@@ -1,0 +1,66 @@
+[build-system]
+requires = ["setuptools>=65.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "urban-living-optimizer"
+version = "0.1.0"
+description = "Urban Living Optimizer - Monolithic local analyzer for SP/RMSP neighborhoods"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Urban Analytics Team", email = "contact@example.com"}
+]
+
+dependencies = [
+    "pydantic>=2.0",
+    "geopandas>=0.14",
+    "shapely>=2.0",
+    "pandas>=2.0",
+    "networkx>=3.0",
+    "pyproj>=3.4",
+    "requests>=2.31",
+    "pyyaml>=6.0",
+    "python-dateutil>=2.8",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "mypy>=1.0",
+    "black>=23.0",
+    "isort>=5.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+ulo = "app.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.isort]
+profile = "black"
+line_length = 100
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+select = ["E", "F", "W", "I"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+addopts = "--strict-markers"

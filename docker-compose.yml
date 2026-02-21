@@ -1,0 +1,34 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    env_file: .env
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data_cache:/app/data_cache:ro
+      - ./runs:/app/runs
+      - ./cache:/app/cache
+      - ./profiles:/app/profiles
+    shm_size: "1gb"
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()\""]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  ui:
+    build:
+      context: .
+      dockerfile: docker/ui.Dockerfile
+    environment:
+      - VITE_API_BASE=http://localhost:8000
+    ports:
+      - "5173:5173"
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
+
+networks:
+  default:
+    name: imovel-ideal

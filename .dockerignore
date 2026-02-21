@@ -1,0 +1,15 @@
+runs/
+.env
+cache/
+profiles/
+.profiles/
+onde_morar_profiles/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+*.tmp
+.DS_Store
+.vscode/
+.idea/

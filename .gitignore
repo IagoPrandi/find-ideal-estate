@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+.pnpm-store/
+.pnpm-debug.log*
+
+# Testing
+/runs
+coverage/
+*.log
+
+# Production
+dist/
+build/
+.next/
+out/
+
+# Environment
+.env
+.env.local
+.env*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Contracts
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+
+# Database
+*.db
+*.db-journal
+db/.env
+db/src/database.types.ts
+
+# Docker
+docker-compose.override.yml
+
+# Misc
+*.pem
+.cache/
+

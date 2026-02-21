@@ -1,0 +1,106 @@
+:root {
+  color-scheme: light;
+  font-family: "Inter", system-ui, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+body {
+  margin: 0;
+  background: #f7f7fb;
+  color: #1f1f25;
+}
+
+.page {
+  max-width: 960px;
+  margin: 48px auto;
+  padding: 0 24px;
+}
+
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.toolbar button {
+  border: 1px solid #d5d8e4;
+  background: white;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.status {
+  font-weight: 600;
+}
+
+.run {
+  color: #4a4f63;
+}
+
+.zones,
+.listings {
+  margin-top: 24px;
+  padding: 16px;
+  border-radius: 12px;
+  background: white;
+  border: 1px solid #eceef5;
+}
+
+.zones-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.zones ul {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+}
+
+.zones li {
+  padding: 8px 0;
+  border-bottom: 1px solid #f0f2f8;
+}
+
+.polygon {
+  color: #667089;
+  font-size: 13px;
+  margin-left: 22px;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+
+.exports {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.exports a {
+  color: #1e4fce;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.mini-map {
+  border: 1px solid #e6e9f3;
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+
+.card {
+  border: 1px solid #e6e9f3;
+  border-radius: 10px;
+  padding: 12px;
+  background: #fafbff;
+}
