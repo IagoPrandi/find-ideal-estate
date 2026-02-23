@@ -69,6 +69,46 @@ class RunStore:
         data["updated_at"] = now
         self._write_json(status_path, data)
 
+    def append_log(
+        self,
+        run_id: str,
+        level: str,
+        stage: str,
+        message: str,
+        error_type: Optional[str] = None,
+    ) -> None:
+        run_path = self.runs_dir / run_id
+        logs_dir = run_path / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        log_path = logs_dir / "events.jsonl"
+        event: Dict[str, Any] = {
+            "ts": self._now_iso(),
+            "run_id": run_id,
+            "level": level,
+            "stage": stage,
+            "message": message,
+        }
+        if error_type:
+            event["error_type"] = error_type
+        with log_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(event, ensure_ascii=False) + "\n")
+
+    def set_failed(self, run_id: str, stage: str, error_type: str, message: str) -> None:
+        run_path = self.runs_dir / run_id
+        status_path = run_path / "status.json"
+        data = self._read_json(status_path)
+        now = self._now_iso()
+        data["state"] = "failed"
+        data["stage"] = stage
+        data["updated_at"] = now
+        data["last_error"] = {
+            "type": error_type,
+            "message": message,
+            "stage": stage,
+            "updated_at": now,
+        }
+        self._write_json(status_path, data)
+
     def _generate_run_id(self, payload: RunCreateRequest) -> str:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
         payload_json = json.dumps(payload.model_dump(), sort_keys=True)

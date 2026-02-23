@@ -60,6 +60,14 @@ async def run_zones(run_id: str) -> Response:
     return Response(content=zones_path.read_text(encoding="utf-8"), media_type="application/geo+json")
 
 
+@app.get("/runs/{run_id}/security")
+async def run_security(run_id: str) -> Response:
+    p = Path(RUNS_DIR) / run_id / "security" / "public_safety.json"
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="security artifact not found")
+    return Response(content=p.read_text(encoding="utf-8"), media_type="application/json")
+
+
 @app.post("/runs/{run_id}/zones/select", response_model=SimpleMessageResponse)
 async def select_zones(run_id: str, payload: ZoneSelectionRequest) -> SimpleMessageResponse:
     run_dir = Path(RUNS_DIR) / run_id

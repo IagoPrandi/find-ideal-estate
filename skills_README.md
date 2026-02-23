@@ -14,6 +14,7 @@ Este arquivo indexa todas as skills disponíveis em `\skills`.
 - [automation-upkeep](#automation-upkeep) — Implement deterministic, idempotent phase automation using Chainlink-style checkUpkeep/performUpkeep for updatePhase/requestDraw/openDay/closeDay, with safe retries and manual fallback.
 - [checkout-batch-flow](#checkout-batch-flow) — Implement/review one-transaction checkout() batching (feed → commit → buyRelics → applyRelics → monthly action) with deterministic validation, canonical ordering, and exact payment reconciliation (refund extra).
 - [daily-turn-flow](#daily-turn-flow) — Enforce the canonical daily flow (OPEN/SHOP → COMMIT → REVEAL → DRAW → CLAIM → CLOSE) with strict phase checks, commit/reveal invariants, VRF lifecycle, and event expectations for indexer/UI.
+- [develop-frontend](#develop-frontend) — Review, debug and elevate AI-generated web frontends: layout stability, responsiveness, accessibility, visual consistency (tokens), UI states, and baseline performance/SEO.
 - [develop-web-game](#develop-web-game) — Build games in small steps and validate every change. Treat each iteration as: implement → act → pause → observe → adjust.
 - [frontend-contract-sim](#frontend-contract-sim) — Standardize frontend transaction flows with viem/wagmi using simulation-first, deterministic error mapping, and safe logging. Use for checkout, commit/reveal, buy/apply relics, draws, and claims.
 - [indexer-reorg-idempotent](#indexer-reorg-idempotent) — Enforce reorg-aware, idempotent indexing with stable event identity keys, replay safety, and clear optimistic vs confirmed consistency tiers. Use when touching DB writes or replay logic.
@@ -80,6 +81,19 @@ Este arquivo indexa todas as skills disponíveis em `\skills`.
 - Reveal required before being counted for winners (A2 counters update on reveal).
 - Draw must complete before any claim.
 - Claim is per mode (if multiple win modes are enabled), and each mode has its own claimed flag.
+
+## develop-frontend
+
+**Título:** Develop Frontend (Qualidade de UI para código gerado por IA)
+
+**Descrição:** Revisar, depurar e elevar a qualidade de frontends (web) gerados por IA, garantindo layout estável (sem overflow), responsividade, acessibilidade, consistência visual via tokens, estados de UI completos e baseline de performance/SEO.
+
+**Arquivo:** `skills/develop-frontend/SKILL.md`
+
+**Quando usar (gatilhos):**
+- Quando receber UI/landing/dashboard gerada por IA e precisar torná-la consistente e pronta para produção.
+- Quando houver bugs de layout/spacing/alinhamento, responsividade, contraste/a11y, ou inconsistência entre componentes.
+- Antes de “fechar” um design system (tokens) e padronizar estados (hover/focus/disabled/loading/empty/error).
 
 ## develop-web-game
 

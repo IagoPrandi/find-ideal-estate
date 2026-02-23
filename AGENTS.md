@@ -13,11 +13,3 @@
 ## Routing: pick skills by change scope
 
 Always open **skills_README.md** and find a skill to done the task. You just can't use a available skill if there aren't one to task.
-
-- security-threat-checklist whenever surface area changes.
-- Contracts: daily-turn-flow, a2-key-aggregation, checkout-batch-flow, relics-batch-ops, resources-economy, automation-upkeep, upgradeability-governance.
-- Indexer: ponder-indexer-events, indexer-reorg-idempotent.
-- Frontend: frontend-contract-sim.
-- Web2 Auth/API: web2-wallet-auth.
-- Ops/Releases: ops-observability-runbook, release-config-management.
-- game-dev: develop-web-game

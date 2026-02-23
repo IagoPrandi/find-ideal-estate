@@ -209,16 +209,40 @@ def normalize_text(s: str) -> str:
 # I/O: GTFS + GPKG
 # -------------------------
 
+
 def load_gtfs_tables(gtfs_dir: Path) -> Dict[str, pd.DataFrame]:
+    """Carrega tabelas GTFS com I/O otimizado (colunas mínimas nas maiores tabelas).
+
+    Observação: mantemos dtype=str para consistência e conversões explícitas depois.
+    """
     required = ["stops.txt", "trips.txt", "stop_times.txt", "routes.txt"]
     for f in required:
         if not (gtfs_dir / f).exists():
             raise FileNotFoundError(f"GTFS faltando: {gtfs_dir / f}")
 
+    usecols_map: Dict[str, List[str]] = {
+        # tabelas grandes — reduza I/O e memória
+        "stop_times": ["trip_id", "arrival_time", "departure_time", "stop_id", "stop_sequence"],
+        "stops": ["stop_id", "stop_name", "stop_lat", "stop_lon"],
+        "trips": ["route_id", "service_id", "trip_id", "trip_headsign", "direction_id", "shape_id"],
+        "routes": ["route_id", "route_short_name", "route_long_name", "route_type"],
+        "frequencies": ["trip_id", "start_time", "end_time", "headway_secs"],
+        # calendários (se existirem)
+        "calendar": ["service_id", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "start_date", "end_date"],
+        "calendar_dates": ["service_id", "date", "exception_type"],
+        "shapes": ["shape_id", "shape_pt_lat", "shape_pt_lon", "shape_pt_sequence"],
+    }
+
     tables: Dict[str, pd.DataFrame] = {}
     for name in ["stops", "trips", "stop_times", "routes", "frequencies", "calendar", "calendar_dates", "shapes"]:
         fp = gtfs_dir / f"{name}.txt"
-        if fp.exists():
+        if not fp.exists():
+            continue
+        uc = usecols_map.get(name)
+        try:
+            tables[name] = pd.read_csv(fp, dtype=str, usecols=uc) if uc else pd.read_csv(fp, dtype=str)
+        except ValueError:
+            # Se o GTFS não tiver alguma coluna esperada, faz fallback para leitura completa.
             tables[name] = pd.read_csv(fp, dtype=str)
     return tables
 
@@ -329,37 +353,56 @@ def load_flood_tree(flood_gpkg: Path) -> STRtree:
     return tree
 
 
+
 def flood_ratio_for_buffers_utm(buffers_utm: List[Any], flood_tree: STRtree) -> List[float]:
+    """Calcula razão de área alagável dentro de cada buffer (em CRS métrico).
+
+    Otimizações:
+    - usa geometria preparada (prep) para acelerar testes de interseção;
+    - evita intersection() quando não intersecta;
+    - early-break quando a cobertura já está ~saturada (>=95%).
+    """
+    from shapely.prepared import prep
+
     ratios: List[float] = []
+    geoms_src = getattr(flood_tree, "_geoms", None)
+
     for buf in buffers_utm:
         if buf is None or buf.is_empty:
             ratios.append(0.0)
             continue
+
         a = float(buf.area)
         if a <= 0:
             ratios.append(0.0)
             continue
+
         cand = flood_tree.query(buf)
+        pbuf = prep(buf)
         inter_area = 0.0
-        geoms_src = getattr(flood_tree, "_geoms", None)
+        # limiar para parar cedo (trade-off velocidade x precisão)
+        sat = 0.95 * a
+
         for g_obj in cand:
-            # STRtree pode retornar geometria ou índice
             if isinstance(g_obj, (int, np.integer)) and geoms_src is not None:
                 g = geoms_src[int(g_obj)]
             else:
                 g = g_obj
-            if not g.intersects(buf):
+
+            # teste rápido com geometria preparada
+            if not pbuf.intersects(g):
                 continue
+
             inter = g.intersection(buf)
             if not inter.is_empty:
                 inter_area += float(inter.area)
+                if inter_area >= sat:
+                    inter_area = min(inter_area, a)
+                    break
+
         ratios.append(inter_area / a)
     return ratios
 
-
-# -------------------------
-# Buffers (pontos WGS84 -> UTM buffer -> WGS84)
-# -------------------------
 
 def buffers_from_points(points_wgs: List[Tuple[str, float, float]], radius_m: float) -> Tuple[List[Any], List[Any]]:
     to_utm = Transformer.from_crs(EPSG_WGS84, EPSG_UTM_SP, always_xy=True)
@@ -389,7 +432,14 @@ def buffers_from_points(points_wgs: List[Tuple[str, float, float]], radius_m: fl
 # Ônibus via GTFS: seed por coordenadas + sentido + frequência
 # -------------------------
 
+
 def find_nearest_stop_id_by_coord(stops: pd.DataFrame, lat: float, lon: float, max_dist_m: float = 120.0) -> Tuple[str, float]:
+    """Encontra o stop_id mais próximo de (lat, lon).
+
+    Otimizações:
+    - transforma coordenadas em lote com pyproj (vetorizado);
+    - evita list comprehensions custosas em GTFS grandes.
+    """
     stops_xy = stops[["stop_id", "stop_lat", "stop_lon"]].copy()
     stops_xy["stop_id"] = stops_xy["stop_id"].astype(str)
     stops_xy["stop_lat"] = stops_xy["stop_lat"].astype(float)
@@ -398,14 +448,21 @@ def find_nearest_stop_id_by_coord(stops: pd.DataFrame, lat: float, lon: float, m
     to_utm = Transformer.from_crs(EPSG_WGS84, EPSG_UTM_SP, always_xy=True)
     x0, y0 = to_utm.transform(float(lon), float(lat))
 
-    xs, ys = zip(*[to_utm.transform(lo, la) for lo, la in zip(stops_xy["stop_lon"], stops_xy["stop_lat"])])
+    # transformação vetorizada (arrays)
+    xs, ys = to_utm.transform(stops_xy["stop_lon"].to_numpy(), stops_xy["stop_lat"].to_numpy())
     stops_xy["x"] = xs
     stops_xy["y"] = ys
-    stops_xy["d2"] = (stops_xy["x"] - x0) ** 2 + (stops_xy["y"] - y0) ** 2
-    best = stops_xy.sort_values("d2").iloc[0]
+
+    dx = stops_xy["x"] - x0
+    dy = stops_xy["y"] - y0
+    stops_xy["d2"] = dx * dx + dy * dy
+
+    best = stops_xy.loc[stops_xy["d2"].idxmin()]
     dist = math.sqrt(float(best["d2"]))
     if dist > max_dist_m:
-        raise ValueError(f"Nenhum stop dentro de {max_dist_m} m. Melhor distância foi {dist:.1f} m (stop_id={best['stop_id']}).")
+        raise ValueError(
+            f"Nenhum stop dentro de {max_dist_m} m. Melhor distância foi {dist:.1f} m (stop_id={best['stop_id']})."
+        )
     return str(best["stop_id"]), dist
 
 
@@ -446,6 +503,7 @@ def expected_wait_minutes_for_trip(trip_id: str, dep_sec_at_origin: Optional[int
     return None
 
 
+
 def compute_downstream_generalized_times(
     stop_times: pd.DataFrame,
     trips: pd.DataFrame,
@@ -454,12 +512,27 @@ def compute_downstream_generalized_times(
     freq_idx: Dict[str, List[Tuple[int, int, int]]],
     departure_window: Optional[Tuple[str, str]] = None,
 ) -> Dict[str, Dict[str, Any]]:
+    """Para um stop de origem, calcula o melhor (menor) tempo generalizado para stops a jusante.
+
+    Otimização principal:
+    - evita filtrar `stop_times` inteiro para cada trip_id (O(trips * |stop_times|));
+      em vez disso, pré-agrupa `stop_times` por trip_id uma vez e consulta O(1).
+    """
+    if stop_times is None or stop_times.empty:
+        return {}
+
     st = stop_times.copy()
+    # normaliza tipos uma vez
+    st["trip_id"] = st["trip_id"].astype(str)
+    st["stop_id"] = st["stop_id"].astype(str)
     st["arr_sec"] = st["arrival_time"].astype(str).map(parse_gtfs_time_to_seconds)
     st["dep_sec"] = st["departure_time"].astype(str).map(parse_gtfs_time_to_seconds)
     st["stop_sequence_i"] = st["stop_sequence"].astype(int)
 
-    origin_rows = st[st["stop_id"].astype(str) == str(origin_stop_id)].copy()
+    st = st.dropna(subset=["dep_sec", "arr_sec", "stop_sequence_i"])
+    st = st.sort_values(["trip_id", "stop_sequence_i"])
+
+    origin_rows = st[st["stop_id"] == str(origin_stop_id)].copy()
     if origin_rows.empty:
         raise ValueError(f"Origin stop_id '{origin_stop_id}' não aparece em stop_times.")
 
@@ -472,18 +545,27 @@ def compute_downstream_generalized_times(
     if origin_rows.empty:
         return {}
 
-    trips_ix = trips.set_index("trip_id", drop=False)
+    # pega apenas a primeira passagem por trip (reduz iteração)
+    origin_rows = origin_rows.sort_values("dep_sec").groupby("trip_id", as_index=False).head(1)
+
+    trips_ix = trips.copy()
+    if "trip_id" in trips_ix.columns:
+        trips_ix["trip_id"] = trips_ix["trip_id"].astype(str)
+        trips_ix = trips_ix.set_index("trip_id", drop=False)
+    else:
+        trips_ix = trips_ix.set_index(pd.Index([], name="trip_id"))
+
+    # pré-indexação: trip_id -> tabela de stop_times já ordenada
+    stop_times_by_trip: Dict[str, pd.DataFrame] = {tid: grp for tid, grp in st.groupby("trip_id", sort=False)}
+
     best: Dict[str, Dict[str, Any]] = {}
 
-    for trip_id, grp in origin_rows.groupby("trip_id"):
-        trip_id = str(trip_id)
-        origin = grp.sort_values("dep_sec").iloc[0]
+    for _, origin in origin_rows.iterrows():
+        trip_id = str(origin["trip_id"])
         seq0 = int(origin["stop_sequence_i"])
-        dep0 = origin["dep_sec"]
-        if dep0 is None:
-            continue
+        dep0 = int(origin["dep_sec"])
 
-        wait_min = expected_wait_minutes_for_trip(trip_id, int(dep0), freq_idx)
+        wait_min = expected_wait_minutes_for_trip(trip_id, dep0, freq_idx)
         wait_min = float(wait_min) if wait_min is not None else 0.0
 
         direction_id = None
@@ -495,23 +577,25 @@ def compute_downstream_generalized_times(
             trip_headsign = str(tr.get("trip_headsign")) if "trip_headsign" in tr else None
             route_id = str(tr.get("route_id")) if "route_id" in tr else None
 
-        trip_rows = st[st["trip_id"].astype(str) == trip_id].copy()
-        trip_rows = trip_rows[trip_rows["stop_sequence_i"] > seq0]
+        trip_tbl = stop_times_by_trip.get(trip_id)
+        if trip_tbl is None or trip_tbl.empty:
+            continue
+
+        trip_rows = trip_tbl[trip_tbl["stop_sequence_i"] > seq0]
         if trip_rows.empty:
             continue
 
+        # iterrows é ok aqui porque já reduzimos drasticamente o volume (trip_rows é um recorte curto)
         for _, r in trip_rows.iterrows():
             sid = str(r["stop_id"])
-            arr = r["arr_sec"]
-            if arr is None:
-                continue
+            arr = int(r["arr_sec"])
             in_vehicle = (arr - dep0) / 60.0
             if in_vehicle <= 0:
                 continue
             if in_vehicle > float(t_bus):
                 continue
-            gen_time = float(in_vehicle) + wait_min
 
+            gen_time = float(in_vehicle) + wait_min
             prev = best.get(sid)
             if prev is None or gen_time < float(prev["min_gen_time"]):
                 best[sid] = {
@@ -523,6 +607,7 @@ def compute_downstream_generalized_times(
                     "trip_headsign": trip_headsign,
                     "route_id": route_id,
                 }
+
     return best
 
 

@@ -993,6 +993,34 @@ def _quintoandar_address_full(h: dict) -> Optional[str]:
     return None
 
 
+def _infer_state_code_from_text(*values: Any) -> Optional[str]:
+    """Infere UF (ex.: SP) a partir de trechos textuais confiáveis."""
+    import re
+
+    texts: List[str] = []
+    for v in values:
+        if isinstance(v, str) and v.strip():
+            texts.append(v.strip())
+
+    for t in texts:
+        m = re.search(r"(?:^|[\s,\-/])([A-Za-z]{2})(?:$|[\s,\-/])", t)
+        if m:
+            uf = m.group(1).upper()
+            if uf in {
+                "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA",
+                "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN",
+                "RS", "RO", "RR", "SC", "SP", "SE", "TO",
+            }:
+                return uf
+
+    for t in texts:
+        low = t.lower()
+        if "sao paulo" in low or "são paulo" in low:
+            return "SP"
+
+    return None
+
+
 
 def parse_quintoandar_state_to_std(state: dict, coords_map: Optional[Dict[str, Tuple[Optional[float], Optional[float]]]] = None) -> List[dict]:
     """Parseia um 'state' do QuintoAndar (seja do __NEXT_DATA__ ou de payloads de API) para o schema padrão."""
@@ -1040,6 +1068,14 @@ def parse_quintoandar_state_to_std(state: dict, coords_map: Optional[Dict[str, T
             or h.get("uf")
             or h.get("stateAcronym")
         )
+        if not state_name:
+            state_name = _infer_state_code_from_text(
+                h_addr.get("address"),
+                h_addr.get("city"),
+                h.get("regionName"),
+                addr,
+                url,
+            )
 
         lat, lon = (None, None)
         rid = str(h.get("id") or sid)
@@ -1120,6 +1156,8 @@ def _qa_parse_quintoandar_search_list_payload(payload: dict, coords_map: Optiona
         if isinstance(state_name, str) and state_name.strip():
             addr_parts.append(state_name.strip())
         addr = ", ".join(addr_parts) if addr_parts else None
+        if not state_name:
+            state_name = _infer_state_code_from_text(street, neigh, city, addr)
 
         # url: fallback padrão
         url = f"https://www.quintoandar.com.br/imovel/{lid}"
@@ -1293,7 +1331,20 @@ def parse_vivareal_glue_to_std(glue_json: dict) -> List[dict]:
             get_by_path(listing, "address.state")
             or get_by_path(listing, "address.stateAcronym")
             or get_by_path(listing, "address.uf")
+            or get_by_path(it, "address.state")
+            or get_by_path(it, "address.stateAcronym")
+            or get_by_path(it, "address.uf")
         )
+        if not state:
+            loc_id = (
+                get_by_path(listing, "address.locationId")
+                or get_by_path(it, "address.locationId")
+                or ""
+            )
+            if isinstance(loc_id, str):
+                low = loc_id.lower()
+                if low.startswith("br>") and "sao paulo" in low:
+                    state = "SP"
 
         for v in (street, number, neigh, city, state):
             if v is not None and str(v).strip():

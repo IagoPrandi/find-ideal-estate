@@ -82,6 +82,36 @@ def _safe_float(v: Any) -> float | None:
         return None
 
 
+_VALID_STREET_TYPE_PATTERNS = [
+    r"\brua\b",
+    r"\br\.?\b",
+    r"\bavenida\b",
+    r"\bav\.?\b",
+    r"\balameda\b",
+    r"\btravessa\b",
+    r"\btrv\.?\b",
+    r"\bestrada\b",
+    r"\best\.?\b",
+    r"\brodovia\b",
+    r"\brod\.?\b",
+    r"\bpraca\b",
+    r"\bpraça\b",
+    r"\blargo\b",
+    r"\bviela\b",
+    r"\bbeco\b",
+]
+_VALID_STREET_TYPE_RE = re.compile("|".join(_VALID_STREET_TYPE_PATTERNS), flags=re.IGNORECASE)
+
+
+def _address_has_valid_street_type(v: Any) -> bool:
+    if v is None:
+        return False
+    s = str(v).strip()
+    if not s:
+        return False
+    return _VALID_STREET_TYPE_RE.search(s) is not None
+
+
 def finalize_run(run_dir: Path, selected_zone_uids: List[str], params: Dict[str, Any]) -> Dict[str, Path]:
     result: List[Dict[str, Any]] = []
 
@@ -124,6 +154,10 @@ def finalize_run(run_dir: Path, selected_zone_uids: List[str], params: Dict[str,
                 lat = _safe_float(it.get("lat") or it.get("latitude"))
                 lon = _safe_float(it.get("lon") or it.get("longitude"))
                 if lat is None or lon is None:
+                    continue
+
+                address = it.get("address")
+                if not _address_has_valid_street_type(address):
                     continue
 
                 state = it.get("state")

@@ -36,6 +36,9 @@ Critério de sucesso global:
 - [core/zone_ops.py](core/zone_ops.py)
 - [core/listings_ops.py](core/listings_ops.py)
 
+### Segurança pública (SSP + CEM)
+- [cods_ok/segurancaRegiao.py](cods_ok/segurancaRegiao.py)
+
 ### Frontend
 - [ui/src/App.jsx](ui/src/App.jsx)
 
@@ -51,7 +54,8 @@ Critério de sucesso global:
 3. Contrato de adapters: argumentos corretos para subprocess e tratamento de erro.
 4. E2E (pipeline): fluxo completo por `run_id` do início ao output final.
 5. UI flow (browser automation): ações do usuário do botão 1 ao 6.
-6. NFR: performance, resiliência, idempotência, segurança mínima.
+6. Segurança pública: coleta de ocorrências, comparativo região vs cidade e DPs mais próximas.
+7. NFR: performance, resiliência, idempotência, segurança mínima.
 
 ## 4) Ambientes e dados de teste
 
@@ -83,6 +87,7 @@ Critério de sucesso global:
 - `POST /runs`
 - `GET /runs/{run_id}/status`
 - `GET /runs/{run_id}/zones`
+- `GET /runs/{run_id}/security`
 - `POST /runs/{run_id}/zones/select`
 - `POST /runs/{run_id}/zones/{zone_uid}/detail`
 - `POST /runs/{run_id}/zones/{zone_uid}/listings`
@@ -119,6 +124,7 @@ Critério de sucesso global:
 - Ordem de estágios: `validate` → `zones_by_ref` → `zones_enrich` → `zones_consolidate`.
 - Falha em adapter interrompe pipeline e mantém rastreabilidade em status/log.
 - Múltiplos `reference_points` geram `ref_0..n`.
+- Etapa de segurança pública (quando habilitada no M1) executa sem quebrar o pipeline principal.
 
 ### Técnica
 - Mock dos adapters para teste de ordem/chamadas.
@@ -174,6 +180,7 @@ Arquivo alvo: [core/listings_ops.py](core/listings_ops.py)
   - `zones_final.geojson`
 - Score de listing responde a pesos `w_price`, `w_transport`, `w_pois`.
 - Listings sem coordenada são ignorados sem quebrar run.
+- Listings sem endereço válido contendo tipo de logradouro brasileiro (ex.: `rua`, `avenida`, `alameda`, `travessa`, `estrada`, `rodovia`, `praça`) são ignorados na saída final.
 
 ## 5.8 Frontend (fluxo funcional)
 
@@ -201,6 +208,11 @@ Arquivo alvo: [ui/src/App.jsx](ui/src/App.jsx)
 ## 5.9 Script E2E (API) — Dataset A (1 ponto)
 
 Objetivo: executar o fluxo completo com 1 ponto inicial, selecionar 1 zona aleatória, e obter a saída final de imóveis.
+
+Regras operacionais do smoke (M8):
+- Selecionar **apenas 1 zona** por execução de `run_id`.
+- Em caso de falha, repetir em novo `run_id` (não iterar várias zonas no mesmo run).
+- Emitir logs de progresso por etapa (`create_run`, `wait_zones`, `select_zone`, `detail_zone`, `listings`, `finalize`, `validate_output`, `done`).
 
 Ponto inicial (lat, lon): $(-23.585068145112295, -46.690640014541714)$
 
@@ -256,6 +268,7 @@ $finalListings | Select-Object -First 5
 - Uma zona selecionada e detalhada.
 - Saída final disponível em `/final/listings.json`.
 - Amostra de 5 itens exibida.
+- Logs por etapa com timestamp e `run_id` para acompanhamento do progresso e diagnóstico.
 
 ## 5.10 Docker e operação local
 
@@ -269,6 +282,26 @@ Arquivos alvo:
 - `ui` acessa API via `VITE_API_BASE`.
 - Volumes montados com permissão esperada (`data_cache` somente leitura).
 - Reinício de containers preserva `runs/` e `cache/`.
+
+## 5.11 Segurança pública (M1)
+
+Arquivo alvo: [cods_ok/segurancaRegiao.py](cods_ok/segurancaRegiao.py)
+
+### Cenários
+- `run_query` retorna payload com chaves obrigatórias:
+  - `ocorrencias_por_tipo_no_raio`
+  - `comparativo_regiao_vs_cidade_sp`
+  - `duas_delegacias_mais_proximas`
+- `load_occurrences` prioriza Parquet em cache e reconstrói a partir de XLSX quando faltar coluna de município.
+- `filter_occurrences_within_radius` aplica filtro vetorizado e retorna contagem consistente com o dicionário por delito.
+- `build_regiao_vs_cidade_sp_comparativo` calcula `share_da_cidade` e `acima_media_pct` sem divisão inválida.
+- `load_delegacias_from_cem` retorna delegacias com coordenadas válidas e `dp_num` coerente.
+- Falha de rede/download em SSP/CEM gera erro rastreável sem expor segredo (`SSP_SECRET_KEY`) em logs.
+
+### Evidência
+- JSON de saída salvo em artifact por `run_id` (ex.: `runs/<run_id>/security/public_safety.json`).
+- Log de etapa com duração e classificação de erro quando ocorrer falha.
+- Amostra validada com ao menos 2 delegacias no campo `duas_delegacias_mais_proximas`.
 
 ## 6) Testes NFR (não funcionais)
 
@@ -293,6 +326,7 @@ Arquivos alvo:
 
 ### P0 (bloqueia release)
 - Criação de run, pipeline de zonas, consolidação, seleção, detalhamento, scraping mínimo, finalização, exports.
+- Segurança pública integrada ao pipeline (payload mínimo + artifact persistido por `run_id`).
 
 ### P1
 - Ranking e consistência de score, recorte de transporte, UX de filtro/seleção.
