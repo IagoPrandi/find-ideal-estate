@@ -24,7 +24,16 @@ def _extract_streets(streets_path: Path, max_items: int) -> List[str]:
     streets = data.get("streets") if isinstance(data, dict) else None
     if not isinstance(streets, list):
         streets = []
-    return [str(s) for s in streets[:max_items]]
+
+    selected: List[str] = []
+    for street in streets:
+        street_name = str(street)
+        if not _address_has_valid_street_type(street_name):
+            continue
+        selected.append(street_name)
+        if len(selected) >= max_items:
+            break
+    return selected
 
 
 def scrape_zone_listings(run_dir: Path, zone_uid: str, params: Dict[str, Any]) -> List[Path]:
@@ -101,6 +110,7 @@ _VALID_STREET_TYPE_PATTERNS = [
     r"\bbeco\b",
 ]
 _VALID_STREET_TYPE_RE = re.compile("|".join(_VALID_STREET_TYPE_PATTERNS), flags=re.IGNORECASE)
+_FORBIDDEN_ADDRESS_TOKEN_RE = re.compile(r"\bacesso\b", flags=re.IGNORECASE)
 
 
 def _address_has_valid_street_type(v: Any) -> bool:
@@ -108,6 +118,8 @@ def _address_has_valid_street_type(v: Any) -> bool:
         return False
     s = str(v).strip()
     if not s:
+        return False
+    if _FORBIDDEN_ADDRESS_TOKEN_RE.search(s) is not None:
         return False
     return _VALID_STREET_TYPE_RE.search(s) is not None
 

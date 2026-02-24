@@ -11,8 +11,17 @@ Execução local do pipeline:
 ## Subir API/UI
 
 - `docker compose up -d api ui`
+- após mudança de código no backend, atualizar runtime com: `docker compose up -d --build api`
 - Health API: `GET http://localhost:8000/health`
 - UI: http://localhost:5173
+
+## Enriquecimento verde (v8 tiled)
+
+- O adapter de enriquecimento usa `green_tiles_v3/tile_index.csv`.
+- Se o `tile_index.csv` não existir, o pipeline tenta gerar automaticamente a partir de:
+  - `data_cache/geosampa/SIRGAS_GPKG_VEGETACAO_SIGNIFICATIVA.gpkg`
+  - layer `SIRGAS_GPKG_VEGETACAO_SIGNIFICATIVA`
+- A primeira execução pode ser mais lenta por causa da geração dos tiles.
 
 ## Smoke E2E (M8)
 

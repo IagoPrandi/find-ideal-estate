@@ -21,8 +21,8 @@ for ($runAttempt = 1; $runAttempt -le $maxRunAttempts; $runAttempt++) {
     reference_points = @(
       @{
         name = "ref_0"
-        lat  = -23.585068145112295
-        lon  = -46.690640014541714
+        lat  = -23.52092538588677, 
+        lon  = -46.72715710892109
       }
     )
     # smoke controlado, porém menos restritivo para reduzir falsos vazios
@@ -37,7 +37,7 @@ for ($runAttempt = 1; $runAttempt -le $maxRunAttempts; $runAttempt++) {
   $run = Invoke-RestMethod -Method Post -Uri "$ApiBase/runs" -ContentType "application/json" -Body ($createBody | ConvertTo-Json -Depth 6)
   $runId = $run.run_id
   Write-Step -RunId $runId -Step "create_run" -Message "RUN_ATTEMPT=$runAttempt/$maxRunAttempts"
-  Write-Step -RunId $runId -Step "params" -Message "POINT=(-23.585068145112295,-46.690640014541714) max_streets_per_zone=1 listing_max_pages=1"
+  Write-Step -RunId $runId -Step "params" -Message "POINT=(-23.52092538588677,-46.72715710892109) max_streets_per_zone=1 listing_max_pages=1"
 
   # Aguarda zonas
   $zones = $null

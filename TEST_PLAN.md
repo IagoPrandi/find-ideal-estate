@@ -214,7 +214,7 @@ Regras operacionais do smoke (M8):
 - Em caso de falha, repetir em novo `run_id` (não iterar várias zonas no mesmo run).
 - Emitir logs de progresso por etapa (`create_run`, `wait_zones`, `select_zone`, `detail_zone`, `listings`, `finalize`, `validate_output`, `done`).
 
-Ponto inicial (lat, lon): $(-23.585068145112295, -46.690640014541714)$
+Ponto inicial (lat, lon): $(-23.520933192209554, -46.726910766729866)$
 
 Script (PowerShell):
 

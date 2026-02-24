@@ -47,6 +47,15 @@
 - 2026-02-22 — M8 ajuste operacional (alinhado ao `TEST_PLAN.md`): smoke E2E passa a selecionar somente 1 zona por `run_id` e registrar logs detalhados por etapa para rastreio de progresso.
 - 2026-02-22 — M8 qualidade de dados: finalização passa a aceitar somente listings com `address` não vazio contendo `rua` (além de coordenadas reais e `state` preenchido).
 - 2026-02-22 — M8 qualidade de dados: validação de endereço ampliada para exigir tipo de logradouro brasileiro válido (ex.: `rua`, `avenida`, `alameda`, `travessa`, `estrada`, `rodovia`, `praça`), rejeitando termos não-logradouro como `acesso`.
+- 2026-02-22 — Documentos obrigatórios abertos: `PRD.md`, `BEST_PRACTICES.md`, `skills_README.md`.
+- 2026-02-22 — Skill utilizada (primária): `develop-frontend`.
+- 2026-02-22 — FE0 implementado: migração do `ui/` para Vite + React + TypeScript com lint/format, Tailwind com tokens, Mapbox GL JS (token por `.env`) e layout split-screen com painel minimizável e chrome do mapa (busca, stepper, zoom, camadas, legenda e ajuda).
+- 2026-02-23 — Documentos obrigatórios abertos: `PRD.md`, `BEST_PRACTICES.md`, `skills_README.md`.
+- 2026-02-23 — Skill utilizada (primária): `ops-observability-runbook`.
+- 2026-02-23 — Migração do adapter de enriquecimento para `zone_enrich_green_flood_v8_tiled_groups_fixed.py` com suporte ao `tile_index.csv` do `gpkg_grid_tiler_v3_splitmerge.py`, normalização de paths de tiles e geração de artifacts compatíveis (`zones_enriched.geojson` + `ranking_enriched.csv`).
+- 2026-02-23 — Ajuste de qualidade no pipeline de listings: ruas-semente e `address` com termo `acesso` passam a ser rejeitados antes do scraping/finalização; apenas logradouros válidos seguem para processamento.
+- 2026-02-23 — Atualização operacional do projeto: quando `green_tiles_v3/tile_index.csv` não existir, o adapter gera os tiles automaticamente via `gpkg_grid_tiler_v3_splitmerge.py`; README atualizado com prática de rebuild do `api` após mudanças de código.
+- 2026-02-23 — Validação API pós-atualização concluída (`RUN_ID=20260223234602_ae44a643`): pipeline completo executado com runtime rebuildado e primeira rua processada sem `acesso` (`avenida-alexandre-colares`).
 
 
 ## 0) Objetivo do MVP (o que o usuário consegue fazer)
@@ -288,7 +297,7 @@ Responsável por:
 
 ### 4.3 Scripts existentes (não mudar lógica; apenas “wrap”)
 - Zonas: `candidate_zones_from_cache_v10_fixed2.py`
-- Enriquecimento: `zone_enrich_green_flood_v3.py`
+- Enriquecimento: `zone_enrich_green_flood_v8_tiled_groups_fixed.py` (entrada de tiles + `tile_index.csv` gerados pelo `gpkg_grid_tiler_v3_splitmerge.py`)
 - Ruas: `encontrarRuasRaio.py`
 - POIs: `pois_categoria_raio.py`
 - Meta scraping: `realestate_meta_search.py` + parsers `quintoAndar.py`, `vivaReal.py`
@@ -335,7 +344,7 @@ runs/<run_id>/zones/by_ref/ref_<i>/raw/outputs/
 
 ### 5.3 Etapa B — Enriquecimento por ref (alagamento + verde)
 Para cada ref:
-1) executar `zone_enrich_green_flood_v3.py` apontando para o `raw/outputs`  
+1) executar `zone_enrich_green_flood_v8_tiled_groups_fixed.py` apontando para o `raw/outputs` + index de tiles verdes (`tile_index.csv`)  
 2) salvar em:
 ```
 runs/<run_id>/zones/by_ref/ref_<i>/enriched/
