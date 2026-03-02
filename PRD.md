@@ -30,6 +30,7 @@
 - 2026-02-20 — Execução de testes baseada no TEST_PLAN concluída (componentes, contratos de adapters, integração smoke, build/UI smoke, NFR smoke e validação de compose).
 - 2026-02-20 — Script E2E (Dataset A) executado; identificado bloqueio em `zones_enrich` por `TopologyException` (geometria inválida) e aplicado ajuste no adapter de zonas para `--seed-bus-coord=<lat,lon>`.
 - 2026-02-20 — Regra operacional definida: qualquer fluxo que use Playwright deve rodar via Docker (`api` container), não no host local.
+- 2026-02-23 — Regra operacional reforçada: usar exclusivamente o Docker/Compose deste projeto (`docker-compose.yml` na raiz) com nome de projeto Compose `onde_morar_mvp`.
 - 2026-02-20 — E2E Dataset A concluído com sucesso em Docker (`RUN_ID=20260221032857_47f4384b`, `FINAL_COUNT=413`) após correções de robustez em adapters/listings/finalização e tratamento de geometrias inválidas no enriquecimento.
 - 2026-02-21 — Skill utilizada (primária): `ops-observability-runbook`.
 - 2026-02-21 — M8 em execução: logging estruturado por run/etapa implementado em `runs/<run_id>/logs/events.jsonl` com classificação de erro por etapa.
@@ -51,11 +52,46 @@
 - 2026-02-22 — Skill utilizada (primária): `develop-frontend`.
 - 2026-02-22 — FE0 implementado: migração do `ui/` para Vite + React + TypeScript com lint/format, Tailwind com tokens, Mapbox GL JS (token por `.env`) e layout split-screen com painel minimizável e chrome do mapa (busca, stepper, zoom, camadas, legenda e ajuda).
 - 2026-02-23 — Documentos obrigatórios abertos: `PRD.md`, `BEST_PRACTICES.md`, `skills_README.md`.
+- 2026-02-23 — Skill utilizada (primária): `develop-frontend`.
+- 2026-02-23 — FE1 implementado: clique no mapa define ponto principal com remoção/edição, interesses opcionais com categoria/rótulo e remoção, toggle Alugar/Comprar, CTA “Gerar Zonas Candidatas” com `POST /runs`, polling de `GET /runs/{run_id}/status`, overlay de processamento e transição automática para passo 2 em sucesso.
+- 2026-02-23 — Documentos obrigatórios abertos: `PRD.md`, `BEST_PRACTICES.md`, `skills_README.md`.
 - 2026-02-23 — Skill utilizada (primária): `ops-observability-runbook`.
 - 2026-02-23 — Migração do adapter de enriquecimento para `zone_enrich_green_flood_v8_tiled_groups_fixed.py` com suporte ao `tile_index.csv` do `gpkg_grid_tiler_v3_splitmerge.py`, normalização de paths de tiles e geração de artifacts compatíveis (`zones_enriched.geojson` + `ranking_enriched.csv`).
 - 2026-02-23 — Ajuste de qualidade no pipeline de listings: ruas-semente e `address` com termo `acesso` passam a ser rejeitados antes do scraping/finalização; apenas logradouros válidos seguem para processamento.
 - 2026-02-23 — Atualização operacional do projeto: quando `green_tiles_v3/tile_index.csv` não existir, o adapter gera os tiles automaticamente via `gpkg_grid_tiler_v3_splitmerge.py`; README atualizado com prática de rebuild do `api` após mudanças de código.
 - 2026-02-23 — Validação API pós-atualização concluída (`RUN_ID=20260223234602_ae44a643`): pipeline completo executado com runtime rebuildado e primeira rua processada sem `acesso` (`avenida-alexandre-colares`).
+- 2026-02-23 — Documentos obrigatórios abertos: `PRD.md`, `BEST_PRACTICES.md`, `skills_README.md`.
+- 2026-02-23 — Skill utilizada (primária): `develop-frontend`.
+- 2026-02-23 — FE2 implementado: renderização de zonas consolidadas com hubs numerados, estado selecionado/fade, rotas ref→zona com estilo por modo (ônibus tracejado/trilhos contínuo), tooltip de rota com linhas/tempo, tabela sincronizada (mapa↔lista), ordenação/filtros rápidos e CTA de detalhamento para zonas selecionadas.
+- 2026-02-23 — FE3 implementado: detalhamento e carga de imóveis finais, pins com label de preço e sincronização pin↔card, filtro por rua, cards com dados do imóvel, bloco de explicabilidade (“Por que este imóvel?”) e ação de abrir anúncio original.
+- 2026-02-23 — Documentos obrigatórios abertos: `PRD.md`, `BEST_PRACTICES.md`, `skills_README.md`.
+- 2026-02-23 — Skill utilizada (primária): `develop-frontend`.
+- 2026-02-23 — FE4 concluído (confirmado): cliente HTTP centralizado (`VITE_API_BASE`), validação de contratos com Zod (run/status/zones/listings), polling com backoff + jitter e estados robustos de UI (loading/empty/error-recoverable/error-fatal) com mensagens acionáveis.
+- 2026-02-23 — FE5 em execução: responsividade com painel em formato bottom sheet em telas menores, melhorias de acessibilidade por teclado (focus visible global + fechamento de modal por `Esc`) e ajustes de ergonomia dos controles de mapa.
+- 2026-02-23 — FE5 concluído: responsividade desktop + bottom sheet mobile ativa no painel, foco visível global, fechamento por `Esc`, labels semânticos nos controles de mapa e validação de build/lint/typecheck sem erros bloqueantes.
+- 2026-02-23 — Documentos obrigatórios abertos: `PRD.md`, `BEST_PRACTICES.md`, `skills_README.md`.
+- 2026-02-23 — Skill utilizada (primária): `develop-frontend`.
+- 2026-02-23 — FE4 implementado: cliente HTTP centralizado com base `VITE_API_BASE`, validação de contratos com Zod (run status, zonas, detalhes e listings), polling de status com backoff exponencial+jitter, estados de UI por etapa (loading/empty/error recuperável/error fatal) e mensagens de erro acionáveis com orientação de recuperação.
+- 2026-02-24 — Documentos obrigatórios abertos: `PRD.md`, `BEST_PRACTICES.md`, `skills_README.md`.
+- 2026-02-24 — Skill utilizada (primária): `playwright`.
+- 2026-02-24 — FE6 em execução: suíte de validação frontend ampliada em `ui/src/App.test.tsx` para cobrir fluxo ponta-a-ponta (referência → run → zonas), cenário extremo de lista vazia e cenário de texto longo; checklist de regressão visual publicado em `ui/REGRESSION_VISUAL_CHECKLIST.md`.
+- 2026-02-26 — Documentos obrigatórios abertos: `PRD.md`, `BEST_PRACTICES.md`, `skills_README.md`.
+- 2026-02-26 — Skill utilizada (primária): `develop-frontend`.
+- 2026-02-26 — Ajuste de UX no frontend conforme `esbocoFrontend.txt`: rotas de ônibus/trilhos não aparecem antes de referência + zonas, linhas de rota geradas dinamicamente a partir do ponto principal e zonas consolidadas, e painel com progresso de execução + ETA por etapa em `ui/src/App.tsx`.
+- 2026-02-26 — Ajuste adicional de UX conforme feedback: controle de camadas expandido para `Rotas`, `Metrô/Trem` e `Pontos de ônibus` com toggle de ocultar/exibir; stepper de fluxo reposicionado para a lateral esquerda do mapa; progresso de execução ampliado com tempo decorrido, ETA e histórico curto de duração por etapa.
+- 2026-02-26 — Documentos obrigatórios abertos: `PRD.md`, `BEST_PRACTICES.md`, `skills_README.md`.
+- 2026-02-26 — Skill utilizada (primária): `develop-frontend`.
+- 2026-02-26 — Refino FE2/FE5 em `ui/src/App.tsx`: camadas de transporte independentes (`Rotas de ônibus`, `Metrô/Trem`, `Pontos de ônibus`) com hide/show por camada, fluxo mantido na lateral esquerda do mapa conforme `esbocoFrontend.txt`, e componente de progresso com duração por etapa + ETA restante total.
+- 2026-02-26 — Documentos obrigatórios abertos: `PRD.md`, `BEST_PRACTICES.md`, `skills_README.md`.
+- 2026-02-26 — Skill utilizada (primária): `ops-observability-runbook`.
+- 2026-02-26 — Correção de performance no pipeline da API (`wait_zones`): etapas pesadas (`public_safety`, `zones_by_ref`, `zones_enrich`, `zones_consolidate`) agora executam em `asyncio.to_thread`, evitando bloqueio do event loop e destravando polling de status durante execução.
+- 2026-02-26 — Ajuste de performance em `zones_enrich`: adapter passa a priorizar/reutilizar `cache/green_tiles_v3/tile_index.csv` (cache persistente do projeto) antes de tentar gerar tiles novamente; fallback cache existente também é reaproveitado, reduzindo o tempo de `wait_zones` em execuções subsequentes.
+- 2026-03-01 — Documentos obrigatórios abertos: `PRD.md`, `BEST_PRACTICES.md`, `skills_README.md`.
+- 2026-03-01 — Skill utilizada (primária): `develop-frontend`.
+- 2026-03-01 — FE2 refinado: camadas de transporte do mapa migradas para rotas reais por `run_id` usando GeoSampa (`SIRGAS_GPKG_linhaonibus.gpkg`, `geoportal_linha_metro_v4.gpkg`, `geoportal_linha_trem_v2.gpkg`) e pontos reais de transporte (`geoportal_ponto_onibus.gpkg`, estações metrô/trem), com novo endpoint `GET /runs/{run_id}/transport/routes` e consumo no frontend.
+- 2026-03-01 — Documentos obrigatórios abertos: `PRD.md`, `BEST_PRACTICES.md`, `skills_README.md`.
+- 2026-03-01 — Skill utilizada (primária): `develop-frontend`.
+- 2026-03-01 — FE2 refinado: pontos/paradas de transporte passam a aparecer por padrão no mapa (mesmo sem `run`) via `GET /transport/stops?lon=<...>&lat=<...>&radius_m=<...>`, com camada `Pontos de ônibus` independente da disponibilidade de rotas.
 
 
 ## 0) Objetivo do MVP (o que o usuário consegue fazer)
@@ -136,7 +172,8 @@ Estrutura mínima:
 
 ### 3.4 Docker (infra local padronizada)
 - **Docker Desktop / Docker Engine** instalado.
-- Execução recomendada via **Docker Compose** (API + UI), mantendo o host “limpo” de dependências.
+- Execução obrigatória via **Docker Compose** do próprio repositório (API + UI), mantendo o host “limpo” de dependências.
+- Nome do projeto Compose obrigatório: `onde_morar_mvp`.
 - Variáveis em `.env` (ex.: `MAPBOX_ACCESS_TOKEN`).
 - Volumes montados:
   - `./data_cache:/app/data_cache:ro` (dados GTFS/GPKG)
@@ -308,6 +345,10 @@ Responsável por:
 **Serviços (Docker Compose):**
 - `api`: FastAPI + orquestrador + scripts + Playwright (scraping).
 - `ui`: frontend (Mapbox GL) consumindo a API.
+
+**Regra operacional de Compose:**
+- usar apenas o arquivo `docker-compose.yml` deste projeto;
+- executar com nome de projeto Compose fixo `onde_morar_mvp`.
 
 **Rede e portas (default):**
 - UI: `http://localhost:5173`
@@ -531,7 +572,7 @@ EXPOSE 5173
 
 ### Como rodar
 ```bash
-docker compose up --build
+docker compose -p onde_morar_mvp up --build
 ```
 
 ### Observações práticas (scraping)
@@ -617,6 +658,7 @@ flowchart TD
 
 ### Critérios objetivos de aceite por milestone (complementar)
 - **M0:** `docker compose up --build` sobe UI+API e health checks retornam OK.
+- **M0:** `docker compose -p onde_morar_mvp up --build` sobe UI+API e health checks retornam OK.
 - **M1:** criação de `run_id` + persistência de logs/artifacts por etapa validada por teste de integração.
 - **M1:** criação de `run_id` + persistência de logs/artifacts por etapa validada por teste de integração, incluindo geração e persistência dos dados de segurança pública quando habilitado.
 - **M2:** para 1 ponto, existem artifacts `raw` e `enriched` com contagem de features > 0.
@@ -630,67 +672,67 @@ flowchart TD
 > A sequência abaixo detalha **a implementação do frontend** (prioridade).
 
 ### FE0 — Setup do frontend e “layout base” (mapa + painel)
-- [ ] Criar projeto `ui/` (Vite + React + TypeScript) e padronizar lint/format (ESLint/Prettier).
-- [ ] Integrar Tailwind com **tokens** (cores, spacing, tipografia) para consistência visual.
-- [ ] Integrar Mapbox GL JS (token via `.env` do UI; sem hardcode).
-- [ ] Implementar layout split-screen (mapa + painel fixo ~400px) com **minimizar/restaurar**.
-- [ ] Implementar “chrome” do mapa: busca, stepper, zoom, camadas, legenda e ajuda.
+- [x] Criar projeto `ui/` (Vite + React + TypeScript) e padronizar lint/format (ESLint/Prettier).
+- [x] Integrar Tailwind com **tokens** (cores, spacing, tipografia) para consistência visual.
+- [x] Integrar Mapbox GL JS (token via `.env` do UI; sem hardcode).
+- [x] Implementar layout split-screen (mapa + painel fixo ~400px) com **minimizar/restaurar**.
+- [x] Implementar “chrome” do mapa: busca, stepper, zoom, camadas, legenda e ajuda.
 
 **Aceite (FE0):**
 - UI abre em `http://localhost:5173`, mapa renderiza, painel aparece e minimiza/restaura sem quebrar layout.
 
 ### FE1 — Passo 1 (Referências) + criação de run
-- [ ] Clique no mapa define **1 ponto principal** com marcador + rótulo.
-- [ ] Remover/editar ponto principal (reset de estado e limpeza visual).
-- [ ] Interesses secundários (opcional): adicionar/remover pins (não geram zonas).
-- [ ] Toggle Alugar/Comprar (MVP).
-- [ ] CTA “Gerar Zonas”: `POST /runs` e iniciar polling de status.
+- [x] Clique no mapa define **1 ponto principal** com marcador + rótulo.
+- [x] Remover/editar ponto principal (reset de estado e limpeza visual).
+- [x] Interesses secundários (opcional): adicionar/remover pins (não geram zonas).
+- [x] Toggle Alugar/Comprar (MVP).
+- [x] CTA “Gerar Zonas”: `POST /runs` e iniciar polling de status.
 
 **Aceite (FE1):**
 - Sem ref principal o CTA fica desabilitado; com ref principal a criação do `run_id` ocorre e a UI transita para o passo 2.
 
 ### FE2 — Passo 2 (Zonas) — renderização + seleção + rotas
-- [ ] Renderizar zonas consolidadas no mapa:
+- [x] Renderizar zonas consolidadas no mapa:
   - bolha/hub + **número da zona** no mapa,
   - badge de tempo e ícone (ônibus/trilhos),
   - estados: selecionada / não selecionada / “fade”.
-- [ ] Renderizar rotas (linhas) ref → zona (ônibus tracejado, trilhos contínuo).
-- [ ] Tooltip no hover/click da rota: listar linhas (metrô/trem/ônibus) e tempo (via artifacts de trace).
-- [ ] Painel com tabela/lista:
+- [x] Renderizar rotas (linhas) ref → zona (ônibus tracejado, trilhos contínuo).
+- [x] Tooltip no hover/click da rota: listar linhas (metrô/trem/ônibus) e tempo (via artifacts de trace).
+- [x] Painel com tabela/lista:
   - seleção por checkbox + “selecionar tudo”,
   - ordenação (score/tempo) e filtros rápidos (MVP).
-- [ ] CTA “Detalhar Selecionadas (N)” chama backend para iniciar etapa de detalhamento.
+- [x] CTA “Detalhar Selecionadas (N)” chama backend para iniciar etapa de detalhamento.
 
 **Aceite (FE2):**
 - Seleção em mapa e tabela se mantém sincronizada; rotas exibem tooltip com informações coerentes; CTA só habilita com ≥1 zona.
 
 ### FE3 — Passo 3 (Imóveis) — pins + lista + detalhe
-- [ ] Renderizar pins de imóveis no mapa (label de preço + estado selecionado).
-- [ ] Lista de cards no painel (compacto → expandido ao selecionar).
-- [ ] Filtro por rua (select) e “Top imóveis (todas as ruas)”.
-- [ ] “Por que este imóvel?” usando `score_breakdown` (explicabilidade).
-- [ ] Ação “Ver anúncio original” abre `url` em nova aba.
+- [x] Renderizar pins de imóveis no mapa (label de preço + estado selecionado).
+- [x] Lista de cards no painel (compacto → expandido ao selecionar).
+- [x] Filtro por rua (select) e “Top imóveis (todas as ruas)”.
+- [x] “Por que este imóvel?” usando `score_breakdown` (explicabilidade).
+- [x] Ação “Ver anúncio original” abre `url` em nova aba.
 
 **Aceite (FE3):**
 - Clique no pin seleciona card e vice-versa; filtro por rua altera lista e pins; cards exibem dados completos sem overflow.
 
 ### FE4 — Integração de dados (contratos, validação e estados)
-- [ ] Cliente HTTP com base `VITE_API_BASE`.
-- [ ] Validação de payloads com Zod (zonas, detalhes, listings).
-- [ ] Polling com backoff (status do run + progresso por etapa).
-- [ ] Estados padrão por tela: loading / vazio / erro recuperável / erro fatal.
-- [ ] Mensagens de erro acionáveis (o que ocorreu + como corrigir).
+- [x] Cliente HTTP com base `VITE_API_BASE`.
+- [x] Validação de payloads com Zod (zonas, detalhes, listings).
+- [x] Polling com backoff (status do run + progresso por etapa).
+- [x] Estados padrão por tela: loading / vazio / erro recuperável / erro fatal.
+- [x] Mensagens de erro acionáveis (o que ocorreu + como corrigir).
 
 **Aceite (FE4):**
 - UI não quebra com payload incompleto; erros são exibidos com instruções; reprocessar/voltar etapas mantém consistência.
 
 ### FE5 — Qualidade visual e UX (responsivo + acessível + performance)
-- [ ] Responsividade mínima:
+- [x] Responsividade mínima:
   - desktop: split-screen;
   - telas menores: painel vira “drawer” (bottom sheet) sem esconder controles essenciais do mapa.
-- [ ] Acessibilidade:
+- [x] Acessibilidade:
   - foco visível, navegação por teclado, botões semânticos, labels em inputs.
-- [ ] Performance:
+- [x] Performance:
   - reduzir re-render de camadas (memo), clustering de markers quando necessário,
   - imagens/ícones otimizados, evitar listas gigantes sem virtualização.
 

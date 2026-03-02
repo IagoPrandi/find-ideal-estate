@@ -30,6 +30,11 @@ body {
   color: var(--color-text);
 }
 
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
 .panel-scroll {
   scrollbar-width: thin;
   scrollbar-color: #b7c4e8 transparent;

@@ -19,12 +19,26 @@ def _as_path(value: object) -> Path | None:
 
 def _resolve_green_inputs(geodir: Path, params: Dict[str, Any]) -> tuple[Path, Path]:
     green_tiles_dir = _as_path(params.get("green_tiles_dir"))
-    if green_tiles_dir is None:
-        green_tiles_dir = geodir / "green_tiles_v3"
-
     green_tile_index = _as_path(params.get("green_tile_index"))
-    if green_tile_index is None:
-        green_tile_index = green_tiles_dir / "tile_index.csv"
+
+    if green_tiles_dir is not None:
+        if green_tile_index is None:
+            green_tile_index = green_tiles_dir / "tile_index.csv"
+        return green_tiles_dir, green_tile_index
+
+    if green_tile_index is not None:
+        return green_tile_index.parent, green_tile_index
+
+    # Prefer persisted runtime cache (mounted in docker) to avoid re-tiling on each run.
+    cache_dir = Path(params.get("cache_root") or "cache")
+    cache_tiles_dir = cache_dir / "green_tiles_v3"
+    cache_tile_index = cache_tiles_dir / "tile_index.csv"
+    if cache_tile_index.exists():
+        return cache_tiles_dir, cache_tile_index
+
+    # Fallback to geodir path (legacy/default).
+    green_tiles_dir = geodir / "green_tiles_v3"
+    green_tile_index = green_tiles_dir / "tile_index.csv"
 
     return green_tiles_dir, green_tile_index
 
@@ -37,6 +51,12 @@ def _ensure_green_tile_index(
 ) -> tuple[Path, Path]:
     if green_tile_index.exists():
         return green_tiles_dir, green_tile_index
+
+    # If chosen path is missing, reuse fallback cache when it is already prepared.
+    fallback_tiles_dir = Path(params.get("green_tiles_fallback_dir") or (Path("cache") / "green_tiles_v3"))
+    fallback_tile_index = fallback_tiles_dir / "tile_index.csv"
+    if fallback_tile_index.exists():
+        return fallback_tiles_dir, fallback_tile_index
 
     tiler_script = Path("cods_ok") / "gpkg_grid_tiler_v3_splitmerge.py"
     source_gpkg = _as_path(params.get("green_source_gpkg"))

@@ -1,6 +1,6 @@
 # Plano Completo de Testes — MVP Imovel Ideal
 
-Data: 2026-02-20
+Data: 2026-02-23
 Escopo: validar cada parte da implementação do pipeline local (API, orquestração, adapters, consolidação, detalhamento, scraping, finalização e UI).
 
 ## 1) Objetivo do plano
@@ -57,12 +57,71 @@ Critério de sucesso global:
 6. Segurança pública: coleta de ocorrências, comparativo região vs cidade e DPs mais próximas.
 7. NFR: performance, resiliência, idempotência, segurança mínima.
 
+## 3.1) Plano de avanço por milestone do frontend (FE) — GO/NO-GO
+
+Objetivo: permitir avanço seguro entre milestones FE, com critérios objetivos de aceite, pontos de validação por tarefa e evidências mínimas obrigatórias.
+
+### Regras de avanço
+- Um milestone FE só avança para o próximo quando:
+  - 100% dos critérios P0 do milestone atual estiverem aprovados;
+  - não houver defeitos abertos de severidade crítica/alta ligados ao fluxo principal;
+  - evidências do milestone (logs, capturas, relatório) estiverem anexadas.
+- Defeitos médios só podem ser carregados para o próximo milestone com plano de correção e prazo definido.
+- Defeitos críticos/altos bloqueiam avanço (NO-GO).
+
+### Escopo do avanço atual
+- FE0, FE1, FE2 e FE3: implementados e já validados funcionalmente.
+- Próximo alvo de avanço: FE4 (integração de dados, validação de contratos e robustez de estados).
+
+### Matriz de aceite para avanço FE4 → FE6
+
+#### FE4 — Integração de dados (contratos + estados)
+**P0 (obrigatório para GO):**
+- Cliente HTTP usa `VITE_API_BASE` em todos os fluxos.
+- Payloads críticos validados com schema (zonas, detalhes, listings), com fallback de erro amigável.
+- Polling de status com retry/backoff e cancelamento limpo ao trocar de etapa/tela.
+- Estados `loading`, `empty`, `recoverable error`, `fatal error` implementados e navegáveis.
+- Mensagens de erro acionáveis (causa + ação sugerida).
+
+**Validações por tarefa (integridade):**
+- Contrato: resposta parcial/incompleta não quebra renderização.
+- Estado: transição entre etapas mantém consistência visual e dados já carregados.
+- Observabilidade: cada falha relevante gera log com contexto mínimo (`run_id`, `stage`, `error_code`).
+
+#### FE5 — Qualidade visual e UX
+**P0 (obrigatório para GO):**
+- Responsividade validada em 360, 768, 1024 e 1440 px.
+- Navegação por teclado validada (tab/shift+tab/enter/esc).
+- Foco visível em elementos interativos principais.
+- Contraste mínimo aceitável em textos, chips e controles do mapa.
+- Fluidez mantida com ~2.000 zonas sem travamento perceptível na interação básica.
+
+**Validações por tarefa (integridade):**
+- Layout: sem overflow horizontal e sem sobreposição de controles críticos.
+- A11y: sem uso de `div` clicável para ação principal sem semântica.
+- Performance: renderizações desnecessárias reduzidas nos layers/listas.
+
+#### FE6 — E2E e DoD de frontend
+**P0 (obrigatório para GO):**
+- Suite E2E cobre ponta-a-ponta: referência → zonas → seleção/detalhe → imóveis.
+- Regressão visual mínima validada (legenda, camadas, tooltip, painel minimizado).
+- Cenários extremos validados (lista vazia, texto longo, número grande).
+- Execução em ambiente Docker (UI + API), com evidência reprodutível.
+
+**Validações por tarefa (integridade):**
+- Estabilidade: taxa de sucesso E2E $\ge 95\%$ em execução repetida de smoke.
+- Consistência: sincronização mapa↔painel preservada após reload/retentativa.
+- Segurança: nenhuma exposição de segredo em logs/snapshots.
+- Evidência frontend (FE6): execução de `npm run test:fe6` em `ui/` com cenários de fluxo e extremos em [ui/src/App.test.tsx](ui/src/App.test.tsx).
+- Evidência visual (FE6): checklist manual em [ui/REGRESSION_VISUAL_CHECKLIST.md](ui/REGRESSION_VISUAL_CHECKLIST.md).
+
 ## 4) Ambientes e dados de teste
 
 ### 4.1 Ambiente base
 - Python com dependências de [requirements.txt](requirements.txt).
 - UI com dependências de [ui/package.json](ui/package.json).
-- Containers via [docker-compose.yml](docker-compose.yml).
+- Containers exclusivamente via [docker-compose.yml](docker-compose.yml) deste projeto.
+- Nome de projeto Compose obrigatório em toda execução: `onde_morar_mvp`.
 
 ### 4.2 Dataset controlado
 - Reutilizar `data_cache` do projeto.
@@ -77,6 +136,7 @@ Critério de sucesso global:
 ### 4.4 Regra obrigatória para Playwright
 - Qualquer etapa que use Playwright (direta ou indiretamente, ex.: `realestate_meta_search.py`) deve executar dentro do container `api` via Docker.
 - Não executar Playwright no host local para validação oficial do plano.
+- Não usar compose externo/global: somente o Compose deste repositório com `docker compose -p onde_morar_mvp ...`.
 
 ## 5) Casos por componente
 
@@ -187,10 +247,14 @@ Arquivo alvo: [core/listings_ops.py](core/listings_ops.py)
 Arquivo alvo: [ui/src/App.jsx](ui/src/App.jsx)
 
 ### Cenários
-- Fluxo dos 6 botões em ordem.
-- Filtro por `zone_uid`.
-- Seleção múltipla de zonas.
-- Renderização de cards de imóveis e mini-mapa.
+- Fluxo por etapas FE1→FE3 em ordem (referência, zonas, imóveis).
+- FE4: validação de contrato para payload completo, parcial e inválido sem quebra da tela.
+- FE4: estados obrigatórios por etapa (`loading`, vazio, erro recuperável, erro fatal).
+- FE4: polling com backoff e limpeza correta ao navegar entre etapas.
+- FE5: responsividade (360/768/1024/1440), acessibilidade de teclado e foco visível.
+- FE5: comportamento com volume alto de zonas (~2.000 features) sem perda crítica de usabilidade.
+- FE6: regressão visual (camadas, legenda, tooltip, painel minimizado) sem overflow.
+- FE6: sincronização mapa↔lista/pin↔card preservada após filtros e re-render.
 - Links de export (GeoJSON/CSV/JSON) válidos quando final pronto.
 
 ### Automação
@@ -204,6 +268,12 @@ Arquivo alvo: [ui/src/App.jsx](ui/src/App.jsx)
   7) finalizar,
   8) validar mensagem e presença de cards/export links.
 - Observação obrigatória: quando o fluxo acionar scraping com Playwright, a API deve estar rodando em Docker (`docker compose up api`) para garantir paridade de ambiente.
+- Observação obrigatória: quando o fluxo acionar scraping com Playwright, a API deve estar rodando em Docker (`docker compose -p onde_morar_mvp up api`) para garantir paridade de ambiente.
+
+### Critério de avanço FE (checklist de aprovação)
+- FE4 GO: contratos validados + estados robustos aprovados em smoke manual e automatizado.
+- FE5 GO: responsividade + a11y + fluidez aprovadas com evidência por breakpoint.
+- FE6 GO: E2E aprovado em Docker + checklist visual sem regressão crítica.
 
 ## 5.9 Script E2E (API) — Dataset A (1 ponto)
 
@@ -222,7 +292,7 @@ Script (PowerShell):
 $ApiBase = "http://localhost:8000"
 
 # Pré-condição obrigatória: API em Docker (Playwright no container)
-# Ex.: docker compose up -d api
+# Ex.: docker compose -p onde_morar_mvp up -d api
 
 $createBody = @{
   reference_points = @(
@@ -337,7 +407,9 @@ Arquivo alvo: [cods_ok/segurancaRegiao.py](cods_ok/segurancaRegiao.py)
 ## 8) Cadência recomendada
 
 - A cada commit: unitários + contrato de adapters (rápido).
-- Diário: smoke E2E local (API + UI).
+- A cada commit frontend (FE4+): validação de contratos + estados de tela alterados.
+- Diário: smoke E2E local (API + UI) + checklist rápido de regressão visual.
+- Pré-avanço de milestone FE: suíte de gate do milestone atual (GO/NO-GO).
 - Pré-release: regressão completa + NFR + verificação de segurança.
 
 ## 9) Template de evidência por execução
@@ -350,6 +422,18 @@ Para cada suíte, registrar:
 - Tempo de execução
 - Artifacts (logs, screenshots UI, paths em `runs/<run_id>`)
 - Ações corretivas abertas
+
+### 9.1 Template de evidência para avanço de milestone FE
+- Milestone alvo (FE4/FE5/FE6)
+- Decisão final (GO/NO-GO)
+- Critérios P0 (pass/fail por item)
+- Defeitos encontrados (severidade, impacto, owner, prazo)
+- Evidências anexas:
+  - screenshots por breakpoint,
+  - relatório E2E,
+  - amostra de logs (`run_id`, `stage`, `error_code`),
+  - link para artifacts em `runs/<run_id>` quando aplicável
+- Risco residual aceito (sim/não) + justificativa
 
 ## 10) Critério de aprovação final
 

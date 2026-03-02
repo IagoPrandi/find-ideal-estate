@@ -43,7 +43,8 @@ class Runner:
                 current_stage = "public_safety"
                 self._stage_mark(run_id, current_stage, "running")
                 try:
-                    aggregate_path, ref_paths = build_public_safety_artifacts(
+                    aggregate_path, ref_paths = await asyncio.to_thread(
+                        build_public_safety_artifacts,
                         run_dir=run_dir,
                         reference_points=reference_points,
                         params=params,
@@ -83,7 +84,8 @@ class Runner:
             for idx, ref in enumerate(reference_points):
                 ref_dir = run_dir / "zones" / "by_ref" / f"ref_{idx}" / "raw"
                 ref_dir.mkdir(parents=True, exist_ok=True)
-                run_candidate_zones(
+                await asyncio.to_thread(
+                    run_candidate_zones,
                     cache_dir=cache_dir,
                     out_dir=ref_dir,
                     seed_lat=float(ref["lat"]),
@@ -99,7 +101,8 @@ class Runner:
                 raw_outputs = run_dir / "zones" / "by_ref" / f"ref_{idx}" / "raw" / "outputs"
                 enriched_dir = run_dir / "zones" / "by_ref" / f"ref_{idx}" / "enriched"
                 enriched_dir.mkdir(parents=True, exist_ok=True)
-                run_zone_enrich(
+                await asyncio.to_thread(
+                    run_zone_enrich,
                     runs_dir=raw_outputs,
                     geodir=geodir,
                     out_dir=enriched_dir,
@@ -111,7 +114,7 @@ class Runner:
             current_stage = "zones_consolidate"
             self._stage_mark(run_id, current_stage, "running")
             zone_dedupe_m = float(params.get("zone_dedupe_m", 50.0))
-            consolidate_zones(run_dir, zone_dedupe_m=zone_dedupe_m)
+            await asyncio.to_thread(consolidate_zones, run_dir, zone_dedupe_m=zone_dedupe_m)
             self._stage_mark(run_id, current_stage, "success")
 
             self.store.update_status(run_id, state="success", stage="done")

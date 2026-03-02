@@ -3,11 +3,14 @@ from __future__ import annotations
 import csv
 import json
 import math
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import fiona
-from shapely.geometry import Point, shape
+from pyproj import CRS, Transformer
+from shapely.geometry import Point, box, mapping, shape
+from shapely.ops import transform as shp_transform
 
 from adapters.pois_adapter import run_pois
 from adapters.streets_adapter import run_streets
@@ -146,4 +149,289 @@ def build_zone_detail(run_dir: Path, zone_uid: str, params: Dict[str, Any]) -> D
         "streets": streets_path,
         "pois": pois_path,
         "transport": transport_path,
+    }
+
+
+def _guess_prop_key(props: Dict[str, Any], candidates: List[str]) -> str | None:
+    if not props:
+        return None
+    normalized = {re.sub(r"[^a-z0-9]", "", str(k).lower()): k for k in props.keys()}
+    for c in candidates:
+        nk = re.sub(r"[^a-z0-9]", "", c.lower())
+        if nk in normalized:
+            return str(normalized[nk])
+    return None
+
+
+def _append_lines_from_gpkg(
+    out_features: List[Dict[str, Any]],
+    gpkg_path: Path,
+    clip_geom: Any,
+    mode: str,
+    source_name: str,
+    max_items: int,
+) -> None:
+    if not gpkg_path.exists() or len(out_features) >= max_items:
+        return
+
+    for layer in fiona.listlayers(str(gpkg_path)):
+        if len(out_features) >= max_items:
+            return
+        with fiona.open(str(gpkg_path), layer=layer) as src:
+            src_crs = CRS.from_user_input(src.crs) if src.crs else None
+            wgs84 = CRS.from_epsg(4326)
+            to_src = (
+                Transformer.from_crs(wgs84, src_crs, always_xy=True)
+                if src_crs and src_crs.to_epsg() != 4326
+                else None
+            )
+            to_wgs = (
+                Transformer.from_crs(src_crs, wgs84, always_xy=True)
+                if src_crs and src_crs.to_epsg() != 4326
+                else None
+            )
+            clip_in_src = shp_transform(to_src.transform, clip_geom) if to_src else clip_geom
+
+            sample_feat = src[0] if len(src) > 0 else None
+            sample_props = dict((sample_feat.get("properties") if sample_feat else {}) or {})
+            route_name_key = _guess_prop_key(
+                sample_props,
+                [
+                    "nm_linha_metro_trem",
+                    "nm_linha",
+                    "nr_nome_linha",
+                    "ln_nome",
+                    "nome",
+                    "name",
+                    "route_long_name",
+                    "route_short_name",
+                ],
+            )
+            route_id_key = _guess_prop_key(
+                sample_props,
+                ["route_id", "cd_identificador_linha", "id", "objectid", "fid", "codigo"],
+            )
+
+            for feat in src:
+                if not feat:
+                    continue
+                if len(out_features) >= max_items:
+                    return
+                geom = feat.get("geometry")
+                if not geom:
+                    continue
+                g = shape(geom)
+                if g.is_empty or not g.intersects(clip_in_src):
+                    continue
+
+                clipped = g.intersection(clip_in_src)
+                if clipped.is_empty:
+                    continue
+                if clipped.geom_type not in {"LineString", "MultiLineString"}:
+                    continue
+
+                clipped_out = shp_transform(to_wgs.transform, clipped) if to_wgs else clipped
+
+                props = feat.get("properties") or {}
+                route_name = str(props.get(route_name_key) or "").strip() if route_name_key else ""
+                route_id = str(props.get(route_id_key) or "").strip() if route_id_key else ""
+
+                out_features.append(
+                    {
+                        "type": "Feature",
+                        "geometry": mapping(clipped_out),
+                        "properties": {
+                            "mode": mode,
+                            "source": source_name,
+                            "route_name": route_name,
+                            "route_id": route_id,
+                        },
+                    }
+                )
+
+
+def _append_points_from_gpkg(
+    out_features: List[Dict[str, Any]],
+    gpkg_path: Path,
+    clip_geom: Any,
+    point_kind: str,
+    max_items: int,
+) -> None:
+    if not gpkg_path.exists() or len(out_features) >= max_items:
+        return
+
+    for layer in fiona.listlayers(str(gpkg_path)):
+        if len(out_features) >= max_items:
+            return
+        with fiona.open(str(gpkg_path), layer=layer) as src:
+            src_crs = CRS.from_user_input(src.crs) if src.crs else None
+            wgs84 = CRS.from_epsg(4326)
+            to_src = (
+                Transformer.from_crs(wgs84, src_crs, always_xy=True)
+                if src_crs and src_crs.to_epsg() != 4326
+                else None
+            )
+            to_wgs = (
+                Transformer.from_crs(src_crs, wgs84, always_xy=True)
+                if src_crs and src_crs.to_epsg() != 4326
+                else None
+            )
+            clip_in_src = shp_transform(to_src.transform, clip_geom) if to_src else clip_geom
+
+            sample_feat = src[0] if len(src) > 0 else None
+            sample_props = dict((sample_feat.get("properties") if sample_feat else {}) or {})
+            name_key = _guess_prop_key(sample_props, ["nm_estacao", "nome", "name", "stop_name", "denominacao"])
+            id_key = _guess_prop_key(sample_props, ["stop_id", "id", "objectid", "fid", "codigo"])
+
+            for feat in src:
+                if not feat:
+                    continue
+                if len(out_features) >= max_items:
+                    return
+                geom = feat.get("geometry")
+                if not geom:
+                    continue
+                g = shape(geom)
+                if g.is_empty:
+                    continue
+                c = g.centroid
+                if not c.intersects(clip_in_src):
+                    continue
+
+                c_out = shp_transform(to_wgs.transform, c) if to_wgs else c
+
+                props = feat.get("properties") or {}
+                out_features.append(
+                    {
+                        "type": "Feature",
+                        "geometry": mapping(c_out),
+                        "properties": {
+                            "kind": point_kind,
+                            "name": str(props.get(name_key) or "").strip() if name_key else "",
+                            "id": str(props.get(id_key) or "").strip() if id_key else "",
+                        },
+                    }
+                )
+
+
+def build_run_transport_layers(run_dir: Path, radius_m: float = 3500.0) -> Dict[str, Any]:
+    zones_path = run_dir / "zones" / "consolidated" / "zones_consolidated.geojson"
+    if not zones_path.exists():
+        raise FileNotFoundError("zones not found for run")
+
+    zones_data = _load_json(zones_path)
+    zone_shapes = []
+    for feat in zones_data.get("features", []):
+        geom = feat.get("geometry")
+        if not geom:
+            continue
+        g = shape(geom)
+        if not g.is_empty:
+            zone_shapes.append(g)
+
+    if not zone_shapes:
+        raise ValueError("zones geometry is empty")
+
+    minx = min(g.bounds[0] for g in zone_shapes)
+    miny = min(g.bounds[1] for g in zone_shapes)
+    maxx = max(g.bounds[2] for g in zone_shapes)
+    maxy = max(g.bounds[3] for g in zone_shapes)
+
+    expand_deg = max(radius_m / 111320.0, 0.01)
+    clip_geom = box(minx - expand_deg, miny - expand_deg, maxx + expand_deg, maxy + expand_deg)
+
+    geosampa_dir = Path("data_cache") / "geosampa"
+
+    route_features: List[Dict[str, Any]] = []
+    _append_lines_from_gpkg(
+        out_features=route_features,
+        gpkg_path=geosampa_dir / "SIRGAS_GPKG_linhaonibus.gpkg",
+        clip_geom=clip_geom,
+        mode="bus",
+        source_name="geosampa_bus",
+        max_items=1200,
+    )
+    _append_lines_from_gpkg(
+        out_features=route_features,
+        gpkg_path=geosampa_dir / "geoportal_linha_metro_v4.gpkg",
+        clip_geom=clip_geom,
+        mode="train",
+        source_name="geosampa_metro",
+        max_items=1400,
+    )
+    _append_lines_from_gpkg(
+        out_features=route_features,
+        gpkg_path=geosampa_dir / "geoportal_linha_trem_v2.gpkg",
+        clip_geom=clip_geom,
+        mode="train",
+        source_name="geosampa_trem",
+        max_items=1600,
+    )
+
+    stop_features: List[Dict[str, Any]] = []
+    _append_points_from_gpkg(
+        out_features=stop_features,
+        gpkg_path=geosampa_dir / "geoportal_ponto_onibus.gpkg",
+        clip_geom=clip_geom,
+        point_kind="bus_stop",
+        max_items=1200,
+    )
+    _append_points_from_gpkg(
+        out_features=stop_features,
+        gpkg_path=geosampa_dir / "geoportal_estacao_metro_v2.gpkg",
+        clip_geom=clip_geom,
+        point_kind="station",
+        max_items=1350,
+    )
+    _append_points_from_gpkg(
+        out_features=stop_features,
+        gpkg_path=geosampa_dir / "geoportal_estacao_trem_v2.gpkg",
+        clip_geom=clip_geom,
+        point_kind="station",
+        max_items=1500,
+    )
+
+    return {
+        "routes": {
+            "type": "FeatureCollection",
+            "features": route_features,
+        },
+        "stops": {
+            "type": "FeatureCollection",
+            "features": stop_features,
+        },
+    }
+
+
+def build_transport_stops_for_point(lon: float, lat: float, radius_m: float = 2500.0) -> Dict[str, Any]:
+    expand_deg = max(radius_m / 111320.0, 0.005)
+    clip_geom = box(lon - expand_deg, lat - expand_deg, lon + expand_deg, lat + expand_deg)
+
+    geosampa_dir = Path("data_cache") / "geosampa"
+    stop_features: List[Dict[str, Any]] = []
+    _append_points_from_gpkg(
+        out_features=stop_features,
+        gpkg_path=geosampa_dir / "geoportal_ponto_onibus.gpkg",
+        clip_geom=clip_geom,
+        point_kind="bus_stop",
+        max_items=1800,
+    )
+    _append_points_from_gpkg(
+        out_features=stop_features,
+        gpkg_path=geosampa_dir / "geoportal_estacao_metro_v2.gpkg",
+        clip_geom=clip_geom,
+        point_kind="station",
+        max_items=2100,
+    )
+    _append_points_from_gpkg(
+        out_features=stop_features,
+        gpkg_path=geosampa_dir / "geoportal_estacao_trem_v2.gpkg",
+        clip_geom=clip_geom,
+        point_kind="station",
+        max_items=2400,
+    )
+
+    return {
+        "type": "FeatureCollection",
+        "features": stop_features,
     }

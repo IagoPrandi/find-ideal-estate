@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Response
+from fastapi.middleware.cors import CORSMiddleware
 
 from app.runner import Runner
 from app.schemas import (
@@ -17,9 +18,20 @@ from app.schemas import (
 )
 from app.store import RunStore
 from core.listings_ops import finalize_run, scrape_zone_listings
-from core.zone_ops import build_zone_detail
+from core.zone_ops import build_run_transport_layers, build_transport_stops_for_point, build_zone_detail
 
 app = FastAPI(title="Imovel Ideal API", version="0.2.0")
+
+raw_origins = os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
+allow_origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=allow_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 RUNS_DIR = os.getenv("RUNS_DIR", "runs")
 store = RunStore(RUNS_DIR)
@@ -66,6 +78,29 @@ async def run_security(run_id: str) -> Response:
     if not p.exists():
         raise HTTPException(status_code=404, detail="security artifact not found")
     return Response(content=p.read_text(encoding="utf-8"), media_type="application/json")
+
+
+@app.get("/runs/{run_id}/transport/routes")
+async def run_transport_routes(run_id: str) -> dict:
+    run_dir = Path(RUNS_DIR) / run_id
+    if not run_dir.exists():
+        raise HTTPException(status_code=404, detail="run_id not found")
+    try:
+        return build_run_transport_layers(run_dir=run_dir)
+    except FileNotFoundError as ex:
+        raise HTTPException(status_code=404, detail=str(ex)) from ex
+    except Exception as ex:
+        raise HTTPException(status_code=400, detail=str(ex)) from ex
+
+
+@app.get("/transport/stops")
+async def transport_stops(lon: float, lat: float, radius_m: float = 2500.0) -> dict:
+    if not (-180.0 <= lon <= 180.0 and -90.0 <= lat <= 90.0):
+        raise HTTPException(status_code=400, detail="invalid lon/lat")
+    try:
+        return build_transport_stops_for_point(lon=lon, lat=lat, radius_m=radius_m)
+    except Exception as ex:
+        raise HTTPException(status_code=400, detail=str(ex)) from ex
 
 
 @app.post("/runs/{run_id}/zones/select", response_model=SimpleMessageResponse)

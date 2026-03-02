@@ -1,0 +1,147 @@
+import { ZodSchema } from "zod";
+import {
+  FinalizeResponse,
+  FinalizeResponseSchema,
+  ListingsCollection,
+  ListingsCollectionSchema,
+  ListingsScrapeResponse,
+  ListingsScrapeResponseSchema,
+  RunCreateResponse,
+  RunCreateResponseSchema,
+  RunStatusResponse,
+  RunStatusResponseSchema,
+  SimpleMessageResponse,
+  SimpleMessageResponseSchema,
+  TransportLayersResponse,
+  TransportLayersResponseSchema,
+  TransportStopsResponse,
+  TransportStopsResponseSchema,
+  ZoneDetailResponse,
+  ZoneDetailResponseSchema,
+  ZonesCollection,
+  ZonesCollectionSchema
+} from "./schemas";
+
+const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
+
+type RequestOptions = {
+  method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
+  body?: unknown;
+};
+
+export class ApiError extends Error {
+  status: number;
+  recoverable: boolean;
+
+  constructor(message: string, status: number, recoverable: boolean) {
+    super(message);
+    this.status = status;
+    this.recoverable = recoverable;
+  }
+}
+
+async function requestJson<T>(path: string, schema: ZodSchema<T>, options: RequestOptions = {}): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    method: options.method || "GET",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: options.body ? JSON.stringify(options.body) : undefined
+  });
+
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : {};
+
+  if (!response.ok) {
+    const detail = typeof data?.detail === "string" ? data.detail : "Erro inesperado da API.";
+    const recoverable = response.status >= 500 || response.status === 429 || response.status === 408;
+    throw new ApiError(detail, response.status, recoverable);
+  }
+
+  const parsed = schema.safeParse(data);
+  if (!parsed.success) {
+    throw new ApiError("Payload da API inválido para o contrato esperado.", 500, false);
+  }
+
+  return parsed.data;
+}
+
+export function apiActionHint(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.recoverable) {
+      return `${error.message} Tente novamente em alguns segundos.`;
+    }
+    if (error.status === 404) {
+      return `${error.message} Verifique se o run_id existe e se a etapa anterior foi concluída.`;
+    }
+    if (error.status === 400) {
+      return `${error.message} Revise os dados enviados e refaça a ação.`;
+    }
+    return `${error.message} Corrija a configuração e tente novamente.`;
+  }
+
+  return "Falha de comunicação. Verifique API, rede e tente novamente.";
+}
+
+export async function createRun(payload: {
+  reference_points: Array<{ name: string; lat: number; lon: number }>;
+  params: Record<string, unknown>;
+}): Promise<RunCreateResponse> {
+  return (await requestJson("/runs", RunCreateResponseSchema, {
+    method: "POST",
+    body: payload
+  })) as RunCreateResponse;
+}
+
+export async function getRunStatus(runId: string): Promise<RunStatusResponse> {
+  return (await requestJson(`/runs/${runId}/status`, RunStatusResponseSchema)) as RunStatusResponse;
+}
+
+export async function getZones(runId: string): Promise<ZonesCollection> {
+  return (await requestJson(`/runs/${runId}/zones`, ZonesCollectionSchema)) as ZonesCollection;
+}
+
+export async function getZoneDetail(runId: string, zoneUid: string): Promise<ZoneDetailResponse> {
+  return (await requestJson(`/runs/${runId}/zones/${zoneUid}/detail`, ZoneDetailResponseSchema, {
+    method: "POST"
+  })) as ZoneDetailResponse;
+}
+
+export async function selectZones(runId: string, zoneUids: string[]): Promise<SimpleMessageResponse> {
+  return (await requestJson(`/runs/${runId}/zones/select`, SimpleMessageResponseSchema, {
+    method: "POST",
+    body: { zone_uids: zoneUids }
+  })) as SimpleMessageResponse;
+}
+
+export async function scrapeZoneListings(runId: string, zoneUid: string): Promise<ListingsScrapeResponse> {
+  return (await requestJson(`/runs/${runId}/zones/${zoneUid}/listings`, ListingsScrapeResponseSchema, {
+    method: "POST"
+  })) as ListingsScrapeResponse;
+}
+
+export async function finalizeRun(runId: string): Promise<FinalizeResponse> {
+  return (await requestJson(`/runs/${runId}/finalize`, FinalizeResponseSchema, {
+    method: "POST"
+  })) as FinalizeResponse;
+}
+
+export async function getFinalListings(runId: string): Promise<ListingsCollection> {
+  return (await requestJson(`/runs/${runId}/final/listings`, ListingsCollectionSchema)) as ListingsCollection;
+}
+
+export async function getTransportLayers(runId: string): Promise<TransportLayersResponse> {
+  return (await requestJson(
+    `/runs/${runId}/transport/routes`,
+    TransportLayersResponseSchema
+  )) as TransportLayersResponse;
+}
+
+export async function getTransportStops(lon: number, lat: number, radiusM = 2500): Promise<TransportStopsResponse> {
+  return (await requestJson(
+    `/transport/stops?lon=${encodeURIComponent(String(lon))}&lat=${encodeURIComponent(String(lat))}&radius_m=${encodeURIComponent(String(radiusM))}`,
+    TransportStopsResponseSchema
+  )) as TransportStopsResponse;
+}
+
+export { API_BASE };
