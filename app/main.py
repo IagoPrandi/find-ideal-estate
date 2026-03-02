@@ -2,12 +2,13 @@ import asyncio
 import json
 import os
 from pathlib import Path
-from fastapi import FastAPI, HTTPException, Response
+from fastapi import Body, FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.runner import Runner
 from app.schemas import (
     FinalizeResponse,
+    ListingsScrapeRequest,
     ListingsScrapeResponse,
     RunCreateRequest,
     RunCreateResponse,
@@ -94,7 +95,25 @@ async def run_transport_routes(run_id: str) -> dict:
 
 
 @app.get("/transport/stops")
-async def transport_stops(lon: float, lat: float, radius_m: float = 2500.0) -> dict:
+async def transport_stops(
+    lon: float | None = None,
+    lat: float | None = None,
+    radius_m: float = 2500.0,
+    bbox: str | None = None,
+) -> dict:
+    """Get bus/train stops. Use bbox (minLon,minLat,maxLon,maxLat) for viewport-based loading, or lon/lat/radius."""
+    bbox_tuple = None
+    if bbox:
+        parts = [float(x.strip()) for x in bbox.split(",") if x.strip()]
+        if len(parts) == 4:
+            bbox_tuple = (parts[0], parts[1], parts[2], parts[3])
+    if bbox_tuple is not None:
+        try:
+            return build_transport_stops_for_point(lon=0, lat=0, bbox=bbox_tuple)
+        except Exception as ex:
+            raise HTTPException(status_code=400, detail=str(ex)) from ex
+    if lon is None or lat is None:
+        raise HTTPException(status_code=400, detail="lon and lat required when bbox not provided")
     if not (-180.0 <= lon <= 180.0 and -90.0 <= lat <= 90.0):
         raise HTTPException(status_code=400, detail="invalid lon/lat")
     try:
@@ -136,13 +155,33 @@ async def zone_detail(run_id: str, zone_uid: str) -> ZoneDetailResponse:
     )
 
 
+@app.get("/runs/{run_id}/zones/{zone_uid}/streets")
+async def zone_streets(run_id: str, zone_uid: str) -> dict:
+    """Return list of streets for a zone (from streets.json)."""
+    run_dir = Path(RUNS_DIR) / run_id
+    if not run_dir.exists():
+        raise HTTPException(status_code=404, detail="run_id not found")
+    streets_path = run_dir / "zones" / "detail" / zone_uid / "streets.json"
+    if not streets_path.exists():
+        raise HTTPException(status_code=404, detail="streets not found; run zone detail first")
+    data = json.loads(streets_path.read_text(encoding="utf-8"))
+    streets = data.get("streets") if isinstance(data.get("streets"), list) else []
+    return {"zone_uid": zone_uid, "streets": streets}
+
+
 @app.post("/runs/{run_id}/zones/{zone_uid}/listings", response_model=ListingsScrapeResponse)
-async def zone_listings(run_id: str, zone_uid: str) -> ListingsScrapeResponse:
+async def zone_listings(
+    run_id: str,
+    zone_uid: str,
+    body: ListingsScrapeRequest | None = Body(default=None),
+) -> ListingsScrapeResponse:
     run_dir = Path(RUNS_DIR) / run_id
     if not run_dir.exists():
         raise HTTPException(status_code=404, detail="run_id not found")
     payload = store.get_input(run_id)
-    params = payload.get("params") or {}
+    params = dict(payload.get("params") or {})
+    if body is not None and body.street_filter and body.street_filter.strip():
+        params["street_filter"] = body.street_filter.strip()
 
     try:
         listing_files = scrape_zone_listings(run_dir=run_dir, zone_uid=zone_uid, params=params)

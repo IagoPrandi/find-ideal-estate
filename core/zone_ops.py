@@ -403,9 +403,19 @@ def build_run_transport_layers(run_dir: Path, radius_m: float = 3500.0) -> Dict[
     }
 
 
-def build_transport_stops_for_point(lon: float, lat: float, radius_m: float = 2500.0) -> Dict[str, Any]:
-    expand_deg = max(radius_m / 111320.0, 0.005)
-    clip_geom = box(lon - expand_deg, lat - expand_deg, lon + expand_deg, lat + expand_deg)
+def build_transport_stops_for_point(
+    lon: float,
+    lat: float,
+    radius_m: float = 2500.0,
+    bbox: Tuple[float, float, float, float] | None = None,
+) -> Dict[str, Any]:
+    """Build GeoJSON of bus/train stops. Uses bbox if provided, else lon/lat + radius."""
+    if bbox is not None:
+        min_lon, min_lat, max_lon, max_lat = bbox
+        clip_geom = box(min_lon, min_lat, max_lon, max_lat)
+    else:
+        expand_deg = max(radius_m / 111320.0, 0.005)
+        clip_geom = box(lon - expand_deg, lat - expand_deg, lon + expand_deg, lat + expand_deg)
 
     geosampa_dir = Path("data_cache") / "geosampa"
     stop_features: List[Dict[str, Any]] = []

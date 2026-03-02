@@ -1,4 +1,4 @@
-import { ZodSchema } from "zod";
+import { z, ZodSchema } from "zod";
 import {
   FinalizeResponse,
   FinalizeResponseSchema,
@@ -114,9 +114,14 @@ export async function selectZones(runId: string, zoneUids: string[]): Promise<Si
   })) as SimpleMessageResponse;
 }
 
-export async function scrapeZoneListings(runId: string, zoneUid: string): Promise<ListingsScrapeResponse> {
+export async function scrapeZoneListings(
+  runId: string,
+  zoneUid: string,
+  streetFilter?: string
+): Promise<ListingsScrapeResponse> {
   return (await requestJson(`/runs/${runId}/zones/${zoneUid}/listings`, ListingsScrapeResponseSchema, {
-    method: "POST"
+    method: "POST",
+    body: streetFilter ? { street_filter: streetFilter } : {}
   })) as ListingsScrapeResponse;
 }
 
@@ -137,11 +142,26 @@ export async function getTransportLayers(runId: string): Promise<TransportLayers
   )) as TransportLayersResponse;
 }
 
-export async function getTransportStops(lon: number, lat: number, radiusM = 2500): Promise<TransportStopsResponse> {
+export async function getTransportStops(
+  lon: number,
+  lat: number,
+  radiusM = 2500,
+  bbox?: { minLon: number; minLat: number; maxLon: number; maxLat: number }
+): Promise<TransportStopsResponse> {
+  const params = bbox
+    ? `bbox=${encodeURIComponent(`${bbox.minLon},${bbox.minLat},${bbox.maxLon},${bbox.maxLat}`)}`
+    : `lon=${encodeURIComponent(String(lon))}&lat=${encodeURIComponent(String(lat))}&radius_m=${encodeURIComponent(String(radiusM))}`;
   return (await requestJson(
-    `/transport/stops?lon=${encodeURIComponent(String(lon))}&lat=${encodeURIComponent(String(lat))}&radius_m=${encodeURIComponent(String(radiusM))}`,
+    `/transport/stops?${params}`,
     TransportStopsResponseSchema
   )) as TransportStopsResponse;
+}
+
+export async function getZoneStreets(runId: string, zoneUid: string): Promise<{ zone_uid: string; streets: string[] }> {
+  return (await requestJson(
+    `/runs/${runId}/zones/${zoneUid}/streets`,
+    z.object({ zone_uid: z.string(), streets: z.array(z.string()) })
+  )) as { zone_uid: string; streets: string[] };
 }
 
 export { API_BASE };

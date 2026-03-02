@@ -49,6 +49,10 @@ class ZoneDetailResponse(BaseModel):
     transport_path: str
 
 
+class ListingsScrapeRequest(BaseModel):
+    street_filter: Optional[str] = None
+
+
 class ListingsScrapeResponse(BaseModel):
     zone_uid: str
     listing_files: List[str]

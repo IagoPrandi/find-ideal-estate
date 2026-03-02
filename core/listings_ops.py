@@ -43,7 +43,13 @@ def scrape_zone_listings(run_dir: Path, zone_uid: str, params: Dict[str, Any]) -
     if not streets_path.exists():
         raise FileNotFoundError(f"streets.json not found for zone {zone_uid}")
 
-    streets = _extract_streets(streets_path, max_items=int(params.get("max_streets_per_zone", 3)))
+    street_filter = params.get("street_filter")
+    if street_filter and str(street_filter).strip():
+        streets = [str(street_filter).strip()]
+        if not _address_has_valid_street_type(streets[0]):
+            streets = []
+    else:
+        streets = _extract_streets(streets_path, max_items=int(params.get("max_streets_per_zone", 3)))
     mode = str(params.get("listing_mode", "rent"))
     radius_m = float(params.get("listing_radius_m", 1500))
     max_pages = int(params.get("listing_max_pages", 2))

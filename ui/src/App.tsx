@@ -1,4 +1,24 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Search,
+  MapPin,
+  Bus,
+  Train,
+  Layers,
+  ChevronRight,
+  Loader2,
+  Home,
+  HelpCircle,
+  Minus,
+  Maximize2,
+  Plus,
+  MapPinOff,
+  SlidersHorizontal,
+  Info,
+  CheckSquare,
+  Square,
+  X
+} from "lucide-react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import {
@@ -11,6 +31,7 @@ import {
   getTransportLayers,
   getTransportStops,
   getZoneDetail,
+  getZoneStreets,
   getZones,
   scrapeZoneListings,
   selectZones
@@ -23,7 +44,7 @@ import type {
   ZonesCollection
 } from "./api/schemas";
 
-type LayerKey = "routes" | "train" | "busStops" | "flood" | "green" | "pois";
+type LayerKey = "routes" | "train" | "busStops" | "zones" | "flood" | "green" | "pois";
 type InteractionMode = "primary" | "interest";
 type PropertyMode = "rent" | "buy";
 type ExecutionStageKey = "zones" | "selectZone" | "detailZone" | "zoneListings" | "finalize";
@@ -49,15 +70,16 @@ const MAPBOX_TOKEN =
   import.meta.env.VITE_MAPBOX_ACCESS_TOKEN || (import.meta.env.MODE === "test" ? "test-token" : "");
 
 const STEPS = [
-  { id: 1, label: "Referências" },
-  { id: 2, label: "Zonas" },
-  { id: 3, label: "Imóveis" }
+  { id: 1, title: "Referências", desc: "Defina seu local base" },
+  { id: 2, title: "Zonas", desc: "Regiões recomendadas" },
+  { id: 3, title: "Imóveis", desc: "Encontre o seu novo lar" }
 ] as const;
 
 const LAYER_INFO: Record<LayerKey, { label: string; color: string }> = {
   routes: { label: "Rotas de ônibus", color: "#2563eb" },
   train: { label: "Metrô/Trem", color: "#0f766e" },
-  busStops: { label: "Pontos de ônibus", color: "#f97316" },
+  busStops: { label: "Paradas (ônibus/estações)", color: "#f97316" },
+  zones: { label: "Zonas candidatas", color: "#2563eb" },
   flood: { label: "Alagamento", color: "#7c3aed" },
   green: { label: "Área verde", color: "#16a34a" },
   pois: { label: "POIs", color: "#d97706" }
@@ -130,6 +152,7 @@ export default function App() {
     routes: true,
     train: true,
     busStops: true,
+    zones: true,
     flood: false,
     green: false,
     pois: false
@@ -157,6 +180,11 @@ export default function App() {
   const [zoneSelectionMessage, setZoneSelectionMessage] = useState("Selecione uma zona consolidada.");
   const [zoneDetailData, setZoneDetailData] = useState<ZoneDetailResponse | null>(null);
   const [zoneListingMessage, setZoneListingMessage] = useState("Aguardando seleção e detalhamento da zona.");
+  const [streetFilterMode, setStreetFilterMode] = useState<"all" | "specific">("all");
+  const [selectedStreet, setSelectedStreet] = useState("");
+  const [zoneStreets, setZoneStreets] = useState<string[]>([]);
+  const [stopsLoading, setStopsLoading] = useState(false);
+  const [loadingText, setLoadingText] = useState("");
   const [finalListings, setFinalListings] = useState<ListingFeature[]>([]);
   const [finalizeMessage, setFinalizeMessage] = useState("Finalize o run para carregar os imóveis.");
   const [isSelectingZone, setIsSelectingZone] = useState(false);
@@ -182,10 +210,19 @@ export default function App() {
 
   const initialViewport = useRef(viewport);
   const progressTimerRef = useRef<number | null>(null);
+  const stopsDebounceRef = useRef<number | null>(null);
   const progressStartRef = useRef<number>(0);
   const progressExpectedRef = useRef<number>(0);
 
   const hasRouteData = Boolean(primaryPoint && zonesCollection.length > 0);
+
+  const isLoading =
+    isCreatingRun ||
+    isPolling ||
+    isSelectingZone ||
+    isDetailingZone ||
+    isListingZone ||
+    isFinalizingRun;
 
   useEffect(() => {
     interactionModeRef.current = interactionMode;
@@ -313,6 +350,11 @@ export default function App() {
         }
       });
 
+      map.addSource("zones-source", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] }
+      });
+
       map.addLayer({
         id: "bus-layer",
         type: "line",
@@ -354,14 +396,45 @@ export default function App() {
       });
       map.addLayer({
         id: "bus-stop-layer",
-        type: "circle",
+        type: "symbol",
         source: "bus-stop-demo",
+        layout: {
+          "text-field": ["match", ["get", "kind"], "bus_stop", "🚌", "station", "🚆", "🚏"],
+          "text-size": 16,
+          "text-allow-overlap": true,
+          "text-ignore-placement": true
+        },
         paint: {
-          "circle-radius": 5,
-          "circle-color": "#f97316",
-          "circle-stroke-color": "#fff",
-          "circle-stroke-width": 1.5
+          "text-halo-color": "#fff",
+          "text-halo-width": 2
         }
+      });
+
+      map.addLayer({
+        id: "zones-fill-layer",
+        type: "fill",
+        source: "zones-source",
+        paint: {
+          "fill-color": "#2563eb",
+          "fill-opacity": 0.2,
+          "fill-outline-color": "#2563eb"
+        }
+      });
+      map.addLayer({
+        id: "zones-outline-layer",
+        type: "line",
+        source: "zones-source",
+        paint: {
+          "line-color": "#2563eb",
+          "line-width": 2
+        }
+      });
+
+      map.on("mouseenter", "zones-fill-layer", () => {
+        map.getCanvas().style.cursor = "pointer";
+      });
+      map.on("mouseleave", "zones-fill-layer", () => {
+        map.getCanvas().style.cursor = "";
       });
 
       map.on("moveend", () => {
@@ -370,6 +443,19 @@ export default function App() {
       });
 
       map.on("click", (event) => {
+        const features = map.queryRenderedFeatures(event.point, {
+          layers: ["zones-fill-layer"]
+        });
+        if (features.length > 0) {
+          const uid = features[0].properties?.zone_uid as string | undefined;
+          if (uid) {
+            setSelectedZoneUid(uid);
+            setZoneSelectionMessage(`Zona ${uid} selecionada no mapa.`);
+            setActiveStep(2);
+            return;
+          }
+        }
+
         const lat = Number(event.lngLat.lat.toFixed(6));
         const lon = Number(event.lngLat.lng.toFixed(6));
 
@@ -422,10 +508,24 @@ export default function App() {
     map.setLayoutProperty("bus-layer", "visibility", visibility(layerVisibility.routes && hasRouteData));
     map.setLayoutProperty("train-layer", "visibility", visibility(layerVisibility.train && hasRouteData));
     map.setLayoutProperty("bus-stop-layer", "visibility", visibility(layerVisibility.busStops));
+    if (map.getLayer("zones-fill-layer")) {
+      map.setLayoutProperty(
+        "zones-fill-layer",
+        "visibility",
+        visibility(layerVisibility.zones && zonesCollection.length > 0)
+      );
+    }
+    if (map.getLayer("zones-outline-layer")) {
+      map.setLayoutProperty(
+        "zones-outline-layer",
+        "visibility",
+        visibility(layerVisibility.zones && zonesCollection.length > 0)
+      );
+    }
     map.setLayoutProperty("flood-layer", "visibility", visibility(layerVisibility.flood));
     map.setLayoutProperty("green-layer", "visibility", visibility(layerVisibility.green));
     map.setLayoutProperty("poi-layer", "visibility", visibility(layerVisibility.pois));
-  }, [hasRouteData, isMapReady, layerVisibility]);
+  }, [hasRouteData, isMapReady, layerVisibility, zonesCollection.length]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -440,30 +540,97 @@ export default function App() {
 
     let cancelled = false;
 
-    const loadDefaultStops = async () => {
-      try {
-        const stops = await getTransportStops(viewport.lon, viewport.lat, 2800);
-        if (cancelled) {
-          return;
-        }
-        busStopSource.setData(stops);
-      } catch {
-        if (cancelled) {
-          return;
-        }
-        busStopSource.setData({
-          type: "FeatureCollection",
-          features: []
-        });
+    const loadStops = () => {
+      const bounds = map.getBounds();
+      if (!bounds) {
+        return;
       }
+      const bbox = {
+        minLon: bounds.getWest(),
+        minLat: bounds.getSouth(),
+        maxLon: bounds.getEast(),
+        maxLat: bounds.getNorth()
+      };
+
+      setStopsLoading(true);
+      getTransportStops(0, 0, 2500, bbox)
+        .then((stops) => {
+          if (!cancelled) {
+            busStopSource.setData(stops);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            busStopSource.setData({ type: "FeatureCollection", features: [] });
+          }
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setStopsLoading(false);
+          }
+        });
     };
 
-    void loadDefaultStops();
+    if (stopsDebounceRef.current) {
+      window.clearTimeout(stopsDebounceRef.current);
+    }
+    stopsDebounceRef.current = window.setTimeout(loadStops, 350);
 
     return () => {
       cancelled = true;
+      if (stopsDebounceRef.current) {
+        window.clearTimeout(stopsDebounceRef.current);
+        stopsDebounceRef.current = null;
+      }
     };
-  }, [isMapReady, viewport.lat, viewport.lon]);
+  }, [isMapReady, viewport.lat, viewport.lon, viewport.zoom]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isMapReady) {
+      return;
+    }
+
+    const zonesSource = map.getSource("zones-source") as mapboxgl.GeoJSONSource | undefined;
+    if (!zonesSource) {
+      return;
+    }
+
+    if (zonesCollection.length === 0) {
+      zonesSource.setData({ type: "FeatureCollection", features: [] });
+      return;
+    }
+
+    zonesSource.setData({
+      type: "FeatureCollection",
+      features: zonesCollection
+    });
+  }, [isMapReady, zonesCollection]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isMapReady || !map.getLayer("zones-fill-layer")) {
+      return;
+    }
+
+    if (selectedZoneUid) {
+      map.setPaintProperty("zones-fill-layer", "fill-opacity", [
+        "case",
+        ["==", ["get", "zone_uid"], selectedZoneUid],
+        0.45,
+        0.15
+      ]);
+      map.setPaintProperty("zones-outline-layer", "line-width", [
+        "case",
+        ["==", ["get", "zone_uid"], selectedZoneUid],
+        3,
+        2
+      ]);
+    } else {
+      map.setPaintProperty("zones-fill-layer", "fill-opacity", 0.2);
+      map.setPaintProperty("zones-outline-layer", "line-width", 2);
+    }
+  }, [isMapReady, selectedZoneUid]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -682,10 +849,13 @@ export default function App() {
           if ((key === "routes" || key === "train") && !hasRouteData) {
             return false;
           }
+          if (key === "zones" && zonesCollection.length === 0) {
+            return false;
+          }
           return layerVisibility[key];
         })
         .map((key) => ({ key, ...LAYER_INFO[key] })),
-    [hasRouteData, layerVisibility]
+    [hasRouteData, layerVisibility, zonesCollection.length]
   );
 
   const mapBusyMessage = useMemo(() => {
@@ -841,6 +1011,7 @@ export default function App() {
     resetExecutionTracking();
     startExecutionProgress("zones", "Gerando zonas candidatas...", 180);
     setIsCreatingRun(true);
+    setLoadingText("Analisando rotas de transporte e gerando zonas isócronas...");
     setStatusMessage("Criando run...");
     setZonesState("idle");
     setZonesStateMessage("Aguardando processamento das zonas.");
@@ -935,6 +1106,32 @@ export default function App() {
     }
   };
 
+  useEffect(() => {
+    if (!runId || !selectedZoneUid || !zoneDetailData) {
+      setZoneStreets([]);
+      return;
+    }
+
+    let cancelled = false;
+    getZoneStreets(runId, selectedZoneUid)
+      .then((data) => {
+        if (!cancelled) {
+          setZoneStreets(data.streets || []);
+          if (data.streets?.length && !selectedStreet) {
+            setSelectedStreet(data.streets[0]);
+          }
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setZoneStreets([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [runId, selectedZoneUid, zoneDetailData]);
+
   const handleDetailZone = async () => {
     if (!runId || !selectedZoneUid || isDetailingZone) {
       return;
@@ -943,11 +1140,12 @@ export default function App() {
     let succeeded = false;
     startExecutionProgress("detailZone", "Detalhando zona...", 60);
     setIsDetailingZone(true);
+    setLoadingText("Cruzando bases geográficas, recolhendo ruas e efetuando scraping dos imóveis...");
     setZoneListingMessage("Executando detalhamento da zona...");
     try {
       const detail = await getZoneDetail(runId, selectedZoneUid);
       setZoneDetailData(detail);
-      setZoneListingMessage("Detalhamento concluído. Próximo: buscar imóveis da zona.");
+      setZoneListingMessage("Detalhamento concluído. Escolha como buscar imóveis.");
       setStatusMessage(`Detalhamento finalizado para ${selectedZoneUid}.`);
       succeeded = true;
     } catch (error) {
@@ -974,12 +1172,17 @@ export default function App() {
       return;
     }
 
+    const streetFilter = streetFilterMode === "specific" && selectedStreet ? selectedStreet : undefined;
+
     let succeeded = false;
     startExecutionProgress("zoneListings", "Coletando imóveis por rua...", 180);
     setIsListingZone(true);
-    setZoneListingMessage("Buscando imóveis para a zona selecionada...");
+    setLoadingText("Buscando imóveis nas plataformas...");
+    setZoneListingMessage(
+      streetFilter ? `Buscando imóveis na rua ${streetFilter}...` : "Buscando imóveis em todas as ruas da zona..."
+    );
     try {
-      const result = await scrapeZoneListings(runId, selectedZoneUid);
+      const result = await scrapeZoneListings(runId, selectedZoneUid, streetFilter);
       setZoneListingMessage(`Coleta concluída: ${result.listing_files.length} artifact(s) de listings.`);
       setActiveStep(3);
       setStatusMessage(`Listings coletados para ${selectedZoneUid}.`);
@@ -1011,6 +1214,7 @@ export default function App() {
     let succeeded = false;
     startExecutionProgress("finalize", "Finalizando run e consolidando resultado...", 90);
     setIsFinalizingRun(true);
+    setLoadingText("Finalizando run e consolidando resultado...");
     setFinalizeMessage("Finalizando run e carregando resultado final...");
     try {
       await finalizeRun(runId);
@@ -1041,6 +1245,18 @@ export default function App() {
 
   const removeInterest = (id: string) => {
     setInterests((current) => current.filter((item) => item.id !== id));
+  };
+
+  const navigateToStep = (targetStep: 1 | 2 | 3) => {
+    if (targetStep === 1 && activeStep > 1) {
+      removePrimaryPoint();
+    } else if (targetStep === 2 && activeStep > 2) {
+      setActiveStep(2);
+    } else if (targetStep === 3 && (activeStep >= 3 || (activeStep === 2 && selectedZoneUid && finalListings.length > 0))) {
+      setActiveStep(3);
+    } else if (targetStep <= activeStep) {
+      setActiveStep(targetStep);
+    }
   };
 
   const toggleLayer = (key: LayerKey) => {
@@ -1085,8 +1301,6 @@ export default function App() {
     };
   };
 
-  const panelDesktopWidth = isPanelMinimized ? "w-16" : "w-[400px]";
-  const panelMobileHeight = isPanelMinimized ? "max-lg:h-14" : "max-lg:h-[48vh]";
   const totalRemainingSec = EXECUTION_STAGE_ORDER.reduce((acc, key) => {
     const stage = executionStages[key];
     if (stage.status === "done") {
@@ -1102,171 +1316,170 @@ export default function App() {
   }, 0);
 
   return (
-    <main className="h-full w-full bg-bg text-text">
+    <main className="flex h-screen w-full overflow-hidden bg-[#F0EDE5] font-sans text-slate-800 select-none">
       <div className="relative flex h-full w-full overflow-hidden max-lg:flex-col">
-        <section className="relative h-full min-w-0 flex-1 max-lg:h-[55vh] max-lg:flex-none">
+        <section className="relative h-full min-w-0 flex-1 overflow-hidden bg-[#E5E3DF] transition-all duration-300 max-lg:h-[55vh] max-lg:flex-none">
           <div ref={mapContainerRef} className="h-full w-full" aria-label="Mapa principal" />
 
           <div className="pointer-events-none absolute inset-0">
-            <div className="pointer-events-auto absolute left-4 top-4 z-20 w-[min(460px,calc(100%-2rem))] rounded-panel border border-border bg-panel/95 p-3 shadow-panel backdrop-blur-sm">
-              <form className="flex gap-2" onSubmit={handleSearch}>
-                <label htmlFor="map-search" className="sr-only">
-                  Buscar endereço
-                </label>
+            {/* Barra de Pesquisa - estilo esboço */}
+            <div className="pointer-events-auto absolute left-6 top-6 z-40 w-80">
+              <form onSubmit={handleSearch} className="bg-white/95 backdrop-blur-md rounded-lg shadow-md flex items-center px-4 py-3 border border-slate-200">
+                <Search className="text-slate-400 w-5 h-5 mr-3 shrink-0" />
                 <input
                   id="map-search"
                   value={searchValue}
-                  onChange={(event) => setSearchValue(event.target.value)}
-                  placeholder="Buscar endereço ou bairro"
-                  className="w-full rounded-xl border border-border px-3 py-2 text-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/25"
+                  onChange={(e) => setSearchValue(e.target.value)}
+                  placeholder="Endereço ou bairro..."
+                  className="bg-transparent border-none outline-none w-full text-slate-700 placeholder-slate-400 text-sm font-medium"
                 />
-                <button
-                  type="submit"
-                  className="rounded-xl bg-primary px-3 py-2 text-sm font-semibold text-white transition hover:brightness-105"
-                >
+                <button type="submit" className="text-[#2563EB] text-sm font-bold ml-2">
                   Buscar
                 </button>
               </form>
             </div>
 
-            <div className="pointer-events-auto absolute left-4 top-32 z-20 rounded-panel border border-border bg-panel/95 p-2 shadow-panel backdrop-blur-sm">
-              <div className="flex gap-2 text-xs">
-                <button
-                  type="button"
-                  onClick={() => setInteractionMode("primary")}
-                  className={`rounded-lg px-2.5 py-1.5 font-semibold ${
-                    interactionMode === "primary"
-                      ? "bg-primary text-white"
-                      : "border border-border bg-white text-muted"
-                  }`}
-                >
-                  Definir principal
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setInteractionMode("interest")}
-                  className={`rounded-lg px-2.5 py-1.5 font-semibold ${
-                    interactionMode === "interest"
-                      ? "bg-primary text-white"
-                      : "border border-border bg-white text-muted"
-                  }`}
-                >
-                  Adicionar interesse
-                </button>
-              </div>
-            </div>
-
-            <div className="pointer-events-auto absolute left-4 top-56 z-20 flex flex-col items-start gap-2">
-              {STEPS.map((stepItem, index) => {
-                const isReached = activeStep >= stepItem.id;
-                return (
-                  <div key={stepItem.id} className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setActiveStep(stepItem.id as 1 | 2 | 3)}
-                      className={`h-9 w-9 rounded-full border text-xs font-bold transition ${
-                        isReached
-                          ? "border-primary bg-primary text-white"
-                          : "border-border bg-white text-muted"
-                      }`}
-                      aria-label={`Ir para passo ${stepItem.id}`}
-                    >
-                      {stepItem.id}
-                    </button>
-                    <span className={`text-xs font-medium ${isReached ? "text-text" : "text-muted"}`}>
-                      {stepItem.label}
-                    </span>
-                    {index < STEPS.length - 1 ? <span className="ml-2 mr-1 h-6 w-px bg-border" /> : null}
-                  </div>
-                );
-              })}
-            </div>
-
-            <div className="pointer-events-auto absolute right-4 top-4 z-20 flex flex-col items-end gap-2">
+            {/* Modo de interação */}
+            <div className="pointer-events-auto absolute left-6 top-20 z-40 flex gap-2">
               <button
                 type="button"
-                onClick={() => setIsLayerMenuOpen((open) => !open)}
-                className="rounded-xl border border-border bg-panel px-3 py-2 text-sm font-medium shadow-panel"
-                aria-label="Abrir menu de camadas"
+                onClick={() => setInteractionMode("primary")}
+                className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${
+                  interactionMode === "primary" ? "bg-[#2563EB] text-white" : "bg-white/95 text-slate-500 border border-slate-200"
+                }`}
               >
-                Camadas
+                Definir principal
+              </button>
+              <button
+                type="button"
+                onClick={() => setInteractionMode("interest")}
+                className={`rounded-lg px-2.5 py-1.5 text-xs font-semibold transition ${
+                  interactionMode === "interest" ? "bg-[#2563EB] text-white" : "bg-white/95 text-slate-500 border border-slate-200"
+                }`}
+              >
+                Adicionar interesse
+              </button>
+            </div>
+
+            {/* Stepper vertical expandível - estilo esboço */}
+            <div className="pointer-events-none absolute top-24 left-6 z-40 flex flex-col items-start">
+              {STEPS.map((s, idx) => (
+                <div key={s.id} className="flex flex-col items-start">
+                  <button
+                    type="button"
+                    onClick={() => navigateToStep(s.id as 1 | 2 | 3)}
+                    className={`group flex items-center h-10 rounded-full shadow-md transition-all duration-300 ease-out overflow-hidden pointer-events-auto
+                      ${activeStep >= s.id ? "bg-[#2563EB] text-white" : "bg-white text-slate-400 border border-slate-200"}
+                      ${s.id <= activeStep || (s.id === 3 && selectedZoneUid) ? "cursor-pointer hover:border-blue-300 w-10 hover:w-48" : "opacity-50 cursor-not-allowed w-10"}
+                    `}
+                  >
+                    <div className="w-10 h-10 flex-shrink-0 flex items-center justify-center font-bold">
+                      {s.id}
+                    </div>
+                    <div className="flex flex-col whitespace-nowrap pr-4 opacity-0 group-hover:opacity-100 transition-opacity duration-300 delay-100">
+                      <span className={`text-sm font-bold leading-tight ${activeStep >= s.id ? "text-white" : "text-slate-700"}`}>
+                        {s.title}
+                      </span>
+                      <span className={`text-[10px] font-medium mt-0.5 leading-tight ${activeStep >= s.id ? "text-blue-200" : "text-slate-500"}`}>
+                        {s.desc}
+                      </span>
+                    </div>
+                  </button>
+                  {idx < 2 && (
+                    <div className={`w-1 h-8 my-1 ml-[18px] rounded transition-colors ${activeStep > s.id ? "bg-[#2563EB]" : "bg-slate-300"}`} />
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <div className="pointer-events-auto absolute right-6 top-6 z-40 flex flex-col items-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsLayerMenuOpen((o) => !o)}
+                className={`bg-white/95 backdrop-blur-md px-4 py-2.5 rounded-lg shadow-md border text-slate-700 font-bold flex items-center gap-2 transition-all pointer-events-auto ${
+                  isLayerMenuOpen ? "border-[#2563EB] text-[#2563EB]" : "border-slate-200"
+                }`}
+              >
+                <Layers className="w-5 h-5" /> Camadas
               </button>
               {isLayerMenuOpen ? (
-                <div className="w-56 rounded-panel border border-border bg-panel p-3 shadow-panel">
-                  <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-muted">Mostrar / ocultar</p>
+                <div className="absolute top-full mt-2 right-0 bg-white/95 backdrop-blur-md p-4 rounded-xl shadow-xl border border-slate-200 w-48 pointer-events-auto">
+                  <div className="text-xs font-bold text-slate-800 mb-3 uppercase flex justify-between items-center">
+                    Camadas Visíveis
+                    <button onClick={() => setIsLayerMenuOpen(false)} className="text-slate-400 hover:text-slate-700">
+                      <X size={16} />
+                    </button>
+                  </div>
                   {(Object.keys(LAYER_INFO) as LayerKey[]).map((key) => (
-                    <label key={key} className="mb-2 flex cursor-pointer items-center gap-2 text-sm">
+                    <label key={key} className="flex items-center gap-2.5 mb-3 cursor-pointer group">
                       <input
                         type="checkbox"
                         checked={layerVisibility[key]}
                         onChange={() => toggleLayer(key)}
-                        className="h-4 w-4 accent-primary"
+                        className="w-4 h-4 rounded text-[#2563EB]"
                       />
-                      <span className={(key === "routes" || key === "train") && !hasRouteData ? "text-muted" : ""}>
+                      <span className={`text-sm font-medium ${(key === "routes" || key === "train") && !hasRouteData ? "text-slate-400" : "text-slate-700"}`}>
                         {LAYER_INFO[key].label}
                       </span>
                     </label>
                   ))}
-                  {!hasRouteData ? (
-                    <p className="mt-1 text-xs text-muted">
-                      Rotas só aparecem após selecionar referência e carregar zonas.
-                    </p>
-                  ) : null}
                 </div>
               ) : null}
+            </div>
 
-              <div className="flex overflow-hidden rounded-xl border border-border bg-panel shadow-panel">
-                <button type="button" onClick={zoomIn} className="px-3 py-2 text-lg" aria-label="Aumentar zoom">
-                  +
+            {/* Zoom e Ajuda - canto inferior direito */}
+            <div className="pointer-events-auto absolute bottom-6 right-6 z-40 flex flex-col gap-2">
+              <div className="bg-white/95 backdrop-blur-md rounded-lg shadow-lg border border-slate-200 flex flex-col overflow-hidden">
+                <button onClick={zoomIn} className="p-2 text-slate-600 hover:text-[#2563EB] hover:bg-slate-50 border-b border-slate-100 transition-colors" title="Aumentar zoom">
+                  <Plus size={20} />
                 </button>
-                <button
-                  type="button"
-                  onClick={zoomOut}
-                  className="border-l border-border px-3 py-2 text-lg"
-                  aria-label="Diminuir zoom"
-                >
-                  −
+                <button onClick={zoomOut} className="p-2 text-slate-600 hover:text-[#2563EB] hover:bg-slate-50 transition-colors" title="Diminuir zoom">
+                  <Minus size={20} />
                 </button>
               </div>
-
               <button
-                type="button"
                 onClick={() => setIsHelpOpen(true)}
-                className="rounded-xl border border-border bg-panel px-3 py-2 text-sm font-medium shadow-panel"
-                aria-label="Abrir ajuda"
+                className="bg-white/95 backdrop-blur-md rounded-lg shadow-lg border border-slate-200 p-2 text-slate-600 hover:text-[#2563EB] hover:bg-slate-50 transition-colors"
+                title="Ajuda"
               >
-                Ajuda
+                <HelpCircle size={20} />
               </button>
             </div>
 
-            <div className="pointer-events-auto absolute bottom-4 left-4 z-20 rounded-panel border border-border bg-panel/95 p-3 shadow-panel backdrop-blur-sm">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Legenda</p>
-              {activeLegendItems.length ? (
-                <ul className="space-y-1">
-                  {activeLegendItems.map((item) => (
-                    <li key={item.key} className="flex items-center gap-2 text-xs text-text">
-                      <span
-                        className="inline-block h-2.5 w-2.5 rounded-full"
-                        style={{ backgroundColor: item.color }}
-                        aria-hidden="true"
-                      />
-                      {item.label}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-xs text-muted">Ative camadas para visualizar a legenda.</p>
+            {/* Legenda - estilo esboço */}
+            <div className="pointer-events-auto absolute bottom-6 left-6 z-40 flex flex-col gap-3">
+              {(layerVisibility.flood || layerVisibility.green || (layerVisibility.routes && hasRouteData) || activeLegendItems.length > 0) && (
+                <div className="bg-white/95 backdrop-blur-md p-4 rounded-xl shadow-lg border border-slate-200 text-xs text-slate-600 font-medium flex flex-col gap-2.5 min-w-[160px]">
+                  <span className="text-[10px] uppercase font-bold text-slate-400 mb-0.5 tracking-wider">Legenda</span>
+                  {stopsLoading && layerVisibility.busStops ? (
+                    <p className="text-slate-500">Carregando paradas...</p>
+                  ) : null}
+                  {layerVisibility.flood && <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded bg-purple-600/50 border border-purple-700/30" /> Risco de Cheia</div>}
+                  {layerVisibility.green && <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded bg-green-500/50 border border-green-600/30" /> Área Verde</div>}
+                  {layerVisibility.routes && hasRouteData && (
+                    <>
+                      <div className="flex items-center gap-2"><div className="w-4 border-b-2 border-red-500" /> Metrô/Trem</div>
+                      <div className="flex items-center gap-2"><div className="w-4 border-b-2 border-dashed border-orange-500" /> Ônibus</div>
+                    </>
+                  )}
+                  {layerVisibility.busStops && <div className="flex items-center gap-2"><span className="text-base">🚌</span> Paradas</div>}
+                  {layerVisibility.zones && zonesCollection.length > 0 && <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded bg-blue-500/30 border border-blue-600/50" /> Zonas</div>}
+                </div>
               )}
             </div>
 
-            {mapBusyMessage ? (
-              <div className="pointer-events-none absolute inset-0 z-30 grid place-items-center bg-slate-950/25 p-6">
-                <div className="pointer-events-auto rounded-panel border border-border bg-panel px-4 py-3 text-sm font-medium text-text shadow-panel">
-                  <span className="mr-2 inline-block h-2 w-2 animate-pulse rounded-full bg-primary" />
-                  {mapBusyMessage}
+            {/* Loading Overlay - estilo esboço/Gemini */}
+            {(isLoading || mapBusyMessage) && (
+              <div className="absolute inset-0 bg-white/40 backdrop-blur-[3px] z-50 flex flex-col items-center justify-center pointer-events-none">
+                <div className="bg-white/95 px-8 py-6 rounded-2xl shadow-2xl flex flex-col items-center border border-slate-200 text-center max-w-sm pointer-events-auto">
+                  <Loader2 className="w-10 h-10 text-[#2563EB] animate-spin mb-4" />
+                  <h3 className="font-bold text-slate-800 text-lg mb-2">Processando...</h3>
+                  <p className="text-sm text-slate-500 font-medium leading-relaxed">
+                    {loadingText || mapBusyMessage || "Aguarde..."}
+                  </p>
                 </div>
               </div>
-            ) : null}
+            )}
 
             {mapError ? (
               <div className="pointer-events-none absolute inset-0 z-30 grid place-items-center bg-slate-950/35 p-6">
@@ -1278,26 +1491,47 @@ export default function App() {
           </div>
         </section>
 
+        {isPanelMinimized && (
+          <button
+            onClick={() => setIsPanelMinimized(false)}
+            className="absolute top-6 right-6 z-50 bg-white/95 backdrop-blur-md p-3.5 rounded-full shadow-xl border border-slate-200 text-[#2563EB] hover:bg-slate-50 transition-all flex items-center justify-center"
+            title="Restaurar painel"
+          >
+            <Maximize2 size={24} />
+          </button>
+        )}
+
         <aside
-          className={`relative h-full border-l border-border bg-panel shadow-panel transition-all duration-300 ${panelDesktopWidth} ${panelMobileHeight} max-lg:fixed max-lg:bottom-0 max-lg:left-0 max-lg:right-0 max-lg:z-30 max-lg:w-full max-lg:border-l-0 max-lg:border-t`}
+          className={`w-[400px] bg-white h-full shadow-2xl z-40 flex flex-col border-l border-slate-200 shrink-0 relative transition-all duration-300 ${isPanelMinimized ? "-mr-[400px]" : "mr-0"} max-lg:fixed max-lg:bottom-0 max-lg:left-0 max-lg:right-0 max-lg:z-30 max-lg:w-full max-lg:border-l-0 max-lg:border-t max-lg:h-[48vh]`}
           aria-label="Painel lateral"
         >
           <button
             type="button"
-            onClick={() => setIsPanelMinimized((value) => !value)}
-            className="absolute left-2 top-2 z-20 rounded-lg border border-border bg-white px-2 py-1 text-xs font-semibold text-muted"
-            aria-expanded={!isPanelMinimized}
+            onClick={() => setIsPanelMinimized(true)}
+            className="absolute top-5 right-5 z-50 p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-md transition-colors"
+            title="Minimizar painel"
           >
-            {isPanelMinimized ? "Abrir" : "Minimizar"}
+            <Minus size={20} />
           </button>
 
-          {!isPanelMinimized ? (
-            <div className="panel-scroll h-full overflow-y-auto px-5 pb-6 pt-12">
-              <h1 className="text-xl font-bold">Imóvel Ideal</h1>
-              <p className="mt-1 text-sm text-muted">Milestone FE1 — referências e criação de run.</p>
+          {activeStep > 1 && (
+            <div className="px-6 py-4 border-b border-slate-100 flex items-center gap-2 bg-slate-50">
+              <button onClick={() => navigateToStep((activeStep - 1) as 1 | 2 | 3)} className="text-[#2563EB] text-sm font-bold flex items-center hover:underline pr-8">
+                <ChevronRight className="w-4 h-4 rotate-180 mr-1" /> Voltar
+              </button>
+              <span className="text-slate-400 text-sm">| Passo {activeStep} de 3</span>
+            </div>
+          )}
 
-              <section className="mt-5 rounded-panel border border-border p-4 text-sm">
-                <h2 className="font-semibold">1) Ponto principal</h2>
+          {!isPanelMinimized ? (
+            <div className="panel-scroll flex-1 overflow-y-auto px-5 pb-6 pt-12">
+              {/* ETAPA 1 */}
+              <div className={activeStep === 1 ? "block" : "hidden"}>
+              <h2 className="text-xl font-bold text-slate-800 mb-6">Ponto de Referência</h2>
+              <section className="rounded-xl border border-slate-200 p-4 text-sm">
+                <h3 className="font-semibold text-slate-700 mb-3 flex items-center gap-2">
+                  <MapPin className="w-4 h-4 text-[#2563EB]" /> Ponto Principal
+                </h3>
                 {primaryPoint ? (
                   <div className="mt-2 space-y-2">
                     <p>
@@ -1429,12 +1663,15 @@ export default function App() {
                 type="button"
                 onClick={handleCreateRun}
                 disabled={!primaryPoint || isCreatingRun || isPolling}
-                className="mt-4 w-full rounded-xl bg-primary px-4 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50"
+                className="mt-4 w-full rounded-xl bg-[#2563EB] px-4 py-3.5 text-sm font-bold text-white shadow-lg disabled:cursor-not-allowed disabled:opacity-50 hover:bg-blue-700"
               >
                 Gerar Zonas Candidatas
               </button>
+              </div>
 
-              <section className="mt-4 rounded-panel border border-border p-4 text-sm">
+              {/* ETAPA 2 e 3 - conteúdo existente */}
+              <div className={activeStep >= 2 ? "block" : "hidden"}>
+              <section className="mt-4 rounded-xl border border-slate-200 p-4 text-sm">
                 <h2 className="font-semibold">Status</h2>
                 <p className="mt-2 text-muted">{statusMessage}</p>
                 {runId ? <p className="mt-1 text-xs text-muted">run_id: {runId}</p> : null}
@@ -1578,6 +1815,50 @@ export default function App() {
                       })}
                     </ul>
 
+                    <div className="mt-2 space-y-2">
+                      <h3 className="text-xs font-semibold text-muted">Buscar imóveis</h3>
+                      <div className="flex flex-wrap gap-2">
+                        <label className="flex cursor-pointer items-center gap-1.5 text-xs">
+                          <input
+                            type="radio"
+                            name="street-mode"
+                            checked={streetFilterMode === "all"}
+                            onChange={() => setStreetFilterMode("all")}
+                            className="accent-primary"
+                          />
+                          Todas as ruas da zona
+                        </label>
+                        <label className="flex cursor-pointer items-center gap-1.5 text-xs">
+                          <input
+                            type="radio"
+                            name="street-mode"
+                            checked={streetFilterMode === "specific"}
+                            onChange={() => setStreetFilterMode("specific")}
+                            className="accent-primary"
+                          />
+                          Rua específica
+                        </label>
+                      </div>
+                      {streetFilterMode === "specific" && zoneStreets.length > 0 ? (
+                        <label className="block">
+                          <span className="mb-1 block text-[11px] text-muted">Selecione a rua</span>
+                          <select
+                            value={selectedStreet}
+                            onChange={(e) => setSelectedStreet(e.target.value)}
+                            className="w-full rounded-lg border border-border px-2 py-1.5 text-sm"
+                          >
+                            {zoneStreets.map((s) => (
+                              <option key={s} value={s}>
+                                {s}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      ) : streetFilterMode === "specific" && zoneDetailData ? (
+                        <p className="text-xs text-muted">Carregando ruas...</p>
+                      ) : null}
+                    </div>
+
                     <div className="grid grid-cols-2 gap-2">
                       <button
                         type="button"
@@ -1598,7 +1879,12 @@ export default function App() {
                       <button
                         type="button"
                         onClick={handleZoneListings}
-                        disabled={!selectedZoneUid || !zoneDetailData || isListingZone}
+                        disabled={
+                          !selectedZoneUid ||
+                          !zoneDetailData ||
+                          isListingZone ||
+                          (streetFilterMode === "specific" && !selectedStreet)
+                        }
                         className="rounded border border-border px-2 py-1.5 text-xs font-semibold disabled:opacity-50"
                       >
                         {isListingZone ? "Buscando..." : "Buscar imóveis"}
@@ -1695,10 +1981,11 @@ export default function App() {
                   </ul>
                 ) : null}
               </section>
+              </div>
             </div>
           ) : (
             <div className="grid h-full place-items-center pt-8">
-              <span className="-rotate-90 text-xs font-semibold tracking-[0.18em] text-muted">PAINEL</span>
+              <span className="-rotate-90 text-xs font-semibold tracking-[0.18em] text-slate-400">PAINEL</span>
             </div>
           )}
         </aside>

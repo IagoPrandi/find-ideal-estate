@@ -92,6 +92,9 @@
 - 2026-03-01 — Documentos obrigatórios abertos: `PRD.md`, `BEST_PRACTICES.md`, `skills_README.md`.
 - 2026-03-01 — Skill utilizada (primária): `develop-frontend`.
 - 2026-03-01 — FE2 refinado: pontos/paradas de transporte passam a aparecer por padrão no mapa (mesmo sem `run`) via `GET /transport/stops?lon=<...>&lat=<...>&radius_m=<...>`, com camada `Pontos de ônibus` independente da disponibilidade de rotas.
+- 2026-03-01 — Documentos obrigatórios abertos: `PRD.md`, `BEST_PRACTICES.md`, `skills_README.md`.
+- 2026-03-01 — Skill utilizada (primária): `develop-frontend`.
+- 2026-03-01 — Melhorias de UX (estilo Gemini): paradas de ônibus/estações carregadas por viewport (bbox) com debounce; ícones emoji (ônibus/estação) nas paradas; zonas renderizadas no mapa com seleção por clique; destaque visual da zona selecionada; toggle de camada "Zonas candidatas"; passo "Buscar imóveis" com opção de rua específica ou todas as ruas; endpoint `GET /runs/{run_id}/zones/{zone_uid}/streets` e `POST .../listings` com body opcional `street_filter`; indicador "Carregando paradas..." na legenda.
 
 
 ## 0) Objetivo do MVP (o que o usuário consegue fazer)
