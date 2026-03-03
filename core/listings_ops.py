@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -17,6 +18,23 @@ def _slugify(s: str) -> str:
 
 def _load_json(path: Path) -> Dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _append_run_log(run_dir: Path, level: str, stage: str, message: str, **extra: Any) -> None:
+    logs_dir = run_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    log_path = logs_dir / "events.jsonl"
+    event: Dict[str, Any] = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "run_id": run_dir.name,
+        "level": level,
+        "stage": stage,
+        "message": message,
+    }
+    if extra:
+        event.update(extra)
+    with log_path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(event, ensure_ascii=False) + "\n")
 
 
 def _extract_streets(streets_path: Path, max_items: int) -> List[str]:
@@ -50,15 +68,44 @@ def scrape_zone_listings(run_dir: Path, zone_uid: str, params: Dict[str, Any]) -
             streets = []
     else:
         streets = _extract_streets(streets_path, max_items=int(params.get("max_streets_per_zone", 3)))
+        if not streets:
+            raw = _load_json(streets_path)
+            raw_streets = raw.get("streets") if isinstance(raw, dict) else []
+            if isinstance(raw_streets, list):
+                streets = [str(item).strip() for item in raw_streets if str(item).strip()][: int(params.get("max_streets_per_zone", 3))]
     mode = str(params.get("listing_mode", "rent"))
     radius_m = float(params.get("listing_radius_m", 1500))
     max_pages = int(params.get("listing_max_pages", 2))
     config_path = Path(params.get("listings_config", "platforms.yaml"))
 
+    _append_run_log(
+        run_dir,
+        level="info",
+        stage="zone_listings",
+        message="iniciando coleta de imóveis",
+        zone_uid=zone_uid,
+        street_filter=street_filter,
+        streets_total=len(streets),
+        listing_mode=mode,
+        listing_radius_m=radius_m,
+        listing_max_pages=max_pages,
+    )
+
     out_paths: List[Path] = []
+    failed_streets = 0
+    skipped_no_json = 0
     for street in streets:
         slug = _slugify(street)
         base_out = run_dir / "zones" / "detail" / zone_uid / "streets" / slug / "listings"
+        _append_run_log(
+            run_dir,
+            level="info",
+            stage="zone_listings",
+            message="coletando rua",
+            zone_uid=zone_uid,
+            street=street,
+            street_slug=slug,
+        )
         try:
             run_root = run_listings_all(
                 config_path=config_path,
@@ -71,8 +118,20 @@ def scrape_zone_listings(run_dir: Path, zone_uid: str, params: Dict[str, Any]) -
                 max_pages=max_pages,
                 headless=bool(params.get("listings_headless", True)),
             )
-        except Exception:
+        except Exception as ex:
             # Falha por rua/plataforma não deve derrubar o run inteiro.
+            failed_streets += 1
+            _append_run_log(
+                run_dir,
+                level="warning",
+                stage="zone_listings",
+                message="falha ao coletar rua",
+                zone_uid=zone_uid,
+                street=street,
+                street_slug=slug,
+                error_type=type(ex).__name__,
+                error=str(ex),
+            )
             continue
 
         src_json = run_root / "compiled_listings.json"
@@ -81,9 +140,53 @@ def scrape_zone_listings(run_dir: Path, zone_uid: str, params: Dict[str, Any]) -
             dst_json = base_out / "compiled_listings.json"
             dst_json.write_text(src_json.read_text(encoding="utf-8"), encoding="utf-8")
             out_paths.append(dst_json)
+            try:
+                payload = _load_json(dst_json)
+                if isinstance(payload, dict):
+                    items = payload.get("items")
+                elif isinstance(payload, list):
+                    items = payload
+                else:
+                    items = []
+                count = len(items) if isinstance(items, list) else 0
+            except Exception:
+                count = 0
+            _append_run_log(
+                run_dir,
+                level="info",
+                stage="zone_listings",
+                message="rua coletada com sucesso",
+                zone_uid=zone_uid,
+                street=street,
+                street_slug=slug,
+                listings_count=count,
+            )
+        else:
+            skipped_no_json += 1
+            _append_run_log(
+                run_dir,
+                level="warning",
+                stage="zone_listings",
+                message="coleta sem arquivo de saída json",
+                zone_uid=zone_uid,
+                street=street,
+                street_slug=slug,
+            )
         if src_csv.exists():
             dst_csv = base_out / "compiled_listings.csv"
             dst_csv.write_text(src_csv.read_text(encoding="utf-8"), encoding="utf-8")
+
+    _append_run_log(
+        run_dir,
+        level="info",
+        stage="zone_listings",
+        message="coleta de imóveis finalizada",
+        zone_uid=zone_uid,
+        streets_total=len(streets),
+        streets_failed=failed_streets,
+        streets_without_json=skipped_no_json,
+        outputs_json=len(out_paths),
+    )
 
     return out_paths
 
@@ -171,8 +274,6 @@ def finalize_run(run_dir: Path, selected_zone_uids: List[str], params: Dict[str,
             for it in items:
                 lat = _safe_float(it.get("lat") or it.get("latitude"))
                 lon = _safe_float(it.get("lon") or it.get("longitude"))
-                if lat is None or lon is None:
-                    continue
 
                 address = it.get("address")
                 if not _address_has_valid_street_type(address):
@@ -182,8 +283,14 @@ def finalize_run(run_dir: Path, selected_zone_uids: List[str], params: Dict[str,
                 if state is None or str(state).strip() == "":
                     continue
 
-                min_poi = min([haversine_m(lat, lon, p_lat, p_lon) for p_lat, p_lon in poi_points], default=None)
-                min_transport = min([haversine_m(lat, lon, t_lat, t_lon) for t_lat, t_lon in transport_points], default=None)
+                min_poi = None
+                min_transport = None
+                if lat is not None and lon is not None:
+                    min_poi = min([haversine_m(lat, lon, p_lat, p_lon) for p_lat, p_lon in poi_points], default=None)
+                    min_transport = min(
+                        [haversine_m(lat, lon, t_lat, t_lon) for t_lat, t_lon in transport_points],
+                        default=None,
+                    )
 
                 price = _safe_float(it.get("price") or it.get("price_brl"))
                 price_score = 0.0 if price is None else max(0.0, 1.0 - (price / float(params.get("price_ref", 5000))))
@@ -209,6 +316,26 @@ def finalize_run(run_dir: Path, selected_zone_uids: List[str], params: Dict[str,
                         **it,
                     }
                 )
+
+    with_coords = 0
+    without_coords = 0
+    for row in result:
+        lat = _safe_float(row.get("lat") or row.get("latitude"))
+        lon = _safe_float(row.get("lon") or row.get("longitude"))
+        if lat is None or lon is None:
+            without_coords += 1
+        else:
+            with_coords += 1
+
+    _append_run_log(
+        run_dir,
+        level="info",
+        stage="finalize",
+        message="consolidação de imóveis finalizada",
+        listings_total=len(result),
+        listings_with_coords=with_coords,
+        listings_without_coords=without_coords,
+    )
 
     result = sorted(result, key=lambda x: x.get("score_listing_v1", 0.0), reverse=True)
 

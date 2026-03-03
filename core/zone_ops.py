@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Tuple
 import fiona
 from pyproj import CRS, Transformer
 from shapely.geometry import Point, box, mapping, shape
+from shapely.geometry.base import BaseGeometry
 from shapely.ops import transform as shp_transform
 
 from adapters.pois_adapter import run_pois
@@ -51,7 +52,14 @@ def zone_centroid_lonlat(zone_feature: Dict[str, Any]) -> Tuple[float, float]:
     return float(c.x), float(c.y)
 
 
-def _load_transport(run_dir: Path, lon: float, lat: float, radius_m: float, max_items: int = 200) -> Dict[str, Any]:
+def _load_transport(
+    run_dir: Path,
+    lon: float,
+    lat: float,
+    radius_m: float,
+    max_items: int = 200,
+    zone_geom: BaseGeometry | None = None,
+) -> Dict[str, Any]:
     cache_dir = Path("data_cache")
     gtfs_stops = cache_dir / "gtfs" / "stops.txt"
     rows: List[Dict[str, Any]] = []
@@ -67,6 +75,8 @@ def _load_transport(run_dir: Path, lon: float, lat: float, radius_m: float, max_
                     continue
                 dist = haversine_m(lat, lon, s_lat, s_lon)
                 if dist <= radius_m:
+                    if zone_geom is not None and not zone_geom.covers(Point(s_lon, s_lat)):
+                        continue
                     rows.append(
                         {
                             "type": "bus_stop",
@@ -98,6 +108,8 @@ def _load_transport(run_dir: Path, lon: float, lat: float, radius_m: float, max_
                     s_lon, s_lat = float(c.x), float(c.y)
                     dist = haversine_m(lat, lon, s_lat, s_lon)
                     if dist <= radius_m:
+                        if zone_geom is not None and not zone_geom.covers(Point(s_lon, s_lat)):
+                            continue
                         p = feat.get("properties") or {}
                         stations.append(
                             {
@@ -118,8 +130,21 @@ def _load_transport(run_dir: Path, lon: float, lat: float, radius_m: float, max_
 def build_zone_detail(run_dir: Path, zone_uid: str, params: Dict[str, Any]) -> Dict[str, Path]:
     zone = get_zone_feature(run_dir, zone_uid)
     lon, lat = zone_centroid_lonlat(zone)
+    zone_geom = shape(zone.get("geometry") or {})
+    if zone_geom.is_empty:
+        raise ValueError(f"zone geometry empty for zone {zone_uid}")
 
-    radius_m = float(params.get("zone_detail_radius_m", 1200))
+    bounds = zone_geom.bounds
+    corners = [
+        (bounds[0], bounds[1]),
+        (bounds[0], bounds[3]),
+        (bounds[2], bounds[1]),
+        (bounds[2], bounds[3]),
+    ]
+    radius_m = max(haversine_m(lat, lon, corner_lat, corner_lon) for corner_lon, corner_lat in corners)
+    radius_m = max(radius_m + 150.0, 300.0)
+
+    streets_radius_m = max(float(params.get("zone_detail_radius_m", 1200)), radius_m)
     streets_path = run_dir / "zones" / "detail" / zone_uid / "streets.json"
     pois_path = run_dir / "zones" / "detail" / zone_uid / "pois.json"
     transport_path = run_dir / "zones" / "detail" / zone_uid / "transport.json"
@@ -127,7 +152,7 @@ def build_zone_detail(run_dir: Path, zone_uid: str, params: Dict[str, Any]) -> D
     run_streets(
         lon=lon,
         lat=lat,
-        radius_m=radius_m,
+        radius_m=streets_radius_m,
         out_path=streets_path,
         step_m=float(params.get("street_step_m", 150)),
         query_radius_m=float(params.get("street_query_radius_m", 120)),
@@ -141,7 +166,23 @@ def build_zone_detail(run_dir: Path, zone_uid: str, params: Dict[str, Any]) -> D
         limit=int(params.get("pois_limit", 25)),
     )
 
-    transport = _load_transport(run_dir=run_dir, lon=lon, lat=lat, radius_m=radius_m)
+    if pois_path.exists():
+        pois_data = _load_json(pois_path)
+        filtered_results: List[Dict[str, Any]] = []
+        for item in (pois_data.get("results") or []):
+            poi_lon = item.get("longitude")
+            poi_lat = item.get("latitude")
+            try:
+                poi_point = Point(float(poi_lon), float(poi_lat))
+            except Exception:
+                continue
+            if zone_geom.covers(poi_point):
+                filtered_results.append(item)
+        pois_data["results"] = filtered_results
+        pois_data["filter_scope"] = "zone_polygon"
+        pois_path.write_text(json.dumps(pois_data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    transport = _load_transport(run_dir=run_dir, lon=lon, lat=lat, radius_m=radius_m, zone_geom=zone_geom)
     transport_path.parent.mkdir(parents=True, exist_ok=True)
     transport_path.write_text(json.dumps(transport, ensure_ascii=False, indent=2), encoding="utf-8")
 

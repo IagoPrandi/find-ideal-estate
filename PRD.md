@@ -95,6 +95,27 @@
 - 2026-03-01 — Documentos obrigatórios abertos: `PRD.md`, `BEST_PRACTICES.md`, `skills_README.md`.
 - 2026-03-01 — Skill utilizada (primária): `develop-frontend`.
 - 2026-03-01 — Melhorias de UX (estilo Gemini): paradas de ônibus/estações carregadas por viewport (bbox) com debounce; ícones emoji (ônibus/estação) nas paradas; zonas renderizadas no mapa com seleção por clique; destaque visual da zona selecionada; toggle de camada "Zonas candidatas"; passo "Buscar imóveis" com opção de rua específica ou todas as ruas; endpoint `GET /runs/{run_id}/zones/{zone_uid}/streets` e `POST .../listings` com body opcional `street_filter`; indicador "Carregando paradas..." na legenda.
+- 2026-03-02 — Documentos obrigatórios abertos: `PRD.md`, `BEST_PRACTICES.md`, `skills_README.md`.
+- 2026-03-02 — Skill utilizada (primária): `develop-frontend`.
+- 2026-03-02 — Implementação em andamento (refatoração FE + API): remoção do stepper lateral esquerdo, migração para micropáginas de fluxo, troca de ícone/camada de paradas para render compatível, painel minimizável por ícone acompanhante, contrato de detalhe de zona sem paths de JSON com métricas agregadas e início da integração de imóveis no mapa com popup e foco via painel.
+- 2026-03-03 — Documentos obrigatórios abertos: `PRD.md`, `BEST_PRACTICES.md`, `skills_README.md`.
+- 2026-03-03 — Skill utilizada (primária): `develop-frontend`.
+- 2026-03-03 — Implementação em andamento (FE + API): painel lateral minimizado sem sobreposição no mapa; zonas renderizadas como círculos transparentes com raio configurável antes da geração; clique na zona no mapa abre detalhamento da zona; remoção do destaque de rua no mapa; logs detalhados da coleta de imóveis por rua em `runs/<run_id>/logs/events.jsonl`; painel final separa imóveis com e sem coordenadas (sem coordenadas exibidos apenas no painel, não no mapa).
+- 2026-03-03 — Implementação em andamento (FE UX/fluxo): fluxo visível consolidado em 3 etapas (Referência, Zonas, Imóveis) com detalhamento+busca+consolidação dentro da etapa 3; botão minimizar/maximizar acoplado ao painel; correção de faixa cinza do mapa ao recolher/expandir painel via `map.resize()`; remoção do bloco “Contrato FE4 (zonas)”; progresso trocado para barra compacta fixa no painel; raio exibido com unidade em metros e círculos de zona com fallback por raio de feature quando disponível.
+- 2026-03-03 — Documentos obrigatórios abertos: `PRD.md`, `BEST_PRACTICES.md`, `skills_README.md`.
+- 2026-03-03 — Skill utilizada (primária): `develop-frontend`.
+- 2026-03-03 — Correção de bug no fluxo “Buscar imóveis”: dependências ausentes do scraper adicionadas (`orjson`, `rapidfuzz`, `tqdm`) e `playwright` fixado em `1.50.0` para compatibilidade com a imagem `mcr.microsoft.com/playwright/python:v1.50.0-jammy`; validação concluída com retorno de imóveis no endpoint `POST /runs/{run_id}/zones/{zone_uid}/listings` e no consolidado final.
+- 2026-03-02 — Documentos obrigatórios abertos: `PRD.md`, `BEST_PRACTICES.md`, `skills_README.md`.
+- 2026-03-02 — Skill utilizada (primária): `develop-frontend`.
+- 2026-03-02 — Implementação em andamento (zona/POI/transporte/imóveis): `zone_detail` agora filtra POIs e pontos de transporte estritamente dentro do polígono da zona selecionada; resposta inclui `poi_points`, `transport_points`, `seed_transport_point` e `downstream_transport_point`; mapa renderiza POIs reais da zona e destaque visual distinto para seed/downstream; busca de imóveis auto-consolida ao final da coleta; endpoint de listings retorna erro explícito quando coleta não produz saídas válidas.
+- 2026-03-02 — Documentos obrigatórios abertos: `PRD.md`, `BEST_PRACTICES.md`, `skills_README.md`.
+- 2026-03-02 — Skill utilizada (primária): `develop-frontend`.
+- 2026-03-02 — Implementação em andamento (mapa + listagens): seed original (mais próximo do ponto principal) e seeds/downstreams das zonas passam a ser carregados/exibidos logo após a geração das zonas; camada de POIs reposicionada acima das zonas e com popup ao clique; endpoint de listagens deixa de falhar com `502` em retorno vazio (responde `200` com `listings_count=0`); fallback de ruas no scraping quando filtro estrito resultar em lista vazia.
+- 2026-03-03 — Documentos obrigatórios abertos: `PRD.md`, `BEST_PRACTICES.md`, `skills_README.md`.
+- 2026-03-03 — Skill utilizada (primária): `develop-frontend`.
+- 2026-03-03 — Implementação em andamento (cards de imóveis): cards agora exibem plataforma, tamanho (m²) e quartos; clique no card alterna expansão/recolhimento com distâncias até POIs mais próximos por categorias de interesse e distância ao transporte; seleção de múltiplos cards habilita comparação de preço/tamanho/transporte/POIs em raio configurável; ordenação adicionada por preço e tamanho.
+- 2026-03-03 — Ajuste incremental de UX (comparação): painel de comparação de múltiplos imóveis alterado para formato de tabela compacta lado a lado com rolagem horizontal e métricas em linhas (preço, plataforma, endereço, tamanho, quartos, transporte e POIs no raio configurado).
+- 2026-03-03 — Ajuste incremental de UX (comparação visual): destaque automático de melhor/pior valor por linha na tabela comparativa (preço, tamanho, transporte e POIs no raio), com semântica de cor para facilitar decisão.
 
 
 ## 0) Objetivo do MVP (o que o usuário consegue fazer)

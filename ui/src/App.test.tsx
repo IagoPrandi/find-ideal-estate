@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
@@ -8,13 +8,23 @@ type MapClickEvent = {
     lat: number;
     lng: number;
   };
+  point: {
+    x: number;
+    y: number;
+  };
 };
 
 let clickHandler: ((event: MapClickEvent) => void) | null = null;
 
 vi.mock("mapbox-gl", () => {
   class MockPopup {
+    setLngLat() {
+      return this;
+    }
     setHTML() {
+      return this;
+    }
+    addTo() {
       return this;
     }
   }
@@ -36,13 +46,22 @@ vi.mock("mapbox-gl", () => {
 
   class MockMap {
     private sources: Record<string, { setData: (data: unknown) => void }> = {};
+    private layers = new Set<string>();
 
-    on(event: string, callback: ((event: MapClickEvent) => void) | (() => void)) {
+    on(
+      event: string,
+      layerOrCallback: string | ((event: MapClickEvent) => void) | (() => void),
+      maybeCallback?: (event: MapClickEvent) => void
+    ) {
       if (event === "load") {
-        (callback as () => void)();
+        const callback =
+          typeof layerOrCallback === "function" ? layerOrCallback : (maybeCallback as (() => void) | undefined);
+        if (callback) {
+          (callback as () => void)();
+        }
       }
-      if (event === "click") {
-        clickHandler = callback as (event: MapClickEvent) => void;
+      if (event === "click" && typeof layerOrCallback === "function") {
+        clickHandler = layerOrCallback as (event: MapClickEvent) => void;
       }
       return this;
     }
@@ -57,14 +76,38 @@ vi.mock("mapbox-gl", () => {
     getSource(name: string) {
       return this.sources[name];
     }
-    addLayer() {
+    addLayer(layer: { id: string }) {
+      this.layers.add(layer.id);
       return this;
+    }
+    getLayer(id: string) {
+      return this.layers.has(id) ? { id } : undefined;
     }
     setLayoutProperty() {
       return this;
     }
+    setPaintProperty() {
+      return this;
+    }
+    queryRenderedFeatures() {
+      return [];
+    }
+    flyTo() {
+      return this;
+    }
+    getCanvas() {
+      return { style: { cursor: "" } };
+    }
     getCenter() {
       return { lat: -23.55052, lng: -46.633308 };
+    }
+    getBounds() {
+      return {
+        getWest: () => -46.8,
+        getSouth: () => -23.7,
+        getEast: () => -46.4,
+        getNorth: () => -23.4
+      };
     }
     getZoom() {
       return 10.7;
@@ -99,7 +142,8 @@ async function triggerMapClick(lat: number, lon: number) {
       lngLat: {
         lat,
         lng: lon
-      }
+      },
+      point: { x: 0, y: 0 }
     });
   });
 }
@@ -125,7 +169,7 @@ describe("App frontend FE smoke", () => {
   it("renders base UI with create run disabled initially", () => {
     render(<App />);
 
-    expect(screen.getByRole("heading", { name: "Imóvel Ideal" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Ponto de Referência" })).toBeInTheDocument();
 
     const createRunButton = screen.getByRole("button", {
       name: "Gerar Zonas Candidatas"
@@ -139,7 +183,7 @@ describe("App frontend FE smoke", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "Abrir ajuda" }));
+    await user.click(screen.getByRole("button", { name: "Ajuda" }));
     expect(screen.getByRole("heading", { name: /Ajuda — FE1/i })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Fechar" }));
@@ -150,13 +194,13 @@ describe("App frontend FE smoke", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    const toggleButton = screen.getByRole("button", { name: "Minimizar" });
+    const toggleButton = screen.getByRole("button", { name: "Minimizar painel" });
     await user.click(toggleButton);
 
-    expect(screen.getByRole("button", { name: "Abrir" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Expandir painel" })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Abrir" }));
-    expect(screen.getByRole("button", { name: "Minimizar" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Expandir painel" }));
+    expect(screen.getByRole("button", { name: "Minimizar painel" })).toBeInTheDocument();
   });
 
   it("switches property mode between rent and buy", async () => {
@@ -242,9 +286,9 @@ describe("App frontend FE smoke", () => {
 
     await user.click(createRunButton);
 
-    expect(await screen.findByText(/Payload válido: 1 zonas consolidadas\./i)).toBeInTheDocument();
-    expect(await screen.findAllByText(/Zonas candidatas prontas\./i)).not.toHaveLength(0);
-    expect(screen.getByRole("button", { name: "Ir para passo 2" })).toHaveClass("bg-primary");
+    expect(await screen.findByRole("heading", { name: "Selecionar zona" })).toBeInTheDocument();
+    expect(screen.getByText(/Zona 1/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Selecionar zona" })).toBeEnabled();
   });
 
   it("covers FE6 extreme empty state when zones payload has zero features", async () => {
@@ -298,15 +342,21 @@ describe("App frontend FE smoke", () => {
     const user = userEvent.setup();
     render(<App />);
 
-    await user.click(screen.getByRole("button", { name: "Adicionar interesse" }));
+    const optionalInterestsHeading = screen.getByRole("heading", { name: /2\) Interesses \(opcional\)/i });
+    const optionalInterestsSection = optionalInterestsHeading.closest("section");
+    if (!optionalInterestsSection) {
+      throw new Error("Optional interests section not found.");
+    }
+    await user.click(within(optionalInterestsSection).getByRole("button", { name: "Adicionar interesse" }));
 
     const longLabel =
       "Academia com nome extremamente longo para validar renderização sem overflow e com responsividade no painel lateral";
     await user.type(screen.getByPlaceholderText("Ex.: Academia XYZ"), longLabel);
 
+    await user.click(within(optionalInterestsSection).getByRole("button", { name: "Selecionar no mapa" }));
     await triggerMapClick(-23.612345, -46.598765);
 
     expect(await screen.findByText(longLabel)).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Imóvel Ideal" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Ponto de Referência" })).toBeInTheDocument();
   });
 });

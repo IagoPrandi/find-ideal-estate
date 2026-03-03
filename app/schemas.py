@@ -42,11 +42,35 @@ class SimpleMessageResponse(BaseModel):
     message: str
 
 
+class ZonePoint(BaseModel):
+    kind: str
+    id: Optional[str] = None
+    name: Optional[str] = None
+    category: Optional[str] = None
+    lat: float
+    lon: float
+
+
 class ZoneDetailResponse(BaseModel):
     zone_uid: str
-    streets_path: str
-    pois_path: str
-    transport_path: str
+    zone_name: str
+    green_area_ratio: float
+    flood_area_ratio: float
+    poi_count_by_category: Dict[str, int]
+    bus_lines_count: int
+    train_lines_count: int
+    bus_stop_count: int
+    train_station_count: int
+    lines_used_for_generation: List[Dict[str, Any]]
+    reference_transport_point: Optional[Dict[str, Any]] = None
+    seed_transport_point: Optional[ZonePoint] = None
+    downstream_transport_point: Optional[ZonePoint] = None
+    transport_points: List[ZonePoint] = Field(default_factory=list)
+    poi_points: List[ZonePoint] = Field(default_factory=list)
+    streets_count: int
+    has_street_data: bool
+    has_poi_data: bool
+    has_transport_data: bool
 
 
 class ListingsScrapeRequest(BaseModel):
@@ -55,7 +79,7 @@ class ListingsScrapeRequest(BaseModel):
 
 class ListingsScrapeResponse(BaseModel):
     zone_uid: str
-    listing_files: List[str]
+    listings_count: int
 
 
 class FinalizeResponse(BaseModel):

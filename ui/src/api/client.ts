@@ -1,6 +1,8 @@
 import { z, ZodSchema } from "zod";
 import {
   FinalizeResponse,
+  FinalListingsJson,
+  FinalListingsJsonSchema,
   FinalizeResponseSchema,
   ListingsCollection,
   ListingsCollectionSchema,
@@ -133,6 +135,10 @@ export async function finalizeRun(runId: string): Promise<FinalizeResponse> {
 
 export async function getFinalListings(runId: string): Promise<ListingsCollection> {
   return (await requestJson(`/runs/${runId}/final/listings`, ListingsCollectionSchema)) as ListingsCollection;
+}
+
+export async function getFinalListingsJson(runId: string): Promise<FinalListingsJson> {
+  return (await requestJson(`/runs/${runId}/final/listings.json`, FinalListingsJsonSchema)) as FinalListingsJson;
 }
 
 export async function getTransportLayers(runId: string): Promise<TransportLayersResponse> {

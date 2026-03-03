@@ -43,9 +43,30 @@ export const ZonesCollectionSchema = z.object({
 
 export const ZoneDetailResponseSchema = z.object({
   zone_uid: z.string(),
-  streets_path: z.string(),
-  pois_path: z.string(),
-  transport_path: z.string()
+  zone_name: z.string(),
+  green_area_ratio: z.number(),
+  flood_area_ratio: z.number(),
+  poi_count_by_category: z.record(z.number()),
+  bus_lines_count: z.number(),
+  train_lines_count: z.number(),
+  bus_stop_count: z.number(),
+  train_station_count: z.number(),
+  lines_used_for_generation: z.array(
+    z.object({
+      mode: z.string(),
+      route_id: z.string(),
+      line_name: z.string()
+    })
+  ),
+  reference_transport_point: z.unknown().optional(),
+  seed_transport_point: z.unknown().optional(),
+  downstream_transport_point: z.unknown().optional(),
+  transport_points: z.array(z.unknown()),
+  poi_points: z.array(z.unknown()),
+  streets_count: z.number(),
+  has_street_data: z.unknown(),
+  has_poi_data: z.unknown(),
+  has_transport_data: z.unknown()
 });
 
 export const SimpleMessageResponseSchema = z.object({
@@ -54,7 +75,7 @@ export const SimpleMessageResponseSchema = z.object({
 
 export const ListingsScrapeResponseSchema = z.object({
   zone_uid: z.string(),
-  listing_files: z.array(z.string())
+  listings_count: z.number()
 });
 
 export const FinalizeResponseSchema = z.object({
@@ -77,6 +98,8 @@ export const ListingsCollectionSchema = z.object({
   type: z.literal("FeatureCollection"),
   features: z.array(ListingFeatureSchema)
 });
+
+export const FinalListingsJsonSchema = z.array(z.record(z.unknown()));
 
 export const TransportFeatureSchema = z.object({
   type: z.literal("Feature"),
@@ -146,9 +169,62 @@ export type ZonesCollection = {
 
 export type ZoneDetailResponse = {
   zone_uid: string;
-  streets_path: string;
-  pois_path: string;
-  transport_path: string;
+  zone_name: string;
+  green_area_ratio: number;
+  flood_area_ratio: number;
+  poi_count_by_category: Record<string, number>;
+  bus_lines_count: number;
+  train_lines_count: number;
+  bus_stop_count: number;
+  train_station_count: number;
+  lines_used_for_generation: Array<{
+    mode: string;
+    route_id: string;
+    line_name: string;
+  }>;
+  reference_transport_point?: {
+    kind: string;
+    id?: unknown;
+    name?: string;
+    lat?: number;
+    lon?: number;
+  } | null;
+  seed_transport_point?: {
+    kind: string;
+    id?: string | null;
+    name?: string | null;
+    category?: string | null;
+    lat: number;
+    lon: number;
+  } | null;
+  downstream_transport_point?: {
+    kind: string;
+    id?: string | null;
+    name?: string | null;
+    category?: string | null;
+    lat: number;
+    lon: number;
+  } | null;
+  transport_points: Array<{
+    kind: string;
+    id?: string | null;
+    name?: string | null;
+    category?: string | null;
+    lat: number;
+    lon: number;
+  }>;
+  poi_points: Array<{
+    kind: string;
+    id?: string | null;
+    name?: string | null;
+    category?: string | null;
+    lat: number;
+    lon: number;
+  }>;
+  streets_count: number;
+  has_street_data: boolean;
+  has_poi_data: boolean;
+  has_transport_data: boolean;
 };
 
 export type SimpleMessageResponse = {
@@ -157,7 +233,7 @@ export type SimpleMessageResponse = {
 
 export type ListingsScrapeResponse = {
   zone_uid: string;
-  listing_files: string[];
+  listings_count: number;
 };
 
 export type FinalizeResponse = {
@@ -178,6 +254,8 @@ export type ListingsCollection = {
     properties: Record<string, unknown>;
   }>;
 };
+
+export type FinalListingsJson = Array<Record<string, unknown>>;
 
 export type TransportLayersResponse = {
   routes: GeoJSON.FeatureCollection;
