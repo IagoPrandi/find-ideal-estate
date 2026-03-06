@@ -17,6 +17,8 @@
 - [13. Definition of Done (DoD)](#13-definition-of-done-dod)
 - [14. Anti-padrões que o agente deve evitar](#14-anti-padrões-que-o-agente-deve-evitar)
 - [15. Checklist final](#15-checklist-final)
+- [16. Estrutura de diretórios e ownership](#16-estrutura-de-diretórios-e-ownership)
+- [17. Práticas avançadas recomendadas](#17-práticas-avançadas-recomendadas)
 
 ---
 
@@ -99,6 +101,24 @@
   - APIs (v1, v2),
   - Eventos/ABIs (semântica e campos).
 - Evite breaking changes sem estratégia de migração.
+
+### 4.4 Ownership e fronteiras por diretório (Web2)
+- **app/**
+  - Camada de transporte/orquestração (HTTP, validação de entrada/saída, mapeamento de erro).
+  - Não deve concentrar regra de negócio profunda.
+- **core/**
+  - Regras de negócio puras e invariantes de domínio.
+  - Não deve depender de framework web/UI.
+- **adapters/**
+  - Integração com scripts/sistemas externos (subprocess, providers, IO externo).
+  - Não decide regra final de negócio; apenas traduz/integra.
+- **ui/src/features/**
+  - Regra de apresentação por domínio (referência, zonas, imóveis, mapa).
+  - Evitar “super componente” central com toda lógica.
+- **tests/**
+  - Estrutura espelhando o domínio (`unit`, `integration`, `contract`, `e2e`) para rastreabilidade.
+- **scripts/**
+  - Automação operacional reproduzível (smoke, baseline, validações), sem regra de produto.
 
 ---
 
@@ -330,6 +350,70 @@ Uma entrega só é considerada “pronta” quando:
 - [ ] Logs/métricas essenciais presentes
 - [ ] Runbook para incidentes críticos
 - [ ] Deploy documentado e versionado
+
+---
+
+## 16. Estrutura de diretórios e ownership
+
+Use esta referência como padrão mínimo para projetos Web2/Web3 híbridos:
+
+### Backend (alvo)
+- `app/main.py`: rotas e borda HTTP.
+- `app/schemas.py`: contratos de request/response.
+- `app/config.py`: configuração tipada centralizada.
+- `app/services/*`: casos de uso por domínio.
+- `app/utils/*`: utilitários compartilhados (json/error/log).
+- `core/*`: regras de negócio e cálculos puros.
+- `adapters/*`: integração externa (RPC, subprocess, APIs terceiras).
+
+### Frontend (alvo)
+- `ui/src/App.tsx`: composição de layout/fluxo.
+- `ui/src/features/*`: módulos por domínio (reference/zones/listings/map).
+- `ui/src/hooks/*`: efeitos e polling.
+- `ui/src/state/*`: estado global e derivado.
+- `ui/src/api/*`: cliente HTTP + validação de contrato.
+- `ui/src/components/*`: componentes compartilhados sem regra de domínio.
+
+### Regras de governança de ownership
+- Um módulo deve ter um “owner” técnico explícito.
+- Mudança cross-diretório exige validação de contrato e regressão.
+- “Mover arquivo” sem justificar fronteira arquitetural é anti-padrão.
+
+---
+
+## 17. Práticas avançadas recomendadas
+
+Estas práticas complementam as seções anteriores e devem ser adotadas em projetos que buscam maturidade de produto.
+
+### 17.1 Compatibilidade e evolução
+- Defina política de depreciação de endpoint/campo (prazo, aviso, remoção).
+- Versione schema de artifacts (`schema_version`) para leitura retrocompatível.
+- Mantenha changelog de contrato (API e eventos).
+
+### 17.2 Confiabilidade orientada por SLO
+- Defina SLO por endpoint/fluxo crítico e **error budget**.
+- Se o budget estourar, congele features e priorize estabilidade.
+- Estabeleça limites claros de degradação aceitável em performance e qualidade de output.
+
+### 17.3 Segurança de cadeia de dependências
+- Audite origem/licença de novas dependências.
+- Evite adicionar biblioteca para resolver problema simples.
+- Tenha rotina periódica de atualização com validação completa da suíte.
+
+### 17.4 Rollout e rollback seguros
+- Use feature flags para mudanças de risco.
+- Prefira rollout incremental com validação por etapa.
+- Defina critérios objetivos de rollback antes do deploy.
+
+### 17.5 Determinismo de testes e evidência
+- Evite testes frágeis dependentes de serviços externos sem mock/fixture.
+- Use datasets fixos para baseline vs pós-mudança.
+- Exija evidência por lote: testes, diffs de contrato, métricas e decisão de aprovação.
+
+### 17.6 Governança arquitetural
+- Registre decisões estruturais em ADR (Architecture Decision Record).
+- Defina limites de complexidade por módulo/função como gatilho de refatoração.
+- Reescrita total é exceção: só com dados de inviabilidade da refatoração incremental.
 
 ---
 

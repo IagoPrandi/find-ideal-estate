@@ -33,6 +33,10 @@ def run_candidate_zones(
         args += ["--t-bus", str(params["t_bus"])]
     if "t_rail" in params:
         args += ["--t-rail", str(params["t_rail"])]
+    if "seed_bus_max_dist_m" in params:
+        args += ["--seed-bus-max-dist-m", str(params["seed_bus_max_dist_m"])]
+    if "seed_rail_max_dist_m" in params:
+        args += ["--seed-rail-max-dist-m", str(params["seed_rail_max_dist_m"])]
     if "dedupe_radius_m" in params:
         args += ["--dedupe-radius-m", str(params["dedupe_radius_m"])]
 

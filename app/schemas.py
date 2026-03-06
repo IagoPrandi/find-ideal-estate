@@ -71,6 +71,7 @@ class ZoneDetailResponse(BaseModel):
     has_street_data: bool
     has_poi_data: bool
     has_transport_data: bool
+    public_safety: Optional[Dict[str, Any]] = None
 
 
 class ListingsScrapeRequest(BaseModel):

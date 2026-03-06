@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import sys
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Dict, List, Tuple
@@ -32,11 +33,13 @@ def _load_public_safety_module() -> ModuleType:
     if not script_path.exists():
         raise FileNotFoundError(f"public safety script not found: {script_path}")
 
-    spec = importlib.util.spec_from_file_location("segurancaRegiao", script_path)
+    module_name = "segurancaRegiao"
+    spec = importlib.util.spec_from_file_location(module_name, script_path)
     if spec is None or spec.loader is None:
         raise RuntimeError(f"could not load module spec for: {script_path}")
 
     module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
     spec.loader.exec_module(module)
     if not hasattr(module, "run_query"):
         raise AttributeError("segurancaRegiao.py does not expose run_query")
@@ -89,3 +92,103 @@ def build_public_safety_artifacts(
     aggregate_path.parent.mkdir(parents=True, exist_ok=True)
     aggregate_path.write_text(json.dumps(aggregate, ensure_ascii=False, indent=2), encoding="utf-8")
     return aggregate_path, artifact_paths
+
+
+def _build_public_safety_summary(result: Dict[str, Any]) -> Dict[str, Any]:
+    crimes = result.get("ocorrencias_por_tipo_no_raio")
+    crimes_dict = crimes if isinstance(crimes, dict) else {}
+    total_no_raio = 0
+    for value in crimes_dict.values():
+        try:
+            total_no_raio += int(value)
+        except Exception:
+            continue
+
+    comparativo = result.get("comparativo_regiao_vs_cidade_sp")
+    comparativo_dict = comparativo if isinstance(comparativo, dict) else {}
+    top_crimes: List[Dict[str, Any]] = []
+    for crime, value in sorted(crimes_dict.items(), key=lambda item: int(item[1]), reverse=True)[:5]:
+        try:
+            qtd = int(value)
+        except Exception:
+            continue
+        top_crimes.append({"tipo_delito": str(crime), "qtd": qtd})
+
+    delegacias = result.get("duas_delegacias_mais_proximas")
+    delegacias_dict = delegacias if isinstance(delegacias, dict) else {}
+    dps_proximas: List[Dict[str, Any]] = []
+    for nome, info in delegacias_dict.items():
+        if not isinstance(info, dict):
+            continue
+        dps_proximas.append(
+            {
+                "nome": str(nome),
+                "dist_km": info.get("dist_km"),
+                "total_ocorrencias": info.get("total_ocorrencias"),
+            }
+        )
+
+    return {
+        "ocorrencias_no_raio_total": total_no_raio,
+        "top_delitos_no_raio": top_crimes,
+        "delta_pct_vs_cidade": comparativo_dict.get("delta_pct_vs_cidade"),
+        "regiao_media_dia": comparativo_dict.get("regiao_media_dia"),
+        "cidade_media_dia": comparativo_dict.get("cidade_media_dia"),
+        "delegacias_mais_proximas": dps_proximas,
+    }
+
+
+def get_zone_public_safety(
+    run_dir: Path,
+    zone_uid: str,
+    lat: float,
+    lon: float,
+    params: Dict[str, Any],
+) -> Dict[str, Any]:
+    if not is_public_safety_enabled(params):
+        return {"enabled": False, "reason": "public_safety_enabled=false"}
+
+    radius_km = float(params.get("public_safety_radius_km", 1.0))
+    ano = int(params.get("public_safety_year", 2025))
+    fail_on_error = is_public_safety_fail_on_error(params)
+
+    out_path = run_dir / "zones" / "detail" / zone_uid / "public_safety.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    result: Dict[str, Any]
+    if out_path.exists():
+        try:
+            loaded = json.loads(out_path.read_text(encoding="utf-8"))
+            result = loaded if isinstance(loaded, dict) else {}
+        except Exception as ex:
+            if fail_on_error:
+                raise RuntimeError(f"could not read cached public safety for zone {zone_uid}: {ex}") from ex
+            return {
+                "enabled": False,
+                "year": ano,
+                "radius_km": radius_km,
+                "error": f"could not read cached public safety for zone {zone_uid}: {ex}",
+            }
+    else:
+        try:
+            module = _load_public_safety_module()
+            raw = module.run_query(ref_lat=lat, ref_lon=lon, radius_km=radius_km, ano=ano)
+            result = raw if isinstance(raw, dict) else {}
+            out_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception as ex:
+            if fail_on_error:
+                raise
+            return {
+                "enabled": False,
+                "year": ano,
+                "radius_km": radius_km,
+                "error": str(ex),
+            }
+
+    return {
+        "enabled": True,
+        "year": ano,
+        "radius_km": radius_km,
+        "result": result,
+        "summary": _build_public_safety_summary(result),
+    }

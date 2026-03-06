@@ -1310,6 +1310,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--buffer-m", type=float, default=600.0)
     p.add_argument("--t-bus", type=float, default=25.0)
     p.add_argument("--t-rail", type=float, default=25.0)
+    p.add_argument("--seed-bus-max-dist-m", type=float, default=250.0)
+    p.add_argument("--seed-rail-max-dist-m", type=float, default=1200.0)
 
     p.add_argument("--bus-step", type=int, default=2, help="Δt_bus (min) para amostragem por bucket")
     p.add_argument("--bus-kmax", type=int, default=60, help="K_bus máximo de paradas por seed")
@@ -1404,7 +1406,12 @@ def resolve_seeds(args: argparse.Namespace, stops: pd.DataFrame) -> Tuple[List[s
     if args.seed_bus_coord:
         lat_s, lon_s = [x.strip() for x in args.seed_bus_coord.split(",")]
         lat = float(lat_s); lon = float(lon_s)
-        seed_stop, dist_m = find_nearest_stop_id_by_coord(stops, lat=lat, lon=lon, max_dist_m=250.0)
+        seed_stop, dist_m = find_nearest_stop_id_by_coord(
+            stops,
+            lat=lat,
+            lon=lon,
+            max_dist_m=float(args.seed_bus_max_dist_m),
+        )
         print(f"[BUS] Seed por coord → stop_id={seed_stop} (dist={dist_m:.1f} m)")
         seeds_bus.append(seed_stop)
 
@@ -1474,7 +1481,7 @@ def main() -> int:
                     lon=lon0,
                     stations_wgs=rail_stations_wgs,
                     stations_name={k:v.get('nm_estacao_metro_trem','') for k,v in rail_stations_meta.items()},
-                    max_dist_m=1200.0,
+                    max_dist_m=float(args.seed_rail_max_dist_m),
                 )
                 if nearest is not None:
                     nid, nm, dist_m = nearest

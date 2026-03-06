@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from adapters.listings_adapter import run_listings_all
+from core.public_safety_ops import get_zone_public_safety
 from core.zone_ops import get_zone_feature, haversine_m, zone_centroid_lonlat
 
 
@@ -238,7 +239,19 @@ def finalize_run(run_dir: Path, selected_zone_uids: List[str], params: Dict[str,
 
     for zone_uid in selected_zone_uids:
         zone = get_zone_feature(run_dir, zone_uid)
+        zone_lon, zone_lat = zone_centroid_lonlat(zone)
         z_props = zone.get("properties") or {}
+        zone_public_safety = get_zone_public_safety(
+            run_dir=run_dir,
+            zone_uid=zone_uid,
+            lat=zone_lat,
+            lon=zone_lon,
+            params=params,
+        )
+        zone_ps_summary = zone_public_safety.get("summary") if isinstance(zone_public_safety, dict) else {}
+        if not isinstance(zone_ps_summary, dict):
+            zone_ps_summary = {}
+
         pois_path = run_dir / "zones" / "detail" / zone_uid / "pois.json"
         transport_path = run_dir / "zones" / "detail" / zone_uid / "transport.json"
 
@@ -313,6 +326,11 @@ def finalize_run(run_dir: Path, selected_zone_uids: List[str], params: Dict[str,
                         "zone_time_agg": z_props.get("time_agg"),
                         "zone_flood_ratio": z_props.get("flood_ratio_r800"),
                         "zone_green_ratio": z_props.get("green_ratio_r700"),
+                        "zone_public_safety_enabled": bool(zone_public_safety.get("enabled")),
+                        "zone_public_safety_year": zone_public_safety.get("year"),
+                        "zone_public_safety_radius_km": zone_public_safety.get("radius_km"),
+                        "zone_public_safety_occurrences_total": zone_ps_summary.get("ocorrencias_no_raio_total"),
+                        "zone_public_safety_delta_pct_vs_cidade": zone_ps_summary.get("delta_pct_vs_cidade"),
                         **it,
                     }
                 )

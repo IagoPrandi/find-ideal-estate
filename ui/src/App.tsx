@@ -222,6 +222,9 @@ export default function App() {
   const [streetFilterMode, setStreetFilterMode] = useState<"all" | "specific">("all");
   const [selectedStreet, setSelectedStreet] = useState("");
   const [zoneRadiusM, setZoneRadiusM] = useState(900);
+  const [maxTravelTimeMin, setMaxTravelTimeMin] = useState(25);
+  const [seedBusSearchMaxDistM, setSeedBusSearchMaxDistM] = useState(250);
+  const [seedRailSearchMaxDistM, setSeedRailSearchMaxDistM] = useState(1200);
   const [zoneStreets, setZoneStreets] = useState<string[]>([]);
   const [stopsLoading, setStopsLoading] = useState(false);
   const [loadingText, setLoadingText] = useState("");
@@ -1725,8 +1728,16 @@ export default function App() {
         ],
         params: {
           cache_dir: "data_cache",
+          public_safety_enabled: true,
+          public_safety_fail_on_error: false,
+          public_safety_radius_km: 1.0,
+          public_safety_year: 2025,
           zone_dedupe_m: 50,
           zone_radius_m: zoneRadiusM,
+          t_bus: maxTravelTimeMin,
+          t_rail: maxTravelTimeMin,
+          seed_bus_max_dist_m: seedBusSearchMaxDistM,
+          seed_rail_max_dist_m: seedRailSearchMaxDistM,
           max_streets_per_zone: 3,
           listing_max_pages: 2,
           listing_mode: propertyMode
@@ -2644,6 +2655,73 @@ export default function App() {
                 </div>
               </section>
 
+              <section className="mt-4 rounded-panel border border-border p-4 text-sm">
+                <h2 className="font-semibold">5) Transporte (configuração)</h2>
+                <p className="mt-1 text-xs text-muted">Defina tempo máximo de viagem e distância máxima para buscar seeds de ônibus e trem/metrô.</p>
+                <div className="mt-3 space-y-3">
+                  <label className="block">
+                    <span className="mb-1 block text-xs text-muted">Tempo máximo de viagem (min)</span>
+                    <input
+                      type="range"
+                      min={5}
+                      max={90}
+                      step={1}
+                      value={maxTravelTimeMin}
+                      onChange={(event) => setMaxTravelTimeMin(Math.max(1, Number(event.target.value) || 1))}
+                      className="mb-2 w-full"
+                    />
+                    <input
+                      type="number"
+                      min={1}
+                      step={1}
+                      value={maxTravelTimeMin}
+                      onChange={(event) => setMaxTravelTimeMin(Math.max(1, Number(event.target.value) || 1))}
+                      className="w-full rounded-lg border border-border px-2 py-1.5 text-xs"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-xs text-muted">Distância máxima seed ônibus (m)</span>
+                    <input
+                      type="range"
+                      min={50}
+                      max={2000}
+                      step={50}
+                      value={seedBusSearchMaxDistM}
+                      onChange={(event) => setSeedBusSearchMaxDistM(Math.max(50, Number(event.target.value) || 50))}
+                      className="mb-2 w-full"
+                    />
+                    <input
+                      type="number"
+                      min={50}
+                      step={50}
+                      value={seedBusSearchMaxDistM}
+                      onChange={(event) => setSeedBusSearchMaxDistM(Math.max(50, Number(event.target.value) || 50))}
+                      className="w-full rounded-lg border border-border px-2 py-1.5 text-xs"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-xs text-muted">Distância máxima seed trem/metrô (m)</span>
+                    <input
+                      type="range"
+                      min={100}
+                      max={5000}
+                      step={50}
+                      value={seedRailSearchMaxDistM}
+                      onChange={(event) => setSeedRailSearchMaxDistM(Math.max(100, Number(event.target.value) || 100))}
+                      className="mb-2 w-full"
+                    />
+                    <input
+                      type="number"
+                      min={100}
+                      step={50}
+                      value={seedRailSearchMaxDistM}
+                      onChange={(event) => setSeedRailSearchMaxDistM(Math.max(100, Number(event.target.value) || 100))}
+                      className="w-full rounded-lg border border-border px-2 py-1.5 text-xs"
+                    />
+                  </label>
+                </div>
+              </section>
+
               <button
                 type="button"
                 onClick={handleCreateRun}
@@ -2800,6 +2878,45 @@ export default function App() {
                         Downstream da zona: {zoneDetailData.downstream_transport_point?.name || "não encontrado"}
                       </li>
                     </ul>
+
+                    <p className="mt-2 font-semibold text-text">Segurança pública</p>
+                    {zoneDetailData.public_safety?.enabled ? (
+                      <>
+                        <p className="mt-0.5">
+                          Ano: {zoneDetailData.public_safety?.year ?? "N/A"} · Raio: {zoneDetailData.public_safety?.radius_km ?? "N/A"} km
+                        </p>
+                        <p className="mt-0.5">
+                          <strong>Total de ocorrências no raio:</strong>{" "}
+                          {zoneDetailData.public_safety?.summary?.ocorrencias_no_raio_total ?? "N/A"}
+                        </p>
+                        <p className="mt-0.5">
+                          <strong>Comparativo vs cidade (média/dia):</strong>{" "}
+                          {typeof zoneDetailData.public_safety?.summary?.delta_pct_vs_cidade === "number"
+                            ? `${(zoneDetailData.public_safety.summary.delta_pct_vs_cidade * 100).toFixed(1)}%`
+                            : "N/A"}
+                        </p>
+                        <p className="mt-1 font-semibold text-text">Top delitos no raio</p>
+                        <ul className="space-y-0.5">
+                          {(zoneDetailData.public_safety?.summary?.top_delitos_no_raio || []).slice(0, 5).map((item) => (
+                            <li key={item.tipo_delito}>{item.tipo_delito}: {item.qtd}</li>
+                          ))}
+                        </ul>
+                        <p className="mt-1 font-semibold text-text">2 DPs mais próximas</p>
+                        <ul className="space-y-0.5">
+                          {(zoneDetailData.public_safety?.summary?.delegacias_mais_proximas || []).slice(0, 2).map((dp) => (
+                            <li key={dp.nome}>
+                              {dp.nome} · {typeof dp.dist_km === "number" ? `${dp.dist_km.toFixed(2)} km` : "distância N/A"}
+                            </li>
+                          ))}
+                        </ul>
+                      </>
+                    ) : (
+                      <p className="mt-0.5 text-xs">
+                        {zoneDetailData.public_safety?.error
+                          ? `Não foi possível carregar segurança pública: ${zoneDetailData.public_safety.error}`
+                          : "Segurança pública desabilitada para este run."}
+                      </p>
+                    )}
                   </div>
                 ) : null}
               </section>

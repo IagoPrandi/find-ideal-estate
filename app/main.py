@@ -19,8 +19,15 @@ from app.schemas import (
     ZoneSelectionRequest,
 )
 from app.store import RunStore
+from core.public_safety_ops import get_zone_public_safety
 from core.listings_ops import finalize_run, scrape_zone_listings
-from core.zone_ops import build_run_transport_layers, build_transport_stops_for_point, build_zone_detail, get_zone_feature
+from core.zone_ops import (
+    build_run_transport_layers,
+    build_transport_stops_for_point,
+    build_zone_detail,
+    get_zone_feature,
+    zone_centroid_lonlat,
+)
 
 app = FastAPI(title="Imovel Ideal API", version="0.2.0")
 
@@ -173,6 +180,14 @@ async def zone_detail(run_id: str, zone_uid: str) -> ZoneDetailResponse:
             None,
         )
         zone_name = f"Zona {(zone_index + 1) if zone_index is not None else 1}"
+        zone_lon, zone_lat = zone_centroid_lonlat(zone_feature)
+        public_safety = get_zone_public_safety(
+            run_dir=run_dir,
+            zone_uid=zone_uid,
+            lat=zone_lat,
+            lon=zone_lon,
+            params=params,
+        )
 
         streets_data = json.loads(out["streets"].read_text(encoding="utf-8")) if out["streets"].exists() else {}
         pois_data = json.loads(out["pois"].read_text(encoding="utf-8")) if out["pois"].exists() else {}
@@ -308,6 +323,7 @@ async def zone_detail(run_id: str, zone_uid: str) -> ZoneDetailResponse:
             has_street_data=bool(streets_data.get("streets")),
             has_poi_data=bool(pois_data.get("results")),
             has_transport_data=bool(bus_stops or stations),
+            public_safety=public_safety,
         )
     except Exception as ex:
         raise HTTPException(status_code=400, detail=f"zone detail summary failed: {ex}") from ex

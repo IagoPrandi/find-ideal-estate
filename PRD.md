@@ -10,6 +10,37 @@
 ---
 ## Progress Tracker
 
+- 2026-03-06 — Documentos obrigatórios abertos: `PRD.md`, `BEST_PRACTICES.md`, `skills_README.md`.
+- 2026-03-06 — Skill utilizada (primária): `develop-frontend`.
+- 2026-03-06 — Validação de contrato de segurança pública na UI: confirmação de envio de `public_safety_enabled`, `public_safety_fail_on_error`, `public_safety_radius_km` e `public_safety_year` no payload de criação de run; cobertura de teste reforçada em `ui/src/App.test.tsx`.
+
+- 2026-03-05 — Documentos obrigatórios abertos: `PRD.md`, `BEST_PRACTICES.md`, `skills_README.md`.
+- 2026-03-05 — Skill utilizada (primária): `develop-frontend`.
+- 2026-03-05 — Correção de UX/integração de segurança pública no frontend: `ui/src/App.tsx` agora envia `public_safety_enabled=true` (com `public_safety_fail_on_error=false`, `public_safety_radius_km=1.0`, `public_safety_year=2025`) no `POST /runs`, evitando que o detalhe da zona exiba “Segurança pública desabilitada” em novas execuções.
+
+- 2026-03-05 — Estabilização de teste assíncrono em Windows: ajuste de janela/intervalo/limiar em `tests/test_runner_async.py` para reduzir flakiness sem perder validação de não bloqueio do event loop; suíte rápida validada (`tests/test_runner_async.py` e `tests/test_hello.py` com 2/2 aprovados).
+
+- 2026-03-05 — Documentos obrigatórios abertos: `PRD.md`, `BEST_PRACTICES.md`, `skills_README.md`.
+- 2026-03-05 — Skill utilizada (primária): `ops-observability-runbook`.
+- 2026-03-05 — Correção de runtime em segurança pública: loader dinâmico de `cods_ok/segurancaRegiao.py` agora registra módulo em `sys.modules` antes de `exec_module`, eliminando falha de `dataclass` (`'NoneType' object has no attribute '__dict__'`) no detalhamento por zona.
+- 2026-03-05 — Smoke pós-correção validado em Docker (`RUN_ID=20260305030330_924539c7`): `status=success`, `stage=done`, `zone_detail.public_safety.enabled=true`, `summary.ocorrencias_no_raio_total=8540`.
+
+- 2026-03-04 — Documentos obrigatórios abertos: `PRD.md`, `BEST_PRACTICES.md`, `skills_README.md`.
+- 2026-03-04 — Skill utilizada (primária): `develop-frontend`.
+- 2026-03-04 — Segurança pública integrada ao detalhamento da zona (`/runs/{run_id}/zones/{zone_uid}/detail`) com bloco `public_safety` (resultado bruto preservado de `cods_ok/segurancaRegiao.py` + resumo legível) e propagação de métricas-resumo no output final de imóveis (`listings_final.json/.csv/.geojson`).
+
+- 2026-03-04 — `BEST_PRACTICES.md` atualizado com seção explícita de estrutura de diretórios e ownership (backend/frontend) + práticas avançadas recomendadas (depreciação/versionamento de artifacts, SLO/error budget, supply chain, rollout/rollback, determinismo de testes e ADR).
+
+- 2026-03-04 — Plano de remediação expandido com estrutura alvo de diretórios e responsabilidades (backend/frontend) + seção de boas práticas adicionais não explícitas (versionamento de artifacts, depreciação de contrato, SLO/error budget, feature flags, ADR, limites de complexidade e supply chain).
+
+- 2026-03-04 — Plano de remediação refinado com estratégia explícita de refatoração estrutural (backend/frontend), redução de redundância, modularização alvo e critério objetivo de decisão entre refatorar incrementalmente vs reescrever módulo específico.
+
+- 2026-03-04 — Atualização do plano de remediação com nível de execução: protocolo anti-regressão (baseline, snapshots de contrato, invariantes de dados, limites de degradação, gates A/B/C/D e critérios de rollback) em `BEST_PRACTICES_REMEDIATION_PLAN.md`.
+
+- 2026-03-04 — Documentos obrigatórios abertos: `PRD.md`, `BEST_PRACTICES.md`, `skills_README.md`.
+- 2026-03-04 — Skill utilizada (primária): `security-threat-checklist`.
+- 2026-03-04 — Documento de análise e remediação de boas práticas criado: `BEST_PRACTICES_REMEDIATION_PLAN.md` (segurança, organização, estrutura e matriz de testes/gates).
+
 - 2026-02-20 — Revisão de qualidade/usabilidade/segurança aplicada ao PRD (v1.3).
 - 2026-02-20 — Documentos obrigatórios abertos: `PRD.md`, `BEST_PRACTICES.md`, `skills_README.md`.
 - 2026-02-20 — Skill utilizada (primária): `security-threat-checklist`.
@@ -116,6 +147,8 @@
 - 2026-03-03 — Implementação em andamento (cards de imóveis): cards agora exibem plataforma, tamanho (m²) e quartos; clique no card alterna expansão/recolhimento com distâncias até POIs mais próximos por categorias de interesse e distância ao transporte; seleção de múltiplos cards habilita comparação de preço/tamanho/transporte/POIs em raio configurável; ordenação adicionada por preço e tamanho.
 - 2026-03-03 — Ajuste incremental de UX (comparação): painel de comparação de múltiplos imóveis alterado para formato de tabela compacta lado a lado com rolagem horizontal e métricas em linhas (preço, plataforma, endereço, tamanho, quartos, transporte e POIs no raio configurado).
 - 2026-03-03 — Ajuste incremental de UX (comparação visual): destaque automático de melhor/pior valor por linha na tabela comparativa (preço, tamanho, transporte e POIs no raio), com semântica de cor para facilitar decisão.
+- 2026-03-03 — Implementação em andamento (fase 1 transporte): adicionados controles para tempo máximo de viagem e distância máxima de busca de seed para ônibus e trem/metrô; parâmetros propagados no `createRun` (`t_bus`, `t_rail`, `seed_bus_max_dist_m`, `seed_rail_max_dist_m`) e repassados até o script de zonas via adapter/CLI.
+- 2026-03-03 — Ajuste incremental de UX (fase 1 transporte): adicionados sliders sincronizados com inputs numéricos para tempo máximo de viagem e distâncias máximas de busca de seed (ônibus e trem/metrô), facilitando ajuste rápido com precisão.
 
 
 ## 0) Objetivo do MVP (o que o usuário consegue fazer)

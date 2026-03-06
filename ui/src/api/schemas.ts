@@ -66,7 +66,8 @@ export const ZoneDetailResponseSchema = z.object({
   streets_count: z.number(),
   has_street_data: z.unknown(),
   has_poi_data: z.unknown(),
-  has_transport_data: z.unknown()
+  has_transport_data: z.unknown(),
+  public_safety: z.unknown().optional()
 });
 
 export const SimpleMessageResponseSchema = z.object({
@@ -225,6 +226,26 @@ export type ZoneDetailResponse = {
   has_street_data: boolean;
   has_poi_data: boolean;
   has_transport_data: boolean;
+  public_safety?: {
+    enabled?: boolean;
+    year?: number;
+    radius_km?: number;
+    summary?: {
+      ocorrencias_no_raio_total?: number;
+      delta_pct_vs_cidade?: number | null;
+      top_delitos_no_raio?: Array<{
+        tipo_delito: string;
+        qtd: number;
+      }>;
+      delegacias_mais_proximas?: Array<{
+        nome: string;
+        dist_km?: number;
+        total_ocorrencias?: number;
+      }>;
+    };
+    result?: Record<string, unknown>;
+    error?: string;
+  } | null;
 };
 
 export type SimpleMessageResponse = {

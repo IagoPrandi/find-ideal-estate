@@ -217,10 +217,12 @@ describe("App frontend FE smoke", () => {
 
   it("covers FE6 happy path: reference -> generate zones -> step 2", async () => {
     const user = userEvent.setup();
+    let createRunPayload: Record<string, unknown> | null = null;
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
 
       if (url.endsWith("/runs") && init?.method === "POST") {
+        createRunPayload = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null;
         return jsonResponse({
           run_id: "run_fe6_ok",
           status: {
@@ -285,6 +287,16 @@ describe("App frontend FE smoke", () => {
     });
 
     await user.click(createRunButton);
+
+    expect(createRunPayload).not.toBeNull();
+    if (!createRunPayload) {
+      throw new Error("createRun payload was not captured");
+    }
+    const params = (createRunPayload["params"] as Record<string, unknown>) || {};
+    expect(params.public_safety_enabled).toBe(true);
+    expect(params.public_safety_fail_on_error).toBe(false);
+    expect(params.public_safety_radius_km).toBe(1);
+    expect(params.public_safety_year).toBe(2025);
 
     expect(await screen.findByRole("heading", { name: "Selecionar zona" })).toBeInTheDocument();
     expect(screen.getByText(/Zona 1/i)).toBeInTheDocument();

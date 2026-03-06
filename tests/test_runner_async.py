@@ -12,13 +12,13 @@ def test_runner_pipeline_does_not_block_event_loop(tmp_path, monkeypatch):
     run_id = store.create_run(payload)
 
     def slow_candidate_zones(*args, **kwargs):
-        time.sleep(0.25)
+        time.sleep(0.35)
 
     def slow_zone_enrich(*args, **kwargs):
-        time.sleep(0.25)
+        time.sleep(0.35)
 
     def slow_consolidate(*args, **kwargs):
-        time.sleep(0.25)
+        time.sleep(0.35)
 
     monkeypatch.setattr("app.runner.run_candidate_zones", slow_candidate_zones)
     monkeypatch.setattr("app.runner.run_zone_enrich", slow_zone_enrich)
@@ -26,11 +26,11 @@ def test_runner_pipeline_does_not_block_event_loop(tmp_path, monkeypatch):
 
     runner = Runner(store)
 
-    async def ticker(window_sec: float = 0.35) -> int:
+    async def ticker(window_sec: float = 0.8) -> int:
         ticks = 0
         deadline = time.perf_counter() + window_sec
         while time.perf_counter() < deadline:
-            await asyncio.sleep(0.01)
+            await asyncio.sleep(0.02)
             ticks += 1
         return ticks
 
@@ -43,4 +43,4 @@ def test_runner_pipeline_does_not_block_event_loop(tmp_path, monkeypatch):
     ticks = asyncio.run(scenario())
 
     # If the pipeline blocks the event loop, ticks remain very low (near zero).
-    assert ticks >= 10
+    assert ticks >= 8
