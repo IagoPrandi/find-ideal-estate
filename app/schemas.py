@@ -81,6 +81,8 @@ class ListingsScrapeRequest(BaseModel):
 class ListingsScrapeResponse(BaseModel):
     zone_uid: str
     listings_count: int
+    listings_total: int = 0
+    platform_counts: Dict[str, int] = Field(default_factory=dict)
 
 
 class FinalizeResponse(BaseModel):

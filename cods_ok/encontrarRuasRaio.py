@@ -31,7 +31,7 @@ import time
 
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import requests
 
@@ -139,6 +139,78 @@ class MapboxTilequeryStreetFinder:
 
         return set()
 
+    def reverse_geocode_context(
+        self,
+        lon: float,
+        lat: float,
+        language_pref: str = "pt",
+        timeout: float = 10.0,
+        retries: int = 3,
+        sleep_on_429: float = 0.6,
+    ) -> Tuple[str, str, str]:
+        """
+        Geocodificação reversa para obter (bairro, cidade, sigla_estado).
+        Usa Mapbox Geocoding API v5.
+        """
+        url = (
+            f"https://api.mapbox.com/geocoding/v5/mapbox.places/"
+            f"{lon:.6f},{lat:.6f}.json"
+        )
+        params = {
+            "access_token": self.token,
+            "types": "neighborhood,place,region",
+            "language": language_pref,
+        }
+
+        backoff = 0.8
+        for attempt in range(retries + 1):
+            r = self.session.get(url, params=params, timeout=timeout)
+
+            if r.status_code == 429 and attempt < retries:
+                time.sleep(sleep_on_429 + backoff)
+                backoff *= 2
+                continue
+
+            r.raise_for_status()
+            data = r.json()
+
+            bairro = ""
+            cidade = ""
+            estado = ""
+
+            for feat in data.get("features", []):
+                place_type = feat.get("place_type", [])
+                text = feat.get("text", "")
+                if "neighborhood" in place_type and not bairro:
+                    bairro = text
+                elif "place" in place_type and not cidade:
+                    cidade = text
+                elif "region" in place_type and not estado:
+                    short_code = feat.get("properties", {}).get("short_code", "")
+                    if short_code and "-" in short_code:
+                        estado = short_code.split("-")[-1].upper()
+                    else:
+                        estado = text
+
+            return (bairro, cidade, estado)
+
+        return ("", "", "")
+
+
+def _format_street_address(
+    street: str, bairro: str, cidade: str, estado: str
+) -> str:
+    """Formata como 'Rua, Bairro, Cidade - Sigla_Estado'."""
+    parts = [street]
+    if bairro:
+        parts.append(bairro)
+    if cidade:
+        parts.append(cidade)
+    base = ", ".join(parts)
+    if estado:
+        return f"{base} - {estado}"
+    return base
+
 
 def streets_within_radius_via_tilequery(
     access_token: str,
@@ -152,30 +224,60 @@ def streets_within_radius_via_tilequery(
 ) -> List[str]:
     """
     Aproxima as ruas dentro de um raio, executando tilequery em vários pontos amostrados.
+    Retorna cada rua formatada como "Rua, Bairro, Cidade - Sigla_Estado".
     """
     points = generate_points_in_circle(center_lon, center_lat, radius_m, step_m)
     finder = MapboxTilequeryStreetFinder(access_token)
-
-    streets: Set[str] = set()
-
-    # Evite max_workers muito alto para não estourar rate limit.
     max_workers = max(1, int(max_workers))
 
+    # Fase 1: tilequery em todos os pontos, rastreando qual ponto encontrou cada rua
+    street_to_point: Dict[str, Tuple[float, float]] = {}
+
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        futures = [
+        futures = {
             ex.submit(
                 finder.tilequery_road_names,
                 lon,
                 lat,
                 tilequery_radius_m,
                 language_pref,
-            )
+            ): (lon, lat)
             for lon, lat in points
-        ]
+        }
         for fut in as_completed(futures):
-            streets |= fut.result()
+            point = futures[fut]
+            for name in fut.result():
+                if name not in street_to_point:
+                    street_to_point[name] = point
 
-    return sorted(streets)
+    if not street_to_point:
+        return []
+
+    # Fase 2: geocodificação reversa dos pontos representativos (um por rua)
+    unique_points = set(street_to_point.values())
+    point_to_context: Dict[Tuple[float, float], Tuple[str, str, str]] = {}
+
+    with ThreadPoolExecutor(max_workers=max(1, max_workers // 2)) as ex:
+        futures = {
+            ex.submit(
+                finder.reverse_geocode_context,
+                lon,
+                lat,
+                language_pref,
+            ): (lon, lat)
+            for lon, lat in unique_points
+        }
+        for fut in as_completed(futures):
+            point = futures[fut]
+            point_to_context[point] = fut.result()
+
+    # Fase 3: montar resultado formatado
+    results: List[str] = []
+    for street, point in street_to_point.items():
+        bairro, cidade, estado = point_to_context.get(point, ("", "", ""))
+        results.append(_format_street_address(street, bairro, cidade, estado))
+
+    return sorted(results)
 
 
 def main() -> int:

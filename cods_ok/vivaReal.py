@@ -109,8 +109,46 @@ def _format_address(addr: dict) -> Optional[str]:
     return ", ".join(parts) if parts else None
 
 
+def _extract_listings_array(glue_json: dict) -> List[dict]:
+    if not isinstance(glue_json, dict):
+        return []
+
+    candidate_paths = [
+        "search.result.listings",
+        "search.result",
+        "listings",
+    ]
+    for path in candidate_paths:
+        listings = get_by_path(glue_json, path)
+        if isinstance(listings, list) and listings:
+            return listings
+
+    recs = glue_json.get("recommendations")
+    if isinstance(recs, list) and recs:
+        flattened: List[dict] = []
+        for rec in recs:
+            if not isinstance(rec, dict):
+                continue
+            scores = rec.get("scores")
+            if not isinstance(scores, list):
+                continue
+            for score in scores:
+                if not isinstance(score, dict):
+                    continue
+                lst = score.get("listing")
+                if isinstance(lst, dict):
+                    inner = lst.get("listing")
+                    if isinstance(inner, dict):
+                        flattened.append(inner)
+                    else:
+                        flattened.append(lst)
+        return flattened
+
+    return []
+
+
 def parse_vivareal_glue_to_std(glue_json: dict) -> List[dict]:
-    listings = get_by_path(glue_json, "search.result.listings")
+    listings = _extract_listings_array(glue_json)
     if not isinstance(listings, list):
         return []
 
@@ -171,6 +209,9 @@ def parse_run_dir(platform_dir: str | Path) -> List[dict]:
     if not files:
         # fallback: qualquer replay vivareal
         files = sorted(glob.glob(str(p / "replay_vivareal_*.json")))
+    if not files:
+        # fallback final: qualquer json da pasta
+        files = sorted(glob.glob(str(p / "*.json")))
     out: List[dict] = []
     seen = set()
     for fp in files:

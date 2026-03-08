@@ -27,8 +27,10 @@ def run_candidate_zones(
         str(out_dir),
     ]
 
-    if "buffer_m" in params:
-        args += ["--buffer-m", str(params["buffer_m"])]
+    # zone_radius_m is required — validated upstream in the pipeline.
+    if "zone_radius_m" not in params:
+        raise ValueError("zone_radius_m is required in params")
+    args += ["--buffer-m", str(params["zone_radius_m"])]
     if "t_bus" in params:
         args += ["--t-bus", str(params["t_bus"])]
     if "t_rail" in params:

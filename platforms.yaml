@@ -22,6 +22,7 @@ platforms:
       bathrooms: bathrooms
       parking: parking
       url: url
+ 
   vivareal:
     start_urls:
       rent:
@@ -48,14 +49,13 @@ platforms:
   zapimoveis:
     start_urls:
       rent:
-      - https://www.zapimoveis.com.br/aluguel/imoveis/sp+sao-paulo/
+      - https://www.zapimoveis.com.br/aluguel/
       buy:
-      - https://www.zapimoveis.com.br/venda/imoveis/sp+sao-paulo/
-    # O ZAP usa o mesmo serviço "Glue API" do grupo (similar ao VivaReal).
-    # Capturamos e fazemos replay das chamadas para `glue-api.zapimoveis.com.br/v2/listings`.
+      - https://www.zapimoveis.com.br/venda/
     include_url_substrings:
-    - glue-api.zapimoveis.com.br/v2/listings
-    - glue-api.zapimoveis.com.br
+    - api
+    - graphql
+    - search
     listing_path: ''
     fields:
       id: id
@@ -68,4 +68,4 @@ platforms:
       bathrooms: bathrooms
       parking: parkingSpaces
       url: link.href
-    prefer_headful: false
+    prefer_headful: true

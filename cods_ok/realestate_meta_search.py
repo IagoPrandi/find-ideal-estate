@@ -37,6 +37,14 @@ VIVAREAL_GLUE_HEADERS = {
     'origin': 'https://www.vivareal.com.br',
 }
 
+ZAPIMOVEIS_PAGES_DEFAULT = 4
+
+ZAPIMOVEIS_GLUE_HEADERS = {
+    'x-domain': 'www.zapimoveis.com.br',
+    'referer': 'https://www.zapimoveis.com.br/',
+    'origin': 'https://www.zapimoveis.com.br',
+}
+
 from urllib.parse import urlsplit, urlunsplit, parse_qsl, urlencode
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
@@ -46,52 +54,82 @@ import html as _html
 # ----------------------------
 # Geocoding (endereço -> lat/lon)
 # ----------------------------
+def _nominatim_normalize_br_address(address: str) -> List[str]:
+    """Gera variações normalizadas de um endereço pt-BR para o Nominatim.
+
+    Nominatim não entende bem "bairro" nem "cidade - UF" (com dash).
+    Retorna lista de queries a tentar, da mais específica para a mais simples.
+    """
+    addr = (address or "").strip()
+    if not addr:
+        return [addr] if addr else []
+
+    addr = re.sub(r"\s*-\s*([A-Za-z]{2})\s*$", r", \1", addr)
+
+    parts = [p.strip() for p in addr.split(",") if p.strip()]
+    candidates = [", ".join(parts)]
+    if len(parts) >= 3:
+        candidates.append(f"{parts[0]}, {parts[-1]}")
+        candidates.append(f"{parts[0]}, {', '.join(parts[2:])}")
+    if len(parts) >= 4:
+        candidates.append(f"{parts[0]}, {parts[2]}, {parts[3]}")
+    return list(dict.fromkeys(candidates))
+
+
 def geocode_address_nominatim(address: str, countrycodes: str = "br", limit: int = 1) -> Optional[Dict[str, Any]]:
     """Geocodifica um endereço usando Nominatim (OpenStreetMap).
     Retorna dict com lat/lon e, quando disponível, city/state.
     Usa apenas urllib (sem deps externas).
+
+    Tenta múltiplas normalizações do endereço para lidar com formatos pt-BR
+    como "rua, bairro, cidade - UF".
     """
     address = (address or "").strip()
     if not address:
         return None
 
-    # Nominatim exige User-Agent identificável. Permite override via env.
     ua = os.environ.get("NOMINATIM_USER_AGENT", "onde-morar-scraper/1.0 (contact: set NOMINATIM_USER_AGENT)")
     base = "https://nominatim.openstreetmap.org/search"
-    q = {
-        "format": "jsonv2",
-        "q": address,
-        "limit": str(limit),
-        "addressdetails": "1",
-        "countrycodes": countrycodes,
-    }
-    url = base + "?" + urlencode(list(q.items()))
-    try:
-        req = Request(url, headers={"User-Agent": ua, "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8"})
-        with urlopen(req, timeout=20) as resp:
-            raw = resp.read()
-        data = json.loads(raw.decode("utf-8", errors="ignore") or "[]")
-        if not isinstance(data, list) or not data:
-            return None
-        best = data[0]
-        lat = _as_float(best.get("lat"))
-        lon = _as_float(best.get("lon"))
-        if lat is None or lon is None:
-            return None
-        addr = best.get("address") if isinstance(best.get("address"), dict) else {}
-        city = addr.get("city") or addr.get("town") or addr.get("village") or addr.get("municipality")
-        state = addr.get("state")
-        return {
-            "query": address,
-            "lat": lat,
-            "lon": lon,
-            "display_name": best.get("display_name"),
-            "city": city,
-            "state": state,
-            "raw": best,
+
+    candidates = _nominatim_normalize_br_address(address)
+
+    for query_str in candidates:
+        q = {
+            "format": "jsonv2",
+            "q": query_str,
+            "limit": str(limit),
+            "addressdetails": "1",
+            "countrycodes": countrycodes,
         }
-    except Exception:
-        return None
+        url = base + "?" + urlencode(list(q.items()))
+        try:
+            req = Request(url, headers={"User-Agent": ua, "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8"})
+            with urlopen(req, timeout=20) as resp:
+                raw = resp.read()
+            data = json.loads(raw.decode("utf-8", errors="ignore") or "[]")
+            if not isinstance(data, list) or not data:
+                continue
+            best = data[0]
+            lat = _as_float(best.get("lat"))
+            lon = _as_float(best.get("lon"))
+            if lat is None or lon is None:
+                continue
+            addr = best.get("address") if isinstance(best.get("address"), dict) else {}
+            city = addr.get("city") or addr.get("town") or addr.get("village") or addr.get("municipality")
+            state = addr.get("state")
+            return {
+                "query": query_str,
+                "lat": lat,
+                "lon": lon,
+                "display_name": best.get("display_name"),
+                "city": city,
+                "state": state,
+                "raw": best,
+            }
+        except Exception:
+            continue
+
+    return None
 
 
 
@@ -1477,17 +1515,16 @@ def compile_run_to_std(
                 if rid in coords_map:
                     it["lat"], it["lon"] = coords_map[rid]
 
-    # VivaReal: qualquer replay_* que seja Glue listings
-    vr_dir = run_root / "vivareal"
-    if vr_dir.exists():
-        vr_files = sorted(vr_dir.glob("replay_vivareal_*_*.json")) + sorted(vr_dir.glob("replay_vivareal_*_p*.json"))
-        # também inclui addrpoint/fallback (padronizamos pelo parser)
-        vr_files += sorted(vr_dir.glob("replay_vivareal_*p*_*.json"))
-        vr_files = sorted(set(vr_files))
-        for jf in vr_files:
+    # Glue platforms (VivaReal + ZapImóveis): qualquer JSON que contenha search.result.listings
+    for _glue_name, _glue_parser in [("vivareal", parse_vivareal_glue_to_std), ("zapimoveis", parse_zapimoveis_glue_to_std)]:
+        _glue_dir = run_root / _glue_name
+        if not _glue_dir.exists():
+            continue
+        _glue_files = sorted(_glue_dir.glob("*.json"))
+        for jf in _glue_files:
             try:
                 glue_json = orjson.loads(jf.read_bytes())
-                items.extend(parse_vivareal_glue_to_std(glue_json))
+                items.extend(_glue_parser(glue_json))
             except Exception:
                 continue
 
@@ -1814,7 +1851,7 @@ async def _qa_dom_listing_ids_quintoandar(page) -> List[str]:
     """Coleta IDs visíveis no DOM do QuintoAndar (a href contém /imovel/<id>)."""
     try:
         ids = await page.evaluate(
-            """() => {
+            r"""() => {
                 const out = new Set();
                 const els = Array.from(document.querySelectorAll('a[href]'));
                 for (const a of els) {
@@ -2058,12 +2095,217 @@ def _vr_build_street_url_from_address(address: str, mode: str = "rent", geo: Opt
     if zone_slug and neigh_slug:
         path_parts.extend([zone_slug, neigh_slug, street_slug])
     elif neigh_slug:
-        # fallback: sem zona (ainda costuma funcionar em alguns casos)
-        path_parts.extend([neigh_slug, street_slug])
+        path_parts.extend(["bairros", neigh_slug, street_slug])
     else:
         path_parts.append(street_slug)
 
     return base + "/" + "/".join(path_parts).rstrip("/")
+
+
+# ----------------------------
+# ZapImóveis: endereço -> URL de busca + fallback Glue API
+# ----------------------------
+
+def _zap_build_street_url_from_address(address: str, mode: str = "rent", geo: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """Monta URL de busca do ZapImóveis a partir de endereço.
+    Formato: /aluguel/imoveis/sp+sao-paulo/rua-guaipa
+    """
+    if not address:
+        return None
+    parsed = _vr_parse_br_address(address)
+    street = parsed.get("street")
+    city = parsed.get("city") or (geo.get("city") if isinstance(geo, dict) else None) or "São Paulo"
+    state_code = parsed.get("state_code")
+
+    if not state_code and isinstance(geo, dict):
+        st = (geo.get("state") or "").strip().lower()
+        state_code = {
+            "são paulo": "sp", "rio de janeiro": "rj", "minas gerais": "mg",
+            "paraná": "pr", "rio grande do sul": "rs", "santa catarina": "sc",
+            "bahia": "ba", "pernambuco": "pe", "ceará": "ce", "distrito federal": "df",
+        }.get(st, None)
+
+    if not street or not state_code:
+        return None
+
+    city_slug = _vr_slugify(city or "")
+    street_slug = _vr_slugify(street)
+    if not city_slug or not street_slug:
+        return None
+
+    prefix = "aluguel" if mode == "rent" else "venda"
+    return f"https://www.zapimoveis.com.br/{prefix}/imoveis/{state_code}+{city_slug}/{street_slug}"
+
+
+def _zapimoveis_fallback_glue_url(
+    business: str,
+    lat: float,
+    lon: float,
+    size: int = 36,
+    from_: int = 0,
+    city: str = "São Paulo",
+    state: str = "São Paulo",
+    ref: str = "/aluguel/imoveis/sp+sao-paulo/",
+) -> str:
+    """Monta URL do Glue API do ZapImóveis (mesma estrutura do VivaReal)."""
+    base = "https://glue-api.zapimoveis.com.br/v2/listings"
+    state_name = state or "São Paulo"
+    city_name = city or "São Paulo"
+    loc_state = _vr_norm_location_name(state_name)
+    loc_city = _vr_norm_location_name(city_name)
+    q = {
+        "business": business,
+        "parentId": "null",
+        "listingType": "USED",
+        "__zt": "mtc:deduplication2023",
+        "addressCity": city_name,
+        "addressZone": "",
+        "addressStreet": "",
+        "addressNeighborhood": "",
+        "addressLocationId": f"BR>{loc_state}>NULL>{loc_city}",
+        "addressState": state_name,
+        "addressPointLat": str(lat),
+        "addressPointLon": str(lon),
+        "addressType": "city",
+        "page": str(int(from_ / max(size, 1)) + 1),
+        "size": str(size),
+        "from": str(from_),
+        "images": "webp",
+        "categoryPage": "RESULT",
+    }
+    return base + "?" + urlencode(list(q.items()))
+
+
+def parse_zapimoveis_glue_to_std(glue_json: dict) -> List[dict]:
+    """Parser para ZapImóveis Glue API (mesma estrutura do VivaReal)."""
+    listings = get_by_path(glue_json, "search.result.listings")
+    if not isinstance(listings, list):
+        return []
+
+    out = []
+    for it in listings:
+        listing = it.get("listing") if isinstance(it, dict) and isinstance(it.get("listing"), dict) else it
+        if not isinstance(listing, dict):
+            continue
+
+        lid = listing.get("id") or listing.get("listingId") or listing.get("propertyId")
+        lat_raw = (
+            get_by_path(listing, "address.point.lat")
+            or get_by_path(listing, "address.geoLocation.location.lat")
+            or get_by_path(listing, "address.point.approximateLat")
+            or get_by_path(listing, "address.point.latitude")
+        )
+        lon_raw = (
+            get_by_path(listing, "address.point.lon")
+            or get_by_path(listing, "address.geoLocation.location.lon")
+            or get_by_path(listing, "address.point.approximateLon")
+            or get_by_path(listing, "address.point.longitude")
+        )
+        lat = _as_float(lat_raw)
+        lon = _as_float(lon_raw)
+
+        price = None
+        pi = listing.get("pricingInfos")
+        if isinstance(pi, list) and pi:
+            cand = []
+            for p in pi:
+                if isinstance(p, dict):
+                    pv = parse_brl(p.get("price")) or parse_brl(p.get("rentalTotalPrice")) or parse_brl(p.get("monthlyCondoFee"))
+                    if pv is not None:
+                        cand.append(pv)
+            if cand:
+                price = min(cand)
+        if price is None:
+            price = _min_price_from_any(listing)
+
+        area = None
+        ua = listing.get("usableAreas")
+        if isinstance(ua, list) and ua:
+            area = _as_float(ua[0])
+        if area is None:
+            area = _as_float(listing.get("usableArea") or listing.get("area"))
+
+        b_raw = listing.get("bedrooms")
+        if isinstance(b_raw, list):
+            b_raw = b_raw[0] if b_raw else None
+        bedrooms = _as_int(b_raw)
+
+        ba_raw = listing.get("bathrooms")
+        if isinstance(ba_raw, list):
+            ba_raw = ba_raw[0] if ba_raw else None
+        bathrooms = _as_int(ba_raw)
+
+        p_raw = listing.get("parkingSpaces") or listing.get("parking") or listing.get("garageSpaces")
+        if isinstance(p_raw, list):
+            p_raw = p_raw[0] if p_raw else None
+        parking = _as_int(p_raw)
+
+        url = None
+        if isinstance(it, dict):
+            url = get_by_path(it, "link.href")
+        if not url:
+            url = get_by_path(listing, "link.href") or listing.get("url") or listing.get("href")
+        if isinstance(url, str) and url.startswith("/"):
+            url = "https://www.zapimoveis.com.br" + url
+
+        parts = []
+        street = get_by_path(listing, "address.street") or get_by_path(listing, "address.streetName")
+        number = get_by_path(listing, "address.streetNumber") or get_by_path(listing, "address.number")
+        neigh = get_by_path(listing, "address.neighborhood")
+        city_addr = get_by_path(listing, "address.city")
+        state_addr = (
+            get_by_path(listing, "address.state")
+            or get_by_path(listing, "address.stateAcronym")
+            or get_by_path(listing, "address.uf")
+        )
+        for v in (street, number, neigh, city_addr, state_addr):
+            if v is not None and str(v).strip():
+                parts.append(str(v).strip())
+        addr = ", ".join(parts) if parts else (neigh or city_addr or None)
+
+        out.append({
+            "schema_version": STD_SCHEMA_VERSION,
+            "platform": "zapimoveis",
+            "listing_id": str(lid) if lid is not None else None,
+            "url": url,
+            "lat": lat,
+            "lon": lon,
+            "price_brl": price,
+            "area_m2": area,
+            "bedrooms": bedrooms,
+            "bathrooms": bathrooms,
+            "parking": parking,
+            "address": addr,
+        })
+    return out
+
+
+def _zap_glue_headers():
+    return ZAPIMOVEIS_GLUE_HEADERS
+
+
+def _is_glue_platform(name: str) -> bool:
+    """Retorna True para plataformas que usam a Glue API (VivaReal/ZapImóveis)."""
+    return name in ("vivareal", "zapimoveis")
+
+
+def _glue_api_domain(platform_name: str) -> str:
+    if platform_name == "zapimoveis":
+        return "glue-api.zapimoveis.com.br"
+    return "glue-api.vivareal.com"
+
+
+def _glue_headers_for(platform_name: str) -> dict:
+    if platform_name == "zapimoveis":
+        return dict(ZAPIMOVEIS_GLUE_HEADERS)
+    return dict(VIVAREAL_GLUE_HEADERS)
+
+
+def _glue_pages_default(platform_name: str) -> int:
+    if platform_name == "zapimoveis":
+        return ZAPIMOVEIS_PAGES_DEFAULT
+    return VIVAREAL_PAGES_DEFAULT
+
 
 def _qa_slugify(text: str) -> str:
     """Slugifica texto pt-BR (remove acentos, normaliza espaços e pontuação)."""
@@ -2163,6 +2405,212 @@ async def _qa_try_resolve_location_url(page, query: str, mode: str) -> Optional[
 
     return None
 
+
+def _url_path_depth(url: str) -> int:
+    """Conta segmentos não-vazios do path de uma URL."""
+    from urllib.parse import urlsplit as _us
+    return len([s for s in (_us(url).path or "").split("/") if s])
+
+
+def _glue_best_option_index(options_texts: List[str], full_address: str) -> List[int]:
+    """Ordena os índices das opções pela similaridade com o endereço completo.
+
+    Compara cada opção com o endereço completo (rua + bairro + cidade).
+    Retorna lista de índices ordenados do mais ao menos similar.
+    """
+    addr_lower = full_address.lower()
+    addr_parts = [p.strip().lower() for p in re.split(r"[,\-]", addr_lower) if p.strip()]
+
+    scores = []
+    for i, text in enumerate(options_texts):
+        t = text.lower()
+        score = 0
+        for part in addr_parts:
+            if part in t:
+                score += len(part)
+        scores.append((score, i))
+
+    scores.sort(key=lambda x: -x[0])
+    return [idx for _, idx in scores]
+
+
+async def _glue_fill_search_and_get_options(page, query: str, platform_name: str):
+    """Preenche a busca no modal e retorna as opções visíveis (até 4).
+
+    Retorna (input_locator_or_None, lista_de_(index, text, locator)).
+    """
+    _filled_input = None
+    input_selectors = [
+        'input[role="combobox"]',
+        'dialog input',
+        '[class*="modal"] input',
+        '[class*="Modal"] input',
+        '[class*="overlay"] input',
+        '[class*="Overlay"] input',
+        'input[placeholder]',
+    ]
+    for inp_sel in input_selectors:
+        try:
+            inp = page.locator(inp_sel).first
+            if await inp.is_visible(timeout=2000):
+                await inp.click()
+                await inp.fill("")
+                await inp.fill(query)
+                _filled_input = inp
+                break
+        except Exception:
+            continue
+
+    if not _filled_input:
+        await page.keyboard.press("Control+a")
+        await page.keyboard.type(query, delay=35)
+
+    await page.wait_for_timeout(3000)
+
+    options = []
+    try:
+        all_opts = page.get_by_role("option")
+        count = await all_opts.count()
+        for i in range(min(count, 4)):
+            loc = all_opts.nth(i)
+            try:
+                if await loc.is_visible(timeout=1000):
+                    txt = (await loc.text_content() or "").strip()
+                    options.append((i, txt, loc))
+            except Exception:
+                continue
+    except Exception:
+        pass
+
+    if not options:
+        for opt_sel in ['[role="option"]', 'li[class*="suggestion"]', 'li[class*="option"]']:
+            try:
+                all_opts = page.locator(opt_sel)
+                count = await all_opts.count()
+                for i in range(min(count, 4)):
+                    loc = all_opts.nth(i)
+                    try:
+                        if await loc.is_visible(timeout=1000):
+                            txt = (await loc.text_content() or "").strip()
+                            options.append((i, txt, loc))
+                    except Exception:
+                        continue
+                if options:
+                    break
+            except Exception:
+                continue
+
+    return _filled_input, options
+
+
+async def _glue_try_resolve_location_url(
+    page, query: str, platform_name: str, mode: str,
+    full_address: Optional[str] = None,
+    min_listings: int = 5,
+) -> Optional[str]:
+    """Usa a barra de busca do VivaReal ou ZapImóveis para pesquisar o endereço via UI.
+
+    Seleciona a opção mais próxima do endereço completo dentre as 4 primeiras.
+    Se a página resultante tiver poucos imóveis, volta e tenta a segunda melhor opção.
+    """
+    if not query:
+        return None
+
+    q0 = str(query).strip()
+    if q0.lower().startswith("http://") or q0.lower().startswith("https://"):
+        return q0
+
+    compare_addr = full_address or query
+    url_before = page.url
+    depth_before = _url_path_depth(url_before)
+
+    combo = page.locator('[role="combobox"]:not([aria-label*="Ordenar"])').first
+
+    try:
+        await combo.wait_for(state="visible", timeout=5000)
+    except Exception:
+        print(f"[{platform_name}] busca UI: combobox de localização não encontrado")
+        return None
+
+    try:
+        await combo.click()
+        await page.wait_for_timeout(1500)
+
+        _input, options = await _glue_fill_search_and_get_options(page, query, platform_name)
+
+        if not options:
+            print(f"[{platform_name}] busca UI: nenhuma sugestão encontrada, cancelando")
+            await page.keyboard.press("Escape")
+            return None
+
+        opt_texts = [t for _, t, _ in options]
+        ranked = _glue_best_option_index(opt_texts, compare_addr)
+        print(f"[{platform_name}] busca UI: {len(options)} opções — ranking por similaridade com '{compare_addr}':")
+        for rank, idx in enumerate(ranked):
+            print(f"  [{rank+1}] {opt_texts[idx][:90]}")
+
+        for attempt, best_idx in enumerate(ranked[:2]):
+            _, opt_text, opt_loc = options[best_idx]
+
+            if attempt > 0:
+                await combo.click()
+                await page.wait_for_timeout(1500)
+                _input, options = await _glue_fill_search_and_get_options(page, query, platform_name)
+                if not options or best_idx >= len(options):
+                    print(f"[{platform_name}] busca UI: opções não reapareceram na 2ª tentativa")
+                    break
+                _, opt_text, opt_loc = options[best_idx]
+
+            print(f"[{platform_name}] busca UI: tentativa {attempt+1} — clicando em '{opt_text[:80]}'")
+            await opt_loc.click()
+            await page.wait_for_timeout(5000)
+
+            if page.url == url_before:
+                try:
+                    await page.wait_for_url(lambda u: u != url_before, timeout=10000)
+                except Exception:
+                    pass
+
+            new_url = page.url
+            if new_url == url_before:
+                print(f"[{platform_name}] busca UI: URL não mudou")
+                continue
+
+            depth_after = _url_path_depth(new_url)
+            if depth_after < depth_before:
+                print(f"[{platform_name}] busca UI: URL ficou genérica ({new_url}), revertendo")
+                await page.goto(url_before, wait_until="domcontentloaded")
+                continue
+
+            # Verifica quantidade de resultados na página
+            if attempt == 0 and len(ranked) > 1:
+                await page.wait_for_timeout(3000)
+                try:
+                    cards = page.locator('a[href*="/imovel/"], a[href*="/imoveis/"], [class*="ListingCard"], [class*="listing-card"], [data-type="property"]')
+                    n_cards = await cards.count()
+                except Exception:
+                    n_cards = 99
+
+                if n_cards < min_listings:
+                    print(f"[{platform_name}] busca UI: poucos imóveis ({n_cards}), tentando próxima opção...")
+                    await page.goto(url_before, wait_until="domcontentloaded")
+                    await page.wait_for_timeout(2000)
+                    continue
+
+            print(f"[{platform_name}] busca UI: '{query}' -> {new_url}")
+            return new_url
+
+        if page.url != url_before and _url_path_depth(page.url) >= depth_before:
+            print(f"[{platform_name}] busca UI: usando última URL válida -> {page.url}")
+            return page.url
+
+        return None
+
+    except Exception as e:
+        print(f"[{platform_name}] busca UI: erro — {e}")
+        return None
+
+
 async def capture_platform(
     platform: PlatformConfig,
     mode: str,
@@ -2201,42 +2649,74 @@ async def capture_platform(
     qa_count_headers = None
     qa_search_templates: List[Dict[str, Any]] = []  # [{url, headers, body}]
 
+    # Glue platforms (VivaReal/ZapImóveis): headers reais capturados pelo browser via interceptação de rotas.
+    _vr_glue_live_headers: Dict[str, str] = {}
+    _vr_glue_nav_url: Optional[str] = None
+
 
     async with async_playwright() as p:
         # ---------------------------
         # Contexto do browser
         # ---------------------------
-        # VivaReal: tem bloqueado headless via Cloudflare de forma intermitente.
-        # No container usamos Xvfb, então podemos rodar "headful" sem abrir janela no host.
         effective_headless = headless
-        if platform.name == "vivareal":
-            effective_headless = False  # força headful dentro do container (Xvfb)
+        if _is_glue_platform(platform.name):
+            effective_headless = False
 
         # Persistência:
-        # - para a maioria, isolamos por run (evita sujeira)
-        # - para VivaReal, reusamos um perfil estável para manter cookies e reduzir desafios.
-        if platform.name == "vivareal":
-            user_data_dir = os.environ.get("VIVAREAL_PROFILE_DIR", "/app/.profiles/vivareal")
+        # Perfil isolado por run (evita cookies/cache marcados pelo Cloudflare)
+        if _is_glue_platform(platform.name):
+            import shutil
+            _default_profile = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".profiles", platform.name)
+            _env_key = f"{platform.name.upper()}_PROFILE_DIR"
+            user_data_dir = os.environ.get(_env_key, _default_profile)
+            if os.path.isdir(user_data_dir):
+                shutil.rmtree(user_data_dir, ignore_errors=True)
             os.makedirs(user_data_dir, exist_ok=True)
         else:
             user_data_dir = os.path.join(str(run_dir), "_user_data")
 
-        context = await p.chromium.launch_persistent_context(
+        launch_kwargs = dict(
             user_data_dir=user_data_dir,
             headless=effective_headless,
             locale="pt-BR",
             timezone_id="America/Sao_Paulo",
-            viewport={"width": 1280, "height": 720},
+            viewport={"width": 1920, "height": 1080},
             user_agent=(
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
+                "Chrome/131.0.0.0 Safari/537.36"
             ),
             args=[
                 "--disable-blink-features=AutomationControlled",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--disable-infobars",
+                "--disable-extensions",
             ],
+            ignore_default_args=["--enable-automation"],
+            ignore_https_errors=True,
         )
+        try:
+            launch_kwargs["channel"] = "chrome"
+            context = await p.chromium.launch_persistent_context(**launch_kwargs)
+        except Exception:
+            del launch_kwargs["channel"]
+            context = await p.chromium.launch_persistent_context(**launch_kwargs)
+
+        _stealth_js = """
+            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            window.chrome = {runtime: {}, loadTimes: function(){}, csi: function(){}};
+            Object.defineProperty(navigator, 'plugins', {get: () => [1,2,3,4,5]});
+            Object.defineProperty(navigator, 'languages', {get: () => ['pt-BR','pt','en-US','en']});
+            const originalQuery = window.navigator.permissions.query;
+            window.navigator.permissions.query = (parameters) =>
+                parameters.name === 'notifications'
+                    ? Promise.resolve({state: Notification.permission})
+                    : originalQuery(parameters);
+        """
+        await context.add_init_script(_stealth_js)
         page = await context.new_page()
+        await page.add_init_script(_stealth_js)
 
         async def on_response(resp):
             try:
@@ -2350,10 +2830,93 @@ async def capture_platform(
 
         page.on("response", on_response)
 
+        # Glue platforms (VivaReal/ZapImóveis): intercepta chamadas Glue count-only ANTES da navegação.
+        _glue_route_pattern = None
+        if _is_glue_platform(platform.name):
+            _glue_domain = _glue_api_domain(platform.name)
+
+            async def _glue_route_handler(route):
+                nonlocal _vr_glue_live_headers, _vr_glue_nav_url
+                req = route.request
+                try:
+                    _vr_glue_live_headers = dict(req.headers)
+                except Exception:
+                    pass
+                url_raw = req.url
+                if not _vr_glue_nav_url:
+                    _vr_glue_nav_url = url_raw
+                parts_ = urlsplit(url_raw)
+                q_ = dict(parse_qsl(parts_.query, keep_blank_values=True))
+                inc_ = q_.get("includeFields", "")
+                if "totalCount" in inc_ and "listings" not in inc_.lower():
+                    tweaked = _tweak_vivareal_listings_url(url_raw, size=36, from_=0)
+                    print(f"[{platform.name}] route: promovendo count-only para listings (size=36)")
+                    await route.continue_(url=tweaked)
+                else:
+                    await route.continue_()
+
+            _glue_route_pattern = f"**/{_glue_domain}/v2/listings**"
+            await page.route(_glue_route_pattern, _glue_route_handler)
+
         # Navega e espera a página disparar as chamadas de busca
+        _vr_cloudflare_blocked = False
         for u in start_urls:
             print(f"[{platform.name}] GOTO: {u}")
             await page.goto(u, wait_until="domcontentloaded")
+
+            # Detecta bloqueio Cloudflare em plataformas Glue (VivaReal/ZapImóveis) com retry
+            if _is_glue_platform(platform.name):
+                _cf_ok = False
+                for _cf_attempt in range(3):
+                    try:
+                        await page.wait_for_timeout(2000)
+                        title = (await page.title()).lower()
+                        body_text = await page.text_content("body") or ""
+                        if "blocked" in title or "attention required" in title or "you have been blocked" in body_text.lower():
+                            if _cf_attempt < 2:
+                                delay = (_cf_attempt + 1) * 5
+                                print(f"[{platform.name}] Cloudflare bloqueou (tentativa {_cf_attempt + 1}/3). Aguardando {delay}s...")
+                                await page.wait_for_timeout(delay * 1000)
+                                await page.reload(wait_until="domcontentloaded")
+                                continue
+                            _vr_cloudflare_blocked = True
+                            print(f"[{platform.name}] Cloudflare BLOQUEOU após 3 tentativas. Ativando fallback via Glue API direta...")
+                        else:
+                            _cf_ok = True
+                    except Exception:
+                        _cf_ok = True
+                    break
+                if _vr_cloudflare_blocked:
+                    break
+
+            # Glue platforms (VivaReal/ZapImóveis): busca via UI quando informado um endereço
+            if _is_glue_platform(platform.name) and not _vr_cloudflare_blocked:
+                glue_query = platform.search_query_override or search_address
+                if glue_query:
+                    q0 = str(glue_query).strip()
+                    if q0.lower().startswith("http://") or q0.lower().startswith("https://"):
+                        if q0 != page.url:
+                            await page.goto(q0, wait_until="domcontentloaded")
+                        print(f"[{platform.name}] URL direta: {page.url}")
+                    else:
+                        resolved = await _glue_try_resolve_location_url(page, glue_query, platform.name, mode, full_address=search_address)
+                        if not resolved:
+                            _fb_addr = search_address or glue_query
+                            slug_url = _vr_build_street_url_from_address(_fb_addr, mode=mode) if platform.name == "vivareal" else _zap_build_street_url_from_address(_fb_addr, mode=mode)
+                            if slug_url:
+                                print(f"[{platform.name}] fallback slug URL: {slug_url}")
+                                await page.goto(slug_url, wait_until="domcontentloaded")
+
+                    # Re-verifica Cloudflare após navegação da busca
+                    try:
+                        await page.wait_for_timeout(2000)
+                        _title2 = (await page.title()).lower()
+                        _body2 = await page.text_content("body") or ""
+                        if "blocked" in _title2 or "attention required" in _title2 or "you have been blocked" in _body2.lower():
+                            _vr_cloudflare_blocked = True
+                            print(f"[{platform.name}] Cloudflare bloqueou após busca. Ativando fallback via Glue API direta...")
+                    except Exception:
+                        pass
 
             # QuintoAndar: se informado um "search_query" (rua/bairro/cidade), usa a busca do site
             # para chegar numa URL de listagem correta e mais estável que lat/lon direto.
@@ -2432,8 +2995,8 @@ async def capture_platform(
             # QuintoAndar: a listagem é expandida via botão "Ver mais" (não por paginação via ?pagina=).
             if platform.name == "quinto_andar":
                 try:
-                    qa_pages = max_pages if isinstance(max_pages, int) and max_pages > 0 else int(os.environ.get("QA_MAX_PAGES", "1") or "1")
-                    qa_pages = max(1, min(int(qa_pages), 50))  # safety cap
+                    qa_pages = max_pages if isinstance(max_pages, int) and max_pages > 0 else 4
+                    qa_pages = max(1, min(int(qa_pages), 50))
                 except Exception:
                     qa_pages = 1
 
@@ -2444,8 +3007,7 @@ async def capture_platform(
                         await _qa_load_more_quintoandar(page, clicks=qa_pages - 1, wait_seconds=wait_seconds)
                     except Exception:
                         pass
-            if platform.name == "vivareal":
-                # força a página a carregar mais conteúdo e disparar requests reais
+            if _is_glue_platform(platform.name):
                 for _ in range(6):
                     await page.mouse.wheel(0, 1200)
                     await page.wait_for_timeout(1200)
@@ -2454,16 +3016,17 @@ async def capture_platform(
         # ---------------------------
         # Replay automático (enriquecimento)
         # ---------------------------
-        async def replay_and_save(url: str, tag: str) -> bool:
+        async def replay_and_save(url: str, tag: str, headers: Optional[Dict[str, str]] = None) -> bool:
             """Faz GET no endpoint e salva JSON.
 
-            Para VivaReal, a navegação frequentemente captura chamadas "count-only" (sem `search.result.listings`).
-            Neste caso, salvamos o JSON para debug, mas retornamos False para acionar o fallback/promote.
+            Para plataformas Glue (VivaReal/ZapImóveis), usa os headers capturados do browser quando disponíveis.
             """
             try:
+                if headers is None and _is_glue_platform(platform.name) and "/v2/listings" in url:
+                    headers = _vr_glue_live_headers or _glue_headers_for(platform.name) or None
                 r = await page.request.get(
                     url,
-                    headers=(VIVAREAL_GLUE_HEADERS if "glue-api.vivareal.com" in url else None),
+                    headers=headers,
                 )
                 if not r.ok:
                     try:
@@ -2483,8 +3046,7 @@ async def capture_platform(
                 out = run_dir / f"replay_{tag}_{int(time.time()*1000)}.json"
                 out.write_bytes(orjson.dumps(data))
 
-                # validação leve: se for VivaReal, queremos de fato `search.result.listings`
-                if platform.name == "vivareal":
+                if _is_glue_platform(platform.name):
                     lst = get_by_path(data, platform.listing_path or "search.result.listings") or []
                     n = len(lst) if isinstance(lst, list) else 0
                     print(f"[{platform.name}] replay {tag} OK -> {out.name} | listings={n}")
@@ -2497,74 +3059,173 @@ async def capture_platform(
                 print(f"[{platform.name}] replay {tag} erro: {e}")
                 return False
 
-        # VivaReal: tenta pegar a chamada glue-api e “abrir” o payload (size maior + paginação por offset 'from')
-        if platform.name == "vivareal":
-            glue = None
-            for u in reversed(captured_urls):
-                if "glue-api.vivareal.com/v2/listings" in u:
-                    glue = u
-                    break
+        # Glue platforms (VivaReal/ZapImóveis): fallback via Glue API (urllib puro) quando Cloudflare bloqueia
+        if _is_glue_platform(platform.name) and _vr_cloudflare_blocked:
+            _glue_pages = max_pages if isinstance(max_pages, int) and max_pages > 0 else _glue_pages_default(platform.name)
+            if search_lat is not None and search_lon is not None:
+                business = "RENTAL" if mode == "rent" else "SALE"
+                city_fb = search_city or "São Paulo"
+                state_fb = search_state or "São Paulo"
+                ref_fb = start_urls[0] if start_urls else f"/{'aluguel' if mode == 'rent' else 'venda'}/sp/sao-paulo/"
+                vr_total = 0
+                _fb_headers = {
+                    **_glue_headers_for(platform.name),
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/131.0.0.0 Safari/537.36"
+                    ),
+                    "Accept": "application/json, text/plain, */*",
+                    "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+                    "sec-ch-ua": '"Chromium";v="131", "Not_A Brand";v="24"',
+                    "sec-ch-ua-mobile": "?0",
+                    "sec-ch-ua-platform": '"Windows"',
+                    "sec-fetch-dest": "empty",
+                    "sec-fetch-mode": "cors",
+                    "sec-fetch-site": "same-site",
+                }
+                _fallback_url_fn = _zapimoveis_fallback_glue_url if platform.name == "zapimoveis" else _vivareal_fallback_glue_url
+                for pg in range(_glue_pages):
+                    from_ = pg * 36
+                    api_url = _fallback_url_fn(
+                        business=business, lat=search_lat, lon=search_lon,
+                        size=36, from_=from_,
+                        city=city_fb, state=state_fb, ref=ref_fb,
+                    )
+                    print(f"[{platform.name}] fallback glue API p{pg + 1} (urllib)...")
+                    try:
+                        req = Request(api_url)
+                        for k, v in _fb_headers.items():
+                            req.add_header(k, v)
+                        with urlopen(req, timeout=25) as resp:
+                            raw = resp.read()
+                        data_fb = json.loads(raw.decode("utf-8", errors="ignore"))
+                        out_fb = run_dir / f"{platform.name}_fallback_p{pg + 1}_{int(time.time() * 1000)}.json"
+                        out_fb.write_bytes(orjson.dumps(data_fb))
+                        lst_fb = get_by_path(data_fb, "search.result.listings") or []
+                        n_fb = len(lst_fb) if isinstance(lst_fb, list) else 0
+                        vr_total += n_fb
+                        print(f"[{platform.name}] fallback p{pg + 1} OK -> {out_fb.name} | listings={n_fb}")
+                        if n_fb == 0:
+                            break
+                    except (HTTPError, URLError) as e:
+                        code = getattr(e, "code", "?")
+                        snippet = ""
+                        try:
+                            snippet = e.read().decode("utf-8", errors="ignore")[:300] if hasattr(e, "read") else str(e)
+                        except Exception:
+                            snippet = str(e)
+                        print(f"[{platform.name}] fallback p{pg + 1} HTTP {code} | {snippet}")
+                        break
+                    except Exception as e:
+                        print(f"[{platform.name}] fallback p{pg + 1} erro: {e}")
+                        break
+                    await asyncio.sleep(1.0)
+                print(f"[{platform.name}] fallback concluído: {vr_total} listings total")
+            else:
+                print(f"[{platform.name}] Cloudflare bloqueou e sem coordenadas (lat/lon) para fallback. Use --address para habilitar fallback via Glue API.")
 
-            glue_ok_any = False
-
-            # Se temos um endereço (geocodificado), prioriza sempre uma busca por ponto (Glue API) ancorada nesse endereço,
-            # independentemente do que foi capturado durante a navegação.
-            if os.environ.get("VIVAREAL_ENABLE_ADDRPOINT", "0") == "1" and (search_lat is not None) and (search_lon is not None):
-                try:
-                    city2, state2 = (search_city or "São Paulo"), (search_state or "São Paulo")
-                    ref2 = page.url.replace("https://www.vivareal.com.br", "")
-                    if not ref2.startswith("/"):
-                        ref2 = "/" + ref2
-                    for i in range(VIVAREAL_PAGES_DEFAULT):
-                        url_i = _vivareal_fallback_glue_url(
-                            business="RENTAL" if mode == "rent" else "SALE",
-                            lat=float(search_lat),
-                            lon=float(search_lon),
-                            size=72,
-                            from_=i * 72,
-                            city=city2,
-                            state=state2,
-                            ref=ref2,
-                        )
-                        ok = await replay_and_save(url_i, f"vivareal_addrpoint_p{i+1}")
-                        glue_ok_any = glue_ok_any or ok
-                except Exception:
-                    pass
+        # Glue platforms: paginação (fluxo normal, sem bloqueio Cloudflare).
+        elif _is_glue_platform(platform.name) and not _vr_cloudflare_blocked:
+            _glue_domain = _glue_api_domain(platform.name)
+            _glue_pages = max_pages if isinstance(max_pages, int) and max_pages > 0 else _glue_pages_default(platform.name)
+            glue = _vr_glue_nav_url or None
+            if not glue:
+                for u in reversed(captured_urls):
+                    if f"{_glue_domain}/v2/listings" in u:
+                        glue = u
+                        break
 
             if glue:
-                # IMPORTANTE: parentId pode vir "null" na query e ainda assim o endpoint retorna listings.
-                for i in range(VIVAREAL_PAGES_DEFAULT):
-                    enriched_i = _tweak_vivareal_listings_url(glue, size=80, from_=i * 80)
-                    ok = await replay_and_save(enriched_i, f"vivareal_glue_listings_p{i+1}")
-                    glue_ok_any = glue_ok_any or ok
-        
-            # Fallback: se não capturou glue na navegação, tenta montar uma URL por ponto/cidade
-            if (not glue_ok_any) and os.environ.get("VIVAREAL_ENABLE_CITYPOINT", "0") == "1":
-                print(f"[{platform.name}] glue não capturado (ou falhou). Tentando fallback por ponto/cidade...")
-                city, state = _infer_city_state_from_vivareal_url(page.url)
-                # se recebemos um endereço, usamos o geocode (lat/lon e, quando possível, city/state)
-                if search_city:
-                    city = search_city
-                if search_state:
-                    state = search_state
-                fallback_lat = search_lat if search_lat is not None else -23.5615
-                fallback_lon = search_lon if search_lon is not None else -46.6559
-                ref = page.url.replace("https://www.vivareal.com.br", "")
-                if not ref.startswith("/"):
-                    ref = "/" + ref
-                for i in range(VIVAREAL_PAGES_DEFAULT):
-                    fallback_url_i = _vivareal_fallback_glue_url(
-                        business="RENTAL" if mode == "rent" else "SALE",
-                        lat=fallback_lat,
-                        lon=fallback_lon,
-                        size=72,
-                        from_=i * 72,
-                        city=city,
-                        state=state,
-                        ref=ref,
-                    )
-                    ok = await replay_and_save(fallback_url_i, f"vivareal_fallback_citypoint_p{i+1}")
-                    glue_ok_any = glue_ok_any or ok
+                if platform.name == "vivareal":
+                    # VivaReal: urllib funciona — mais rápido que navegação
+                    _all_cookies = []
+                    for _cdomain in [f"https://{_glue_domain}", "https://www.vivareal.com.br"]:
+                        try:
+                            _all_cookies.extend(await context.cookies(_cdomain))
+                        except Exception:
+                            pass
+                    _seen = set()
+                    _deduped = [c for c in _all_cookies if c["name"] not in _seen and not _seen.add(c["name"])]
+                    _cookie_str = "; ".join(f"{c['name']}={c['value']}" for c in _deduped) if _deduped else ""
+                    _pag_headers = {}
+                    for k, v in (_vr_glue_live_headers or {}).items():
+                        _pag_headers[k.title() if k.islower() else k] = v
+                    if not _pag_headers:
+                        _pag_headers = _glue_headers_for(platform.name)
+                    if _cookie_str:
+                        _pag_headers["Cookie"] = _cookie_str
+                    _pag_headers.setdefault("User-Agent",
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
+                    _pag_headers.setdefault("Accept", "application/json, text/plain, */*")
+
+                    print(f"[{platform.name}] glue URL capturada. Buscando paginas 2..{_glue_pages} via urllib...")
+                    for i in range(1, _glue_pages):
+                        url_i = _tweak_vivareal_listings_url(glue, size=36, from_=i * 36)
+                        try:
+                            req_i = Request(url_i)
+                            for k, v in _pag_headers.items():
+                                req_i.add_header(k, v)
+                            with urlopen(req_i, timeout=25) as resp_i:
+                                raw_i = resp_i.read()
+                            data_i = json.loads(raw_i.decode("utf-8", errors="ignore"))
+                            out_i = run_dir / f"{platform.name}_page_p{i + 1}_{int(time.time() * 1000)}.json"
+                            out_i.write_bytes(orjson.dumps(data_i))
+                            lst_i = get_by_path(data_i, "search.result.listings") or []
+                            n_i = len(lst_i) if isinstance(lst_i, list) else 0
+                            print(f"[{platform.name}] urllib p{i + 1} OK -> {out_i.name} | listings={n_i}")
+                        except (HTTPError, URLError) as e:
+                            print(f"[{platform.name}] urllib p{i + 1} HTTP {getattr(e, 'code', '?')}")
+                        except Exception as e:
+                            print(f"[{platform.name}] urllib p{i + 1} erro: {e}")
+                        await asyncio.sleep(1.0)
+                else:
+                    # ZapImóveis: paginação clicando no botão "próxima página" (evita reload que dispara Cloudflare)
+                    _next_selectors = [
+                        'button[aria-label="Próxima página"]',
+                        'a[aria-label="Próxima página"]',
+                        'button[title="Próxima página"]',
+                        'a[title="Próxima página"]',
+                        '[data-testid="next-page"]',
+                        'li.pagination__item--next a',
+                        'li.pagination__item--next button',
+                        'button:has-text("Próxima")',
+                        'a:has-text("Próxima")',
+                        '[class*="pagination"] button:last-child',
+                        '[class*="pagination"] a:last-child',
+                        '[class*="Pagination"] button:last-child',
+                        'button[class*="next"]',
+                        'a[class*="next"]',
+                    ]
+                    print(f"[{platform.name}] glue URL capturada. Buscando paginas 2..{_glue_pages} via clique paginação...")
+                    for i in range(2, _glue_pages + 1):
+                        _nav_count_before = len(captured_urls)
+                        _clicked = False
+                        for sel in _next_selectors:
+                            try:
+                                btn = page.locator(sel).first
+                                if await btn.is_visible(timeout=2000):
+                                    await btn.scroll_into_view_if_needed()
+                                    await page.wait_for_timeout(500)
+                                    await btn.click()
+                                    _clicked = True
+                                    break
+                            except Exception:
+                                continue
+                        if not _clicked:
+                            print(f"[{platform.name}] p{i}: botão de paginação não encontrado")
+                            break
+                        await page.wait_for_timeout(4000)
+                        for _ in range(3):
+                            await page.mouse.wheel(0, 1000)
+                            await page.wait_for_timeout(600)
+                        await page.wait_for_timeout(wait_seconds * 1000)
+                        _new = len(captured_urls) - _nav_count_before
+                        _glue_new = sum(1 for u in captured_urls[_nav_count_before:] if f"{_glue_domain}/v2/listings" in u)
+                        print(f"[{platform.name}] p{i} OK — {_glue_new} glue + {_new - _glue_new} outras URLs capturadas")
+            else:
+                print(f"[{platform.name}] nenhuma URL Glue capturada durante a navegacao")
+
 
         # QuintoAndar: se capturamos um template POST de busca (/search), fazemos replay paginado.
         if platform.name == "quinto_andar" and qa_search_templates:
@@ -2613,8 +3274,8 @@ async def capture_platform(
                 #  1) --max-pages (CLI)
                 #  2) env QA_SEARCH_PAGES
                 #  3) default 4
-                qa_pages = max_pages if isinstance(max_pages, int) and max_pages > 0 else int(os.environ.get("QA_SEARCH_PAGES", "4") or "4")
-                qa_pages = max(1, min(int(qa_pages), 50))  # safety cap
+                qa_pages = max_pages if isinstance(max_pages, int) and max_pages > 0 else 4
+                qa_pages = max(1, min(int(qa_pages), 50))
                 for i in range(qa_pages):
                     body_i = _qa_body_with_pagination(base_body, from_=i*60, size=60)
                     await replay_post(base_url, body_i, f"quintoandar_search_p{i+1}")
@@ -2666,14 +3327,22 @@ async def capture_all(
         if "quinto_andar" in platforms:
             platforms["quinto_andar"].search_query_override = search_address
 
-        # VivaReal: quando possível, navega direto para a URL de rua/bairro (mais consistente do que o fallback "CITY").
+        # VivaReal / ZapImóveis: busca via UI com "rua, cidade" extraídos do geocode
+        _geo_addr = (geo.get("raw", {}).get("address", {}) if isinstance(geo, dict) else {}) or {}
+        _road = _geo_addr.get("road") or ""
+        _geo_city = (geo.get("city") if isinstance(geo, dict) else None) or ""
+        if _road:
+            _glue_search_query = f"{_road}, {_geo_city}".strip(", ")
+        else:
+            _parsed_addr = _vr_parse_br_address(search_address)
+            _street = _parsed_addr.get("street") or ""
+            _fallback_city = _parsed_addr.get("city") or _geo_city or ""
+            _glue_search_query = f"{_street}, {_fallback_city}".strip(", ") if _street else search_address
+        print(f"[glue] query de busca UI: '{_glue_search_query}'")
         if "vivareal" in platforms:
-            vr_url = _vr_build_street_url_from_address(search_address, mode=mode, geo=geo)
-            if vr_url:
-                if mode == "rent":
-                    platforms["vivareal"].start_urls_rent = [vr_url]
-                else:
-                    platforms["vivareal"].start_urls_buy = [vr_url]
+            platforms["vivareal"].search_query_override = _glue_search_query
+        if "zapimoveis" in platforms:
+            platforms["zapimoveis"].search_query_override = _glue_search_query
 
     run_root = Path(out_dir) / "runs" / f"run_{int(time.time())}"
     ensure_dir(run_root)
@@ -2698,6 +3367,8 @@ async def capture_all(
         # Se a plataforma preferir headful, força headless=False mesmo que a flag --headless tenha sido usada
         effective_headless = headless and (not p.prefer_headful)
 
+        _lat = (geo.get("lat") if isinstance(geo, dict) else None) if _is_glue_platform(p.name) else None
+        _lon = (geo.get("lon") if isinstance(geo, dict) else None) if _is_glue_platform(p.name) else None
         await capture_platform(
             p,
             mode=mode,
@@ -2706,9 +3377,8 @@ async def capture_all(
             wait_seconds=wait_seconds,
             max_pages=max_pages,
             search_address=search_address,
-            # IMPORTANTE: não usamos coordenadas para REQUISIÇÕES de busca; elas serão usadas apenas após a lista de imóveis.
-            search_lat=None,
-            search_lon=None,
+            search_lat=_lat,
+            search_lon=_lon,
             search_city=(geo.get("city") if isinstance(geo, dict) else None),
             search_state=(geo.get("state") if isinstance(geo, dict) else None),
         )
@@ -2895,8 +3565,7 @@ def normalize_listing(
     lon = get_by_path(item, f.get("lon", ""))
 
     # Fallbacks por plataforma (quando o YAML não acompanha o schema real do payload)
-    if platform.name == "vivareal":
-        # Glue: coords costumam vir em address.point.* (em alguns payloads é approximateLat/approximateLon)
+    if _is_glue_platform(platform.name):
         if lat is None:
             lat = (
                 get_by_path(item, "address.point.lat")
@@ -2911,14 +3580,15 @@ def normalize_listing(
             )
     url = get_by_path(item, f.get("url", "")) or ""
 
-    # URLs relativas -> absolutas (quando conhecido)
     if isinstance(url, str) and url.startswith("/"):
         if platform.name == "vivareal":
             url = "https://www.vivareal.com.br" + url
+        elif platform.name == "zapimoveis":
+            url = "https://www.zapimoveis.com.br" + url
 
     price_raw = get_by_path(item, f.get("price", ""))
 
-    if platform.name == "vivareal" and price_raw in (None, "", 0):
+    if _is_glue_platform(platform.name) and price_raw in (None, "", 0):
         # Glue: geralmente vem como pricingInfos (lista)
         price_raw = item.get("pricingInfos") or get_by_path(item, "pricingInfos") or get_by_path(item, "pricingInfo") or price_raw
     price: Optional[float] = None
@@ -3738,9 +4408,8 @@ def aggregate_runs(
                 continue
 
             for item in items:
-                # VivaReal: o Glue frequentemente retorna itens no formato {"listing": {...}}.
-                # Para compatibilizar com fields no YAML (id, geoLocation..., pricingInfos...), "desembrulhamos".
-                if pname == "vivareal" and isinstance(item, dict) and isinstance(item.get("listing"), dict):
+                # Glue platforms (VivaReal/ZapImóveis): desembrulha {"listing": {...}}
+                if _is_glue_platform(pname) and isinstance(item, dict) and isinstance(item.get("listing"), dict):
                     # IMPORTANT: o Glue do VivaReal costuma trazer o link do anúncio no *wrapper* (item["link"]["href"]),
                     # enquanto o conteúdo do imóvel fica em item["listing"].
                     # Se "desembrulharmos" sem copiar esse link, perdemos a URL e a saída fica sem o campo.
@@ -3906,7 +4575,7 @@ def build_parser() -> argparse.ArgumentParser:
     cap.add_argument("--out-dir", default=".")
     cap.add_argument("--headless", action="store_true")
     cap.add_argument("--wait-seconds", type=int, default=12)
-    cap.add_argument("--max-pages", type=int, default=None, help="Máx. de páginas para capturar por plataforma (quando aplicável; ex.: QuintoAndar via replay paginado).")
+    cap.add_argument("--max-pages", type=int, default=4, help="Máx. de páginas para capturar por plataforma (padrão: 4). Aplica-se a todas as plataformas.")
     cap.add_argument("--address", "--qa-query", dest="search_address", default=None, help="Endereço (texto) para buscar imóveis. Ex.: 'Rua Guaipá, Vila Leopoldina, São Paulo - SP'.")
 
     capauto = sub.add_parser("capture_autoconfig", help="Captura e tenta autoconfigurar listing_path/fields gerando platforms.autogen.yaml.")
@@ -3915,7 +4584,7 @@ def build_parser() -> argparse.ArgumentParser:
     capauto.add_argument("--out-dir", default=".")
     capauto.add_argument("--headless", action="store_true")
     capauto.add_argument("--wait-seconds", type=int, default=12)
-    capauto.add_argument("--max-pages", type=int, default=None, help="Máx. de páginas para capturar por plataforma (quando aplicável; ex.: QuintoAndar via replay paginado).")
+    capauto.add_argument("--max-pages", type=int, default=4, help="Máx. de páginas para capturar por plataforma (padrão: 4). Aplica-se a todas as plataformas.")
     capauto.add_argument("--address", "--qa-query", dest="search_address", default=None, help="Endereço (texto) para buscar imóveis (usado antes do autoconfig).")
     capauto.add_argument("--out-config", default="platforms.autogen.yaml")
 
@@ -3962,7 +4631,7 @@ def build_parser() -> argparse.ArgumentParser:
     allcmd.add_argument("--out-dir", default=".")
     allcmd.add_argument("--headless", action="store_true")
     allcmd.add_argument("--wait-seconds", type=int, default=12)
-    allcmd.add_argument("--max-pages", type=int, default=None, help="Máx. de páginas para capturar por plataforma (quando aplicável; ex.: QuintoAndar via replay paginado).")
+    allcmd.add_argument("--max-pages", type=int, default=4, help="Máx. de páginas para capturar por plataforma (padrão: 4). Aplica-se a todas as plataformas.")
     allcmd.add_argument("--out", default="results.csv")
 
     return p
@@ -4195,28 +4864,7 @@ async def main_async():
         if center_lat is None or center_lon is None:
             raise SystemExit("Você deve informar --lat/--lon ou --address para definir o ponto de distância/raio.")
 
-        df = aggregate_runs(
-            config_path=args.config,
-            runs_dir=str(run_root),
-            center_lat=center_lat,
-            center_lon=center_lon,
-            radius_m=args.radius_m,
-            mode=args.mode,
-            min_price=args.min_price,
-            max_price=args.max_price,
-            filters={"min_bedrooms": args.min_bedrooms, "min_area_m2": args.min_area_m2},
-            w_price=args.w_price,
-            w_dist=args.w_dist,
-        )
-        out_csv = args.out
-        df.to_csv(out_csv, index=False)
-        parquet_out = os.path.splitext(out_csv)[0] + ".parquet"
-        try:
-            df.to_parquet(parquet_out, index=False)
-            print(f"OK: {out_csv} e {parquet_out} ({len(df)} imóveis)")
-        except ImportError:
-            print(f"OK: {out_csv} ({len(df)} imóveis) — parquet ignorado (instale pyarrow/fastparquet se quiser)")
-        # --- COMPILAR SAÍDA PADRONIZADA (JSON + CSV) ---
+        # --- COMPILAR SAÍDA PADRONIZADA (parsers dedicados — mais robusto) ---
         compiled = compile_run_to_std(
             run_root=run_root,
             config_path=args.config,
@@ -4232,6 +4880,55 @@ async def main_async():
         ]
         if within:
             write_compiled_listings_csv(within, Path(run_root) / "compiled_within_radius.csv")
+
+        # --- RANKING (aggregate_runs usa campos do YAML; fallback para compiled se vazio) ---
+        df = aggregate_runs(
+            config_path=args.config,
+            runs_dir=str(run_root),
+            center_lat=center_lat,
+            center_lon=center_lon,
+            radius_m=args.radius_m,
+            mode=args.mode,
+            min_price=args.min_price,
+            max_price=args.max_price,
+            filters={"min_bedrooms": args.min_bedrooms, "min_area_m2": args.min_area_m2},
+            w_price=args.w_price,
+            w_dist=args.w_dist,
+        )
+
+        # Se os parsers dedicados encontraram mais resultados que aggregate_runs, usa compiled
+        if within and len(within) > len(df):
+            _rows = []
+            for it in within:
+                if it.get("price_brl") is None or it.get("lat") is None:
+                    continue
+                _rows.append({
+                    "raw_id": it.get("listing_id", ""),
+                    "title": "",
+                    "address": it.get("address", ""),
+                    "lat": it["lat"],
+                    "lon": it["lon"],
+                    "price": it["price_brl"],
+                    "area_m2": it.get("area_m2"),
+                    "bedrooms": it.get("bedrooms"),
+                    "bathrooms": it.get("bathrooms"),
+                    "parking": it.get("parking"),
+                    "url": it.get("url", ""),
+                    "platform": it.get("platform", ""),
+                    "distance_m": it.get("distance_m"),
+                })
+            if _rows and len(_rows) > len(df):
+                print(f"Usando parsers dedicados ({len(_rows)} imóveis) em vez de aggregate_runs ({len(df)} imóveis)")
+                df = pd.DataFrame(_rows)
+
+        out_csv = args.out
+        df.to_csv(out_csv, index=False)
+        parquet_out = os.path.splitext(out_csv)[0] + ".parquet"
+        try:
+            df.to_parquet(parquet_out, index=False)
+            print(f"OK: {out_csv} e {parquet_out} ({len(df)} imóveis)")
+        except ImportError:
+            print(f"OK: {out_csv} ({len(df)} imóveis) — parquet ignorado (instale pyarrow/fastparquet se quiser)")
 
         print(f"JSON/Logs em: {run_root}")
 

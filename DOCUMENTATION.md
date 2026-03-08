@@ -1,7 +1,7 @@
 # Imóvel Ideal — Documentação Técnica Completa
 
-**Versão do documento:** 1.0  
-**Data:** 2026-03-04  
+**Versão do documento:** 1.1  
+**Data:** 2026-03-06  
 **Versão do projeto:** MVP Local v1.4
 
 ---
@@ -351,6 +351,12 @@ docker compose -p onde_morar_mvp down
 #### `POST /runs/{run_id}/zones/{zone_uid}/detail`
 - **Descrição:** Coleta ruas, POIs e pontos de transporte da zona; retorna sumário rico
 - **Request:** sem body
+- **Flags opcionais de inclusão** (lidas de `params` do run — todas `true` por default):
+  - `zone_detail_include_pois` — inclui contagem e pontos de POIs
+  - `zone_detail_include_transport` — inclui paradas/estações e linhas
+  - `zone_detail_include_green` — inclui `green_area_ratio`
+  - `zone_detail_include_flood` — inclui `flood_area_ratio`
+  - `zone_detail_include_public_safety` — inclui bloco `public_safety` com dados SSP
 - **Response** (`ZoneDetailResponse`):
   ```json
   {
@@ -372,10 +378,25 @@ docker compose -p onde_morar_mvp down
     "streets_count": 8,
     "has_street_data": true,
     "has_poi_data": true,
-    "has_transport_data": true
+    "has_transport_data": true,
+    "public_safety": {
+      "enabled": true,
+      "year": 2025,
+      "radius_km": 1.0,
+      "result": {},
+      "summary": {
+        "ocorrencias_no_raio_total": 142,
+        "top_delitos_no_raio": [{"tipo_delito": "furto", "qtd": 80}],
+        "delta_pct_vs_cidade": 12.3,
+        "regiao_media_dia": 0.39,
+        "cidade_media_dia": 0.35,
+        "delegacias_mais_proximas": [{"nome": "...", "dist_km": 0.8, "total_ocorrencias": 210}]
+      }
+    }
   }
   ```
-- **Efeito colateral:** cria artifacts em `runs/<run_id>/zones/detail/<zone_uid>/`
+- **Nota:** se `public_safety_enabled=false`, o campo `public_safety` retorna `{"enabled": false, "reason": "public_safety_enabled=false"}`
+- **Efeito colateral:** cria artifacts em `runs/<run_id>/zones/detail/<zone_uid>/`; se segurança for coletada, persiste em `runs/<run_id>/zones/detail/<zone_uid>/public_safety.json`
 
 ---
 
@@ -396,11 +417,20 @@ docker compose -p onde_morar_mvp down
   - se `street_filter` fornecido: coleta somente aquela rua
   - se não: coleta até `max_streets_per_zone` ruas (default: 3)
   - ruas sem tipo de logradouro válido são rejeitadas
+  - por default exige resultados de todas as plataformas (`require_all_listing_platforms=true`); lança erro se alguma retornar 0 resultados
 - **Response** (`ListingsScrapeResponse`):
   ```json
-  {"zone_uid": "...", "listings_count": 5}
+  {
+    "zone_uid": "...",
+    "listings_count": 5,
+    "listings_total": 127,
+    "platform_counts": {"quinto_andar": 45, "vivareal": 60, "zapimoveis": 22}
+  }
   ```
-- **Nota:** `listings_count` é o número de arquivos de resultado (run dirs), não de imóveis individuais
+- **Campos:**
+  - `listings_count` — número de arquivos de resultado (run dirs por rua)
+  - `listings_total` — total de itens de imóveis somados de todos os arquivos
+  - `platform_counts` — breakdown por plataforma (`quinto_andar`, `vivareal`, `zapimoveis`)
 
 ---
 
@@ -496,20 +526,20 @@ Determinístico: mesmo input → mesmo `run_id`.
 
 **Arquivo:** `app/schemas.py`
 
-| Schema | Uso |
-|--------|-----|
-| `ReferencePoint` | Ponto de referência (`name`, `lat`, `lon`) |
-| `RunCreateRequest` | Body do `POST /runs` |
-| `RunStatus` | Estado interno do run |
-| `RunCreateResponse` | Response do `POST /runs` |
-| `RunStatusResponse` | Response do `GET /status` |
-| `ZoneSelectionRequest` | Body do `POST .../zones/select` |
-| `SimpleMessageResponse` | Response genérica de mensagem |
-| `ZonePoint` | Ponto geográfico tipado (poi/bus_stop/station) |
-| `ZoneDetailResponse` | Response do `POST .../zones/{uid}/detail` |
-| `ListingsScrapeRequest` | Body opcional do `POST .../listings` |
-| `ListingsScrapeResponse` | Response do `POST .../listings` |
-| `FinalizeResponse` | Response do `POST .../finalize` |
+| Schema | Uso | Mudanças recentes |
+|--------|-----|------------------|
+| `ReferencePoint` | Ponto de referência (`name`, `lat`, `lon`) | — |
+| `RunCreateRequest` | Body do `POST /runs` | — |
+| `RunStatus` | Estado interno do run | — |
+| `RunCreateResponse` | Response do `POST /runs` | — |
+| `RunStatusResponse` | Response do `GET /status` | — |
+| `ZoneSelectionRequest` | Body do `POST .../zones/select` | — |
+| `SimpleMessageResponse` | Response genérica de mensagem | — |
+| `ZonePoint` | Ponto geográfico tipado (poi/bus_stop/station) | — |
+| `ZoneDetailResponse` | Response do `POST .../zones/{uid}/detail` | **+** `public_safety: Optional[Dict]` |
+| `ListingsScrapeRequest` | Body opcional do `POST .../listings` | — |
+| `ListingsScrapeResponse` | Response do `POST .../listings` | **+** `listings_total: int`, **+** `platform_counts: Dict[str,int]` |
+| `FinalizeResponse` | Response do `POST .../finalize` | — |
 
 ---
 
@@ -682,13 +712,18 @@ Executa scraping de imóveis por rua para uma zona.
 1. Obtém centróide e `streets.json` da zona
 2. Filtra ruas com tipo de logradouro válido (excluindo "acesso")
 3. Para cada rua: chama `run_listings_all` via adapter
-4. Salva resultado compilado em `runs/.../zones/detail/<zone_uid>/streets/<slug>/listings/compiled_listings.json`
+4. Procura `compiled_listings_parsed.json` primeiro; fallback para `compiled_listings.json`
+5. Salva resultado em `runs/.../zones/detail/<zone_uid>/streets/<slug>/listings/compiled_listings.json`
+6. Acumula `platform_counts_total` por plataforma
+7. Se `require_all_listing_platforms=true` e alguma tiver 0 → lança `RuntimeError`
 
 **Filtro de ruas válidas:**
 ```
 Tipos aceitos: rua, avenida, alameda, travessa, estrada, rodovia, praça, largo, viela, beco
 Tokens rejeitados: acesso
 ```
+
+**Plataformas rastreadas (`_REQUIRED_LISTING_PLATFORMS`):** `quinto_andar`, `vivareal`, `zapimoveis`
 
 **Parâmetros de `params`:**
 
@@ -701,14 +736,29 @@ Tokens rejeitados: acesso
 | `listing_max_pages` | Máximo de páginas | 2 |
 | `listings_config` | Caminho do `platforms.yaml` | `"platforms.yaml"` |
 | `listings_headless` | Modo headless | `True` |
+| `require_all_listing_platforms` | Exige ≥1 resultado de cada plataforma | `True` |
+
+**Helpers internos:**
+- `_platform_counts_from_payload(payload)` — conta itens por plataforma a partir do payload JSON
+- `_infer_state_from_address(address)` — extrai UF via regex `", XX"` do endereço (ex: `", SP"` → `"SP"`)
+- `_REQUIRED_LISTING_PLATFORMS` — constante com as 3 plataformas obrigatórias
 
 #### `finalize_run(run_dir, selected_zone_uids, params) → Dict[str, Path]`
 Consolida imóveis de todas as zonas selecionadas, aplica scoring e exporta.
 
 **Filtros de qualidade:**
 - `address` deve ter tipo de logradouro válido e não conter "acesso"
-- `state` deve estar preenchido
+- `state`: se ausente, inferido de `_infer_state_from_address()`; se `require_state_in_listing=true` e ainda vazio → imóvel rejeitado (default do param: `false`)
 - Coordenadas válidas para inclusão no GeoJSON
+
+**Enriquecimento de segurança pública por zona:**
+- Chama `get_zone_public_safety()` para cada zona selecionada
+- Adiciona a cada imóvel os campos:
+  - `zone_public_safety_enabled` — bool
+  - `zone_public_safety_year` — int
+  - `zone_public_safety_radius_km` — float
+  - `zone_public_safety_occurrences_total` — int
+  - `zone_public_safety_delta_pct_vs_cidade` — float
 
 **Score calculado por imóvel:**
 ```python
@@ -716,10 +766,16 @@ score = w_price * price_score + w_transport * transport_score + w_pois * poi_sco
 ```
 (ver seção 14 para detalhes)
 
+**Params adicionais:**
+
+| Param | Descrição | Default |
+|-------|-----------|--------|
+| `require_state_in_listing` | Rejeita imóvel se estado ausente após inferência | `false` |
+
 **Output:**
 ```
 runs/<run_id>/final/
-  listings_final.json      # Lista ordenada por score (todos)
+  listings_final.json      # Lista ordenada por score (com campos zone_public_safety_*)
   listings_final.csv       # CSV com todos os campos
   listings_final.geojson   # Apenas imóveis com coordenadas válidas
   zones_final.geojson      # Cópia das zonas consolidadas
@@ -730,7 +786,7 @@ runs/<run_id>/final/
 ### `core/public_safety_ops.py`
 
 #### `build_public_safety_artifacts(run_dir, reference_points, params) → (Path, List[Path])`
-Coleta dados de segurança pública (SSP/CEM) por ponto de referência dinamicamente via `segurancaRegiao.py`.
+Coleta dados de segurança pública (SSP/CEM) por ponto de referência dinamicamente via `segurancaRegiao.py`. Usada pelo Runner na etapa `public_safety`.
 
 **Parâmetros de `params`:**
 
@@ -749,6 +805,41 @@ runs/<run_id>/security/by_ref/ref_<i>/public_safety.json
 ```
 runs/<run_id>/security/public_safety.json
 ```
+
+#### `get_zone_public_safety(run_dir, zone_uid, lat, lon, params) → Dict`
+Retorna dados de segurança pública para uma zona específica. Chamada pelo endpoint `zone_detail` e por `finalize_run`.
+
+**Lógica:**
+1. Se `public_safety_enabled=false` → retorna `{"enabled": False, "reason": "..."}`
+2. Se `runs/<run_id>/zones/detail/<zone_uid>/public_safety.json` já existir → reutiliza cache
+3. Caso contrário, chama `segurancaRegiao.run_query(lat, lon, radius_km, ano)` e persiste
+4. Em caso de erro: propaga se `public_safety_fail_on_error=true`; senão retorna `{"enabled": False, "error": "..."}`
+
+**Estrutura de retorno:**
+```json
+{
+  "enabled": true,
+  "year": 2025,
+  "radius_km": 1.0,
+  "result": { "...dados brutos SSP..." },
+  "summary": {
+    "ocorrencias_no_raio_total": 142,
+    "top_delitos_no_raio": [{"tipo_delito": "furto", "qtd": 80}],
+    "delta_pct_vs_cidade": 12.3,
+    "regiao_media_dia": 0.39,
+    "cidade_media_dia": 0.35,
+    "delegacias_mais_proximas": [{"nome": "...", "dist_km": 0.8, "total_ocorrencias": 210}]
+  }
+}
+```
+
+**Artifact persistido:**
+```
+runs/<run_id>/zones/detail/<zone_uid>/public_safety.json
+```
+
+#### `_build_public_safety_summary(result) → Dict`
+Helper interno: extrai sumário legível dos dados brutos SSP — total de ocorrências, top 5 tipos de delito, comparativo com média municipal e delegacias próximas.
 
 ---
 
@@ -1019,6 +1110,7 @@ runs/<run_id>/
 │           ├── streets.json            # Lista de ruas da zona
 │           ├── pois.json               # POIs por categoria
 │           ├── transport.json          # Paradas/estações na zona
+│           ├── public_safety.json      # Cache SSP por zona (get_zone_public_safety)
 │           └── streets/
 │               └── <street_slug>/
 │                   └── listings/
@@ -1028,7 +1120,7 @@ runs/<run_id>/
 │                           └── run_<timestamp>/     # Run dir do scraper
 │
 └── final/
-    ├── listings_final.json             # Lista rankeada de imóveis
+    ├── listings_final.json             # Lista rankeada (com campos zone_public_safety_*)
     ├── listings_final.csv              # Em CSV
     ├── listings_final.geojson          # Imóveis com coordenadas válidas
     └── zones_final.geojson             # Cópia das zonas consolidadas
@@ -1096,7 +1188,15 @@ Dados que devem existir localmente **antes** de executar o pipeline.
 
 ### `platforms.yaml`
 
-Configura o comportamento do scraper por plataforma:
+Configura o comportamento do scraper por plataforma. **3 plataformas configuradas** (a 3ª foi adicionada recentemente):
+
+| Plataforma | Chave | Modo de captura | `prefer_headful` |
+|-----------|-------|-----------------|------------------|
+| QuintoAndar | `quinto_andar` | `__NEXT_DATA__` JSON na página | `false` |
+| VivaReal | `vivareal` | Interceptação GraphQL (`api/graphql`) | `true` |
+| ZAP Imóveis | `zapimoveis` | Interceptação `glue-api.zapimoveis.com.br/v2/listings` | `false` | ← **adicionado** |
+
+**Estrutura por entrada:**
 
 ```yaml
 platforms:
@@ -1105,7 +1205,7 @@ platforms:
       rent: [...]   # URLs de aluguel
       buy: [...]    # URLs de compra
     include_url_substrings: [...]  # Filtro de URLs para interceptação
-    listing_path: "..."            # Caminho JSON para os dados
+    listing_path: "..."            # Caminho JSON para os dados (vazio = usa heurística)
     fields:
       id: "..."
       lat: "..."
@@ -1119,6 +1219,8 @@ platforms:
       url: "..."
     prefer_headful: true/false     # Modo headful para plataformas que detectam headless
 ```
+
+**Configuração ZAP Imóveis (adicionada):** usa o serviço Glue API do grupo OLX (`glue-api.zapimoveis.com.br`), o mesmo backend do VivaReal com schema similar. Campo `parking` mapeado para `parkingSpaces` (diferente das outras plataformas).
 
 ### Parâmetros do pipeline (`params` em `POST /runs`)
 
@@ -1142,6 +1244,13 @@ platforms:
 | `max_streets_per_zone` | int | 3 | Máximo de ruas por zona para scraping |
 | `listings_config` | str | "platforms.yaml" | Caminho da config de plataformas |
 | `listings_headless` | bool | true | Playwright em modo headless |
+| `require_all_listing_platforms` | bool | true | Exige ≥1 resultado de cada plataforma obrigatória |
+| `require_state_in_listing` | bool | false | Rejeita imóvel se `state` ausente mesmo após inferência |
+| `zone_detail_include_pois` | bool | true | Inclui POIs na resposta de detalhe de zona |
+| `zone_detail_include_transport` | bool | true | Inclui transporte na resposta de detalhe de zona |
+| `zone_detail_include_green` | bool | true | Inclui `green_area_ratio` na resposta de detalhe de zona |
+| `zone_detail_include_flood` | bool | true | Inclui `flood_area_ratio` na resposta de detalhe de zona |
+| `zone_detail_include_public_safety` | bool | true | Inclui bloco SSP (`public_safety`) na resposta de detalhe |
 | `price_ref` | float | 5000 | Preço de referência (para score) |
 | `transport_ref_m` | float | 1500 | Distância transporte de referência (score) |
 | `pois_ref_m` | float | 1500 | Distância POI de referência (score) |

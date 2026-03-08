@@ -27,11 +27,31 @@ class Runner:
         try:
             self._stage_mark(run_id, "validate", "running")
             await asyncio.sleep(0.01)
-            self._stage_mark(run_id, "validate", "success")
 
             payload = self.store.get_input(run_id)
             reference_points = payload.get("reference_points") or []
             params = payload.get("params") or {}
+
+            if not params.get("zone_radius_m"):
+                raise ValueError(
+                    "zone_radius_m is required. Set the zone radius slider before starting a run."
+                )
+
+            self._stage_mark(run_id, "validate", "success")
+            self.store.append_log(
+                run_id,
+                level="info",
+                stage="validate",
+                message=(
+                    f"pipeline inputs: refs={len(reference_points)} "
+                    f"zone_radius_m={params.get('zone_radius_m', '(not set)')} "
+                    f"listing_mode={params.get('listing_mode', 'rent')} "
+                    f"listing_max_pages={params.get('listing_max_pages', 2)} "
+                    f"max_streets_per_zone={params.get('max_streets_per_zone', 3)} "
+                    f"public_safety_enabled={params.get('public_safety_enabled', False)} "
+                    f"zone_dedupe_m={params.get('zone_dedupe_m', 50)}"
+                ),
+            )
 
             runs_dir = Path(self.store.runs_dir)
             run_dir = runs_dir / run_id
@@ -115,6 +135,21 @@ class Runner:
             self._stage_mark(run_id, current_stage, "running")
             zone_dedupe_m = float(params.get("zone_dedupe_m", 50.0))
             await asyncio.to_thread(consolidate_zones, run_dir, zone_dedupe_m=zone_dedupe_m)
+            # Log how many zones were produced
+            try:
+                import json as _json
+                consolidated_path = run_dir / "zones" / "consolidated" / "zones_consolidated.geojson"
+                zones_count = 0
+                if consolidated_path.exists():
+                    zones_count = len(_json.loads(consolidated_path.read_text(encoding="utf-8")).get("features", []))
+                self.store.append_log(
+                    run_id,
+                    level="info",
+                    stage=current_stage,
+                    message=f"consolidação concluída: zones_count={zones_count} zone_dedupe_m={zone_dedupe_m}",
+                )
+            except Exception:
+                pass
             self._stage_mark(run_id, current_stage, "success")
 
             self.store.update_status(run_id, state="success", stage="done")

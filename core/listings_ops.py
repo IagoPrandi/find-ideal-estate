@@ -11,6 +11,7 @@ from core.public_safety_ops import get_zone_public_safety
 from core.zone_ops import get_zone_feature, haversine_m, zone_centroid_lonlat
 
 
+
 def _slugify(s: str) -> str:
     s = (s or "").strip().lower()
     s = re.sub(r"[^a-z0-9]+", "-", s)
@@ -58,15 +59,28 @@ def _extract_streets(streets_path: Path, max_items: int) -> List[str]:
 def scrape_zone_listings(run_dir: Path, zone_uid: str, params: Dict[str, Any]) -> List[Path]:
     zone = get_zone_feature(run_dir, zone_uid)
     lon, lat = zone_centroid_lonlat(zone)
+
+    # zone_radius_m is required — validated upstream in the pipeline.
+    if params.get("zone_radius_m") is None:
+        raise ValueError("zone_radius_m is required in params")
+    radius_m = float(params["zone_radius_m"])
+
     streets_path = run_dir / "zones" / "detail" / zone_uid / "streets.json"
     if not streets_path.exists():
         raise FileNotFoundError(f"streets.json not found for zone {zone_uid}")
 
+    require_all_platforms = bool(params.get("require_all_listing_platforms", True))
     street_filter = params.get("street_filter")
     if street_filter and str(street_filter).strip():
-        streets = [str(street_filter).strip()]
-        if not _address_has_valid_street_type(streets[0]):
-            streets = []
+        # User explicitly chose a street — scrape only that street, no fallbacks.
+        primary_street = str(street_filter).strip()
+        streets = []
+        if _address_has_valid_street_type(primary_street):
+            streets.append(primary_street)
+        if not streets:
+            # Street name doesn't match valid type patterns but user still sent it;
+            # include it anyway so the user gets feedback rather than an empty run.
+            streets = [primary_street]
     else:
         streets = _extract_streets(streets_path, max_items=int(params.get("max_streets_per_zone", 3)))
         if not streets:
@@ -75,7 +89,6 @@ def scrape_zone_listings(run_dir: Path, zone_uid: str, params: Dict[str, Any]) -
             if isinstance(raw_streets, list):
                 streets = [str(item).strip() for item in raw_streets if str(item).strip()][: int(params.get("max_streets_per_zone", 3))]
     mode = str(params.get("listing_mode", "rent"))
-    radius_m = float(params.get("listing_radius_m", 1500))
     max_pages = int(params.get("listing_max_pages", 2))
     config_path = Path(params.get("listings_config", "platforms.yaml"))
 
@@ -93,6 +106,7 @@ def scrape_zone_listings(run_dir: Path, zone_uid: str, params: Dict[str, Any]) -
     )
 
     out_paths: List[Path] = []
+    platform_counts_total: Dict[str, int] = {platform: 0 for platform in _REQUIRED_LISTING_PLATFORMS}
     failed_streets = 0
     skipped_no_json = 0
     for street in streets:
@@ -107,6 +121,9 @@ def scrape_zone_listings(run_dir: Path, zone_uid: str, params: Dict[str, Any]) -
             street=street,
             street_slug=slug,
         )
+        def _log_fn(level: str, stage: str, message: str, **kw: Any) -> None:
+            _append_run_log(run_dir, level=level, stage=stage, message=message, zone_uid=zone_uid, street=street, **kw)
+
         try:
             run_root = run_listings_all(
                 config_path=config_path,
@@ -118,6 +135,7 @@ def scrape_zone_listings(run_dir: Path, zone_uid: str, params: Dict[str, Any]) -
                 radius_m=radius_m,
                 max_pages=max_pages,
                 headless=bool(params.get("listings_headless", True)),
+                log_fn=_log_fn,
             )
         except Exception as ex:
             # Falha por rua/plataforma não deve derrubar o run inteiro.
@@ -135,14 +153,20 @@ def scrape_zone_listings(run_dir: Path, zone_uid: str, params: Dict[str, Any]) -
             )
             continue
 
+        # Use compiled_listings.json (correct data), not _parsed.json which has scraper bugs
         src_json = run_root / "compiled_listings.json"
+        if not src_json.exists():
+            src_json = None
         src_csv = run_root / "compiled_listings.csv"
-        if src_json.exists():
+        if src_json is not None and src_json.exists():
             dst_json = base_out / "compiled_listings.json"
             dst_json.write_text(src_json.read_text(encoding="utf-8"), encoding="utf-8")
             out_paths.append(dst_json)
             try:
                 payload = _load_json(dst_json)
+                payload_platform_counts = _platform_counts_from_payload(payload)
+                for platform in _REQUIRED_LISTING_PLATFORMS:
+                    platform_counts_total[platform] += int(payload_platform_counts.get(platform) or 0)
                 if isinstance(payload, dict):
                     items = payload.get("items")
                 elif isinstance(payload, list):
@@ -160,6 +184,7 @@ def scrape_zone_listings(run_dir: Path, zone_uid: str, params: Dict[str, Any]) -
                 zone_uid=zone_uid,
                 street=street,
                 street_slug=slug,
+                source_json=src_json.name,
                 listings_count=count,
             )
         else:
@@ -187,7 +212,20 @@ def scrape_zone_listings(run_dir: Path, zone_uid: str, params: Dict[str, Any]) -
         streets_failed=failed_streets,
         streets_without_json=skipped_no_json,
         outputs_json=len(out_paths),
+        platform_counts=platform_counts_total,
     )
+
+    if require_all_platforms and not street_filter:
+        missing_platforms = [
+            platform
+            for platform, count in platform_counts_total.items()
+            if int(count or 0) <= 0
+        ]
+        if missing_platforms:
+            raise RuntimeError(
+                "Coleta de imóveis inválida: plataformas sem resultados. "
+                f"missing={missing_platforms}; counts={platform_counts_total}; zone_uid={zone_uid}"
+            )
 
     return out_paths
 
@@ -221,6 +259,8 @@ _VALID_STREET_TYPE_PATTERNS = [
 ]
 _VALID_STREET_TYPE_RE = re.compile("|".join(_VALID_STREET_TYPE_PATTERNS), flags=re.IGNORECASE)
 _FORBIDDEN_ADDRESS_TOKEN_RE = re.compile(r"\bacesso\b", flags=re.IGNORECASE)
+_STATE_IN_ADDRESS_RE = re.compile(r",\s*([A-Z]{2})\b")
+_REQUIRED_LISTING_PLATFORMS = ("quinto_andar", "vivareal", "zapimoveis")
 
 
 def _address_has_valid_street_type(v: Any) -> bool:
@@ -234,8 +274,65 @@ def _address_has_valid_street_type(v: Any) -> bool:
     return _VALID_STREET_TYPE_RE.search(s) is not None
 
 
+def _infer_state_from_address(address: Any) -> str | None:
+    if not isinstance(address, str):
+        return None
+    match = _STATE_IN_ADDRESS_RE.search(address.upper())
+    if not match:
+        return None
+    return match.group(1)
+
+
+def _platform_counts_from_payload(payload: Any) -> Dict[str, int]:
+    counts: Dict[str, int] = {platform: 0 for platform in _REQUIRED_LISTING_PLATFORMS}
+    if not isinstance(payload, dict):
+        return counts
+
+    explicit = payload.get("platform_counts")
+    if isinstance(explicit, dict):
+        for platform in _REQUIRED_LISTING_PLATFORMS:
+            try:
+                counts[platform] = int(explicit.get(platform) or 0)
+            except Exception:
+                counts[platform] = 0
+        return counts
+
+    items = payload.get("items")
+    if not isinstance(items, list):
+        return counts
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        platform = str(item.get("platform") or "").strip().lower()
+        if platform in counts:
+            counts[platform] += 1
+
+    return counts
+
+
 def finalize_run(run_dir: Path, selected_zone_uids: List[str], params: Dict[str, Any]) -> Dict[str, Path]:
+    # zone_radius_m is required for distance filtering
+    if params.get("zone_radius_m") is None:
+        raise ValueError("zone_radius_m is required in params for finalize")
+    zone_radius_m = float(params["zone_radius_m"])
+
+    _append_run_log(
+        run_dir,
+        level="info",
+        stage="finalize",
+        message="iniciando finalização",
+        selected_zones=selected_zone_uids,
+        zones_count=len(selected_zone_uids),
+        zone_radius_m=zone_radius_m,
+        params_price_ref=params.get("price_ref"),
+        params_w_price=params.get("w_price"),
+        params_w_transport=params.get("w_transport"),
+        params_w_pois=params.get("w_pois"),
+        params_require_state=params.get("require_state_in_listing"),
+    )
     result: List[Dict[str, Any]] = []
+    filtered_distance_count = 0
 
     for zone_uid in selected_zone_uids:
         zone = get_zone_feature(run_dir, zone_uid)
@@ -288,13 +385,27 @@ def finalize_run(run_dir: Path, selected_zone_uids: List[str], params: Dict[str,
                 lat = _safe_float(it.get("lat") or it.get("latitude"))
                 lon = _safe_float(it.get("lon") or it.get("longitude"))
 
+                # Filter out listings outside zone radius (bad scraper results)
+                if lat is not None and lon is not None:
+                    distance_m = haversine_m(lat, lon, zone_lat, zone_lon)
+                    if distance_m > zone_radius_m:
+                        filtered_distance_count += 1
+                        continue
+
                 address = it.get("address")
                 if not _address_has_valid_street_type(address):
                     continue
 
                 state = it.get("state")
                 if state is None or str(state).strip() == "":
+                    state = _infer_state_from_address(address)
+
+                require_state = bool(params.get("require_state_in_listing", False))
+                if require_state and (state is None or str(state).strip() == ""):
                     continue
+
+                if state is not None and str(state).strip() != "":
+                    it["state"] = str(state).strip().upper()
 
                 min_poi = None
                 min_transport = None
@@ -353,6 +464,7 @@ def finalize_run(run_dir: Path, selected_zone_uids: List[str], params: Dict[str,
         listings_total=len(result),
         listings_with_coords=with_coords,
         listings_without_coords=without_coords,
+        filtered_by_distance=filtered_distance_count,
     )
 
     result = sorted(result, key=lambda x: x.get("score_listing_v1", 0.0), reverse=True)

@@ -113,7 +113,19 @@ def _extract_quintoandar_ids_from_visible_pages(state: dict) -> List[str]:
     )
     out: List[str] = []
     if isinstance(pages, dict):
-        pages = pages.get("pages") or pages.get("items") or pages.get("results")
+        nested_pages = pages.get("pages") or pages.get("items") or pages.get("results")
+        if isinstance(nested_pages, dict):
+            ordered_values = []
+            for key in sorted(nested_pages.keys(), key=lambda x: int(x) if str(x).isdigit() else str(x)):
+                ordered_values.append(nested_pages[key])
+            pages = ordered_values
+        elif nested_pages is not None:
+            pages = nested_pages
+        else:
+            ordered_values = []
+            for key in sorted(pages.keys(), key=lambda x: int(x) if str(x).isdigit() else str(x)):
+                ordered_values.append(pages[key])
+            pages = ordered_values
     if isinstance(pages, list):
         for p in pages:
             if isinstance(p, list):
@@ -328,30 +340,40 @@ def parse_run_dir(platform_dir: str | Path) -> List[dict]:
     if not p.exists():
         return []
 
-    next_data = _latest_file(str(p / "quintoandar_next_data_*.json"))
-    next_page = _latest_file(str(p / "quintoandar_next_page_*.json"))
+    next_data_files = sorted(glob.glob(str(p / "quintoandar_next_data_*.json")))
+    next_page_files = sorted(glob.glob(str(p / "quintoandar_next_page_*.json")))
     coords_fp = _latest_file(str(p / "replay_quintoandar_coordinates_full_*.json"))
 
     coords_json = _read_json(coords_fp) if coords_fp else None
     coords_map = _quintoandar_coords_map(coords_json) if isinstance(coords_json, dict) else None
 
-    payload_fp = next_data or next_page
-    if not payload_fp:
-        return []
-    payload = _read_json(payload_fp)
-    state = get_by_path(payload, "props.pageProps.initialState") or get_by_path(payload, "pageProps.initialState")
-    if not isinstance(state, dict):
-        # fallback: alguns endpoints devolvem o state no topo
-        if isinstance(payload, dict):
-            for key in ("initialState", "state", "data", "result"):
-                cand = payload.get(key)
-                if isinstance(cand, dict):
-                    state = cand
-                    break
-    if not isinstance(state, dict):
+    payload_files = [*next_data_files, *next_page_files]
+    if not payload_files:
         return []
 
-    return parse_quintoandar_state_to_std(state, coords_map=coords_map)
+    out: List[dict] = []
+    seen = set()
+    for payload_fp in payload_files:
+        payload = _read_json(payload_fp)
+        state = get_by_path(payload, "props.pageProps.initialState") or get_by_path(payload, "pageProps.initialState")
+        if not isinstance(state, dict):
+            if isinstance(payload, dict):
+                for key in ("initialState", "state", "data", "result"):
+                    cand = payload.get(key)
+                    if isinstance(cand, dict):
+                        state = cand
+                        break
+        if not isinstance(state, dict):
+            continue
+
+        parsed = parse_quintoandar_state_to_std(state, coords_map=coords_map)
+        for item in parsed:
+            key = (item.get("platform"), item.get("listing_id"))
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(item)
+    return out
 
 
 # ----------------------------

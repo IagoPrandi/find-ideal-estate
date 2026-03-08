@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 import math
 import re
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
+
+logger = logging.getLogger(__name__)
 
 import fiona
 from pyproj import CRS, Transformer
@@ -29,6 +33,22 @@ def haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 
 def _load_json(path: Path) -> Dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _param_as_bool(value: Any, default: bool = True) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "t", "yes", "y", "on"}:
+            return True
+        if normalized in {"0", "false", "f", "no", "n", "off"}:
+            return False
+    return default
 
 
 def get_zone_feature(run_dir: Path, zone_uid: str) -> Dict[str, Any]:
@@ -128,43 +148,56 @@ def _load_transport(
 
 
 def build_zone_detail(run_dir: Path, zone_uid: str, params: Dict[str, Any]) -> Dict[str, Path]:
+    t0 = time.perf_counter()
+    logger.info(
+        '{"service": "zone_ops", "fn": "build_zone_detail", "event": "start", '
+        '"run_id": "%s", "zone_uid": "%s", "include_pois": %s, "include_transport": %s}',
+        run_dir.name, zone_uid,
+        str(bool(params.get("zone_detail_include_pois", True))).lower(),
+        str(bool(params.get("zone_detail_include_transport", True))).lower(),
+    )
     zone = get_zone_feature(run_dir, zone_uid)
     lon, lat = zone_centroid_lonlat(zone)
     zone_geom = shape(zone.get("geometry") or {})
     if zone_geom.is_empty:
         raise ValueError(f"zone geometry empty for zone {zone_uid}")
 
-    bounds = zone_geom.bounds
-    corners = [
-        (bounds[0], bounds[1]),
-        (bounds[0], bounds[3]),
-        (bounds[2], bounds[1]),
-        (bounds[2], bounds[3]),
-    ]
-    radius_m = max(haversine_m(lat, lon, corner_lat, corner_lon) for corner_lon, corner_lat in corners)
-    radius_m = max(radius_m + 150.0, 300.0)
-
-    streets_radius_m = max(float(params.get("zone_detail_radius_m", 1200)), radius_m)
+    # Use zone_radius_m as the canonical radius for all zone detail operations
+    if params.get("zone_radius_m") is None:
+        raise ValueError("zone_radius_m is required in params for zone detail")
+    zone_radius_m = float(params["zone_radius_m"])
+    
     streets_path = run_dir / "zones" / "detail" / zone_uid / "streets.json"
     pois_path = run_dir / "zones" / "detail" / zone_uid / "pois.json"
     transport_path = run_dir / "zones" / "detail" / zone_uid / "transport.json"
 
+    include_pois = _param_as_bool(params.get("zone_detail_include_pois"), True)
+    include_transport = _param_as_bool(params.get("zone_detail_include_transport"), True)
+
     run_streets(
         lon=lon,
         lat=lat,
-        radius_m=streets_radius_m,
+        radius_m=zone_radius_m,
         out_path=streets_path,
         step_m=float(params.get("street_step_m", 150)),
         query_radius_m=float(params.get("street_query_radius_m", 120)),
         max_workers=int(params.get("street_max_workers", 8)),
     )
-    run_pois(
-        lon=lon,
-        lat=lat,
-        radius_m=radius_m,
-        out_path=pois_path,
-        limit=int(params.get("pois_limit", 25)),
-    )
+
+    if include_pois:
+        run_pois(
+            lon=lon,
+            lat=lat,
+            radius_m=zone_radius_m,
+            out_path=pois_path,
+            limit=int(params.get("pois_limit", 25)),
+        )
+    else:
+        pois_path.parent.mkdir(parents=True, exist_ok=True)
+        pois_path.write_text(
+            json.dumps({"results": [], "disabled": True}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
 
     if pois_path.exists():
         pois_data = _load_json(pois_path)
@@ -182,10 +215,35 @@ def build_zone_detail(run_dir: Path, zone_uid: str, params: Dict[str, Any]) -> D
         pois_data["filter_scope"] = "zone_polygon"
         pois_path.write_text(json.dumps(pois_data, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    transport = _load_transport(run_dir=run_dir, lon=lon, lat=lat, radius_m=radius_m, zone_geom=zone_geom)
+    if include_transport:
+        transport = _load_transport(run_dir=run_dir, lon=lon, lat=lat, radius_m=zone_radius_m, zone_geom=zone_geom)
+    else:
+        transport = {"bus_stops": [], "stations": [], "disabled": True}
     transport_path.parent.mkdir(parents=True, exist_ok=True)
     transport_path.write_text(json.dumps(transport, ensure_ascii=False, indent=2), encoding="utf-8")
 
+    duration_ms = round((time.perf_counter() - t0) * 1000)
+    pois_count = 0
+    transport_count = 0
+    streets_count = 0
+    try:
+        streets_count = len(json.loads(streets_path.read_text(encoding="utf-8")).get("streets", []))
+    except Exception:
+        pass
+    try:
+        pois_count = len(json.loads(pois_path.read_text(encoding="utf-8")).get("results", []))
+    except Exception:
+        pass
+    try:
+        t_data = json.loads(transport_path.read_text(encoding="utf-8"))
+        transport_count = len(t_data.get("bus_stops", [])) + len(t_data.get("stations", []))
+    except Exception:
+        pass
+    logger.info(
+        '{"service": "zone_ops", "fn": "build_zone_detail", "event": "done", '
+        '"run_id": "%s", "zone_uid": "%s", "streets": %d, "pois": %d, "transport_points": %d, "duration_ms": %d}',
+        run_dir.name, zone_uid, streets_count, pois_count, transport_count, duration_ms,
+    )
     return {
         "streets": streets_path,
         "pois": pois_path,

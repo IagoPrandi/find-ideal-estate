@@ -42,6 +42,7 @@ type LayerKey = "routes" | "train" | "busStops" | "zones" | "flood" | "green" | 
 type InteractionMode = "primary" | "interest";
 type PropertyMode = "rent" | "buy";
 type ExecutionStageKey = "zones" | "selectZone" | "detailZone" | "zoneListings" | "finalize";
+type ZoneInfoKey = "pois" | "transport" | "green" | "flood" | "publicSafety";
 
 type ReferencePoint = {
   name: string;
@@ -97,6 +98,14 @@ const INTEREST_CATEGORIES = [
   "Farmácia",
   "Pin livre"
 ];
+
+const ZONE_INFO_LABELS: Record<ZoneInfoKey, string> = {
+  pois: "POIs da zona",
+  transport: "Transporte da zona",
+  green: "Área verde da zona",
+  flood: "Alagamento da zona",
+  publicSafety: "Segurança pública"
+};
 
 const EXECUTION_STAGE_META: Record<ExecutionStageKey, { label: string; expectedSec: number }> = {
   zones: { label: "Gerar zonas", expectedSec: 180 },
@@ -225,6 +234,13 @@ export default function App() {
   const [maxTravelTimeMin, setMaxTravelTimeMin] = useState(25);
   const [seedBusSearchMaxDistM, setSeedBusSearchMaxDistM] = useState(250);
   const [seedRailSearchMaxDistM, setSeedRailSearchMaxDistM] = useState(1200);
+  const [zoneInfoSelection, setZoneInfoSelection] = useState<Record<ZoneInfoKey, boolean>>({
+    pois: true,
+    transport: true,
+    green: true,
+    flood: true,
+    publicSafety: true
+  });
   const [zoneStreets, setZoneStreets] = useState<string[]>([]);
   const [stopsLoading, setStopsLoading] = useState(false);
   const [loadingText, setLoadingText] = useState("");
@@ -690,7 +706,11 @@ export default function App() {
                 await selectZones(currentRunId, [uid]);
                 const detail = await getZoneDetail(currentRunId, uid);
                 setZoneDetailData(detail);
-                setLayerVisibility((current) => ({ ...current, pois: true, busStops: true }));
+                setLayerVisibility((current) => ({
+                  ...current,
+                  pois: Boolean(detail.has_poi_data),
+                  busStops: Boolean(detail.has_transport_data)
+                }));
                 setZoneListingMessage("Detalhamento concluído. Escolha como buscar imóveis.");
                 setStatusMessage(`Detalhamento finalizado para ${uid}.`);
               } catch (error) {
@@ -1728,10 +1748,15 @@ export default function App() {
         ],
         params: {
           cache_dir: "data_cache",
-          public_safety_enabled: true,
+          public_safety_enabled: zoneInfoSelection.publicSafety,
           public_safety_fail_on_error: false,
           public_safety_radius_km: 1.0,
           public_safety_year: 2025,
+          zone_detail_include_pois: zoneInfoSelection.pois,
+          zone_detail_include_transport: zoneInfoSelection.transport,
+          zone_detail_include_green: zoneInfoSelection.green,
+          zone_detail_include_flood: zoneInfoSelection.flood,
+          zone_detail_include_public_safety: zoneInfoSelection.publicSafety,
           zone_dedupe_m: 50,
           zone_radius_m: zoneRadiusM,
           t_bus: maxTravelTimeMin,
@@ -1876,7 +1901,11 @@ export default function App() {
     try {
       const detail = await getZoneDetail(runId, selectedZoneUid);
       setZoneDetailData(detail);
-      setLayerVisibility((current) => ({ ...current, pois: true, busStops: true }));
+      setLayerVisibility((current) => ({
+        ...current,
+        pois: Boolean(detail.has_poi_data),
+        busStops: Boolean(detail.has_transport_data)
+      }));
       setZoneListingMessage("Detalhamento concluído. Escolha como buscar imóveis.");
       setStatusMessage(`Detalhamento finalizado para ${selectedZoneUid}.`);
       setActiveStep(3);
@@ -2722,6 +2751,29 @@ export default function App() {
                 </div>
               </section>
 
+              <section className="mt-4 rounded-panel border border-border p-4 text-sm">
+                <h2 className="font-semibold">6) Informações da zona (checklist)</h2>
+                <p className="mt-1 text-xs text-muted">Somente itens marcados serão processados no detalhamento da zona.</p>
+                <div className="mt-3 space-y-2">
+                  {(Object.keys(ZONE_INFO_LABELS) as ZoneInfoKey[]).map((key) => (
+                    <label key={key} className="flex cursor-pointer items-center gap-2 text-xs text-text">
+                      <input
+                        type="checkbox"
+                        checked={zoneInfoSelection[key]}
+                        onChange={(event) =>
+                          setZoneInfoSelection((current) => ({
+                            ...current,
+                            [key]: event.target.checked
+                          }))
+                        }
+                        className="h-4 w-4 accent-primary"
+                      />
+                      <span>{ZONE_INFO_LABELS[key]}</span>
+                    </label>
+                  ))}
+                </div>
+              </section>
+
               <button
                 type="button"
                 onClick={handleCreateRun}
@@ -2835,88 +2887,109 @@ export default function App() {
                 {zoneDetailData ? (
                   <div className="mt-2 rounded-lg border border-border/70 bg-bg px-2 py-2 text-[11px] text-muted">
                     <p className="font-semibold text-text mb-1">{zoneDetailData.zone_name}</p>
-                    <div className="grid grid-cols-2 gap-2">
-                      <div className="rounded border border-border px-2 py-1.5">
-                        <strong>Área verde</strong>
-                        <p>{(zoneDetailData.green_area_ratio * 100).toFixed(1)}%</p>
+                    {zoneInfoSelection.green || zoneInfoSelection.flood ? (
+                      <div className="grid grid-cols-2 gap-2">
+                        {zoneInfoSelection.green ? (
+                          <div className="rounded border border-border px-2 py-1.5">
+                            <strong>Área verde</strong>
+                            <p>{((zoneDetailData.green_area_ratio ?? 0) * 100).toFixed(1)}%</p>
+                          </div>
+                        ) : null}
+                        {zoneInfoSelection.flood ? (
+                          <div className="rounded border border-border px-2 py-1.5">
+                            <strong>Área alagável</strong>
+                            <p>{((zoneDetailData.flood_area_ratio ?? 0) * 100).toFixed(1)}%</p>
+                          </div>
+                        ) : null}
                       </div>
-                      <div className="rounded border border-border px-2 py-1.5">
-                        <strong>Área alagável</strong>
-                        <p>{(zoneDetailData.flood_area_ratio * 100).toFixed(1)}%</p>
-                      </div>
-                      <div className="rounded border border-border px-2 py-1.5">
-                        <strong>Pontos ônibus</strong>
-                        <p>{zoneDetailData.bus_stop_count}</p>
-                      </div>
-                      <div className="rounded border border-border px-2 py-1.5">
-                        <strong>Pontos trem/metrô</strong>
-                        <p>{zoneDetailData.train_station_count}</p>
-                      </div>
-                    </div>
-                    <p className="mt-2">
-                      <strong>Linhas ônibus:</strong> {zoneDetailData.bus_lines_count} · <strong>Linhas trem/metrô:</strong> {zoneDetailData.train_lines_count}
-                    </p>
-                    <p className="mt-1 font-semibold text-text">POIs por categoria</p>
-                    <ul className="space-y-0.5">
-                      {Object.entries(zoneDetailData.poi_count_by_category).map(([category, count]) => (
-                        <li key={category}>{category}: {count}</li>
-                      ))}
-                    </ul>
-                    <p className="mt-1 text-[11px]">POIs exibidos no mapa: {zoneDetailData.poi_points.length}</p>
-                    <p className="mt-1 font-semibold text-text">Linhas usadas para gerar zona</p>
-                    <ul className="space-y-0.5">
-                      {zoneDetailData.lines_used_for_generation.map((line, idx) => (
-                        <li key={`${line.route_id}_${idx}`}>{line.mode.toUpperCase()} · {line.route_id || "sem código"} · {line.line_name || "sem nome"}</li>
-                      ))}
-                    </ul>
-                    <p className="mt-1 font-semibold text-text">Referências de transporte</p>
-                    <ul className="space-y-0.5">
-                      <li>
-                        Seed (mais próximo do ponto principal): {zoneDetailData.seed_transport_point?.name || "não encontrado"}
-                      </li>
-                      <li>
-                        Downstream da zona: {zoneDetailData.downstream_transport_point?.name || "não encontrado"}
-                      </li>
-                    </ul>
-
-                    <p className="mt-2 font-semibold text-text">Segurança pública</p>
-                    {zoneDetailData.public_safety?.enabled ? (
+                    ) : null}
+                    {zoneInfoSelection.transport ? (
                       <>
-                        <p className="mt-0.5">
-                          Ano: {zoneDetailData.public_safety?.year ?? "N/A"} · Raio: {zoneDetailData.public_safety?.radius_km ?? "N/A"} km
+                        <div className="mt-2 grid grid-cols-2 gap-2">
+                          <div className="rounded border border-border px-2 py-1.5">
+                            <strong>Pontos ônibus</strong>
+                            <p>{zoneDetailData.bus_stop_count}</p>
+                          </div>
+                          <div className="rounded border border-border px-2 py-1.5">
+                            <strong>Pontos trem/metrô</strong>
+                            <p>{zoneDetailData.train_station_count}</p>
+                          </div>
+                        </div>
+                        <p className="mt-2">
+                          <strong>Linhas ônibus:</strong> {zoneDetailData.bus_lines_count} · <strong>Linhas trem/metrô:</strong> {zoneDetailData.train_lines_count}
                         </p>
-                        <p className="mt-0.5">
-                          <strong>Total de ocorrências no raio:</strong>{" "}
-                          {zoneDetailData.public_safety?.summary?.ocorrencias_no_raio_total ?? "N/A"}
-                        </p>
-                        <p className="mt-0.5">
-                          <strong>Comparativo vs cidade (média/dia):</strong>{" "}
-                          {typeof zoneDetailData.public_safety?.summary?.delta_pct_vs_cidade === "number"
-                            ? `${(zoneDetailData.public_safety.summary.delta_pct_vs_cidade * 100).toFixed(1)}%`
-                            : "N/A"}
-                        </p>
-                        <p className="mt-1 font-semibold text-text">Top delitos no raio</p>
+                        <p className="mt-1 font-semibold text-text">Linhas usadas para gerar zona</p>
                         <ul className="space-y-0.5">
-                          {(zoneDetailData.public_safety?.summary?.top_delitos_no_raio || []).slice(0, 5).map((item) => (
-                            <li key={item.tipo_delito}>{item.tipo_delito}: {item.qtd}</li>
+                          {zoneDetailData.lines_used_for_generation.map((line, idx) => (
+                            <li key={`${line.route_id}_${idx}`}>{line.mode.toUpperCase()} · {line.route_id || "sem código"} · {line.line_name || "sem nome"}</li>
                           ))}
                         </ul>
-                        <p className="mt-1 font-semibold text-text">2 DPs mais próximas</p>
+                        <p className="mt-1 font-semibold text-text">Referências de transporte</p>
                         <ul className="space-y-0.5">
-                          {(zoneDetailData.public_safety?.summary?.delegacias_mais_proximas || []).slice(0, 2).map((dp) => (
-                            <li key={dp.nome}>
-                              {dp.nome} · {typeof dp.dist_km === "number" ? `${dp.dist_km.toFixed(2)} km` : "distância N/A"}
-                            </li>
-                          ))}
+                          <li>
+                            Seed (mais próximo do ponto principal): {zoneDetailData.seed_transport_point?.name || "não encontrado"}
+                          </li>
+                          <li>
+                            Downstream da zona: {zoneDetailData.downstream_transport_point?.name || "não encontrado"}
+                          </li>
                         </ul>
                       </>
-                    ) : (
-                      <p className="mt-0.5 text-xs">
-                        {zoneDetailData.public_safety?.error
-                          ? `Não foi possível carregar segurança pública: ${zoneDetailData.public_safety.error}`
-                          : "Segurança pública desabilitada para este run."}
-                      </p>
-                    )}
+                    ) : null}
+
+                    {zoneInfoSelection.pois ? (
+                      <>
+                        <p className="mt-1 font-semibold text-text">POIs por categoria</p>
+                        <ul className="space-y-0.5">
+                          {Object.entries(zoneDetailData.poi_count_by_category).map(([category, count]) => (
+                            <li key={category}>{category}: {count}</li>
+                          ))}
+                        </ul>
+                        <p className="mt-1 text-[11px]">POIs exibidos no mapa: {zoneDetailData.poi_points.length}</p>
+                      </>
+                    ) : null}
+
+                    {zoneInfoSelection.publicSafety ? (
+                      <>
+                        <p className="mt-2 font-semibold text-text">Segurança pública</p>
+                        {zoneDetailData.public_safety?.enabled ? (
+                          <>
+                            <p className="mt-0.5">
+                              Ano: {zoneDetailData.public_safety?.year ?? "N/A"} · Raio: {zoneDetailData.public_safety?.radius_km ?? "N/A"} km
+                            </p>
+                            <p className="mt-0.5">
+                              <strong>Total de ocorrências no raio:</strong>{" "}
+                              {zoneDetailData.public_safety?.summary?.ocorrencias_no_raio_total ?? "N/A"}
+                            </p>
+                            <p className="mt-0.5">
+                              <strong>Comparativo vs cidade (média/dia):</strong>{" "}
+                              {typeof zoneDetailData.public_safety?.summary?.delta_pct_vs_cidade === "number"
+                                ? `${(zoneDetailData.public_safety.summary.delta_pct_vs_cidade * 100).toFixed(1)}%`
+                                : "N/A"}
+                            </p>
+                            <p className="mt-1 font-semibold text-text">Top delitos no raio</p>
+                            <ul className="space-y-0.5">
+                              {(zoneDetailData.public_safety?.summary?.top_delitos_no_raio || []).slice(0, 5).map((item) => (
+                                <li key={item.tipo_delito}>{item.tipo_delito}: {item.qtd}</li>
+                              ))}
+                            </ul>
+                            <p className="mt-1 font-semibold text-text">2 DPs mais próximas</p>
+                            <ul className="space-y-0.5">
+                              {(zoneDetailData.public_safety?.summary?.delegacias_mais_proximas || []).slice(0, 2).map((dp) => (
+                                <li key={dp.nome}>
+                                  {dp.nome} · {typeof dp.dist_km === "number" ? `${dp.dist_km.toFixed(2)} km` : "distância N/A"}
+                                </li>
+                              ))}
+                            </ul>
+                          </>
+                        ) : (
+                          <p className="mt-0.5 text-xs">
+                            {zoneDetailData.public_safety?.error
+                              ? `Não foi possível carregar segurança pública: ${zoneDetailData.public_safety.error}`
+                              : "Segurança pública desabilitada para este run."}
+                          </p>
+                        )}
+                      </>
+                    ) : null}
                   </div>
                 ) : null}
               </section>

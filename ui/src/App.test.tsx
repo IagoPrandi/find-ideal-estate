@@ -80,6 +80,9 @@ vi.mock("mapbox-gl", () => {
       this.layers.add(layer.id);
       return this;
     }
+    moveLayer() {
+      return this;
+    }
     getLayer(id: string) {
       return this.layers.has(id) ? { id } : undefined;
     }
@@ -116,6 +119,9 @@ vi.mock("mapbox-gl", () => {
       return this;
     }
     zoomOut() {
+      return this;
+    }
+    resize() {
       return this;
     }
     remove() {
@@ -184,10 +190,10 @@ describe("App frontend FE smoke", () => {
     render(<App />);
 
     await user.click(screen.getByRole("button", { name: "Ajuda" }));
-    expect(screen.getByRole("heading", { name: /Ajuda — FE1/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /^Ajuda$/i })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Fechar" }));
-    expect(screen.queryByRole("heading", { name: /Ajuda — FE1/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: /^Ajuda$/i })).not.toBeInTheDocument();
   });
 
   it("toggles panel minimize and restore", async () => {
@@ -297,6 +303,11 @@ describe("App frontend FE smoke", () => {
     expect(params.public_safety_fail_on_error).toBe(false);
     expect(params.public_safety_radius_km).toBe(1);
     expect(params.public_safety_year).toBe(2025);
+    expect(params.zone_detail_include_pois).toBe(true);
+    expect(params.zone_detail_include_transport).toBe(true);
+    expect(params.zone_detail_include_green).toBe(true);
+    expect(params.zone_detail_include_flood).toBe(true);
+    expect(params.zone_detail_include_public_safety).toBe(true);
 
     expect(await screen.findByRole("heading", { name: "Selecionar zona" })).toBeInTheDocument();
     expect(screen.getByText(/Zona 1/i)).toBeInTheDocument();
@@ -347,7 +358,7 @@ describe("App frontend FE smoke", () => {
     expect(
       await screen.findByText(/Nenhuma zona consolidada retornada\. Revise os dados de referência\./i)
     ).toBeInTheDocument();
-    expect(screen.getByText(/Estado:\s*empty/i)).toBeInTheDocument();
+    expect(screen.getByText(/zonas:\s*empty/i)).toBeInTheDocument();
   });
 
   it("covers FE6 long-text scenario for interests and keeps panel functional", async () => {
@@ -370,5 +381,53 @@ describe("App frontend FE smoke", () => {
 
     expect(await screen.findByText(longLabel)).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Ponto de Referência" })).toBeInTheDocument();
+  });
+
+  it("sends unchecked zone info options as false in run params", async () => {
+    const user = userEvent.setup();
+    let createRunPayload: Record<string, unknown> | null = null;
+
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+
+      if (url.endsWith("/runs") && init?.method === "POST") {
+        createRunPayload = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null;
+        return jsonResponse({
+          run_id: "run_checklist_flags",
+          status: {
+            state: "running",
+            stage: "zones_raw"
+          }
+        });
+      }
+
+      return jsonResponse({ detail: "not found" }, 404);
+    });
+
+    vi.stubGlobal("fetch", fetchMock);
+    render(<App />);
+
+    await triggerMapClick(-23.55052, -46.633308);
+
+    await user.click(screen.getByLabelText("POIs da zona"));
+    await user.click(screen.getByLabelText("Transporte da zona"));
+    await user.click(screen.getByLabelText("Área verde da zona"));
+    await user.click(screen.getByLabelText("Alagamento da zona"));
+    await user.click(screen.getByLabelText("Segurança pública"));
+
+    await user.click(screen.getByRole("button", { name: "Gerar Zonas Candidatas" }));
+
+    expect(createRunPayload).not.toBeNull();
+    if (!createRunPayload) {
+      throw new Error("createRun payload was not captured");
+    }
+
+    const params = (createRunPayload["params"] as Record<string, unknown>) || {};
+    expect(params.zone_detail_include_pois).toBe(false);
+    expect(params.zone_detail_include_transport).toBe(false);
+    expect(params.zone_detail_include_green).toBe(false);
+    expect(params.zone_detail_include_flood).toBe(false);
+    expect(params.zone_detail_include_public_safety).toBe(false);
+    expect(params.public_safety_enabled).toBe(false);
   });
 });

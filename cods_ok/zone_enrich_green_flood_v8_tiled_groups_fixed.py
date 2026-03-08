@@ -269,8 +269,8 @@ def main() -> int:
     ap.add_argument("--zones", default="zones.geojson")
     ap.add_argument("--ranking", default="ranking.csv")
 
-    ap.add_argument("--green-tiles-dir", required=True)
-    ap.add_argument("--green-tile-index", required=True)
+    ap.add_argument("--green-tiles-dir", default=None, help="Required unless --skip-green is set.")
+    ap.add_argument("--green-tile-index", default=None, help="Required unless --skip-green is set.")
 
     ap.add_argument("--green-layer", default=None, help="Layer inside each tile gpkg (optional)")
     ap.add_argument("--flood-gpkg", default="geoportal_mancha_inundacao_25.gpkg")
@@ -280,6 +280,8 @@ def main() -> int:
     ap.add_argument("--r-flood-m", type=float, default=800.0)
     ap.add_argument("--progress-every", type=int, default=10)
     ap.add_argument("--fast-area-sum", action="store_true", help="Skip union/dedupe; sum intersections (can overestimate if overlaps).")
+    ap.add_argument("--skip-green", action="store_true", help="Skip green area computation; set green_ratio=0 for all zones.")
+    ap.add_argument("--skip-flood", action="store_true", help="Skip flood area computation; set flood_ratio=0 for all zones.")
     ap.add_argument("-v", "--verbose", action="count", default=0)
 
     args = ap.parse_args()
@@ -298,13 +300,33 @@ def main() -> int:
     ranking_fp = runs_dir / args.ranking
     flood_fp = geodir / args.flood_gpkg
 
-    green_index_fp = Path(args.green_tile_index)
+    skip_green = bool(args.skip_green)
+    skip_flood = bool(args.skip_flood)
+
+    if not skip_green and (not args.green_tiles_dir or not args.green_tile_index):
+        ap.error("--green-tiles-dir and --green-tile-index are required unless --skip-green is set")
+
+    # Fast path: both layers disabled — write zeros and exit immediately.
+    if skip_green and skip_flood:
+        zones = gpd.read_file(str(zones_fp))
+        results = [{"zone_id": str(row.get("zone_id", i)), "green_ratio": 0.0, "flood_ratio": 0.0,
+                    "tiles_hit": 0, "tiles_loaded": 0, "green_feats_loaded": 0, "dt_s": 0.0}
+                   for i, (_, row) in enumerate(zones.iterrows())]
+        df = pd.DataFrame(results)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        df.to_csv(out_dir / "zones_enriched_green_flood.csv", index=False, encoding="utf-8")
+        log("WARNING", "skip-green + skip-flood: both disabled, wrote zeros.", verbose, 0)
+        return 0
+
+    green_index_fp = Path(args.green_tile_index) if not skip_green else None
 
     log("WARNING", "Arquivos:", verbose, 0)
     log("WARNING", f"- zones: {zones_fp}", verbose, 0)
     log("WARNING", f"- ranking: {ranking_fp}", verbose, 0)
-    log("WARNING", f"- flood: {flood_fp} ({file_size_mb(flood_fp):.1f} MB)", verbose, 0)
-    log("WARNING", f"- tile_index: {green_index_fp}", verbose, 0)
+    if not skip_flood:
+        log("WARNING", f"- flood: {flood_fp} ({file_size_mb(flood_fp):.1f} MB)", verbose, 0)
+    if not skip_green:
+        log("WARNING", f"- tile_index: {green_index_fp}", verbose, 0)
 
     t0 = now()
     log("INFO", "→ Ler zones.geojson ...", verbose, 0)
@@ -315,40 +337,43 @@ def main() -> int:
     utm_crs = ensure_utm_crs(zones, verbose)
     zones_utm = zones.to_crs(utm_crs)
 
-    # Load tiles index
-    t1 = now()
-    tile_recs, tiles_crs = read_tile_index(green_index_fp, verbose)
-    log("INFO", f"✓ Ler tile_index.csv ({now()-t1:.2f}s)", verbose, 0)
+    # Load tiles index (only when green is enabled)
+    tile_recs = []
+    tiles_crs = None
+    tf_utm_to_tiles = None
+    tile_boxes = []
+    tile_tree = STRtree([])
+    tile_box_id_to_idx: Dict[int, int] = {}
+    if not skip_green:
+        t1 = now()
+        tile_recs, tiles_crs = read_tile_index(green_index_fp, verbose)
+        log("INFO", f"✓ Ler tile_index.csv ({now()-t1:.2f}s)", verbose, 0)
+        tf_utm_to_tiles = Transformer.from_crs(utm_crs, tiles_crs, always_xy=True)
+        tile_boxes = [box(*tr.bbox) for tr in tile_recs]
+        tile_tree = STRtree(tile_boxes)
+        tile_box_id_to_idx = {id(g): i for i, g in enumerate(tile_boxes)}
 
-    # Transformer UTM -> tiles CRS (often same)
-    tf_utm_to_tiles = Transformer.from_crs(utm_crs, tiles_crs, always_xy=True)
-
-    # Build STRtree on tile bbox polygons (in tiles CRS)
-    tile_boxes = [box(*tr.bbox) for tr in tile_recs]
-    tile_tree = STRtree(tile_boxes)
-    # Map geometry object identity -> index (for Shapely 1.x query that returns geometries)
-    tile_box_id_to_idx = {id(g): i for i, g in enumerate(tile_boxes)}
-
-    # Flood load + cache
-    flood_cache_key = None
-    flood_geoms = None
-    if cache_dir:
-        flood_cache_key = cache_dir / "flood_geoms.pkl"
-        flood_geoms = cache_load_pickle(flood_cache_key)
-
-    if flood_geoms is None:
-        t2 = now()
-        log("INFO", "→ Carregar alagamento ...", verbose, 0)
-        flood_gdf = read_gpkg(flood_fp, args.flood_layer, None, verbose)
-        # project to UTM
-        flood_utm = flood_gdf.to_crs(utm_crs)
-        flood_geoms = list(flood_utm.geometry.values)
-        log("INFO", f"✓ Carregar alagamento ({now()-t2:.2f}s) | flood_polys={len(flood_geoms):,}", verbose, 0)
-        if cache_dir and flood_cache_key:
-            cache_save_pickle(flood_cache_key, flood_geoms)
-            log("INFO", f"Cache SAVE flood: {flood_cache_key.name}", verbose, 1)
-    else:
-        log("INFO", f"Cache HIT flood: {flood_cache_key.name} | geoms={len(flood_geoms):,}", verbose, 0)
+    # Load flood data (only when flood is enabled)
+    flood_geoms: list = []
+    if not skip_flood:
+        cached_flood = None
+        flood_cache_key = None
+        if cache_dir:
+            flood_cache_key = cache_dir / "flood_geoms.pkl"
+            cached_flood = cache_load_pickle(flood_cache_key)
+        if cached_flood is not None:
+            flood_geoms = cached_flood
+            log("INFO", f"Cache HIT flood: {flood_cache_key.name} | geoms={len(flood_geoms):,}", verbose, 0)
+        else:
+            t2 = now()
+            log("INFO", "→ Carregar alagamento ...", verbose, 0)
+            flood_gdf = read_gpkg(flood_fp, args.flood_layer, None, verbose)
+            flood_utm = flood_gdf.to_crs(utm_crs)
+            flood_geoms = list(flood_utm.geometry.values)
+            log("INFO", f"✓ Carregar alagamento ({now()-t2:.2f}s) | flood_polys={len(flood_geoms):,}", verbose, 0)
+            if cache_dir and flood_cache_key:
+                cache_save_pickle(flood_cache_key, flood_geoms)
+                log("INFO", f"Cache SAVE flood: {flood_cache_key.name}", verbose, 1)
 
     # Tile gdf cache (in-memory) by filepath
     tile_gdf_cache: Dict[str, gpd.GeoDataFrame] = {}
@@ -367,82 +392,91 @@ def main() -> int:
         buf_green = geom.buffer(args.r_green_m)
         buf_flood = geom.buffer(args.r_flood_m)
 
-        # zone bbox in tiles CRS (transform min/max corners)
-        minx, miny, maxx, maxy = buf_green.bounds
-        x0, y0 = tf_utm_to_tiles.transform(minx, miny)
-        x1, y1 = tf_utm_to_tiles.transform(maxx, maxy)
-        bb_tiles = (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
-        query_geom = box(*bb_tiles)
-
-        # select tiles by bbox intersect
-        # Shapely 2.x STRtree.query returns indices (np.int64), Shapely 1.x returns geometries.
-        try:
-            cand = tile_tree.query(query_geom, predicate="intersects")
-        except TypeError:
-            cand = tile_tree.query(query_geom)
-
-        cand_idx: List[int] = []
-        if cand is None:
-            cand_idx = []
+        if skip_green and skip_flood:
+            gr, fr = 0.0, 0.0
+            tiles_hit, tiles_loaded, feats_loaded = 0, 0, 0
+        elif skip_green:
+            gr = 0.0
+            fr = flood_ratio_for_zone(buf_flood, flood_geoms)
+            tiles_hit, tiles_loaded, feats_loaded = 0, 0, 0
         else:
-            # numpy array of indices
-            if np is not None and hasattr(cand, "dtype") and str(getattr(cand, "dtype", "")) != "object":
-                cand_idx = [int(x) for x in cand.tolist()]
-            else:
-                # list/array of geometries or indices
-                for x in list(cand):
-                    if isinstance(x, (int,)) or (np is not None and isinstance(x, getattr(np, "integer", ()))):
-                        cand_idx.append(int(x))
-                    else:
-                        j = tile_box_id_to_idx.get(id(x))
-                        if j is not None:
-                            cand_idx.append(int(j))
+            # zone bbox in tiles CRS (transform min/max corners)
+            minx, miny, maxx, maxy = buf_green.bounds
+            x0, y0 = tf_utm_to_tiles.transform(minx, miny)
+            x1, y1 = tf_utm_to_tiles.transform(maxx, maxy)
+            bb_tiles = (min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1))
+            query_geom = box(*bb_tiles)
 
-        # dedupe indices, preserve order
-        cand_idx = list(dict.fromkeys(cand_idx))
-        cand_recs = [tile_recs[j] for j in cand_idx if bounds_intersect(tile_recs[j].bbox, bb_tiles)]
+            # select tiles by bbox intersect
+            # Shapely 2.x STRtree.query returns indices (np.int64), Shapely 1.x returns geometries.
+            try:
+                cand = tile_tree.query(query_geom, predicate="intersects")
+            except TypeError:
+                cand = tile_tree.query(query_geom)
 
-        # Load green geoms from needed tiles
-        green_geoms = []
-        tiles_loaded = 0
-        feats_loaded = 0
-        for tr in cand_recs:
-            key = str(tr.filepath.resolve())
-            if key in tile_gdf_cache:
-                gdf_tile_utm = tile_gdf_cache[key]
+            cand_idx: List[int] = []
+            if cand is None:
+                cand_idx = []
             else:
-                tiles_loaded += 1
-                t_load = now()
-                gdf_tile = read_gpkg(tr.filepath, args.green_layer, None, verbose)
-                # ensure tile CRS; project to UTM for geometry operations
-                if gdf_tile.crs:
-                    gdf_tile_utm = gdf_tile.to_crs(utm_crs)
+                # numpy array of indices
+                if np is not None and hasattr(cand, "dtype") and str(getattr(cand, "dtype", "")) != "object":
+                    cand_idx = [int(x) for x in cand.tolist()]
                 else:
-                    # assume tiles_crs
-                    gdf_tile.set_crs(tiles_crs, inplace=True, allow_override=True)
-                    gdf_tile_utm = gdf_tile.to_crs(utm_crs)
-                tile_gdf_cache[key] = gdf_tile_utm
-                if verbose >= 2:
-                    log("DEBUG", f"tile_load: {Path(key).name} feats={len(gdf_tile_utm):,} dt={now()-t_load:.2f}s", verbose, 2)
-            feats_loaded += int(len(gdf_tile_utm))
-            green_geoms.extend(list(gdf_tile_utm.geometry.values))
+                    # list/array of geometries or indices
+                    for x in list(cand):
+                        if isinstance(x, (int,)) or (np is not None and isinstance(x, getattr(np, "integer", ()))):
+                            cand_idx.append(int(x))
+                        else:
+                            j = tile_box_id_to_idx.get(id(x))
+                            if j is not None:
+                                cand_idx.append(int(j))
 
-        # Compute ratios
-        gr = green_ratio_for_zone(buf_green, green_geoms, verbose)
-        fr = flood_ratio_for_zone(buf_flood, flood_geoms)
+            # dedupe indices, preserve order
+            cand_idx = list(dict.fromkeys(cand_idx))
+            cand_recs = [tile_recs[j] for j in cand_idx if bounds_intersect(tile_recs[j].bbox, bb_tiles)]
+
+            # Load green geoms from needed tiles
+            green_geoms = []
+            tiles_loaded = 0
+            feats_loaded = 0
+            for tr in cand_recs:
+                key = str(tr.filepath.resolve())
+                if key in tile_gdf_cache:
+                    gdf_tile_utm = tile_gdf_cache[key]
+                else:
+                    tiles_loaded += 1
+                    t_load = now()
+                    gdf_tile = read_gpkg(tr.filepath, args.green_layer, None, verbose)
+                    # ensure tile CRS; project to UTM for geometry operations
+                    if gdf_tile.crs:
+                        gdf_tile_utm = gdf_tile.to_crs(utm_crs)
+                    else:
+                        # assume tiles_crs
+                        gdf_tile.set_crs(tiles_crs, inplace=True, allow_override=True)
+                        gdf_tile_utm = gdf_tile.to_crs(utm_crs)
+                    tile_gdf_cache[key] = gdf_tile_utm
+                    if verbose >= 2:
+                        log("DEBUG", f"tile_load: {Path(key).name} feats={len(gdf_tile_utm):,} dt={now()-t_load:.2f}s", verbose, 2)
+                feats_loaded += int(len(gdf_tile_utm))
+                green_geoms.extend(list(gdf_tile_utm.geometry.values))
+
+            # Compute ratios
+            gr = green_ratio_for_zone(buf_green, green_geoms, verbose)
+            fr = flood_ratio_for_zone(buf_flood, flood_geoms) if not skip_flood else 0.0
+            tiles_hit = len(cand_recs)
 
         results.append({
             "zone_id": zid,
             "green_ratio": gr,
             "flood_ratio": fr,
-            "tiles_hit": len(cand_recs),
+            "tiles_hit": tiles_hit,
             "tiles_loaded": tiles_loaded,
             "green_feats_loaded": feats_loaded,
             "dt_s": now() - t_zone
         })
 
         if (i % args.progress_every == 0) or verbose >= 2:
-            log("INFO", f"[{i}/{len(zones_utm)}] zone={zid} tiles_hit={len(cand_recs)} tiles_loaded={tiles_loaded} green_ratio={gr:.3f} flood_ratio={fr:.3f} dt={now()-t_zone:.2f}s", verbose, 0)
+            log("INFO", f"[{i}/{len(zones_utm)}] zone={zid} tiles_hit={tiles_hit} tiles_loaded={tiles_loaded} green_ratio={gr:.3f} flood_ratio={fr:.3f} dt={now()-t_zone:.2f}s", verbose, 0)
 
     df = pd.DataFrame(results)
     out_fp = out_dir / "zones_enriched_green_flood.csv"

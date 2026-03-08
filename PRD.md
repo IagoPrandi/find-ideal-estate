@@ -12,6 +12,23 @@
 
 - 2026-03-06 — Documentos obrigatórios abertos: `PRD.md`, `BEST_PRACTICES.md`, `skills_README.md`.
 - 2026-03-06 — Skill utilizada (primária): `develop-frontend`.
+- 2026-03-06 — Checklist da Etapa 1 ampliado para também controlar `Área verde` e `Alagamento` no detalhamento da zona (`ui/src/App.tsx`), com propagação de flags no payload de `POST /runs`.
+- 2026-03-06 — Endpoint de detalhamento ajustado para respeitar `zone_detail_include_green` e `zone_detail_include_flood` (`app/main.py`, `app/schemas.py`, `ui/src/api/schemas.ts`), retornando métricas ambientais apenas quando habilitadas.
+
+- 2026-03-05 — Documentos obrigatórios abertos: `PRD.md`, `BEST_PRACTICES.md`, `skills_README.md`.
+- 2026-03-05 — Skill utilizada (primária): `develop-frontend`.
+- 2026-03-05 — Etapa 1 atualizada com checklist de informações da zona no frontend (`ui/src/App.tsx`), permitindo selecionar processamento de `POIs`, `Transporte` e `Segurança pública` antes de criar a run.
+- 2026-03-05 — Backend de detalhamento ajustado para respeitar checklist (`core/zone_ops.py`, `app/main.py`): itens desmarcados não são processados e não são adicionados ao resumo de zona.
+- 2026-03-05 — Validação frontend concluída: `ui/src/App.test.tsx` com 8/8 testes aprovados (incluindo novo cenário de flags do checklist no payload de `POST /runs`).
+
+- 2026-03-06 — Documentos obrigatórios abertos: `PRD.md`, `BEST_PRACTICES.md`, `skills_README.md`.
+- 2026-03-06 — Skill utilizada (primária): `ops-observability-runbook`.
+- 2026-03-06 — Integração de scraping/listings avançada: `adapters/listings_adapter.py` passa a gerar `compiled_listings_parsed.json` via parsers dedicados (`vivaReal.py`, `quintoAndar.py`, `zapImoveis.py`) e a preferir `realestate_meta_search_zapImoveis.py` quando disponível.
+- 2026-03-06 — Compatibilização downstream em `core/listings_ops.py`: priorização de `compiled_listings_parsed.json`, fallback para `compiled_listings.json` legado e inferência opcional de `state` a partir de `address` para evitar descarte indevido de itens no `finalize`.
+- 2026-03-06 — Validação rápida concluída: `tests/test_hello.py` e `tests/test_runner_async.py` aprovados (2/2).
+
+- 2026-03-06 — Documentos obrigatórios abertos: `PRD.md`, `BEST_PRACTICES.md`, `skills_README.md`.
+- 2026-03-06 — Skill utilizada (primária): `develop-frontend`.
 - 2026-03-06 — Validação de contrato de segurança pública na UI: confirmação de envio de `public_safety_enabled`, `public_safety_fail_on_error`, `public_safety_radius_km` e `public_safety_year` no payload de criação de run; cobertura de teste reforçada em `ui/src/App.test.tsx`.
 
 - 2026-03-05 — Documentos obrigatórios abertos: `PRD.md`, `BEST_PRACTICES.md`, `skills_README.md`.

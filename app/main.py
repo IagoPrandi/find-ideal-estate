@@ -1,10 +1,21 @@
 import asyncio
 from collections import Counter
 import json
+import logging
 import os
+from datetime import datetime, timezone
 from pathlib import Path
-from fastapi import Body, FastAPI, HTTPException, Response
+from typing import Any
+from fastapi import Body, FastAPI, HTTPException, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import Message
+
+logger = logging.getLogger("api.access")
+logging.basicConfig(
+    level=logging.DEBUG,
+    format='{"ts": "%(asctime)s", "level": "%(levelname)s", "logger": "%(name)s", "msg": %(message)s}',
+)
 
 from app.runner import Runner
 from app.schemas import (
@@ -31,9 +42,47 @@ from core.zone_ops import (
 
 app = FastAPI(title="Imovel Ideal API", version="0.2.0")
 
+
+class RequestBodyLoggingMiddleware(BaseHTTPMiddleware):
+    """Log every incoming request: method, path, query, and decoded body."""
+
+    async def dispatch(self, request: Request, call_next):
+        # Read body (starlette consumes the stream once; we must re-inject it)
+        raw_body = await request.body()
+
+        async def _receive() -> Message:
+            return {"type": "http.request", "body": raw_body, "more_body": False}
+
+        request._receive = _receive  # type: ignore[attr-defined]
+
+        body_str: str | None = None
+        if raw_body:
+            try:
+                body_str = json.loads(raw_body)
+            except Exception:
+                body_str = raw_body.decode("utf-8", errors="replace")
+
+        log_entry = json.dumps(
+            {
+                "service": "api",
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "method": request.method,
+                "path": request.url.path,
+                "query": str(request.url.query) or None,
+                "body": body_str,
+            },
+            ensure_ascii=False,
+        )
+        logger.debug(log_entry)
+        return await call_next(request)
+
+
 raw_origins = os.getenv("CORS_ALLOW_ORIGINS", "http://localhost:5173,http://127.0.0.1:5173")
 allow_origins = [origin.strip() for origin in raw_origins.split(",") if origin.strip()]
 
+# RequestBodyLoggingMiddleware must be added before CORSMiddleware so body is
+# always available regardless of preflight short-circuit.
+app.add_middleware(RequestBodyLoggingMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allow_origins,
@@ -45,6 +94,22 @@ app.add_middleware(
 RUNS_DIR = os.getenv("RUNS_DIR", "runs")
 store = RunStore(RUNS_DIR)
 runner = Runner(store)
+
+
+def _param_as_bool(value: Any, default: bool = True) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "t", "yes", "y", "on"}:
+            return True
+        if normalized in {"0", "false", "f", "no", "n", "off"}:
+            return False
+    return default
 
 
 @app.get("/health")
@@ -161,6 +226,11 @@ async def zone_detail(run_id: str, zone_uid: str) -> ZoneDetailResponse:
         raise HTTPException(status_code=404, detail="run_id not found")
     payload = store.get_input(run_id)
     params = payload.get("params") or {}
+    include_pois = _param_as_bool(params.get("zone_detail_include_pois"), True)
+    include_transport = _param_as_bool(params.get("zone_detail_include_transport"), True)
+    include_green = _param_as_bool(params.get("zone_detail_include_green"), True)
+    include_flood = _param_as_bool(params.get("zone_detail_include_flood"), True)
+    include_public_safety = _param_as_bool(params.get("zone_detail_include_public_safety"), True)
     try:
         out = build_zone_detail(run_dir=run_dir, zone_uid=zone_uid, params=params)
     except Exception as ex:
@@ -181,12 +251,16 @@ async def zone_detail(run_id: str, zone_uid: str) -> ZoneDetailResponse:
         )
         zone_name = f"Zona {(zone_index + 1) if zone_index is not None else 1}"
         zone_lon, zone_lat = zone_centroid_lonlat(zone_feature)
-        public_safety = get_zone_public_safety(
-            run_dir=run_dir,
-            zone_uid=zone_uid,
-            lat=zone_lat,
-            lon=zone_lon,
-            params=params,
+        public_safety = (
+            get_zone_public_safety(
+                run_dir=run_dir,
+                zone_uid=zone_uid,
+                lat=zone_lat,
+                lon=zone_lon,
+                params=params,
+            )
+            if include_public_safety
+            else None
         )
 
         streets_data = json.loads(out["streets"].read_text(encoding="utf-8")) if out["streets"].exists() else {}
@@ -210,7 +284,7 @@ async def zone_detail(run_id: str, zone_uid: str) -> ZoneDetailResponse:
         route_id = str(trace.get("route_id") or "").strip()
         line_name = str(trace.get("busline_name") or trace.get("trip_headsign") or "").strip()
         mode = str(zone_props.get("mode") or "").strip() or "bus"
-        if route_id or line_name:
+        if include_transport and (route_id or line_name):
             lines_used_for_generation.append(
                 {
                     "mode": mode,
@@ -221,7 +295,7 @@ async def zone_detail(run_id: str, zone_uid: str) -> ZoneDetailResponse:
 
         bus_line_ids = set()
         train_line_ids = set()
-        if trace_downstream_stop_id and isinstance(features, list):
+        if include_transport and trace_downstream_stop_id and isinstance(features, list):
             for feature in features:
                 props = feature.get("properties") or {}
                 feature_trace = props.get("trace") if isinstance(props.get("trace"), dict) else {}
@@ -261,58 +335,66 @@ async def zone_detail(run_id: str, zone_uid: str) -> ZoneDetailResponse:
                     }
             return None
 
-        seed_transport_point = _find_transport_point_by_id(trace_seed_stop_id)
-        downstream_transport_point = _find_transport_point_by_id(trace_downstream_stop_id)
-        reference_transport_point = seed_transport_point or downstream_transport_point
+        seed_transport_point = _find_transport_point_by_id(trace_seed_stop_id) if include_transport else None
+        downstream_transport_point = _find_transport_point_by_id(trace_downstream_stop_id) if include_transport else None
+        reference_transport_point = (seed_transport_point or downstream_transport_point) if include_transport else None
 
-        transport_points = [
-            {
-                "kind": "bus_stop",
-                "id": stop.get("id"),
-                "name": stop.get("name"),
-                "lat": stop.get("lat"),
-                "lon": stop.get("lon"),
-            }
-            for stop in bus_stops
-            if isinstance(stop, dict)
-        ]
-        transport_points.extend(
-            [
+        transport_points = []
+        if include_transport:
+            transport_points = [
                 {
-                    "kind": "station",
-                    "id": station.get("id"),
-                    "name": station.get("name"),
-                    "lat": station.get("lat"),
-                    "lon": station.get("lon"),
+                    "kind": "bus_stop",
+                    "id": stop.get("id"),
+                    "name": stop.get("name"),
+                    "lat": stop.get("lat"),
+                    "lon": stop.get("lon"),
                 }
-                for station in stations
-                if isinstance(station, dict)
+                for stop in bus_stops
+                if isinstance(stop, dict)
             ]
-        )
+            transport_points.extend(
+                [
+                    {
+                        "kind": "station",
+                        "id": station.get("id"),
+                        "name": station.get("name"),
+                        "lat": station.get("lat"),
+                        "lon": station.get("lon"),
+                    }
+                    for station in stations
+                    if isinstance(station, dict)
+                ]
+            )
 
-        poi_points = [
-            {
-                "kind": "poi",
-                "id": str(item.get("canonical_id") or "") or None,
-                "name": str(item.get("nome") or "POI").strip() or "POI",
-                "category": str(item.get("categoria") or "outros").strip() or "outros",
-                "lat": float(item.get("latitude")),
-                "lon": float(item.get("longitude")),
-            }
-            for item in (pois_data.get("results") or [])
-            if isinstance(item, dict) and item.get("latitude") is not None and item.get("longitude") is not None
-        ]
+        poi_points = []
+        if include_pois:
+            poi_points = [
+                {
+                    "kind": "poi",
+                    "id": str(item.get("canonical_id") or "") or None,
+                    "name": str(item.get("nome") or "POI").strip() or "POI",
+                    "category": str(item.get("categoria") or "outros").strip() or "outros",
+                    "lat": float(item.get("latitude")),
+                    "lon": float(item.get("longitude")),
+                }
+                for item in (pois_data.get("results") or [])
+                if isinstance(item, dict) and item.get("latitude") is not None and item.get("longitude") is not None
+            ]
 
         return ZoneDetailResponse(
             zone_uid=zone_uid,
             zone_name=zone_name,
-            green_area_ratio=float(zone_props.get("green_ratio_r700") or zone_props.get("green_ratio") or 0.0),
-            flood_area_ratio=float(zone_props.get("flood_ratio_r800") or zone_props.get("flood_ratio") or 0.0),
-            poi_count_by_category=dict(sorted(poi_counter.items())),
-            bus_lines_count=len(bus_line_ids),
-            train_lines_count=len(train_line_ids),
-            bus_stop_count=len(bus_stops),
-            train_station_count=len(stations),
+            green_area_ratio=(
+                float(zone_props.get("green_ratio_r700") or zone_props.get("green_ratio") or 0.0) if include_green else 0.0
+            ),
+            flood_area_ratio=(
+                float(zone_props.get("flood_ratio_r800") or zone_props.get("flood_ratio") or 0.0) if include_flood else 0.0
+            ),
+            poi_count_by_category=dict(sorted(poi_counter.items())) if include_pois else {},
+            bus_lines_count=len(bus_line_ids) if include_transport else 0,
+            train_lines_count=len(train_line_ids) if include_transport else 0,
+            bus_stop_count=len(bus_stops) if include_transport else 0,
+            train_station_count=len(stations) if include_transport else 0,
             lines_used_for_generation=lines_used_for_generation,
             reference_transport_point=reference_transport_point,
             seed_transport_point=seed_transport_point,
@@ -321,8 +403,8 @@ async def zone_detail(run_id: str, zone_uid: str) -> ZoneDetailResponse:
             poi_points=poi_points,
             streets_count=int(streets_data.get("count") or len(streets_data.get("streets") or [])),
             has_street_data=bool(streets_data.get("streets")),
-            has_poi_data=bool(pois_data.get("results")),
-            has_transport_data=bool(bus_stops or stations),
+            has_poi_data=bool(pois_data.get("results")) if include_pois else False,
+            has_transport_data=bool(bus_stops or stations) if include_transport else False,
             public_safety=public_safety,
         )
     except Exception as ex:
@@ -363,6 +445,7 @@ async def zone_listings(
         raise HTTPException(status_code=400, detail=str(ex)) from ex
 
     total_items = 0
+    platform_counts: dict[str, int] = {"quinto_andar": 0, "vivareal": 0, "zapimoveis": 0}
     for listing_file in listing_files:
         if not listing_file.exists():
             continue
@@ -376,10 +459,32 @@ async def zone_listings(
             items = payload
         else:
             items = []
+        used_explicit_platform_counts = False
+        if isinstance(payload, dict):
+            payload_platform_counts = payload.get("platform_counts")
+            if isinstance(payload_platform_counts, dict):
+                for platform in platform_counts:
+                    try:
+                        platform_counts[platform] += int(payload_platform_counts.get(platform) or 0)
+                    except Exception:
+                        continue
+                used_explicit_platform_counts = True
         if isinstance(items, list):
             total_items += len(items)
+            if not used_explicit_platform_counts:
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    platform = str(item.get("platform") or "").strip().lower()
+                    if platform in platform_counts:
+                        platform_counts[platform] += 1
 
-    return ListingsScrapeResponse(zone_uid=zone_uid, listings_count=len(listing_files))
+    return ListingsScrapeResponse(
+        zone_uid=zone_uid,
+        listings_count=len(listing_files),
+        listings_total=total_items,
+        platform_counts=platform_counts,
+    )
 
 
 @app.post("/runs/{run_id}/finalize", response_model=FinalizeResponse)
@@ -434,3 +539,12 @@ async def final_listings_json(run_id: str) -> Response:
     if not p.exists():
         raise HTTPException(status_code=404, detail="final json not found")
     return Response(content=p.read_text(encoding="utf-8"), media_type="application/json")
+
+
+@app.get("/runs/{run_id}/logs")
+async def run_logs(run_id: str) -> Response:
+    """Stream the structured JSONL event log for a run (one JSON object per line)."""
+    p = Path(RUNS_DIR) / run_id / "logs" / "events.jsonl"
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="log file not found for this run")
+    return Response(content=p.read_text(encoding="utf-8"), media_type="application/x-ndjson")

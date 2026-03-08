@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import logging
 import sys
+import time
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Dict, List, Tuple
+
+logger = logging.getLogger(__name__)
 
 
 def _to_bool(value: Any, default: bool = False) -> bool:
@@ -51,9 +55,17 @@ def build_public_safety_artifacts(
     reference_points: List[Dict[str, Any]],
     params: Dict[str, Any],
 ) -> Tuple[Path, List[Path]]:
-    radius_km = float(params.get("public_safety_radius_km", 1.0))
+    t0 = time.perf_counter()
+    # zone_radius_m is required — validated upstream in the pipeline.
+    if params.get("zone_radius_m") is None:
+        raise ValueError("zone_radius_m is required in params")
+    radius_km = float(params["zone_radius_m"]) / 1000.0
     ano = int(params.get("public_safety_year", 2025))
-
+    logger.info(
+        '{"service": "public_safety_ops", "fn": "build_public_safety_artifacts", "event": "start", '
+        '"run_id": "%s", "refs": %d, "radius_km": %s, "ano": %d}',
+        run_dir.name, len(reference_points), radius_km, ano,
+    )
     module = _load_public_safety_module()
 
     by_ref: List[Dict[str, Any]] = []
@@ -91,6 +103,12 @@ def build_public_safety_artifacts(
     aggregate_path = run_dir / "security" / "public_safety.json"
     aggregate_path.parent.mkdir(parents=True, exist_ok=True)
     aggregate_path.write_text(json.dumps(aggregate, ensure_ascii=False, indent=2), encoding="utf-8")
+    duration_ms = round((time.perf_counter() - t0) * 1000)
+    logger.info(
+        '{"service": "public_safety_ops", "fn": "build_public_safety_artifacts", "event": "done", '
+        '"run_id": "%s", "artifacts": %d, "duration_ms": %d}',
+        run_dir.name, len(artifact_paths), duration_ms,
+    )
     return aggregate_path, artifact_paths
 
 
@@ -146,15 +164,29 @@ def get_zone_public_safety(
     params: Dict[str, Any],
 ) -> Dict[str, Any]:
     if not is_public_safety_enabled(params):
+        logger.debug(
+            '{"service": "public_safety_ops", "fn": "get_zone_public_safety", "event": "skipped", '
+            '"run_id": "%s", "zone_uid": "%s", "reason": "disabled"}',
+            run_dir.name, zone_uid,
+        )
         return {"enabled": False, "reason": "public_safety_enabled=false"}
 
-    radius_km = float(params.get("public_safety_radius_km", 1.0))
+    # zone_radius_m is required — validated upstream in the pipeline.
+    if params.get("zone_radius_m") is None:
+        raise ValueError("zone_radius_m is required in params")
+    radius_km = float(params["zone_radius_m"]) / 1000.0
     ano = int(params.get("public_safety_year", 2025))
     fail_on_error = is_public_safety_fail_on_error(params)
 
     out_path = run_dir / "zones" / "detail" / zone_uid / "public_safety.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
+    t0 = time.perf_counter()
+    logger.info(
+        '{"service": "public_safety_ops", "fn": "get_zone_public_safety", "event": "start", '
+        '"run_id": "%s", "zone_uid": "%s", "cache_hit": %s}',
+        run_dir.name, zone_uid, str(out_path.exists()).lower(),
+    )
     result: Dict[str, Any]
     if out_path.exists():
         try:
@@ -185,10 +217,19 @@ def get_zone_public_safety(
                 "error": str(ex),
             }
 
+    summary = _build_public_safety_summary(result)
+    duration_ms = round((time.perf_counter() - t0) * 1000)
+    logger.info(
+        '{"service": "public_safety_ops", "fn": "get_zone_public_safety", "event": "done", '
+        '"run_id": "%s", "zone_uid": "%s", "total_occurrences": %s, "duration_ms": %d}',
+        run_dir.name, zone_uid,
+        str(summary.get("ocorrencias_no_raio_total", "null")),
+        duration_ms,
+    )
     return {
         "enabled": True,
         "year": ano,
         "radius_km": radius_km,
         "result": result,
-        "summary": _build_public_safety_summary(result),
+        "summary": summary,
     }

@@ -210,8 +210,11 @@ def _extract_listings_array(glue_json: dict) -> List[dict]:
     if not isinstance(glue_json, dict):
         raise ZapImoveisNoListingsError("Payload do Glue do ZAP não é um objeto JSON (dict).")
 
-    # 1) Caminhos clássicos de busca (mesma convenção do Glue usado pelo VivaReal)
+    # Caminhos clássicos de busca (mesma convenção do Glue usado pelo VivaReal).
+    # Aqui consideramos apenas as listas que representam, de fato, o resultado
+    # da busca exibido na página — NÃO usamos estruturas de recomendação.
     candidate_paths = [
+        "search.result.listings.listing",
         "search.result.listings",
         "search.result",   # em alguns cenários a lista pode vir diretamente em `result`
         "listings",        # caminho direto na raiz (mais raro)
@@ -221,30 +224,6 @@ def _extract_listings_array(glue_json: dict) -> List[dict]:
         listings = get_by_path(glue_json, path)
         if isinstance(listings, list) and listings:
             return listings
-
-    # 2) Estrutura de recomendações do ZAP:
-    #    recommendations[].scores[].listing.listing
-    recs = glue_json.get("recommendations")
-    if isinstance(recs, list) and recs:
-        flattened: List[dict] = []
-        for rec in recs:
-            if not isinstance(rec, dict):
-                continue
-            scores = rec.get("scores")
-            if not isinstance(scores, list):
-                continue
-            for s in scores:
-                if not isinstance(s, dict):
-                    continue
-                lst = s.get("listing")
-                if isinstance(lst, dict):
-                    inner = lst.get("listing")
-                    if isinstance(inner, dict):
-                        flattened.append(inner)
-                    else:
-                        flattened.append(lst)
-        if flattened:
-            return flattened
 
     # Nenhuma lista encontrada em caminhos esperados
     # Expor as chaves de topo e de `search`/`result` para facilitar o debug.

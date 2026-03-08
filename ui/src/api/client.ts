@@ -43,8 +43,15 @@ export class ApiError extends Error {
 }
 
 async function requestJson<T>(path: string, schema: ZodSchema<T>, options: RequestOptions = {}): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
-    method: options.method || "GET",
+  const method = options.method || "GET";
+  const url = `${API_BASE}${path}`;
+
+  if (import.meta.env.DEV) {
+    console.debug("[API →]", method, url, options.body ?? null);
+  }
+
+  const response = await fetch(url, {
+    method,
     headers: {
       "Content-Type": "application/json"
     },
@@ -53,6 +60,10 @@ async function requestJson<T>(path: string, schema: ZodSchema<T>, options: Reque
 
   const text = await response.text();
   const data = text ? JSON.parse(text) : {};
+
+  if (import.meta.env.DEV) {
+    console.debug("[API ←]", response.status, method, url, data);
+  }
 
   if (!response.ok) {
     const detail = typeof data?.detail === "string" ? data.detail : "Erro inesperado da API.";

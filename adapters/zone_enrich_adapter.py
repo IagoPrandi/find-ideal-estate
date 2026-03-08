@@ -17,6 +17,15 @@ def _as_path(value: object) -> Path | None:
     return Path(text)
 
 
+def _param_as_bool(value: object, default: bool) -> bool:
+    """Coerce a param value to bool; return default when None/missing."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    return str(value).lower() not in ("false", "0", "no", "off")
+
+
 def _resolve_green_inputs(geodir: Path, params: Dict[str, Any]) -> tuple[Path, Path]:
     green_tiles_dir = _as_path(params.get("green_tiles_dir"))
     green_tile_index = _as_path(params.get("green_tile_index"))
@@ -209,16 +218,30 @@ def run_zone_enrich(
     params: Dict[str, Any] | None = None,
 ) -> None:
     params = params or {}
-    script_path = Path("cods_ok") / "zone_enrich_green_flood_v8_tiled_groups_fixed.py"
-    green_tiles_dir, green_tile_index = _resolve_green_inputs(geodir=geodir, params=params)
-    green_tiles_dir, green_tile_index = _ensure_green_tile_index(
-        geodir=geodir,
-        green_tile_index=green_tile_index,
-        green_tiles_dir=green_tiles_dir,
-        params=params,
-    )
+    include_green = _param_as_bool(params.get("zone_detail_include_green"), True)
+    include_flood = _param_as_bool(params.get("zone_detail_include_flood"), True)
+    skip_green = not include_green
+    skip_flood = not include_flood
 
-    normalized_index = _normalize_tile_index_paths(tile_index_path=green_tile_index, out_dir=out_dir)
+    # Fast path: both disabled — produce zero CSV + enriched geojson directly
+    # without launching the subprocess or resolving any tile infrastructure.
+    if skip_green and skip_flood:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        zones_path = runs_dir / "zones.geojson"
+        zones_data = json.loads(zones_path.read_text(encoding="utf-8")) if zones_path.exists() else {"features": []}
+        zero_rows = [{"zone_id": str((f.get("properties") or {}).get("zone_id", i)),
+                      "green_ratio": 0.0, "flood_ratio": 0.0,
+                      "tiles_hit": 0, "tiles_loaded": 0, "green_feats_loaded": 0, "dt_s": 0.0}
+                     for i, f in enumerate(zones_data.get("features", []))]
+        import csv as _csv
+        csv_path = out_dir / "zones_enriched_green_flood.csv"
+        with csv_path.open("w", encoding="utf-8", newline="") as fh:
+            w = _csv.DictWriter(fh, fieldnames=["zone_id","green_ratio","flood_ratio","tiles_hit","tiles_loaded","green_feats_loaded","dt_s"])
+            w.writeheader(); w.writerows(zero_rows)
+        _merge_enrich_outputs(raw_outputs_dir=runs_dir, out_dir=out_dir)
+        return
+
+    script_path = Path("cods_ok") / "zone_enrich_green_flood_v8_tiled_groups_fixed.py"
 
     args = [
         sys.executable,
@@ -229,11 +252,19 @@ def run_zone_enrich(
         str(geodir),
         "--out-dir",
         str(out_dir),
-        "--green-tiles-dir",
-        str(green_tiles_dir),
-        "--green-tile-index",
-        str(normalized_index),
     ]
+
+    # Only resolve and pass tile infrastructure when green is enabled.
+    if not skip_green:
+        green_tiles_dir, green_tile_index = _resolve_green_inputs(geodir=geodir, params=params)
+        green_tiles_dir, green_tile_index = _ensure_green_tile_index(
+            geodir=geodir,
+            green_tile_index=green_tile_index,
+            green_tiles_dir=green_tiles_dir,
+            params=params,
+        )
+        normalized_index = _normalize_tile_index_paths(tile_index_path=green_tile_index, out_dir=out_dir)
+        args += ["--green-tiles-dir", str(green_tiles_dir), "--green-tile-index", str(normalized_index)]
 
     if "r_flood_m" in params:
         args += ["--r-flood-m", str(params["r_flood_m"])]
@@ -251,6 +282,11 @@ def run_zone_enrich(
         args += ["--progress-every", str(params["zone_enrich_progress_every"])]
     if bool(params.get("zone_enrich_fast_area_sum", False)):
         args.append("--fast-area-sum")
+    # Respect the layer checkboxes from the UI.
+    if not _param_as_bool(params.get("zone_detail_include_green"), True):
+        args.append("--skip-green")
+    if not _param_as_bool(params.get("zone_detail_include_flood"), True):
+        args.append("--skip-flood")
     enrich_verbose = int(params.get("zone_enrich_verbose", 1))
     if enrich_verbose > 0:
         args.extend(["-v"] * enrich_verbose)
