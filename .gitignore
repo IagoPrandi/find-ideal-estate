@@ -20,6 +20,7 @@ out/
 .env
 .env.local
 .env*.local
+.python-version
 
 # IDE
 .vscode/
@@ -42,6 +43,8 @@ contracts/broadcast/
 *.db-journal
 db/.env
 db/src/database.types.ts
+infra/migrations/*.pyc
+infra/migrations/versions/*.pyc
 
 # Docker
 docker-compose.override.yml
@@ -49,4 +52,8 @@ docker-compose.override.yml
 # Misc
 *.pem
 .cache/
+__pycache__/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
 

@@ -7,13 +7,12 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Codigo
-COPY app ./app
-COPY core ./core
-COPY adapters ./adapters
-COPY cods_ok ./cods_ok
-COPY platforms.yaml ./platforms.yaml
-COPY *.py ./
+COPY apps/api ./apps/api
+COPY packages/contracts ./packages/contracts
+COPY infra ./infra
+COPY alembic.ini ./alembic.ini
 
 ENV PYTHONUNBUFFERED=1
+ENV PYTHONPATH=/app/apps/api:/app/apps/api/src:/app/packages/contracts
 
 EXPOSE 8000

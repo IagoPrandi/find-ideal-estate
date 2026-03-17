@@ -1,12 +1,30 @@
 # Imovel Ideal (MVP local)
 
+![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)
+
+## Fase 0 bootstrap (PRD)
+
+Estrutura base criada para o roadmap:
+
+- `apps/api`
+- `apps/web`
+- `packages/contracts`
+- `infra/migrations`
+
+Comandos de verificacao da Fase 0:
+
+- `docker compose -p onde_morar up -d`
+- `docker compose -p onde_morar ps`
+- `alembic upgrade head`
+- `curl http://localhost:8000/health`
+
 Execução local do pipeline:
 - pontos de referência -> zonas -> detalhe de zona -> scraping -> ranking -> exports finais.
 
 ## Pré-requisitos
 - Docker Desktop
 - `data_cache/` preenchido
-- `.env` com `MAPBOX_ACCESS_TOKEN`
+- `.env` baseado em `.env.example`
 
 ## Subir API/UI
 
