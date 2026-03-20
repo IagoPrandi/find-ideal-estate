@@ -2,12 +2,15 @@ import logging
 from contextlib import asynccontextmanager
 
 from api.routes.health import router as health_router
+from api.routes.jobs import router as jobs_router
+from api.routes.journeys import router as journeys_router
 from core.config import ConfigurationError, get_settings
 from core.db import close_db, init_db
 from core.logging import configure_logging
 from core.middleware import request_id_middleware
 from core.redis import close_redis, init_redis
 from fastapi import FastAPI
+from workers.bootstrap import init_workers, shutdown_workers
 
 logger = logging.getLogger(__name__)
 
@@ -18,10 +21,12 @@ async def lifespan(_: FastAPI):
     settings = get_settings()
     init_db(settings.database_url)
     init_redis(settings.redis_url)
+    init_workers(broker_kind=settings.dramatiq_broker, redis_url=settings.redis_url)
     logger.info("application started")
     try:
         yield
     finally:
+        shutdown_workers()
         await close_db()
         await close_redis()
         logger.info("application stopped")
@@ -30,6 +35,8 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="Find Ideal Estate API", version="0.1.0", lifespan=lifespan)
 app.middleware("http")(request_id_middleware)
 app.include_router(health_router)
+app.include_router(journeys_router)
+app.include_router(jobs_router)
 
 
 if __name__ == "__main__":

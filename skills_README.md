@@ -13,19 +13,20 @@ Este arquivo indexa todas as skills disponíveis em `\skills`.
 - [a2-key-aggregation](#a2-key-aggregation) — Implement/review the A2 scalable winner model using canonical playerKey per WinMode + O(1) aggregated counters & winner counts (no loops over players) for daily/monthly commit→reveal→draw→claim.
 - [automation-upkeep](#automation-upkeep) — Implement deterministic, idempotent phase automation using Chainlink-style checkUpkeep/performUpkeep for updatePhase/requestDraw/openDay/closeDay, with safe retries and manual fallback.
 - [checkout-batch-flow](#checkout-batch-flow) — Implement/review one-transaction checkout() batching (feed → commit → buyRelics → applyRelics → monthly action) with deterministic validation, canonical ordering, and exact payment reconciliation (refund extra).
-- [daily-turn-flow](#daily-turn-flow) — Enforce the canonical daily flow (OPEN/SHOP → COMMIT → REVEAL → DRAW → CLAIM → CLOSE) with strict phase checks, commit/reveal invariants, VRF lifecycle, and event expectations for indexer/UI.
+- [cloudflare-deploy](#cloudflare-deploy) — Deploy applications and infrastructure to Cloudflare using Workers, Pages, and related platform services (KV, D1, R2, Durable Objects, Queues, etc.).
 - [develop-frontend](#develop-frontend) — Review, debug and elevate AI-generated web frontends: layout stability, responsiveness, accessibility, visual consistency (tokens), UI states, and baseline performance/SEO.
 - [develop-web-game](#develop-web-game) — Build games in small steps and validate every change. Treat each iteration as: implement → act → pause → observe → adjust.
-- [frontend-contract-sim](#frontend-contract-sim) — Standardize frontend transaction flows with viem/wagmi using simulation-first, deterministic error mapping, and safe logging. Use for checkout, commit/reveal, buy/apply relics, draws, and claims.
 - [indexer-reorg-idempotent](#indexer-reorg-idempotent) — Enforce reorg-aware, idempotent indexing with stable event identity keys, replay safety, and clear optimistic vs confirmed consistency tiers. Use when touching DB writes or replay logic.
-- [ops-observability-runbook](#ops-observability-runbook) — Standardize operational observability (logs/metrics/health) and incident runbooks for app+indexer+RPC+VRF, including stuck phases, indexer lag, and DB outages. Use when touching infra, runtime config, indexer loops, workers/automation, or production readiness.
+- [linear](#linear) — Manage issues, projects & team workflows in Linear via the Linear MCP server. Use when the user wants to read, create, or update tickets in Linear.
+- [pdf](#pdf) — Read, create, or review PDF files using `reportlab`, `pdfplumber`, and `pypdf`. Prefer visual checks by rendering pages with Poppler.
 - [playwright](#playwright) — Drive a real browser from the terminal using `playwright-cli`. Prefer the bundled wrapper script so the CLI works even when it is not globally installed. Treat this skill as CLI-first automation. Do not pivot to `@playwright/test` unless the user explicitly asks for test files.
+- [playwright-interactive](#playwright-interactive) — Persistent browser and Electron interaction through `js_repl` for fast iterative UI debugging. Keep Playwright handles alive across iterations for functional and visual QA.
 - [ponder-indexer-events](#ponder-indexer-events) — Maintain Ponder event coverage + Postgres projections for the game. Use when adding/modifying on-chain events, handler logic, schema migrations, or API alignment.
 - [release-config-management](#release-config-management) — Standardize release & configuration management across chains/environments: deployments/<chainId>.json, env/runtime secrets, ABI/schema versioning, idempotent migrations, and reproducible scripts. Use when touching deploy scripts, env vars, DB migrations, ABI/events, or production setup.
-- [relics-batch-ops](#relics-batch-ops) — Standardize buy/apply relic operations with deterministic ordering, stock & fee accounting, inventory decrements, slot compatibility rules, and soldout handling. Use in Shop/Relic managers and checkout steps.
-- [resources-economy](#resources-economy) — Apply internal Resources rules (earn/redeem/get) with authorization, max supply caps, minimum redeem thresholds, and deterministic validation. Use when touching token economy or redemption logic.
+- [render-deploy](#render-deploy) — Deploy applications to Render by analyzing codebases, generating render.yaml Blueprints, and creating services via MCP tools.
 - [security-threat-checklist](#security-threat-checklist) — Apply project security requirements (threat model + Web2/Web3 checklists + mandatory scans/tests) whenever surface area changes: auth, contracts, indexer, API, infra, or admin ops.
 - [upgradeability-governance](#upgradeability-governance) — Enforce safe upgrade patterns (ERC-7201 namespaced storage, initializer discipline, authorizeUpgrade governance, and upgrade tests). Use when touching proxy/upgradeable contracts, storage layout, admin roles, or deploy scripts.
+- [vercel-deploy](#vercel-deploy) — Deploy applications and websites to Vercel. Always deploys as preview unless production is explicitly requested. Handles CLI auth and fallback deploy script.
 - [web2-wallet-auth](#web2-wallet-auth) — Implement or review Web2 wallet-based auth (SIWE/EIP-712) with nonce+expiry+anti-replay, ERC-1271 support, rate limiting, and safe logging. Use when touching login/session/authz endpoints or any signature verification off-chain.
 
 ## a2-key-aggregation
@@ -64,23 +65,19 @@ Este arquivo indexa todas as skills disponíveis em `\skills`.
 - Editing `checkout(CheckoutParams)` in contracts or the UI that builds the cart.
 - Touching pricing, fees, stock, slots, or monthly action constraints.
 
-## daily-turn-flow
+## cloudflare-deploy
 
-**Título:** Daily Turn Flow (Canonical Phases)
+**Título:** Cloudflare Deploy (Workers, Pages & Platform)
 
-**Descrição:** Enforce the canonical daily flow (OPEN/SHOP → COMMIT → REVEAL → DRAW → CLAIM → CLOSE) with strict phase checks, commit/reveal invariants, VRF lifecycle, and event expectations for indexer/UI.
+**Descrição:** Deploy applications and infrastructure to Cloudflare using Workers, Pages, and related platform services (KV, D1, R2, Durable Objects, Queues, etc.). Use when deploying, hosting, or publishing a project on Cloudflare.
 
-**Arquivo:** `skills/daily-turn-flow/SKILL.md`
+**Arquivo:** `skills/cloudflare-deploy/SKILL.md`
 
 **Quando usar (gatilhos):**
-- Any change to daily phases, deadlines, commit/reveal/draw/claim functions, or UI/Indexer logic that depends on phases.
+- User wants to deploy, host, publish, or set up a project on Cloudflare.
+- Choosing between Workers, Pages, D1, R2, KV, Durable Objects, or other Cloudflare products.
+- Setting up `wrangler` authentication or CI/CD with `CLOUDFLARE_API_TOKEN`.
 
-**Invariantes / regras centrais:**
-- Feed payment required before “active” participation that day.
-- Commit required before reveal.
-- Reveal required before being counted for winners (A2 counters update on reveal).
-- Draw must complete before any claim.
-- Claim is per mode (if multiple win modes are enabled), and each mode has its own claimed flag.
 
 ## develop-frontend
 
@@ -105,18 +102,6 @@ Este arquivo indexa todas as skills disponíveis em `\skills`.
 
 **Quando usar:** consulte a SKILL.md (não há seção explícita de *When to use*).
 
-## frontend-contract-sim
-
-**Título:** Frontend Contract Simulation (viem/wagmi)
-
-**Descrição:** Standardize frontend transaction flows with viem/wagmi using simulation-first, deterministic error mapping, and safe logging. Use for checkout, commit/reveal, buy/apply relics, draws, and claims.
-
-**Arquivo:** `skills/frontend-contract-sim/SKILL.md`
-
-**Quando usar (gatilhos):**
-- Any UI flow that sends transactions or estimates costs.
-- Error handling or user messaging around reverts.
-
 ## indexer-reorg-idempotent
 
 **Título:** Indexer Reorg + Idempotency
@@ -129,20 +114,31 @@ Este arquivo indexa todas as skills disponíveis em `\skills`.
 - Adding/changing event handlers, DB schema, or replay/re-sync behavior.
 - Any modification to how you store logs, claims, or day/month aggregates.
 
-## ops-observability-runbook
+## linear
 
-**Título:** Ops, Observability & Runbook
+**Título:** Linear (Issue & Project Management)
 
-**Descrição:** Standardize operational observability (logs/metrics/health) and incident runbooks for app+indexer+RPC+VRF, including stuck phases, indexer lag, and DB outages. Use when touching infra, runtime config, indexer loops, workers/automation, or production readiness.
+**Descrição:** Manage issues, projects & team workflows in Linear via the Linear MCP server. Use when the user wants to read, create, or update tickets in Linear.
 
-**Arquivo:** `skills/ops-observability-runbook/SKILL.md`
+**Arquivo:** `skills/linear/SKILL.md`
 
 **Quando usar (gatilhos):**
-- Any change to:
-- indexer behavior or RPC/WS usage
-- automation/worker that advances phases or requests draw
-- production deployment config (env, containers, restart policies)
-- logging/monitoring/health endpoints
+- User wants to create, update, search, or triage Linear issues/projects.
+- Sprint planning, workload balancing, or documentation audits in Linear.
+- Setting up or troubleshooting the Linear MCP connection.
+
+## pdf
+
+**Título:** PDF (Read, Generate & Validate)
+
+**Descrição:** Use when tasks involve reading, creating, or reviewing PDF files where rendering and layout matter. Prefer visual checks by rendering pages (Poppler) and use Python tools such as `reportlab`, `pdfplumber`, and `pypdf` for generation and extraction.
+
+**Arquivo:** `skills/pdf/SKILL.md`
+
+**Quando usar (gatilhos):**
+- Reading or reviewing PDF content where layout and visuals matter.
+- Creating PDFs programmatically with reliable formatting.
+- Validating final rendering before delivery.
 
 ## playwright
 
@@ -153,6 +149,19 @@ Este arquivo indexa todas as skills disponíveis em `\skills`.
 **Arquivo:** `skills/playwright/SKILL.md`
 
 **Quando usar:** consulte a SKILL.md (não há seção explícita de *When to use*).
+
+## playwright-interactive
+
+**Título:** Playwright Interactive (Persistent Browser via js_repl)
+
+**Descrição:** Persistent browser and Electron interaction through `js_repl` for fast iterative UI debugging. Keep Playwright handles alive across iterations and run functional plus visual QA without restarting the toolchain.
+
+**Arquivo:** `skills/playwright-interactive/SKILL.md`
+
+**Quando usar (gatilhos):**
+- Debugging local web or Electron apps interactively with a persistent browser session.
+- Running iterative functional and visual QA without restarting Playwright each time.
+- When `js_repl` is available and the user needs fast feedback loops on UI changes.
 
 ## ponder-indexer-events
 
@@ -182,27 +191,18 @@ Este arquivo indexa todas as skills disponíveis em `\skills`.
 - dbmate migrations / Kysely types
 - production or testnet rollout
 
-## relics-batch-ops
+## render-deploy
 
-**Título:** Relics Batch Operations (Buy + Apply)
+**Título:** Render Deploy (Git-backed & Blueprint)
 
-**Descrição:** Standardize buy/apply relic operations with deterministic ordering, stock & fee accounting, inventory decrements, slot compatibility rules, and soldout handling. Use in Shop/Relic managers and checkout steps.
+**Descrição:** Deploy applications to Render by analyzing codebases, generating render.yaml Blueprints, and creating services via MCP tools. Use when the user wants to deploy, host, or publish their application on Render's cloud platform.
 
-**Arquivo:** `skills/relics-batch-ops/SKILL.md`
-
-**Quando usar (gatilhos):**
-- Editing `buyRelics`, `applyRelics`, shop stock generation, fees, inventory/slots, or soldout-triggered relic behavior.
-
-## resources-economy
-
-**Título:** Resources Economy (Internal Token)
-
-**Descrição:** Apply internal Resources rules (earn/redeem/get) with authorization, max supply caps, minimum redeem thresholds, and deterministic validation. Use when touching token economy or redemption logic.
-
-**Arquivo:** `skills/resources-economy/SKILL.md`
+**Arquivo:** `skills/render-deploy/SKILL.md`
 
 **Quando usar (gatilhos):**
-- Editing `earnResources`, `redeemResources`, supply caps, or UI that shows balances/redemption.
+- User wants to deploy, host, publish, or set up their application on Render.
+- Creating a render.yaml Blueprint for multi-service or IaC deployments.
+- Setting up databases, cron jobs, or other Render resources.
 
 ## security-threat-checklist
 
@@ -236,6 +236,18 @@ Este arquivo indexa todas as skills disponíveis em `\skills`.
 - upgrade authorization / admin roles
 - deploy/upgrade scripts
 - contract ownership/governance configuration
+
+## vercel-deploy
+
+**Título:** Vercel Deploy (Preview & Production)
+
+**Descrição:** Deploy applications and websites to Vercel. Always deploy as preview unless the user explicitly asks for production. Handles CLI auth, fallback deploy script, and returns the preview URL.
+
+**Arquivo:** `skills/vercel-deploy/SKILL.md`
+
+**Quando usar (gatilhos):**
+- User requests deployment actions like "deploy my app", "push this live", or "create a preview deployment".
+- Setting up or using the Vercel CLI; falling back to the deploy script when auth is missing.
 
 ## web2-wallet-auth
 

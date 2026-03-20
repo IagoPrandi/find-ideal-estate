@@ -69,9 +69,9 @@ Encontrar imóvel para alugar ou comprar em São Paulo é um processo fragmentad
 | Fase | Título | Status | Concluída em | Observações |
 |---|---|---|---|---|
 | 0 | Fundação: monorepo, DB, CI | ✅ Concluída | 2026-03-16 | Stack validada no compose `onde_morar` (`api/postgres/redis`) + Alembic OK |
-| 1 | Core domain: journey, job, SSE | 🔄 Em progresso | — | Tabelas base, SSE, prova de conceito |
-| 2 | Dramatiq + worker infra | 🔄 Em progresso | — | StubBroker, RedisBroker, JobRetryPolicy |
-| 3 | Transporte: GTFS + Valhalla + OTP | ⬜ Não iniciada | — | Bloqueia Fase 4 |
+| 1 | Core domain: journey, job, SSE | ✅ Concluída | 2026-03-16 | M1.1-M1.4 concluídos com migration aplicada e smoke SSE Redis real |
+| 2 | Dramatiq + worker infra | ✅ Concluída | 2026-03-17 | StubBroker/RedisBroker, retry policy, cancelamento cooperativo, watchdog, smoke SSE |
+| 3 | Transporte: GTFS + Valhalla + OTP | 🔄 Em progresso | — | M3.1-M3.4 concluídos; restante bloqueia Fase 4 |
 | 4 | Zonas: isócronas + enriquecimento | ⬜ Não iniciada | — | Bloqueia Fase 5 |
 | 5 | Imóveis: scrapers + dedup + cache | ⬜ Não iniciada | — | Scrapers existem; precisa integração Dramatiq |
 | 6 | Dashboard + relatório PDF | ⬜ Não iniciada | — | WeasyPrint + R2 |
@@ -1227,137 +1227,137 @@ Três avulsos equivalem ao plano mensal — argumento natural de upgrade.
 ### Fase 1 — Core domain: journey, job, SSE
 
 **Objetivo:** modelo de jornada e job funcionando end-to-end com SSE real.
-**Esforço estimado:** 4–5 dias · **Status:** 🔄 Em progresso
+**Esforço estimado:** 4–5 dias · **Status:** ✅ Concluída
 **Dependências bloqueantes:** M0.2, M0.3.
 
 #### M1.1 — Schema completo de domínio
-- [ ] Migrations para `journeys`, `jobs`, `job_events`, `transport_points`, `zones` (colunas base)
-- [ ] Enums `JourneyState`, `JobType`, `JobState` definidos em `packages/contracts/`
-- [ ] Relacionamentos FK corretos; `CASCADE` em job_events → jobs
+- [x] Migrations para `journeys`, `jobs`, `job_events`, `transport_points`, `zones` (colunas base)
+- [x] Enums `JourneyState`, `JobType`, `JobState` definidos em `packages/contracts/`
+- [x] Relacionamentos FK corretos; `CASCADE` em job_events → jobs
 
 **Verificação:** `alembic upgrade head` sem erro; todas as tabelas existem com colunas esperadas.
 
 #### M1.2 — Endpoints de jornada
-- [ ] `POST /journeys` cria jornada + sessão anônima (cookie `anonymous_session_id`, HttpOnly)
-- [ ] `GET /journeys/{id}` retorna estado + `last_completed_step`
-- [ ] `PATCH /journeys/{id}` atualiza `input_snapshot`, `selected_transport_point_id`, etc.
-- [ ] `DELETE /journeys/{id}` marca como `expired`
-- [ ] DTOs `JourneyCreate`, `JourneyRead` em `packages/contracts/`
+- [x] `POST /journeys` cria jornada + sessão anônima (cookie `anonymous_session_id`, HttpOnly)
+- [x] `GET /journeys/{id}` retorna estado + `last_completed_step`
+- [x] `PATCH /journeys/{id}` atualiza `input_snapshot`, `selected_transport_point_id`, etc.
+- [x] `DELETE /journeys/{id}` marca como `expired`
+- [x] DTOs `JourneyCreate`, `JourneyRead` em `packages/contracts/`
 
 **Verificação:** `POST /journeys` → body com `id`; cookie `anonymous_session_id` presente na resposta.
 
 #### M1.3 — Endpoints de job
-- [ ] `POST /jobs` cria job associado a uma jornada
-- [ ] `GET /jobs/{id}` retorna estado + `progress_percent` + `current_stage`
-- [ ] `POST /jobs/{id}/cancel` grava `cancel_requested_at`, responde 202
+- [x] `POST /jobs` cria job associado a uma jornada
+- [x] `GET /jobs/{id}` retorna estado + `progress_percent` + `current_stage`
+- [x] `POST /jobs/{id}/cancel` grava `cancel_requested_at`, responde 202
 
 **Verificação:** job criado e listado com estado `pending`.
 
 #### M1.4 — SSE via Redis pub/sub
-- [ ] `GET /jobs/{id}/events` abre stream SSE
-- [ ] Worker stub publica em `job:{id}` no Redis; cliente recebe no stream
-- [ ] Reconexão com `Last-Event-ID`: API reenvia eventos de `job_events` desde o ID
-- [ ] Cleanup de assinatura Redis ao desconectar (sem leak)
+- [x] `GET /jobs/{id}/events` abre stream SSE
+- [x] Worker stub publica em `job:{id}` no Redis; cliente recebe no stream
+- [x] Reconexão com `Last-Event-ID`: API reenvia eventos de `job_events` desde o ID
+- [x] Cleanup de assinatura Redis ao desconectar (sem leak)
 
 **Verificação:** abrir stream → publicar manualmente no Redis → evento chega ao cliente em < 500ms.
 Desconectar e reconectar com `Last-Event-ID=X` → recebe eventos posteriores a X.
 
 ---
 
-### Fase 2 — Dramatiq + worker infrastructure 🔄
+### Fase 2 — Dramatiq + worker infrastructure ✅
 
 **Objetivo:** sistema de filas real com retry, heartbeat e cancelamento cooperativo.
-**Esforço estimado:** 5–6 dias · **Status:** 🔄 Em progresso
+**Esforço estimado:** 5–6 dias · **Status:** ✅ Concluída (2026-03-17)
 **Dependências bloqueantes:** M1.3, M1.4.
 
-#### M2.1 — Broker e filas ⬜
-- [ ] `StubBroker` ativo em contexto de testes (`DRAMATIQ_BROKER=stub`)
-- [ ] `RedisBroker` ativo em contexto de produção
-- [ ] Definição de filas em `workers/queue.py`:
+#### M2.1 — Broker e filas ✅
+- [x] `StubBroker` ativo em contexto de testes (`DRAMATIQ_BROKER=stub`)
+- [x] `RedisBroker` ativo em contexto de produção
+- [x] Definição de filas em `workers/queue.py`:
   `transport`, `zones`, `enrichment`, `scrape_browser`, `scrape_http`, `deduplication`, `reports`, `prewarm`
-- [ ] Concorrências corretas conforme tabela da seção 8
-- [ ] `Priority.USER_REQUEST = 0`, `Priority.PREWARM = 5`
+- [x] Concorrências corretas conforme tabela da seção 8
+- [x] `Priority.USER_REQUEST = 0`, `Priority.PREWARM = 5`
 
 **Verificação:** testes unitários passam com `StubBroker`; zero imports de Redis em módulos de domínio.
 
-#### M2.2 — JobRetryPolicy e middleware ⬜
-- [ ] `JobRetryPolicy` com backoffs distintos por tipo de job
-- [ ] Middleware `JobStateMiddleware`: atualiza `jobs.state` + emite SSE em cada transição
-- [ ] Middleware de heartbeat: publica `job_heartbeat:{job_id}` a cada 30s, TTL 120s
-- [ ] Transições cobertas por testes unitários: `pending→running→completed`, `failed→retrying→pending`
+#### M2.2 — JobRetryPolicy e middleware ✅
+- [x] `JobRetryPolicy` com backoffs distintos por tipo de job
+- [x] Middleware `JobStateMiddleware`: atualiza `jobs.state` + emite SSE em cada transição
+- [x] Middleware de heartbeat: publica `job_heartbeat:{job_id}` a cada 30s, TTL 120s
+- [x] Transições cobertas por testes unitários: `pending→running→completed`, `failed→retrying→pending`
 
 **Verificação:** job que lança exceção na primeira tentativa → estado `retrying` → re-executa com backoff correto.
 
-#### M2.3 — Cancelamento cooperativo ⬜
-- [ ] `JobCancelledException` importável em qualquer handler
-- [ ] Helper `check_cancellation(job_id)` verifica `cancel_requested_at` antes de cada sub-etapa
-- [ ] Handler de exemplo usa `check_cancellation` entre etapas
-- [ ] Estado final: `cancelled_partial` (resultado parcial persiste em `result_ref`)
-- [ ] `POST /jobs/{id}/cancel` testado end-to-end com handler de exemplo
+#### M2.3 — Cancelamento cooperativo ✅
+- [x] `JobCancelledException` importável em qualquer handler
+- [x] Helper `check_cancellation(job_id)` verifica `cancel_requested_at` antes de cada sub-etapa
+- [x] Handler de exemplo usa `check_cancellation` entre etapas
+- [x] Estado final: `cancelled_partial` (resultado parcial persiste em `result_ref`)
+- [x] `POST /jobs/{id}/cancel` testado end-to-end com handler de exemplo
 
 **Verificação:** `POST /cancel` → handler detecta flag em < 2s → SSE emite `job.cancelled`.
 
-#### M2.4 — Watchdog ⬜
-- [ ] APScheduler (ou `asyncio` periódico) a cada 60s
-- [ ] Detecta jobs `running` com `job_heartbeat:{id}` expirado (> 2 min)
-- [ ] Força estado `cancelled_partial` e emite `job.failed` via SSE
-- [ ] Teste: matar worker manualmente → watchdog corrige estado em < 90s
+#### M2.4 — Watchdog ✅
+- [x] APScheduler (ou `asyncio` periódico) a cada 60s
+- [x] Detecta jobs `running` com `job_heartbeat:{id}` expirado (> 2 min)
+- [x] Força estado `cancelled_partial` e emite `job.failed` via SSE
+- [x] Teste: matar worker manualmente → watchdog corrige estado em < 90s
 
 **Verificação:** job sem heartbeat → watchdog o cancela; `GET /jobs/{id}` mostra `cancelled_partial`.
 
-#### M2.5 — Worker de exemplo e testes ⬜
-- [ ] `TRANSPORT_SEARCH` stub que dorme 3s emitindo progresso via SSE a cada 500ms
-- [ ] Testes unitários com `StubBroker` para cada tipo de job definido
-- [ ] Cobertura de retry: `max_retries` e `backoff_seconds` testados diretamente
-- [ ] Smoke test local: enfileirar job → aguardar SSE `job.completed`
+#### M2.5 — Worker de exemplo e testes ✅
+- [x] `TRANSPORT_SEARCH` stub que dorme 3s emitindo progresso via SSE a cada 500ms
+- [x] Testes unitários com `StubBroker` para cada tipo de job definido
+- [x] Cobertura de retry: `max_retries` e `backoff_seconds` testados diretamente
+- [x] Smoke test local: enfileirar job → aguardar SSE `job.completed`
 
 **Verificação:** todos os testes unitários passam; smoke test completo em < 10s com `StubBroker`.
 
 ---
 
-### Fase 3 — Transporte: GTFS + Valhalla + OTP ⬜
+### Fase 3 — Transporte: GTFS + Valhalla + OTP 🔄
 
 **Objetivo:** descoberta de pontos de transporte elegíveis e rotas a pé funcionando.
-**Esforço estimado:** 8–10 dias · **Status:** ⬜ Não iniciada
+**Esforço estimado:** 8–10 dias · **Status:** 🔄 Em progresso
 **Dependências bloqueantes:** M2.1–M2.5. Hostinger VPS com Valhalla + OTP rodando.
 
-#### M3.1 — Migração frontend Vite → Next.js App Router ⬜
-- [ ] Novo `apps/web/` com Next.js 14+ App Router
-- [ ] MapLibre GL JS integrado; `MapShell` com `preserveDrawingBuffer: true`
-- [ ] MapTiler como único provedor de tiles (chave via `NEXT_PUBLIC_MAPTILER_API_KEY`)
-- [ ] Etapa 1 portada: formulário de configuração funcionando
-- [ ] `next build` sem erros; `next start` responsivo
+#### M3.1 — Migração frontend Vite → Next.js App Router ✅
+- [x] Novo `apps/web/` com Next.js 14+ App Router
+- [x] MapLibre GL JS integrado; `MapShell` com `preserveDrawingBuffer: true`
+- [x] MapTiler como único provedor de tiles (chave via `NEXT_PUBLIC_MAPTILER_API_KEY`)
+- [x] Etapa 1 portada: formulário de configuração funcionando
+- [x] `next build` sem erros; `next start` responsivo
 
 **Verificação:** `next build` verde; formulário de Etapa 1 salva jornada via `POST /journeys`.
 
-#### M3.2 — Ingestão GTFS para PostGIS ⬜
-- [ ] Script de ingestão: download zip → hash check → staging → substituição atômica
-- [ ] Tabelas: `gtfs_stops`, `gtfs_routes`, `gtfs_trips`, `gtfs_stop_times`, `gtfs_shapes`
-- [ ] Índice GIST em `gtfs_stops.location`
-- [ ] Registro em `dataset_versions` (`is_current = true` somente para o mais recente)
-- [ ] Hash check: executar ingestão duas vezes → segunda encerra sem reprocessar
+#### M3.2 — Ingestão GTFS para PostGIS ✅
+- [x] Script de ingestão: download zip → hash check → staging → substituição atômica
+- [x] Tabelas: `gtfs_stops`, `gtfs_routes`, `gtfs_trips`, `gtfs_stop_times`, `gtfs_shapes`
+- [x] Índice GIST em `gtfs_stops.location`
+- [x] Registro em `dataset_versions` (`is_current = true` somente para o mais recente)
+- [x] Hash check: executar ingestão duas vezes → segunda encerra sem reprocessar
 
 **Verificação:** `SELECT count(*) FROM gtfs_stops` → ~22.094; re-ingestão do mesmo arquivo encerra em < 2s.
 
-#### M3.3 — Ingestão GeoSampa ⬜
-- [ ] `ogr2ogr` para: estações metro/trem, paradas de ônibus, terminais, corredores
-- [ ] `ST_IsValid` em todas as geometrias antes de commit
-- [ ] Registro em `dataset_versions`
+#### M3.3 — Ingestão GeoSampa ✅
+- [x] `ogr2ogr` para: estações metro/trem, paradas de ônibus, terminais, corredores
+- [x] `ST_IsValid` em todas as geometrias antes de commit
+- [x] Registro em `dataset_versions`
 
 **Verificação:** `SELECT count(*) FROM geosampa_metro_stations` → dado real SP.
 
-#### M3.4 — Adaptador Valhalla ⬜
-- [ ] `ValhallAdapter.route(origin, dest, costing)` → `RouteResult`
-- [ ] `ValhallAdapter.isochrone(origin, costing, contours_minutes)` → `GeoJSON`
-- [ ] Cache Redis: chave `valhalla:{costing}:{lat1}:{lon1}:{lat2}:{lon2}`, TTL 24h
-- [ ] Timeout de 5s com `httpx.TimeoutException` → `ValhallaCommunicationError`
+#### M3.4 — Adaptador Valhalla ✅
+- [x] `ValhallaAdapter.route(origin, dest, costing)` → `RouteResult`
+- [x] `ValhallaAdapter.isochrone(origin, costing, contours_minutes)` → `GeoJSON`
+- [x] Cache Redis: chave `valhalla:{costing}:{lat1}:{lon1}:{lat2}:{lon2}`, TTL 24h
+- [x] Timeout de 5s com `httpx.TimeoutException` → `ValhallaCommunicationError`
 
 **Verificação:** rota a pé entre dois pontos SP < 300ms; 2ª chamada (cache) < 50ms.
 
-#### M3.5 — Adaptador OTP 2 ⬜
-- [ ] `OTPAdapter.plan(origin, dest, datetime)` → `TransitItinerary`
-- [ ] Mapeia `leg.mode` para `modal_types` em `transport_points`
-- [ ] Retorna múltiplos itinerários ordenados por duração
+#### M3.5 — Adaptador OTP 2 ✅
+- [x] `OTPAdapter.plan(origin, dest, datetime)` → `TransitItinerary`
+- [x] Mapeia `leg.mode` para `modal_types` em `transport_points`
+- [x] Retorna múltiplos itinerários ordenados por duração
 
 **Verificação:** consulta de transporte público entre dois pontos SP retorna itinerário com linhas identificadas.
 
@@ -1368,7 +1368,7 @@ Desconectar e reconectar com `Last-Event-ID=X` → recebe eventos posteriores a 
 - [ ] Persiste lista em `transport_points`; emite `job.completed` via SSE
 - [ ] `GET /journeys/{id}/transport-points` retorna lista enriquecida
 
-**Verificação:** ponto em SP (lat -23.55, lon -46.63), raio 500m → lista de paradas/estações com `walk_distance_m` ± 10% do real.
+**Verificação:** ponto em SP (lat -23.55, lon -46.63), raio 300m → lista de paradas/estações com `walk_distance_m` ± 10% do real.
 
 #### M3.7 — Proxy de geocoding ⬜
 - [ ] `POST /api/geocode` → chama Mapbox Search Box API

@@ -8,6 +8,12 @@ def init_redis(redis_url: str) -> None:
     _redis = Redis.from_url(redis_url, decode_responses=True)
 
 
+def get_redis() -> Redis:
+    if _redis is None:
+        raise RuntimeError("Redis client is not initialized")
+    return _redis
+
+
 async def redis_healthcheck() -> bool:
     if _redis is None:
         return False
