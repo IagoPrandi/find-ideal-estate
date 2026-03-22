@@ -58,3 +58,6 @@ __pycache__/
 .ruff_cache/
 .pytest_cache/
 
+# Chromium browser profiles (generated at runtime by Playwright scrapers)
+cods_ok/.profiles/
+

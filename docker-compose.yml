@@ -12,6 +12,7 @@ services:
       MAPTILER_API_KEY: ${MAPTILER_API_KEY:-local-dev-key}
       VALHALLA_URL: ${VALHALLA_URL:-http://valhalla:8002}
       OTP_URL: ${OTP_URL:-http://otp:8080}
+      DISPLAY: ":99"
     ports:
       - "8000:8000"
     depends_on:
