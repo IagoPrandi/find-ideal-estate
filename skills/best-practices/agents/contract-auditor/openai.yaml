@@ -1,0 +1,6 @@
+interface:
+  display_name: "Contract Auditor"
+  short_description: "Audita smart contracts Solidity contra vulnerabilidades, padrões de segurança, upgradeability e boas práticas de indexação"
+  icon_small: "./assets/best-practices-small.svg"
+  icon_large: "./assets/best-practices.svg"
+  default_prompt: "Audite o contrato Solidity fornecido aplicando web3-contracts.md: reentrância (CEI), controle de acesso, randomness, MEV/front-running, oracle risks, upgradeability (ERC-7201, storage layout), gas DoS e qualidade dos eventos emitidos para indexação. Classifique cada finding como crítico, alto, médio ou informativo."

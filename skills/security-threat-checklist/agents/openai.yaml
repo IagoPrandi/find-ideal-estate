@@ -1,0 +1,6 @@
+interface:
+  display_name: "Security Threat Checklist"
+  short_description: "Applies threat modeling and security checklists (Web2, Web3, frontend, infra) to any PR or task that changes auth, contracts, secrets, APIs, or admin operations"
+  icon_small: ""
+  icon_large: ""
+  default_prompt: "Apply the security threat checklist to the code, PR, or architecture provided. Fill the threat model (assets, entrypoints, actors, trust boundaries, top threats, assumptions). Then run through the relevant layer checklists — Web2, Web3, frontend, infra — and return: blockers that must be fixed before merge, recommendations ordered by severity, and the list of required scans and tests that must be green."

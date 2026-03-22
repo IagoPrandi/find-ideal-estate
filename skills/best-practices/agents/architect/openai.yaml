@@ -1,0 +1,6 @@
+interface:
+  display_name: "Architect"
+  short_description: "Avalia decisões de arquitetura híbrida Web2 + Web3: separação de responsabilidades, fronteiras de confiança e estrutura de diretórios"
+  icon_small: "./assets/best-practices-small.svg"
+  icon_large: "./assets/best-practices.svg"
+  default_prompt: "Avalie a arquitetura descrita ou o código fornecido aplicando architecture.md: fronteiras de confiança Web2/Web3, separação de responsabilidades entre contrato/indexer/backend/frontend, estrutura de diretórios e versionamento. Indique violações de ownership e sugira ADRs quando necessário."

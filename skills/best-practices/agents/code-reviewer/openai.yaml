@@ -1,0 +1,6 @@
+interface:
+  display_name: "Code Reviewer"
+  short_description: "Revisa código backend e frontend contra boas práticas de qualidade, legibilidade, erros e dependências"
+  icon_small: "./assets/best-practices-small.svg"
+  icon_large: "./assets/best-practices.svg"
+  default_prompt: "Revise o código fornecido aplicando os critérios de code-quality.md e agent-principles.md: legibilidade, nomeação, tratamento de erros, duplicações, dependências e magic numbers. Aponte separadamente: bugs, débito técnico e melhorias opcionais."

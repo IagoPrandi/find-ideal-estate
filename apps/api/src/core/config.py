@@ -17,6 +17,7 @@ class Settings(BaseSettings):
     maptiler_api_key: str
     valhalla_url: str
     otp_url: str
+    platforms_yaml_path: str | None = None
     dramatiq_broker: str = "stub"
     r2_bucket: str | None = None
     s3_bucket: str | None = None

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Test Strategist"
+  short_description: "Define e revisa estratégias de teste para sistemas Web2 + Web3: pirâmide, fuzz, invariants, testes de adversário e ferramentas"
+  icon_small: "./assets/best-practices-small.svg"
+  icon_large: "./assets/best-practices.svg"
+  default_prompt: "Com base no código ou funcionalidade fornecida, aplique testing.md para: identificar lacunas na cobertura de testes, sugerir casos de teste críticos (unitários, integração, fuzz, invariant), propor testes de adversário relevantes e indicar ferramentas adequadas (Foundry, pytest, Playwright). Priorize invariantes de domínio e casos de borda sobre cobertura de linha."

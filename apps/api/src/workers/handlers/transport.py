@@ -5,25 +5,45 @@ from uuid import UUID
 
 import dramatiq
 from contracts import JobType
+from core.container import get_container
 from workers.cancellation import check_cancellation
 from workers.middleware import emit_stage_progress
 from workers.queue import QUEUE_TRANSPORT
 from workers.runtime import run_job_with_retry
 
 
+async def run_transport_search_for_job(job_id: UUID) -> int:
+    transport_service = get_container().transport_service()
+    return await transport_service.run_transport_search_for_job(job_id)
+
+
 async def _transport_search_step(job_id: UUID) -> None:
     stage = "transport_search"
-    ticks = 6
-    for idx in range(ticks):
-        await check_cancellation(job_id)
-        progress = int(((idx + 1) / ticks) * 100)
-        await emit_stage_progress(
-            job_id,
-            stage=stage,
-            progress_percent=progress,
-            message=f"Transport search progress {progress}%",
-        )
-        await asyncio.sleep(0.5)
+    await check_cancellation(job_id)
+    await emit_stage_progress(
+        job_id,
+        stage=stage,
+        progress_percent=10,
+        message="Loading journey context",
+    )
+
+    await check_cancellation(job_id)
+    await emit_stage_progress(
+        job_id,
+        stage=stage,
+        progress_percent=40,
+        message="Querying transport points near reference",
+    )
+    await asyncio.sleep(0.5)
+    await run_transport_search_for_job(job_id)
+
+    await check_cancellation(job_id)
+    await emit_stage_progress(
+        job_id,
+        stage=stage,
+        progress_percent=100,
+        message="Transport points persisted",
+    )
 
 
 @dramatiq.actor(queue_name=QUEUE_TRANSPORT)

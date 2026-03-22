@@ -1,5 +1,9 @@
 import { z, ZodSchema } from "zod";
 import {
+  JobRead,
+  JobReadSchema,
+  JourneyRead,
+  JourneyReadSchema,
   FinalizeResponse,
   FinalListingsJson,
   FinalListingsJsonSchema,
@@ -16,6 +20,8 @@ import {
   SimpleMessageResponseSchema,
   TransportLayersResponse,
   TransportLayersResponseSchema,
+  TransportPointRead,
+  TransportPointReadSchema,
   TransportStopsResponse,
   TransportStopsResponseSchema,
   ZoneDetailResponse,
@@ -52,6 +58,7 @@ async function requestJson<T>(path: string, schema: ZodSchema<T>, options: Reque
 
   const response = await fetch(url, {
     method,
+    credentials: "include",
     headers: {
       "Content-Type": "application/json"
     },
@@ -179,6 +186,34 @@ export async function getZoneStreets(runId: string, zoneUid: string): Promise<{ 
     `/runs/${runId}/zones/${zoneUid}/streets`,
     z.object({ zone_uid: z.string(), streets: z.array(z.string()) })
   )) as { zone_uid: string; streets: string[] };
+}
+
+export async function createJourney(payload: {
+  input_snapshot?: Record<string, unknown>;
+  secondary_reference_label?: string;
+  secondary_reference_point?: { lat: number; lon: number };
+}): Promise<JourneyRead> {
+  return (await requestJson("/journeys", JourneyReadSchema, {
+    method: "POST",
+    body: payload
+  })) as JourneyRead;
+}
+
+export async function getJourneyTransportPoints(journeyId: string): Promise<TransportPointRead[]> {
+  return (await requestJson(
+    `/journeys/${journeyId}/transport-points`,
+    z.array(TransportPointReadSchema)
+  )) as TransportPointRead[];
+}
+
+export async function createZoneGenerationJob(journeyId: string): Promise<JobRead> {
+  return (await requestJson("/jobs", JobReadSchema, {
+    method: "POST",
+    body: {
+      journey_id: journeyId,
+      job_type: "zone_generation"
+    }
+  })) as JobRead;
 }
 
 export { API_BASE };

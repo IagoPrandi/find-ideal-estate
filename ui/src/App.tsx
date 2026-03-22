@@ -17,10 +17,13 @@ import "mapbox-gl/dist/mapbox-gl.css";
 import {
   API_BASE,
   apiActionHint,
+  createJourney,
   createRun,
+  createZoneGenerationJob,
   finalizeRun,
   getFinalListings,
   getFinalListingsJson,
+  getJourneyTransportPoints,
   getRunStatus,
   getTransportLayers,
   getTransportStops,
@@ -34,11 +37,12 @@ import type {
   ListingsCollection,
   RunCreateResponse,
   RunStatusResponse,
+  TransportPointRead,
   ZoneDetailResponse,
   ZonesCollection
 } from "./api/schemas";
 
-type LayerKey = "routes" | "train" | "busStops" | "zones" | "flood" | "green" | "pois";
+type LayerKey = "routes" | "train" | "busStops" | "zones" | "flood" | "green" | "pois" | "transportCandidates" | "transportRadius";
 type InteractionMode = "primary" | "interest";
 type PropertyMode = "rent" | "buy";
 type ExecutionStageKey = "zones" | "selectZone" | "detailZone" | "zoneListings" | "finalize";
@@ -76,8 +80,8 @@ const MAPBOX_TOKEN =
 
 const STEPS = [
   { id: 1, title: "Referência", desc: "Defina o ponto principal" },
-  { id: 2, title: "Zonas", desc: "Selecione e detalhe a zona" },
-  { id: 3, title: "Imóveis", desc: "Busque e revise resultados" }
+  { id: 2, title: "Transporte", desc: "Selecione o ponto de transporte" },
+  { id: 3, title: "Zonas e Imóveis", desc: "Selecione zonas e revise resultados" }
 ] as const;
 
 const LAYER_INFO: Record<LayerKey, { label: string; color: string }> = {
@@ -87,7 +91,9 @@ const LAYER_INFO: Record<LayerKey, { label: string; color: string }> = {
   zones: { label: "Zonas candidatas", color: "#2563eb" },
   flood: { label: "Alagamento", color: "#7c3aed" },
   green: { label: "Área verde", color: "#16a34a" },
-  pois: { label: "POIs", color: "#d97706" }
+  pois: { label: "POIs", color: "#d97706" },
+  transportCandidates: { label: "Pontos etapa 2", color: "#ea580c" },
+  transportRadius: { label: "Raio de busca etapa 2", color: "#0ea5e9" }
 };
 
 const INTEREST_CATEGORIES = [
@@ -203,7 +209,9 @@ export default function App() {
     zones: true,
     flood: false,
     green: false,
-    pois: false
+    pois: false,
+    transportCandidates: true,
+    transportRadius: true
   });
 
   const [activeStep, setActiveStep] = useState<1 | 2 | 3>(1);
@@ -215,6 +223,16 @@ export default function App() {
   const [interests, setInterests] = useState<InterestPoint[]>([]);
 
   const [runId, setRunId] = useState("");
+  const [journeyId, setJourneyId] = useState("");
+  const [transportPoints, setTransportPoints] = useState<TransportPointRead[]>([]);
+  const [transportPointsLoading, setTransportPointsLoading] = useState(false);
+  const [transportPointsMessage, setTransportPointsMessage] = useState("Gere zonas candidatas para carregar os pontos de transporte.");
+  const [hoveredTransportPointId, setHoveredTransportPointId] = useState("");
+  const [transportHoverPulseOn, setTransportHoverPulseOn] = useState(true);
+  const [selectedTransportPointId, setSelectedTransportPointId] = useState("");
+  const [isQueueingZoneGeneration, setIsQueueingZoneGeneration] = useState(false);
+  const [zoneGenerationJobId, setZoneGenerationJobId] = useState("");
+  const [transportSearchRadiusM, setTransportSearchRadiusM] = useState(300);
   const [runStatus, setRunStatus] = useState<RunStatusResponse["status"] | null>(null);
   const [statusMessage, setStatusMessage] = useState("Defina o ponto principal no mapa para continuar.");
   const [isCreatingRun, setIsCreatingRun] = useState(false);
@@ -472,6 +490,14 @@ export default function App() {
         type: "geojson",
         data: { type: "FeatureCollection", features: [] }
       });
+      map.addSource("transport-candidates-source", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] }
+      });
+      map.addSource("transport-radius-source", {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] }
+      });
 
       map.addLayer({
         id: "bus-layer",
@@ -597,6 +623,37 @@ export default function App() {
         paint: {
           "circle-radius": 5,
           "circle-color": "#16a34a",
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 2,
+          "circle-opacity": 0.95
+        }
+      });
+      map.addLayer({
+        id: "transport-radius-fill-layer",
+        type: "fill",
+        source: "transport-radius-source",
+        paint: {
+          "fill-color": "#0ea5e9",
+          "fill-opacity": 0.1
+        }
+      });
+      map.addLayer({
+        id: "transport-radius-outline-layer",
+        type: "line",
+        source: "transport-radius-source",
+        paint: {
+          "line-color": "#0284c7",
+          "line-width": 2,
+          "line-dasharray": [1.4, 1.4]
+        }
+      });
+      map.addLayer({
+        id: "transport-candidates-layer",
+        type: "circle",
+        source: "transport-candidates-source",
+        paint: {
+          "circle-radius": ["case", ["==", ["get", "isHovered"], 1], 9, ["==", ["get", "isSelected"], 1], 8, 6],
+          "circle-color": ["case", ["==", ["get", "isSelected"], 1], "#1d4ed8", ["==", ["get", "isHovered"], 1], "#f97316", "#ea580c"],
           "circle-stroke-color": "#ffffff",
           "circle-stroke-width": 2,
           "circle-opacity": 0.95
@@ -819,7 +876,23 @@ export default function App() {
     map.setLayoutProperty("flood-layer", "visibility", visibility(layerVisibility.flood));
     map.setLayoutProperty("green-layer", "visibility", visibility(layerVisibility.green));
     map.setLayoutProperty("poi-layer", "visibility", visibility(layerVisibility.pois));
+    map.setLayoutProperty(
+      "transport-candidates-layer",
+      "visibility",
+      visibility(layerVisibility.transportCandidates && activeStep === 2)
+    );
+    map.setLayoutProperty(
+      "transport-radius-fill-layer",
+      "visibility",
+      visibility(layerVisibility.transportRadius && activeStep === 2)
+    );
+    map.setLayoutProperty(
+      "transport-radius-outline-layer",
+      "visibility",
+      visibility(layerVisibility.transportRadius && activeStep === 2)
+    );
   }, [
+    activeStep,
     hasRouteData,
     isMapReady,
     layerVisibility,
@@ -1215,6 +1288,97 @@ export default function App() {
   }, [finalListings, focusedListingKey, isMapReady]);
 
   useEffect(() => {
+    if (activeStep !== 2 || !hoveredTransportPointId) {
+      setTransportHoverPulseOn(true);
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setTransportHoverPulseOn((current) => !current);
+    }, 280);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [activeStep, hoveredTransportPointId]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isMapReady) {
+      return;
+    }
+
+    const source = map.getSource("transport-candidates-source") as mapboxgl.GeoJSONSource | undefined;
+    if (!source) {
+      return;
+    }
+
+    if (activeStep !== 2 || transportPoints.length === 0) {
+      source.setData({ type: "FeatureCollection", features: [] });
+      return;
+    }
+
+    source.setData({
+      type: "FeatureCollection",
+      features: transportPoints
+        .filter((point) => Number.isFinite(point.lon) && Number.isFinite(point.lat))
+        .map((point) => ({
+          type: "Feature" as const,
+          geometry: {
+            type: "Point" as const,
+            coordinates: [point.lon, point.lat] as [number, number]
+          },
+          properties: {
+            id: point.id,
+            name: point.name || "Ponto sem nome",
+            route_count: point.route_count,
+            walk_distance_m: point.walk_distance_m,
+            isSelected: point.id === selectedTransportPointId ? 1 : 0,
+            isHovered: point.id === hoveredTransportPointId && transportHoverPulseOn ? 1 : 0
+          }
+        })) as unknown as any[]
+    });
+  }, [
+    activeStep,
+    hoveredTransportPointId,
+    isMapReady,
+    selectedTransportPointId,
+    transportHoverPulseOn,
+    transportPoints
+  ]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isMapReady) {
+      return;
+    }
+
+    const source = map.getSource("transport-radius-source") as mapboxgl.GeoJSONSource | undefined;
+    if (!source) {
+      return;
+    }
+
+    if (!primaryPoint || activeStep !== 2) {
+      source.setData({ type: "FeatureCollection", features: [] });
+      return;
+    }
+
+    source.setData({
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          geometry: {
+            type: "Polygon",
+            coordinates: buildCircleCoordinates(primaryPoint.lon, primaryPoint.lat, transportSearchRadiusM)
+          },
+          properties: {
+            radius_m: transportSearchRadiusM
+          }
+        }
+      ]
+    });
+  }, [activeStep, isMapReady, primaryPoint, transportSearchRadiusM]);
+
+  useEffect(() => {
     const map = mapRef.current;
     if (!map || !isMapReady) {
       return;
@@ -1563,6 +1727,72 @@ export default function App() {
     };
   }, [isPolling, runId]);
 
+  useEffect(() => {
+    if (activeStep !== 2 || !primaryPoint || !runId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadTransportPoints = async () => {
+      setTransportPointsLoading(true);
+      setTransportPointsMessage("Carregando pontos de transporte...");
+      try {
+        let journeyRef = journeyId;
+        if (!journeyRef) {
+          const createdJourney = await createJourney({
+            input_snapshot: {
+              reference_point: {
+                lat: primaryPoint.lat,
+                lon: primaryPoint.lon
+              },
+              transport_search_radius_m: seedBusSearchMaxDistM,
+              run_id: runId
+            }
+          });
+          if (cancelled) {
+            return;
+          }
+          journeyRef = createdJourney.id;
+          setJourneyId(createdJourney.id);
+          setTransportSearchRadiusM(
+            Math.max(100, Number((createdJourney.input_snapshot as Record<string, unknown> | undefined)?.transport_search_radius_m) || seedBusSearchMaxDistM)
+          );
+        }
+
+        const points = await getJourneyTransportPoints(journeyRef);
+        if (cancelled) {
+          return;
+        }
+        setTransportPoints(points);
+        if (points.length > 0) {
+          setTransportPointsMessage(`${points.length} ponto(s) de transporte encontrado(s).`);
+          if (!selectedTransportPointId) {
+            setSelectedTransportPointId(points[0].id);
+          }
+        } else {
+          setTransportPointsMessage("Nenhum ponto retornado para esta jornada. Ajuste o ponto principal e tente novamente.");
+        }
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        setTransportPoints([]);
+        setTransportPointsMessage(apiActionHint(error));
+      } finally {
+        if (!cancelled) {
+          setTransportPointsLoading(false);
+        }
+      }
+    };
+
+    void loadTransportPoints();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeStep, journeyId, primaryPoint, runId, seedBusSearchMaxDistM]);
+
   const activeLegendItems = useMemo(
     () =>
       (Object.keys(layerVisibility) as LayerKey[])
@@ -1729,6 +1959,12 @@ export default function App() {
       return;
     }
 
+    setJourneyId("");
+    setTransportPoints([]);
+    setHoveredTransportPointId("");
+    setSelectedTransportPointId("");
+    setZoneGenerationJobId("");
+    setTransportPointsMessage("Gere zonas candidatas para carregar os pontos de transporte.");
     resetExecutionTracking();
     startExecutionProgress("zones", "Gerando zonas candidatas...", 180);
     setIsCreatingRun(true);
@@ -1797,6 +2033,12 @@ export default function App() {
   const removePrimaryPoint = () => {
     setPrimaryPoint(null);
     setRunId("");
+    setJourneyId("");
+    setTransportPoints([]);
+    setHoveredTransportPointId("");
+    setSelectedTransportPointId("");
+    setZoneGenerationJobId("");
+    setTransportPointsMessage("Gere zonas candidatas para carregar os pontos de transporte.");
     setRunStatus(null);
     setIsPolling(false);
     setZonesState("idle");
@@ -1830,35 +2072,6 @@ export default function App() {
       setListingsWithoutCoords([]);
       setFocusedListingKey("");
       setFinalizeMessage("Finalize o run para carregar os imóveis.");
-    }
-  };
-
-  const handleSelectZone = async () => {
-    if (!runId || !selectedZoneUid || isSelectingZone) {
-      return;
-    }
-
-    let succeeded = false;
-    startExecutionProgress("selectZone", "Selecionando zona...", 8);
-    setIsSelectingZone(true);
-    setZoneSelectionMessage("Persistindo zona selecionada...");
-    try {
-      const result = await selectZones(runId, [selectedZoneUid]);
-      setZoneSelectionMessage(result.message);
-      setActiveStep(3);
-      setStatusMessage(`Zona ${selectedZoneUid} selecionada.`);
-      succeeded = true;
-    } catch (error) {
-      const hint = apiActionHint(error);
-      setZoneSelectionMessage(hint);
-      setStatusMessage(hint);
-      stopExecutionProgress("Falha ao selecionar zona.", "error");
-    } finally {
-      setIsSelectingZone(false);
-      if (succeeded) {
-        setExecutionProgress((current) => ({ ...current, percent: 100, etaSec: 0, label: "Zona selecionada." }));
-        window.setTimeout(() => stopExecutionProgress("Zona selecionada."), 700);
-      }
     }
   };
 
@@ -2060,6 +2273,43 @@ export default function App() {
       return `${(value / 1000).toFixed(1)} km`;
     }
     return `${Math.round(value)} m`;
+  };
+
+  const formatWalkTime = (seconds: number) => {
+    if (!Number.isFinite(seconds) || seconds <= 0) {
+      return "n/d";
+    }
+    const minutes = Math.max(1, Math.round(seconds / 60));
+    return `${minutes} min`;
+  };
+
+  const formatModalTypes = (modalTypes: string[]) => {
+    if (!modalTypes || modalTypes.length === 0) {
+      return "n/d";
+    }
+    return modalTypes.map((item) => item.toUpperCase()).join(" + ");
+  };
+
+  const handleGenerateZonesFromTransportStep = async () => {
+    if (!journeyId || !selectedTransportPointId || isQueueingZoneGeneration) {
+      return;
+    }
+
+    setIsQueueingZoneGeneration(true);
+    setTransportPointsMessage("Enfileirando job de geração de zonas...");
+    try {
+      const job = await createZoneGenerationJob(journeyId);
+      setZoneGenerationJobId(job.id);
+      setTransportPointsMessage(`Job ${job.id} enfileirado com sucesso.`);
+      setStatusMessage("Geração de zonas enfileirada. Avance para a etapa 3.");
+      setActiveStep(3);
+    } catch (error) {
+      const hint = apiActionHint(error);
+      setTransportPointsMessage(hint);
+      setStatusMessage(hint);
+    } finally {
+      setIsQueueingZoneGeneration(false);
+    }
   };
 
   const getListingKey = (feature: ListingFeature, index: number) => `${index}_${feature.geometry.coordinates.join("_")}`;
@@ -2438,6 +2688,12 @@ export default function App() {
                   {layerVisibility.busStops && zoneDetailData?.downstream_transport_point ? (
                     <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded-full bg-violet-600 border border-white" /> Downstream da zona</div>
                   ) : null}
+                  {activeStep === 2 && layerVisibility.transportCandidates ? (
+                    <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded-full bg-orange-600 border border-white" /> Pontos de transporte (etapa 2)</div>
+                  ) : null}
+                  {activeStep === 2 && layerVisibility.transportRadius ? (
+                    <div className="flex items-center gap-2"><div className="w-4 border-b-2 border-dashed border-sky-600" /> Raio de busca (etapa 2)</div>
+                  ) : null}
                   {layerVisibility.zones && zonesCollection.length > 0 && <div className="flex items-center gap-2"><div className="w-3.5 h-3.5 rounded bg-blue-500/30 border border-blue-600/50" /> Zonas</div>}
                 </div>
               )}
@@ -2790,6 +3046,7 @@ export default function App() {
                 <h2 className="font-semibold">Status</h2>
                 <p className="mt-2 text-muted">{statusMessage}</p>
                 <p className="mt-1 text-xs text-muted">zonas: {zonesState} · {zonesStateMessage}</p>
+                <p className="mt-1 text-xs text-muted">selecao zona: {zoneSelectionMessage}</p>
                 {runId ? <p className="mt-1 text-xs text-muted">run_id: {runId}</p> : null}
                 {runStatus ? (
                   <p className="text-xs text-muted">
@@ -2815,36 +3072,48 @@ export default function App() {
 
               {activeStep === 2 ? (
               <section className="mt-4 rounded-panel border border-border p-4 text-sm">
-                <h2 className="font-semibold">Selecionar zona</h2>
-                {zonesCollection.length > 0 ? (
+                <h2 className="font-semibold">Etapa 2: seleção de transporte</h2>
+                <p className="mt-2 text-xs text-muted">
+                  Passe o mouse em um item para piscar o ponto no mapa e revisar alcance ({transportSearchRadiusM} m).
+                </p>
+                {transportPointsLoading ? (
+                  <p className="mt-2 text-xs text-muted">Carregando pontos de transporte...</p>
+                ) : null}
+                {transportPoints.length > 0 ? (
                   <div className="mt-2 space-y-2">
-                    <p className="text-xs text-muted">Selecione 1 zona para seguir o fluxo.</p>
+                    <p className="text-xs text-muted">Selecione 1 ponto para registrar a escolha antes de gerar zonas.</p>
                     <ul className="max-h-40 space-y-2 overflow-y-auto">
-                      {zonesCollection.map((zone, index) => {
-                        const uid = zone.properties.zone_uid;
-                        const zoneName = (zone.properties.zone_name as string | undefined) || `Zona ${index + 1}`;
-                        const score =
-                          typeof zone.properties.score === "number"
-                            ? zone.properties.score.toFixed(3)
-                            : "n/a";
-                        const timeAgg =
-                          typeof zone.properties.time_agg === "number"
-                            ? `${zone.properties.time_agg} min`
-                            : "n/a";
+                      {transportPoints.map((point, index) => {
+                        const label = point.name || `Ponto ${index + 1}`;
+                        const isSelected = selectedTransportPointId === point.id;
 
                         return (
-                          <li key={uid} className="rounded-lg border border-border px-2 py-2">
-                            <label className="flex cursor-pointer items-center gap-2">
+                          <li
+                            key={point.id}
+                            className={`rounded-lg border px-2 py-2 ${
+                              isSelected ? "border-primary bg-primary/5" : "border-border"
+                            }`}
+                            onMouseEnter={() => {
+                              setHoveredTransportPointId(point.id);
+                              mapRef.current?.flyTo({ center: [point.lon, point.lat], zoom: 14, duration: 450 });
+                            }}
+                            onMouseLeave={() => setHoveredTransportPointId("")}
+                          >
+                            <label className="flex cursor-pointer items-start gap-2">
                               <input
                                 type="radio"
-                                name="zone-selection"
-                                value={uid}
-                                checked={selectedZoneUid === uid}
-                                onChange={() => setSelectedZoneUid(uid)}
+                                name="transport-selection"
+                                value={point.id}
+                                checked={isSelected}
+                                onChange={() => setSelectedTransportPointId(point.id)}
                                 className="h-4 w-4 accent-primary"
                               />
                               <span className="text-xs text-text">
-                                <strong>{zoneName}</strong> · score {score} · tempo {timeAgg}
+                                <strong>{label}</strong>
+                                <br />
+                                caminhada: {formatMeters(point.walk_distance_m)} ({formatWalkTime(point.walk_time_sec)})
+                                <br />
+                                modal: {formatModalTypes(point.modal_types)} · linhas: {point.route_count}
                               </span>
                             </label>
                           </li>
@@ -2855,19 +3124,27 @@ export default function App() {
                     <div className="grid grid-cols-1 gap-2">
                       <button
                         type="button"
-                        onClick={handleSelectZone}
-                        disabled={!selectedZoneUid || isSelectingZone}
+                        onClick={handleGenerateZonesFromTransportStep}
+                        disabled={!journeyId || !selectedTransportPointId || transportPointsLoading || transportPoints.length === 0 || isQueueingZoneGeneration}
                         className="rounded border border-border px-2 py-1.5 text-xs font-semibold disabled:opacity-50"
                       >
-                        {isSelectingZone ? "Selecionando..." : "Selecionar zona"}
+                        {isQueueingZoneGeneration ? "Enfileirando..." : "Gerar zonas"}
                       </button>
                     </div>
+                    {zoneGenerationJobId ? (
+                      <p className="text-[11px] text-muted">job_id: {zoneGenerationJobId}</p>
+                    ) : null}
+                    {import.meta.env.VITE_E2E_DEBUG === "1" ? (
+                      <div data-testid="m3-8-hover-debug" className="hidden">
+                        hovered={hoveredTransportPointId || "none"};pulse={transportHoverPulseOn ? "1" : "0"}
+                      </div>
+                    ) : null}
                   </div>
                 ) : (
-                  <p className="mt-2 text-xs text-muted">Gere zonas candidatas para habilitar esta etapa.</p>
+                  <p className="mt-2 text-xs text-muted">{transportPointsMessage}</p>
                 )}
 
-                <p className="mt-2 text-xs text-muted">{zoneSelectionMessage}</p>
+                <p className="mt-2 text-xs text-muted">{transportPointsMessage}</p>
               </section>
               ) : null}
 

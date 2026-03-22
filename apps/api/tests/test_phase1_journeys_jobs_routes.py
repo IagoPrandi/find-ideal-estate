@@ -30,6 +30,24 @@ from fastapi.testclient import TestClient  # noqa: E402
 from src.main import app  # noqa: E402
 
 
+def _sample_transport_point(journey_id):
+    return {
+        "id": str(uuid4()),
+        "journey_id": str(journey_id),
+        "source": "gtfs_stop",
+        "external_id": "123",
+        "name": "Parada Teste",
+        "lat": -23.55,
+        "lon": -46.63,
+        "walk_time_sec": 120,
+        "walk_distance_m": 150,
+        "route_ids": ["875A-10", "175T-10"],
+        "modal_types": ["bus"],
+        "route_count": 2,
+        "created_at": datetime.now(tz=timezone.utc).isoformat(),
+    }
+
+
 def _sample_journey() -> JourneyRead:
     return JourneyRead(
         id=uuid4(),
@@ -143,3 +161,85 @@ def test_cancel_job_returns_accepted(monkeypatch):
 
     assert response.status_code == 202
     assert response.json()["status"] == "accepted"
+
+
+def test_get_journey_transport_points_returns_enriched_list(monkeypatch):
+    sample = _sample_journey()
+    sample_point = _sample_transport_point(sample.id)
+
+    async def _get(journey_id):
+        assert journey_id == sample.id
+        return sample
+
+    async def _list(journey_id):
+        assert journey_id == sample.id
+        return [sample_point]
+
+    monkeypatch.setattr("api.routes.journeys.get_journey", _get)
+    monkeypatch.setattr("api.routes.journeys.list_transport_points_for_journey", _list)
+
+    with TestClient(app) as client:
+        response = client.get(f"/journeys/{sample.id}/transport-points")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["source"] == "gtfs_stop"
+    assert body[0]["walk_distance_m"] == 150
+    assert body[0]["route_count"] == 2
+
+
+def test_get_journey_zones_returns_list_response(monkeypatch):
+    sample = _sample_journey()
+    zone_id = str(uuid4())
+    transport_point_id = str(uuid4())
+
+    async def _get(journey_id):
+        assert journey_id == sample.id
+        return sample
+
+    async def _list(journey_id):
+        assert journey_id == sample.id
+        return {
+            "zones": [
+                {
+                    "id": zone_id,
+                    "journey_id": str(sample.id),
+                    "transport_point_id": transport_point_id,
+                    "fingerprint": "fp-1",
+                    "state": "complete",
+                    "travel_time_minutes": 24,
+                    "walk_distance_meters": 210,
+                    "isochrone_geom": {
+                        "type": "Polygon",
+                        "coordinates": [[[-46.63, -23.55], [-46.62, -23.55], [-46.62, -23.54], [-46.63, -23.54], [-46.63, -23.55]]],
+                    },
+                    "green_area_m2": 1200.0,
+                    "flood_area_m2": 50.0,
+                    "safety_incidents_count": 3,
+                    "poi_counts": {"school": 5},
+                    "badges": {
+                        "green_badge": {"value": 1200.0, "percentile": 80.0, "tier": "excellent"}
+                    },
+                    "badges_provisional": False,
+                    "created_at": datetime.now(tz=timezone.utc).isoformat(),
+                    "updated_at": datetime.now(tz=timezone.utc).isoformat(),
+                }
+            ],
+            "total_count": 1,
+            "completed_count": 1,
+        }
+
+    monkeypatch.setattr("api.routes.journeys.get_journey", _get)
+    monkeypatch.setattr("api.routes.journeys.list_zones_for_journey", _list)
+
+    with TestClient(app) as client:
+        response = client.get(f"/journeys/{sample.id}/zones")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["total_count"] == 1
+    assert body["completed_count"] == 1
+    assert len(body["zones"]) == 1
+    assert body["zones"][0]["id"] == zone_id
+    assert body["zones"][0]["badges"]["green_badge"]["tier"] == "excellent"

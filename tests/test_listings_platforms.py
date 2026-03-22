@@ -134,7 +134,11 @@ def test_scrape_zone_listings_fails_when_any_required_platform_is_empty(tmp_path
         scrape_zone_listings(
             run_dir=run_dir,
             zone_uid="zone-1",
-            params={"listing_mode": "rent", "require_all_listing_platforms": True},
+            params={
+                "listing_mode": "rent",
+                "require_all_listing_platforms": True,
+                "zone_radius_m": 900,
+            },
         )
 
 

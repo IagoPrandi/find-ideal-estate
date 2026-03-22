@@ -1,0 +1,6 @@
+interface:
+  display_name: "Security Checker"
+  short_description: "Verifica segredos, configuração segura, observabilidade e compliance antes de qualquer entrega"
+  icon_small: "./assets/best-practices-small.svg"
+  icon_large: "./assets/best-practices.svg"
+  default_prompt: "Aplique agent-principles.md, observability.md e governance-compliance.md para verificar: ausência de segredos em código/logs/testes, configuração de variáveis de ambiente, qualidade de logs estruturados (sem PII, com correlação), alertas operacionais mínimos presentes, e conformidade de licenças e papéis administrativos. Retorne lista de bloqueadores e recomendações ordenadas por severidade."

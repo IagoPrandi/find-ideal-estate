@@ -360,8 +360,9 @@ def test_watchdog_ignores_running_job_with_heartbeat(monkeypatch):
     assert published == []
 
 
-def test_transport_stub_emits_progress_every_half_second(monkeypatch):
+def test_transport_search_step_queries_and_emits_progress(monkeypatch):
     progress_calls = []
+    searched_job_ids = []
     sleep_calls = []
 
     async def _check_cancellation(_job_id):
@@ -370,16 +371,21 @@ def test_transport_stub_emits_progress_every_half_second(monkeypatch):
     async def _emit_stage_progress(job_id, *, stage, progress_percent, message):
         progress_calls.append((job_id, stage, progress_percent, message))
 
+    async def _run_transport_search_for_job(job_id):
+        searched_job_ids.append(job_id)
+        return 2
+
     async def _sleep(seconds):
         sleep_calls.append(seconds)
 
     monkeypatch.setattr("workers.handlers.transport.check_cancellation", _check_cancellation)
     monkeypatch.setattr("workers.handlers.transport.emit_stage_progress", _emit_stage_progress)
+    monkeypatch.setattr("workers.handlers.transport.run_transport_search_for_job", _run_transport_search_for_job)
     monkeypatch.setattr("workers.handlers.transport.asyncio.sleep", _sleep)
 
     job_id = uuid4()
     asyncio.run(_transport_search_step(job_id))
 
-    assert len(progress_calls) == 6
-    assert [item[2] for item in progress_calls] == [16, 33, 50, 66, 83, 100]
-    assert sleep_calls == [0.5, 0.5, 0.5, 0.5, 0.5, 0.5]
+    assert searched_job_ids == [job_id]
+    assert [item[2] for item in progress_calls] == [10, 40, 100]
+    assert sleep_calls == [0.5]

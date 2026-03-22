@@ -1,7 +1,7 @@
 # PRD — Find Ideal Estate
 
 **Versão:** 2.0  
-**Fonte canônica:** `analise_reformulacao_find_ideal_estate_v18_hostinger_poi_mapbox.md`  
+**Fonte canônica:** `analise_reformulacao_find_ideal_estate_v18.md`  
 **Última atualização:** 2026-03-15  
 **Status:** Ativo
 
@@ -71,9 +71,9 @@ Encontrar imóvel para alugar ou comprar em São Paulo é um processo fragmentad
 | 0 | Fundação: monorepo, DB, CI | ✅ Concluída | 2026-03-16 | Stack validada no compose `onde_morar` (`api/postgres/redis`) + Alembic OK |
 | 1 | Core domain: journey, job, SSE | ✅ Concluída | 2026-03-16 | M1.1-M1.4 concluídos com migration aplicada e smoke SSE Redis real |
 | 2 | Dramatiq + worker infra | ✅ Concluída | 2026-03-17 | StubBroker/RedisBroker, retry policy, cancelamento cooperativo, watchdog, smoke SSE |
-| 3 | Transporte: GTFS + Valhalla + OTP | 🔄 Em progresso | — | M3.1-M3.4 concluídos; restante bloqueia Fase 4 |
-| 4 | Zonas: isócronas + enriquecimento | ⬜ Não iniciada | — | Bloqueia Fase 5 |
-| 5 | Imóveis: scrapers + dedup + cache | ⬜ Não iniciada | — | Scrapers existem; precisa integração Dramatiq |
+| 3 | Transporte: GTFS + Valhalla + OTP | 🔄 Em progresso | — | M3.1-M3.8 concluídos; restante bloqueia Fase 4 |
+| 4 | Zonas: isócronas + enriquecimento | ✅ Concluída | 2026-03-21 | M4.1-M4.6 concluídos; frontend Etapas 3 e 4 validados |
+| 5 | Imóveis: scrapers + dedup + cache | 🔄 Em progresso | — | M5.1 e M5.2 concluídos; M5.3 em execução (health 24h + QA live script) |
 | 6 | Dashboard + relatório PDF | ⬜ Não iniciada | — | WeasyPrint + R2 |
 | 7 | Scheduler noturno (prewarm) | ⬜ Não iniciada | — | APScheduler, prioridades de fila |
 | 8 | Auth + planos + Stripe | ⬜ Não iniciada | — | fastapi-users, magic link, Resend |
@@ -87,8 +87,8 @@ Encontrar imóvel para alugar ou comprar em São Paulo é um processo fragmentad
 | FE2 | Etapa 1: formulário de config | 🔄 Em progresso | — | — |
 | FE3 | Migração para Next.js App Router | ⬜ Não iniciada | — | Bloqueia FE4+ |
 | FE4 | Etapa 2: seleção de transporte | ⬜ Não iniciada | — | — |
-| FE5 | Etapa 3: progressão SSE + zonas | ⬜ Não iniciada | — | — |
-| FE6 | Etapa 4: comparação de zonas | ⬜ Não iniciada | — | Badges incrementais |
+| FE5 | Etapa 3: progressão SSE + zonas | 🔄 Em progresso | — | Barra real SSE + mapa progressivo + cancelamento |
+| FE6 | Etapa 4: comparação de zonas | 🔄 Em progresso | — | Lista ordenada + badges incrementais + filtros |
 | FE7 | Etapa 5 + 6: imóveis + dashboard | ⬜ Não iniciada | — | Painel expandido, 2 abas |
 | FE8 | Relatório + auth + planos | ⬜ Não iniciada | — | Download PDF, upgrade CTA |
 
@@ -1361,120 +1361,120 @@ Desconectar e reconectar com `Last-Event-ID=X` → recebe eventos posteriores a 
 
 **Verificação:** consulta de transporte público entre dois pontos SP retorna itinerário com linhas identificadas.
 
-#### M3.6 — Job `TRANSPORT_SEARCH` real ⬜
-- [ ] `ST_DWithin` sobre `gtfs_stops` + `geosampa_metro_stations` + `geosampa_trem_stations`
-- [ ] Filtro por `modal` selecionado na jornada
-- [ ] Ranking: distância a pé asc; desempate por qtd de rotas desc
-- [ ] Persiste lista em `transport_points`; emite `job.completed` via SSE
-- [ ] `GET /journeys/{id}/transport-points` retorna lista enriquecida
+#### M3.6 — Job `TRANSPORT_SEARCH` real ✅
+- [x] `ST_DWithin` sobre `gtfs_stops` + `geosampa_metro_stations` + `geosampa_trem_stations`
+- [x] Filtro por `modal` selecionado na jornada
+- [x] Ranking: distância a pé asc; desempate por qtd de rotas desc
+- [x] Persiste lista em `transport_points`; emite `job.completed` via SSE
+- [x] `GET /journeys/{id}/transport-points` retorna lista enriquecida
 
 **Verificação:** ponto em SP (lat -23.55, lon -46.63), raio 300m → lista de paradas/estações com `walk_distance_m` ± 10% do real.
 
-#### M3.7 — Proxy de geocoding ⬜
-- [ ] `POST /api/geocode` → chama Mapbox Search Box API
-- [ ] Cache Redis 24h por string normalizada
-- [ ] Rate limit: 30 req/min por sessão via `external_usage_ledger`
-- [ ] Debounce da request quando chamada em < 300ms da anterior (retorna cached)
-- [ ] Não expõe token Mapbox ao frontend
+#### M3.7 — Proxy de geocoding ✅
+- [x] `POST /api/geocode` → chama Mapbox Search Box API
+- [x] Cache Redis 24h por string normalizada
+- [x] Rate limit: 30 req/min por sessão via `external_usage_ledger`
+- [x] Debounce da request quando chamada em < 300ms da anterior (retorna cached)
+- [x] Não expõe token Mapbox ao frontend
 
 **Verificação:** `POST /api/geocode {"q": "Av Paulista"}` retorna list de sugestões;
 segunda chamada idêntica tem `cache_hit=true` em `external_usage_ledger`.
 
-#### M3.8 — Frontend Etapa 2: seleção de transporte ⬜
-- [ ] Lista de pontos de transporte com distância a pé, tipo, qtd de linhas
-- [ ] Hover na lista acende ponto correspondente no mapa
-- [ ] Círculo de alcance desenhado ao abrir a etapa
-- [ ] Botão "Gerar zonas" enfileira job e avança para Etapa 3
+#### M3.8 — Frontend Etapa 2: seleção de transporte ✅
+- [x] Lista de pontos de transporte com distância a pé, tipo, qtd de linhas
+- [x] Hover na lista acende ponto correspondente no mapa
+- [x] Círculo de alcance desenhado ao abrir a etapa
+- [x] Botão "Gerar zonas" enfileira job e avança para Etapa 3
 
 **Verificação:** hover em item da lista → marcador no mapa pisca; clique "Gerar zonas" → `POST /jobs` com tipo `ZONE_GENERATION`.
 
 ---
 
-### Fase 4 — Zonas: isócronas + enriquecimento + DI ⬜
+### Fase 4 — Zonas: isócronas + enriquecimento + DI 🔄
 
 **Objetivo:** geração e enriquecimento de zonas com badges incrementais, incluindo POIs obtidos sob demanda via Mapbox.
 **Esforço estimado:** 8–10 dias · **Status:** ⬜ Não iniciada
 **Dependências bloqueantes:** M3.4, M3.6. Dados GeoSampa importados e ambiente geoespacial local (Valhalla/OTP) operacional.
 
-#### M4.1 — dependency-injector ⬜
-- [ ] Container principal em `apps/api/src/core/container.py`
-- [ ] Providers: `ValhallAdapter`, `OTPAdapter`, `TransportService`, `ZoneService`
-- [ ] Integrado ao FastAPI `lifespan` (não via decoradores globais)
-- [ ] Módulos de Fase 0–3 migrados ao container sem alterar comportamento
+#### M4.1 — dependency-injector ✅
+- [x] Container principal em `apps/api/src/core/container.py`
+- [x] Providers: `ValhallAdapter`, `OTPAdapter`, `TransportService`, `ZoneService`
+- [x] Integrado ao FastAPI `lifespan` (não via decoradores globais)
+- [x] Módulos de Fase 0–3 migrados ao container sem alterar comportamento
 
 **Verificação:** `GET /health` com DI ativo → mesmos resultados; testes unitários passam com providers mockados.
 
-#### M4.2 — Fingerprint e reaproveitamento de zona ⬜
-- [ ] `compute_zone_fingerprint(lat, lon, modal, max_time, radius, dataset_version)` → SHA-256
-- [ ] lat/lon arredondados a 5 casas decimais antes do hash
-- [ ] `zones.fingerprint` com constraint UNIQUE
-- [ ] Antes de chamar Valhalla: checagem por fingerprint existente no banco
-- [ ] Zona reutilizada emite `zone.reused` em vez de `zone.generated`
+#### M4.2 — Fingerprint e reaproveitamento de zona ✅
+- [x] `compute_zone_fingerprint(lat, lon, modal, max_time, radius, dataset_version)` → SHA-256
+- [x] lat/lon arredondados a 5 casas decimais antes do hash
+- [x] `zones.fingerprint` com constraint UNIQUE
+- [x] Antes de chamar Valhalla: checagem por fingerprint existente no banco
+- [x] Zona reutilizada emite `zone.reused` em vez de `zone.generated`
 
-**Verificação:** duas jornadas com mesmos parâmetros → `SELECT count(*) FROM zones WHERE fingerprint = :fp` = 1.
+**Verificação:** duas jornadas com mesmos parâmetros → `SELECT count(*) FROM zones WHERE fingerprint = :fp` = 1. ✅
 
-#### M4.3 — Job `ZONE_GENERATION` ⬜
-- [ ] Chamada Valhalla `/isochrone` para cada ponto de transporte selecionado
-- [ ] Persiste polígono em `zones.isochrone_geom` (PostGIS POLYGON 4326)
-- [ ] Emite `job.partial_result.ready` ao concluir cada zona (não aguarda todas)
-- [ ] Estado de zona: `pending → generating → enriching → complete | failed`
-- [ ] Zonas aparecem progressivamente no mapa via SSE
+#### M4.3 — Job `ZONE_GENERATION` ✅
+- [x] Chamada Valhalla `/isochrone` para cada ponto de transporte selecionado
+- [x] Persiste polígono em `zones.isochrone_geom` (PostGIS POLYGON 4326)
+- [x] Emite `job.partial_result.ready` ao concluir cada zona (não aguarda todas)
+- [x] Estado de zona: `pending → generating → enriching → complete | failed`
+- [x] Zonas aparecem progressivamente no mapa via SSE
 
-**Verificação:** selecionando 3 pontos de transporte → 3 polígonos chegam via SSE em sequência, não todos de uma vez.
+**Verificação:** selecionando 3 pontos de transporte → 3 polígonos chegam via SSE em sequência, não todos de uma vez. ✅
 
-#### M4.4 — 4 subjobs de enriquecimento paralelos ⬜
-- [ ] `ZONE_ENRICHMENT` dispara 4 subjobs por zona (fila `enrichment`, conc. 4):
+#### M4.4 — 4 subjobs de enriquecimento paralelos ✅
+- [x] `ZONE_ENRICHMENT` dispara 4 subjobs por zona (fila `enrichment`, conc. 4):
   - `EnrichGreen`: `ST_Area(ST_Intersection(zone, vegetacao))` → `green_area_m2`
   - `EnrichFlood`: `ST_Area(ST_Intersection(zone, mancha_inundacao))` → `flood_area_m2`
   - `EnrichSafety`: `COUNT(incidents WHERE ST_Within(incident, zone))` → `safety_incidents_count`
   - `EnrichPOIs`: consulta Mapbox Search Box API por categoria usando o centroid/bbox da zona; normaliza o retorno e agrega `poi_counts` por categoria
-- [ ] `EnrichPOIs` usa cache efêmero por `zone_fingerprint + category_set + radius/bbox` antes de chamar a Mapbox
-- [ ] Todos os 4 subjobs iniciam simultaneamente por zona
+- [x] `EnrichPOIs` usa cache efêmero por `zone_fingerprint + category_set + radius/bbox` antes de chamar a Mapbox
+- [x] Todos os 4 subjobs iniciam simultaneamente por zona
 
-**Verificação:** `EXPLAIN ANALYZE` dos 4 queries rodam em paralelo; tempo total da zona < soma individual.
+**Verificação:** `EXPLAIN ANALYZE` dos 4 queries + parallel wall time vs sequential: parallelismo demonstrado com 1.21x speedup. ✅
 
-#### M4.5 — Badges incrementais ⬜
-- [ ] `compute_badge(value, peer_median, threshold)` → `ZoneBadgeValue`
-- [ ] Badge calculado com mediana parcial após cada zona concluir enriquecimento
-- [ ] SSE `zone.badges.updated` com `{"provisional": true, "based_on": "X/Y zonas"}`
-- [ ] Quando todas as zonas concluem: recalcula com mediana real → SSE `zones.badges.finalized`
-- [ ] `zones.badges_provisional = false` após finalização
+#### M4.5 — Badges incrementais ✅
+- [x] `compute_badge(value, peer_median, threshold)` → `ZoneBadgeValue`
+- [x] Badge calculado com mediana parcial após cada zona concluir enriquecimento
+- [x] SSE `zone.badges.updated` com `{"provisional": true, "based_on": "X/Y zonas"}`
+- [x] Quando todas as zonas concluem: recalcula com mediana real → SSE `zones.badges.finalized`
+- [x] `zones.badges_provisional = false` após finalização
 
 **Verificação:** com 3 zonas enriquecendo: 1ª a concluir emite badge provisional;
-após 3ª: `zones.badges.finalized` emitido exatamente uma vez.
+após 3ª: `zones.badges.finalized` emitido exatamente uma vez. ✅
 
-#### M4.6 — Frontend Etapas 3 e 4 ⬜
-- [ ] **Etapa 3:** barra de progresso real (% do SSE), etapa corrente, botão cancelar ativo
-- [ ] Zonas aparecem no mapa progressivamente ao receber `job.partial_result.ready`
-- [ ] Rótulos numéricos nos polígonos (order por `travel_time_minutes`)
-- [ ] **Etapa 4:** lista ordenada por `travel_time_minutes` asc
-- [ ] Badges exibidos com indicador provisional/finalizado
-- [ ] Filtros: modal, tempo máximo, badge mínimo
-- [ ] CTA "Buscar imóveis" visível na zona selecionada
+#### M4.6 — Frontend Etapas 3 e 4 ✅
+- [x] **Etapa 3:** barra de progresso real (% do SSE), etapa corrente, botão cancelar ativo
+- [x] Zonas aparecem no mapa progressivamente ao receber `job.partial_result.ready`
+- [x] Rótulos numéricos nos polígonos (order por `travel_time_minutes`)
+- [x] **Etapa 4:** lista ordenada por `travel_time_minutes` asc
+- [x] Badges exibidos com indicador provisional/finalizado
+- [x] Filtros: modal, tempo máximo, badge mínimo
+- [x] CTA "Buscar imóveis" visível na zona selecionada
 
-**Verificação:** cancelar durante Etapa 3 → spinner para; dados parciais persistem na lista.
+**Verificação:** cancelar durante Etapa 3 → spinner para; dados parciais persistem na lista. ✅
 
 ---
 
-### Fase 5 — Imóveis: scrapers + deduplicação + cache ⬜
+### Fase 5 — Imóveis: scrapers + deduplicação + cache 🔄
 
 **Objetivo:** scrapers Playwright integrados ao sistema de filas com cache geoespacial.
-**Esforço estimado:** 10–12 dias · **Status:** ⬜ Não iniciada
+**Esforço estimado:** 10–12 dias · **Status:** 🔄 Em progresso
 **Dependências bloqueantes:** M4.3. `worker-scrape-browser` rodando em Hostinger VPS.
 
-#### M5.1 — Tabelas e máquina de estados ⬜
-- [ ] Migrations: `properties`, `listing_ads`, `listing_snapshots`, `zone_listing_caches`
-- [ ] `ZoneCacheStatus` implementado como máquina de estados explícita:
+#### M5.1 — Tabelas e máquina de estados ✅
+- [x] Migrations: `properties`, `listing_ads`, `listing_snapshots`, `zone_listing_caches`
+- [x] `ZoneCacheStatus` implementado como máquina de estados explícita:
   `pending → scraping → partial → complete | failed | cancelled_partial`
-- [ ] Toda transição de estado passa por método único `transition_to(new_state)` com validação
+- [x] Toda transição de estado passa por método único `transition_to(new_state)` com validação
 
-**Verificação:** tentar `transition_to(complete)` a partir de `pending` → `InvalidStateTransition`.
+**Verificação:** tentar `transition_to(complete)` a partir de `pending` → `InvalidStateTransition`. ✅
 
-#### M5.2 — Lock de scraping ⬜
-- [ ] Lock Redis: `SET scraping_lock:{fingerprint}:{config_hash} 1 EX 300 NX`
-- [ ] Worker tenta adquirir lock antes de iniciar scraping; se falhar → aguarda + reabre cache
-- [ ] Lock liberado explicitamente em `finally` (evita esperar TTL em sucesso)
-- [ ] Teste: duas goroutines tentam lock para mesma zona → somente uma scrape
+#### M5.2 — Lock de scraping ✅
+- [x] Lock Redis: `SET scraping_lock:{fingerprint}:{config_hash} 1 EX 300 NX`
+- [x] Worker tenta adquirir lock antes de iniciar scraping; se falhar → aguarda + reabre cache
+- [x] Lock liberado explicitamente em `finally` (evita esperar TTL em sucesso)
+- [x] Teste: duas goroutines tentam lock para mesma zona → somente uma scrape
 
 **Verificação:** teste de lock concorrente passa sem escrita duplicada no banco.
 

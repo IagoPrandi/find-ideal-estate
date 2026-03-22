@@ -1,5 +1,6 @@
 platforms:
   quinto_andar:
+    max_pages: 4
     start_urls:
       rent:
       - https://www.quintoandar.com.br/alugar/imovel/sao-paulo-sp-brasil
@@ -24,6 +25,7 @@ platforms:
       url: url
  
   vivareal:
+    max_pages: 4
     start_urls:
       rent:
       - https://www.vivareal.com.br/aluguel/sp/sao-paulo/
@@ -47,6 +49,7 @@ platforms:
     prefer_headful: true
 
   zapimoveis:
+    max_pages: 4
     start_urls:
       rent:
       - https://www.zapimoveis.com.br/aluguel/

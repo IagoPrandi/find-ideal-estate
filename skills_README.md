@@ -12,6 +12,7 @@ Este arquivo indexa todas as skills disponíveis em `\skills`.
 
 - [a2-key-aggregation](#a2-key-aggregation) — Implement/review the A2 scalable winner model using canonical playerKey per WinMode + O(1) aggregated counters & winner counts (no loops over players) for daily/monthly commit→reveal→draw→claim.
 - [automation-upkeep](#automation-upkeep) — Implement deterministic, idempotent phase automation using Chainlink-style checkUpkeep/performUpkeep for updatePhase/requestDraw/openDay/closeDay, with safe retries and manual fallback.
+- [best-practices](#best-practices) — Orientações completas de boas práticas para desenvolvimento de projetos Web2 + Web3 híbridos: arquitetura, código, contratos, testes, observabilidade, deploy e governança.
 - [checkout-batch-flow](#checkout-batch-flow) — Implement/review one-transaction checkout() batching (feed → commit → buyRelics → applyRelics → monthly action) with deterministic validation, canonical ordering, and exact payment reconciliation (refund extra).
 - [cloudflare-deploy](#cloudflare-deploy) — Deploy applications and infrastructure to Cloudflare using Workers, Pages, and related platform services (KV, D1, R2, Durable Objects, Queues, etc.).
 - [develop-frontend](#develop-frontend) — Review, debug and elevate AI-generated web frontends: layout stability, responsiveness, accessibility, visual consistency (tokens), UI states, and baseline performance/SEO.
@@ -24,7 +25,7 @@ Este arquivo indexa todas as skills disponíveis em `\skills`.
 - [ponder-indexer-events](#ponder-indexer-events) — Maintain Ponder event coverage + Postgres projections for the game. Use when adding/modifying on-chain events, handler logic, schema migrations, or API alignment.
 - [release-config-management](#release-config-management) — Standardize release & configuration management across chains/environments: deployments/<chainId>.json, env/runtime secrets, ABI/schema versioning, idempotent migrations, and reproducible scripts. Use when touching deploy scripts, env vars, DB migrations, ABI/events, or production setup.
 - [render-deploy](#render-deploy) — Deploy applications to Render by analyzing codebases, generating render.yaml Blueprints, and creating services via MCP tools.
-- [security-threat-checklist](#security-threat-checklist) — Apply project security requirements (threat model + Web2/Web3 checklists + mandatory scans/tests) whenever surface area changes: auth, contracts, indexer, API, infra, or admin ops.
+- [security-threat-checklist](#security-threat-checklist) — Apply threat modeling and security checklists (Web2, Web3, frontend, infra) to any PR or task that changes auth, contracts, secrets, APIs, payments, upgradeability, or admin operations.
 - [upgradeability-governance](#upgradeability-governance) — Enforce safe upgrade patterns (ERC-7201 namespaced storage, initializer discipline, authorizeUpgrade governance, and upgrade tests). Use when touching proxy/upgradeable contracts, storage layout, admin roles, or deploy scripts.
 - [vercel-deploy](#vercel-deploy) — Deploy applications and websites to Vercel. Always deploys as preview unless production is explicitly requested. Handles CLI auth and fallback deploy script.
 - [web2-wallet-auth](#web2-wallet-auth) — Implement or review Web2 wallet-based auth (SIWE/EIP-712) with nonce+expiry+anti-replay, ERC-1271 support, rate limiting, and safe logging. Use when touching login/session/authz endpoints or any signature verification off-chain.
@@ -52,6 +53,30 @@ Este arquivo indexa todas as skills disponíveis em `\skills`.
 **Quando usar (gatilhos):**
 - Adding/adjusting automated phase transitions, VRF request triggers, or scheduled open/close logic.
 - Any time you touch `checkUpkeep`, `performUpkeep`, or “keeper/cron” responsibilities.
+
+## best-practices
+
+**Título:** Best Practices — Web2 + Web3 Híbrido
+
+**Descrição:** Orientações completas de boas práticas para desenvolvimento de projetos Web2 + Web3 híbridos. Cobre arquitetura, qualidade de código, segurança, testes, observabilidade, deploy, governança e compliance. Inclui checklists de DoD, anti-padrões e regras de atuação do agente.
+
+**Arquivo:** `skills/best-practices/SKILL.md`
+
+**Subagentes disponíveis:**
+- `agents/code-reviewer` — revisão de código (qualidade, legibilidade, dependências)
+- `agents/architect` — arquitetura híbrida, fronteiras de confiança, ADRs
+- `agents/contract-auditor` — auditoria de contratos Solidity
+- `agents/test-strategist` — estratégia de testes, fuzz, invariants
+- `agents/deploy-reviewer` — CI/CD, checklist de deploy, rollback
+- `agents/security-checker` — segredos, logs, licenças, papéis administrativos
+
+**Quando usar (gatilhos):**
+- Escrever, revisar ou refatorar código (backend, frontend, contratos Solidity).
+- Projetar ou avaliar arquitetura de sistema híbrido Web2 + Web3.
+- Implementar ou revisar segurança, autenticação, autorização.
+- Definir estratégia de testes, observabilidade ou deploy.
+- Trabalhar com smart contracts, indexadores (Ponder, The Graph) ou APIs.
+- Usuário mencionar: "boas práticas", "code review", "arquitetura", "contrato inteligente", "indexer", "deploy", "testes", "auditoria", "DoD".
 
 ## checkout-batch-flow
 
@@ -208,18 +233,21 @@ Este arquivo indexa todas as skills disponíveis em `\skills`.
 
 **Título:** Security Threat Checklist (DoD Requirement)
 
-**Descrição:** Apply project security requirements (threat model + Web2/Web3 checklists + mandatory scans/tests) whenever surface area changes: auth, contracts, indexer, API, infra, or admin ops.
+**Descrição:** Apply threat modeling and security checklists (Web2, Web3, frontend, infra) to any PR or task that changes auth, contracts, secrets, APIs, payments, upgradeability, or admin operations. Returns blockers, recommendations by severity, and required scans status.
 
 **Arquivo:** `skills/security-threat-checklist/SKILL.md`
 
 **Quando usar (gatilhos):**
 - Any PR that changes:
-- external/public endpoints (HTTP or on-chain functions)
-- auth/signatures/login
-- payout/claim/withdraw
-- upgradeability/storage
-- indexer/DB writes or replay logic
-- infra/secrets/config
+  - external/public endpoints (HTTP or on-chain functions)
+  - auth, signatures, wallet login, session management
+  - payments, claims, withdrawals, rewards, any value transfer
+  - smart contract logic, upgradeability, or storage layout
+  - secrets, environment variables, config, or infra
+  - indexer/DB writes, event replay, or reorg handling
+  - admin operations, role/permission changes
+  - frontend code that signs messages or sends transactions
+- User asks: "is this secure?", "security review", "threat model", "what could go wrong?"
 
 ## upgradeability-governance
 

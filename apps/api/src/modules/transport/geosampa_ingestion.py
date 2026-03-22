@@ -21,6 +21,8 @@ _GEOSAMPA_DATASETS = (
     ("geosampa_bus_stops", "geoportal_ponto_onibus.gpkg"),
     ("geosampa_bus_terminals", "geoportal_terminal_onibus_v2.gpkg"),
     ("geosampa_bus_corridors", "geoportal_corredor_onibus_v2.gpkg"),
+    ("geosampa_vegetacao_significativa", "SIRGAS_GPKG_VEGETACAO_SIGNIFICATIVA.gpkg"),
+    ("geosampa_mancha_inundacao", "geoportal_mancha_inundacao_25.gpkg"),
 )
 _OGR2OGR_DOCKER_IMAGE = "geographica/gdal2:latest"
 _SAFE_IDENTIFIER_RE = re.compile(r"[^a-z0-9_]+")
@@ -441,10 +443,34 @@ async def ingest_geosampa_to_postgis(
                 )
                 invalid_count = int(invalid_count_result.scalar_one())
                 if invalid_count > 0:
-                    raise GeoSampaIngestionError(
-                        "ST_IsValid check failed for "
-                        f"{production_name}: {invalid_count} invalid geometries"
+                    # Attempt to repair invalid geometries from upstream sources.
+                    await conn.execute(
+                        text(
+                            f"""
+                            UPDATE {staging_name}
+                            SET geometry = ST_Multi(ST_CollectionExtract(ST_MakeValid(geometry), 3))
+                            WHERE geometry IS NOT NULL
+                              AND NOT ST_IsValid(geometry)
+                            """
+                        )
                     )
+                    recheck_result = await conn.execute(
+                        text(
+                            f"""
+                            SELECT count(*)
+                            FROM {staging_name}
+                            WHERE geometry IS NULL
+                               OR NOT ST_IsValid(geometry)
+                            """
+                        )
+                    )
+                    remaining_invalid = int(recheck_result.scalar_one())
+                    if remaining_invalid > 0:
+                        raise GeoSampaIngestionError(
+                            "ST_IsValid check failed for "
+                            f"{production_name}: {remaining_invalid} "
+                            "invalid geometries after repair"
+                        )
 
                 row_count_result = await conn.execute(text(f"SELECT count(*) FROM {staging_name}"))
                 row_counts[production_name] = int(row_count_result.scalar_one())

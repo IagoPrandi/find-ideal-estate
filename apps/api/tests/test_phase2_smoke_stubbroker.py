@@ -141,6 +141,7 @@ def test_phase2_smoke_enqueue_and_wait_sse_completed(monkeypatch):
             "workers.middleware.update_job_execution_state",
             _update_job_execution_state,
         )
+        monkeypatch.setattr("workers.handlers.transport.run_transport_search_for_job", lambda _job_id: asyncio.sleep(0))
         monkeypatch.setattr("workers.cancellation.get_job", _get_job)
         monkeypatch.setattr("workers.runtime.JobHeartbeatMiddleware", _FakeHeartbeatMiddleware)
         monkeypatch.setattr("modules.jobs.events.list_job_events", _list_job_events)
@@ -255,6 +256,7 @@ def test_phase2_smoke_cancel_endpoint_emits_cancelled_under_2s(monkeypatch):
             "workers.middleware.update_job_execution_state",
             _update_job_execution_state,
         )
+        monkeypatch.setattr("workers.handlers.transport.run_transport_search_for_job", lambda _job_id: asyncio.sleep(0))
         monkeypatch.setattr("workers.cancellation.get_job", _get_job)
         monkeypatch.setattr("workers.runtime.JobHeartbeatMiddleware", _FakeHeartbeatMiddleware)
         monkeypatch.setattr("modules.jobs.events.list_job_events", _list_job_events)

@@ -129,6 +129,56 @@ export const TransportStopsResponseSchema = z.object({
   features: z.array(TransportFeatureSchema)
 });
 
+export const TransportPointReadSchema = z.object({
+  id: z.string(),
+  journey_id: z.string(),
+  source: z.string(),
+  external_id: z.string().optional(),
+  name: z.string().optional(),
+  lat: z.number(),
+  lon: z.number(),
+  walk_time_sec: z.number(),
+  walk_distance_m: z.number(),
+  route_ids: z.array(z.string()),
+  modal_types: z.array(z.string()),
+  route_count: z.number(),
+  created_at: z.string()
+});
+
+export const JourneyReadSchema = z.object({
+  id: z.string(),
+  user_id: z.string().optional(),
+  anonymous_session_id: z.string().optional(),
+  state: z.string(),
+  input_snapshot: z.record(z.unknown()).optional(),
+  selected_transport_point_id: z.string().optional(),
+  selected_zone_id: z.string().optional(),
+  selected_property_id: z.string().optional(),
+  last_completed_step: z.number().optional(),
+  secondary_reference_label: z.string().optional(),
+  secondary_reference_point: z.object({ lat: z.number(), lon: z.number() }).optional(),
+  created_at: z.string(),
+  updated_at: z.string(),
+  expires_at: z.string().optional()
+});
+
+export const JobReadSchema = z.object({
+  id: z.string(),
+  journey_id: z.string().optional(),
+  job_type: z.string(),
+  state: z.string(),
+  progress_percent: z.number(),
+  current_stage: z.string().optional(),
+  cancel_requested_at: z.string().optional(),
+  started_at: z.string().optional(),
+  finished_at: z.string().optional(),
+  worker_id: z.string().optional(),
+  result_ref: z.record(z.unknown()).optional(),
+  error_code: z.string().optional(),
+  error_message: z.string().optional(),
+  created_at: z.string()
+});
+
 export type RunCreateResponse = {
   run_id: string;
   status: {
@@ -284,3 +334,53 @@ export type TransportLayersResponse = {
 };
 
 export type TransportStopsResponse = GeoJSON.FeatureCollection;
+
+export type TransportPointRead = {
+  id: string;
+  journey_id: string;
+  source: string;
+  external_id?: string | null;
+  name?: string | null;
+  lat: number;
+  lon: number;
+  walk_time_sec: number;
+  walk_distance_m: number;
+  route_ids: string[];
+  modal_types: string[];
+  route_count: number;
+  created_at: string;
+};
+
+export type JourneyRead = {
+  id: string;
+  user_id?: string | null;
+  anonymous_session_id?: string | null;
+  state: string;
+  input_snapshot?: Record<string, unknown> | null;
+  selected_transport_point_id?: string | null;
+  selected_zone_id?: string | null;
+  selected_property_id?: string | null;
+  last_completed_step?: number | null;
+  secondary_reference_label?: string | null;
+  secondary_reference_point?: { lat: number; lon: number } | null;
+  created_at: string;
+  updated_at: string;
+  expires_at?: string | null;
+};
+
+export type JobRead = {
+  id: string;
+  journey_id?: string | null;
+  job_type: string;
+  state: string;
+  progress_percent: number;
+  current_stage?: string | null;
+  cancel_requested_at?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  worker_id?: string | null;
+  result_ref?: Record<string, unknown> | null;
+  error_code?: string | null;
+  error_message?: string | null;
+  created_at: string;
+};

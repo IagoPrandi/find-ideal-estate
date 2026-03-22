@@ -30,7 +30,7 @@ def resolve_worker_plan(queue_names: Iterable[str]) -> list[tuple[str, int]]:
 
 def _load_handlers() -> None:
     # Import side effect: actor declarations.
-    from workers.handlers import transport  # noqa: F401
+    from workers.handlers import enrichment, transport, zones  # noqa: F401
 
 
 def start_workers(

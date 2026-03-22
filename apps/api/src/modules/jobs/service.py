@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
 
+import dramatiq
 from contracts import JobCancelAccepted, JobCreate, JobRead, JobState, JobType
 from core.db import get_engine
+from dramatiq.brokers.stub import StubBroker
 from sqlalchemy import text
 from sqlalchemy.engine import RowMapping
 
@@ -86,11 +89,65 @@ async def create_job(payload: JobCreate) -> JobRead:
     return job
 
 
+def _uses_stub_broker() -> bool:
+    try:
+        return isinstance(dramatiq.get_broker(), StubBroker)
+    except RuntimeError:
+        return False
+
+
+async def _run_job_inline(job: JobRead) -> None:
+    from workers.runtime import run_job_with_retry
+
+    if job.job_type == JobType.TRANSPORT_SEARCH:
+        from workers.handlers.transport import _transport_search_step
+
+        await run_job_with_retry(
+            job.id,
+            JobType.TRANSPORT_SEARCH,
+            stage="transport_search",
+            execute_step=lambda: _transport_search_step(job.id),
+        )
+        return
+
+    if job.job_type == JobType.ZONE_GENERATION:
+        from workers.handlers.zones import _zone_generation_step
+
+        await run_job_with_retry(
+            job.id,
+            JobType.ZONE_GENERATION,
+            stage="zone_generation",
+            execute_step=lambda: _zone_generation_step(job.id),
+        )
+        return
+
+    if job.job_type == JobType.ZONE_ENRICHMENT:
+        from workers.handlers.enrichment import _zone_enrichment_step
+
+        await run_job_with_retry(
+            job.id,
+            JobType.ZONE_ENRICHMENT,
+            stage="zone_enrichment",
+            execute_step=lambda: _zone_enrichment_step(job.id),
+        )
+
+
 async def enqueue_job(job: JobRead) -> None:
+    if _uses_stub_broker():
+        asyncio.create_task(_run_job_inline(job))
+        return
+
     if job.job_type == JobType.TRANSPORT_SEARCH:
         from workers.handlers.transport import transport_search_actor
 
         transport_search_actor.send(str(job.id))
+    elif job.job_type == JobType.ZONE_GENERATION:
+        from workers.handlers.zones import zone_generation_actor
+
+        zone_generation_actor.send(str(job.id))
+    elif job.job_type == JobType.ZONE_ENRICHMENT:
+        from workers.handlers.enrichment import enrich_zones_actor
+        enrich_zones_actor.send(str(job.id))
 
 
 async def update_job_execution_state(
@@ -167,3 +224,4 @@ async def request_job_cancellation(job_id: UUID) -> JobCancelAccepted | None:
         status="accepted",
         cancel_requested_at=row["cancel_requested_at"],
     )
+
