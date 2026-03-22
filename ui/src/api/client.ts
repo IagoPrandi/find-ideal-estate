@@ -12,6 +12,8 @@ import {
   ListingsCollectionSchema,
   ListingsScrapeResponse,
   ListingsScrapeResponseSchema,
+  PriceRollupRead,
+  PriceRollupReadSchema,
   RunCreateResponse,
   RunCreateResponseSchema,
   RunStatusResponse,
@@ -214,6 +216,18 @@ export async function createZoneGenerationJob(journeyId: string): Promise<JobRea
       job_type: "zone_generation"
     }
   })) as JobRead;
+}
+
+export async function getPriceRollups(
+  journeyId: string,
+  zoneFingerprint: string,
+  searchType: string = "rent",
+  days: number = 30
+): Promise<PriceRollupRead[]> {
+  return (await requestJson(
+    `/journeys/${encodeURIComponent(journeyId)}/zones/${encodeURIComponent(zoneFingerprint)}/price-rollups?search_type=${encodeURIComponent(searchType)}&days=${days}`,
+    z.array(PriceRollupReadSchema)
+  )) as PriceRollupRead[];
 }
 
 export { API_BASE };

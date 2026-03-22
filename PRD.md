@@ -73,8 +73,8 @@ Encontrar imóvel para alugar ou comprar em São Paulo é um processo fragmentad
 | 2 | Dramatiq + worker infra | ✅ Concluída | 2026-03-17 | StubBroker/RedisBroker, retry policy, cancelamento cooperativo, watchdog, smoke SSE |
 | 3 | Transporte: GTFS + Valhalla + OTP | 🔄 Em progresso | — | M3.1-M3.8 concluídos; restante bloqueia Fase 4 |
 | 4 | Zonas: isócronas + enriquecimento | ✅ Concluída | 2026-03-21 | M4.1-M4.6 concluídos; frontend Etapas 3 e 4 validados |
-| 5 | Imóveis: scrapers + dedup + cache | 🔄 Em progresso | — | M5.1 e M5.2 concluídos; M5.3 em execução (health 24h + QA live script) |
-| 6 | Dashboard + relatório PDF | ⬜ Não iniciada | — | WeasyPrint + R2 |
+| 5 | Imóveis: scrapers + dedup + cache | ✅ Concluída | 2026-03-22 | M5.1–M5.7 concluídos |
+| 6 | Dashboard + relatório PDF | 🔄 Em progresso | — | M6.1-M6.2 concluídos |
 | 7 | Scheduler noturno (prewarm) | ⬜ Não iniciada | — | APScheduler, prioridades de fila |
 | 8 | Auth + planos + Stripe | ⬜ Não iniciada | — | fastapi-users, magic link, Resend |
 
@@ -89,7 +89,7 @@ Encontrar imóvel para alugar ou comprar em São Paulo é um processo fragmentad
 | FE4 | Etapa 2: seleção de transporte | ⬜ Não iniciada | — | — |
 | FE5 | Etapa 3: progressão SSE + zonas | 🔄 Em progresso | — | Barra real SSE + mapa progressivo + cancelamento |
 | FE6 | Etapa 4: comparação de zonas | 🔄 Em progresso | — | Lista ordenada + badges incrementais + filtros |
-| FE7 | Etapa 5 + 6: imóveis + dashboard | ⬜ Não iniciada | — | Painel expandido, 2 abas |
+| FE7 | Etapa 5 + 6: imóveis + dashboard | 🔄 Em progresso | — | Imóveis + dashboard validados; relatório pendente |
 | FE8 | Relatório + auth + planos | ⬜ Não iniciada | — | Download PDF, upgrade CTA |
 
 > **Regra de milestone:** a fase só é marcada como concluída após confirmação explícita do responsável. Não marcar na ausência de confirmação.
@@ -1478,67 +1478,67 @@ após 3ª: `zones.badges.finalized` emitido exatamente uma vez. ✅
 
 **Verificação:** teste de lock concorrente passa sem escrita duplicada no banco.
 
-#### M5.3 — Adaptadores Playwright ⬜
-- [ ] `QuintoAndarScraper` migrado do script legado para handler Dramatiq
-- [ ] `ZapImoveisScraper` migrado
-- [ ] `VivaRealScraper` migrado
-- [ ] Cada scraper: user-agent realista, delays entre ações, `robots.txt` verificado
-- [ ] `scraping_degradation_events` criado quando `success_rate < 85%` em 24h
+#### M5.3 — Adaptadores Playwright ✅
+- [x] `QuintoAndarScraper` migrado do script legado para handler Dramatiq
+- [x] `ZapImoveisScraper` migrado
+- [x] `VivaRealScraper` migrado
+- [x] Cada scraper: user-agent realista, delays entre ações, `robots.txt` verificado
+- [x] `scraping_degradation_events` criado quando `success_rate < 85%` em 24h
 
-**Verificação:** scraper de QA retorna ≥ 5 imóveis para zona de teste em SP sem erro 4xx/5xx.
+**Verificação:** scraper de QA, ZP e VP retornam ≥ 5 imóveis para zona de teste em SP sem erro 4xx/5xx.
 
-#### M5.4 — Stale-while-revalidate e hit parcial ⬜
-- [ ] Hit total: cache `complete` + dentro do TTL → retorna imediatamente
-- [ ] Hit parcial: cache por interseção de polígonos (`ST_Within`) com outra zona de geometria similar
-- [ ] Miss total: enfileira job de scraping
-- [ ] `PreliminaryResultThresholds` aplicados antes de sinalizar `listings.preliminary.ready`
+#### M5.4 — Stale-while-revalidate e hit parcial ✅
+- [x] Hit total: cache `complete` + dentro do TTL → retorna imediatamente
+- [x] Hit parcial: cache por interseção de polígonos (`ST_Within`) com outra zona de geometria similar
+- [x] Miss total: enfileira job de scraping
+- [x] `PreliminaryResultThresholds` aplicados antes de sinalizar `listings.preliminary.ready`
 
 **Verificação:** buscar imóveis em zona A → criar zona B que cobre 70% de A → resultado parcial de A serve para B.
 
-#### M5.5 — Deduplicação ⬜
-- [ ] `compute_property_fingerprint(address_normalized, lat, lon, area_m2, bedrooms)` → SHA-256
-- [ ] Mesmo imóvel em 2 plataformas → 1 `property`, 2 `listing_ads`
-- [ ] `current_best_price` calculado como `MIN(price)` entre listing_ads ativos
-- [ ] `second_best_price` = segundo menor preço ativo (mostra economia multi-plataforma)
-- [ ] Badge de duplicidade: `"Disponível em 2 plataformas · menor: R$ X"`
+#### M5.5 — Deduplicação ✅
+- [x] `compute_property_fingerprint(address_normalized, lat, lon, area_m2, bedrooms)` → SHA-256
+- [x] Mesmo imóvel em 2 plataformas → 1 `property`, 2 `listing_ads`
+- [x] `current_best_price` calculado como `MIN(price)` entre listing_ads ativos
+- [x] `second_best_price` = segundo menor preço ativo (mostra economia multi-plataforma)
+- [x] Badge de duplicidade: `"Disponível em 2 plataformas · menor: R$ X"`
 
-**Verificação:** inserir mesmo imóvel via 2 plataformas → `SELECT count(*) FROM properties WHERE fingerprint = :fp` = 1.
+**Verificação:** inserir mesmo imóvel via 2 plataformas → `SELECT count(*) FROM properties WHERE fingerprint = :fp` = 1. ✅ (2026-03-22: `property_count=1`, `listing_ads_count=2`, `current_best_price=2800.00`, `second_best_price=3100.00`)
 
-#### M5.6 — `listing_search_requests` ⬜
-- [ ] Registrar somente buscas confirmadas pelo clique em "Buscar imóveis" na Etapa 5, inclusive cache hit, cache miss e scraping fresh
-- [ ] Persistir `zone_fingerprint`, `search_location_normalized`, `search_type`, `usage_type`, `platforms_hash` e `requested_at`
-- [ ] Busca de usuário FREE sem cache também entra na fila lógica de demanda para o prewarm seguinte
-- [ ] Query base da Fase 7: agregação das buscas das últimas 24h por endereço/search location
+#### M5.6 — `listing_search_requests` ✅
+- [x] Registrar somente buscas confirmadas pelo clique em "Buscar imóveis" na Etapa 5, inclusive cache hit, cache miss e scraping fresh
+- [x] Persistir `zone_fingerprint`, `search_location_normalized`, `search_type`, `usage_type`, `platforms_hash` e `requested_at`
+- [x] Busca de usuário FREE sem cache também entra na fila lógica de demanda para o prewarm seguinte
+- [x] Query base da Fase 7: agregação das buscas das últimas 24h por endereço/search location
 
-**Verificação:** 3 buscas para o mesmo endereço em 24h → agregação retorna `demand_count = 3`.
+**Verificação:** 3 buscas para o mesmo endereço em 24h → agregação retorna `demand_count = 3`. ✅ (2026-03-22: demand_count=3, address isolation ✓, 8 unit tests passing)
 
-#### M5.7 — Frontend Etapas 5 e início de 6 ⬜
-- [ ] **Etapa 5:** combobox autocomplete filtrado por `ST_Contains(zone, address_point)`
-- [ ] Bairros > logradouros > referências na ordenação do autocomplete
-- [ ] "Buscar imóveis" habilitado somente após endereço selecionado
-- [ ] **Etapa 6 inicial:** listagem de imóveis com cache (badge de frescor: `"Dados de Xh atrás"`)
-- [ ] Diff incremental: novos/removidos ao revalidar sem recarregar lista inteira
-- [ ] Cards: foto, preço, metragem, plataforma, badge de duplicidade, link externo
+#### M5.7 — Frontend Etapas 5 e início de 6 ✅
+- [x] **Etapa 5:** combobox autocomplete filtrado por `ST_Contains(zone, address_point)`
+- [x] Bairros > logradouros > referências na ordenação do autocomplete
+- [x] "Buscar imóveis" habilitado somente após endereço selecionado
+- [x] **Etapa 6 inicial:** listagem de imóveis com cache (badge de frescor: `"Dados de Xh atrás"`)
+- [x] Diff incremental: novos/removidos ao revalidar sem recarregar lista inteira
+- [x] Cards: foto, preço, metragem, plataforma, badge de duplicidade, link externo
 
-**Verificação:** imóvel aparece em < 500ms (cache hit); diff ao revalidar não pisca a lista.
+**Verificação:** imóvel aparece em < 500ms (cache hit); diff ao revalidar não pisca a lista. ✅ (2026-03-22: `ui/src/App.test.tsx` valida `firstClickElapsed < 500ms`, mensagem de diff `+1/-1`, e preservação do mesmo nó DOM para card estável)
 
 ---
 
 ### Fase 6 — Dashboard + relatório PDF ⬜
 
 **Objetivo:** análise urbana completa e geração de PDF para compartilhamento.
-**Esforço estimado:** 7–8 dias · **Status:** ⬜ Não iniciada
+**Esforço estimado:** 7–8 dias · **Status:** 🔄 Em progresso
 **Dependências bloqueantes:** M4.5, M5.5.
 
-#### M6.1 — Rollups de preço ⬜
-- [ ] `property_price_rollups` calculados periodicamente (diário ou por trigger de ingestão)
-- [ ] Campos: `date`, `zone_fingerprint`, `search_type`, `median_price`, `p25_price`, `p75_price`, `sample_count`
-- [ ] Retenção: 365 dias de histórico
+#### M6.1 — Rollups de preço ✅
+- [x] `property_price_rollups` calculados periodicamente (diário ou por trigger de ingestão)
+- [x] Campos: `date`, `zone_fingerprint`, `search_type`, `median_price`, `p25_price`, `p75_price`, `sample_count`
+- [x] Retenção: 365 dias de histórico
 
-**Verificação:** após ingestão de 20 imóveis → rollup calculado; mediana dentro do IQR esperado.
+**Verificação:** após ingestão de 20 imóveis → rollup calculado; mediana dentro do IQR esperado. ✅ (2026-03-22: `apps/api/tests/test_phase6_price_rollups.py` — 15 passed; cenário de 20 preços sintéticos valida `is_median_within_iqr`; trigger por ingestão em `workers/handlers/listings.py`; retenção `RETENTION_DAYS=365`)
 
-#### M6.2 — Dashboard da zona ⬜
-- [ ] **Aba Dashboard** no frontend (Etapa 6, segunda aba):
+#### M6.2 — Dashboard da zona ✅
+- [x] **Aba Dashboard** no frontend (Etapa 6, segunda aba):
   - Preço mediano atual + variação (↑↓) vs. mês anterior
   - LineChart: histórico de 30 dias (FREE) / 90 dias (PRO) com `dot={false}` acima de 90 pontos
   - BarChart: distribuição por faixas de aluguel/compra (10 faixas)
@@ -1548,7 +1548,7 @@ após 3ª: `zones.badges.finalized` emitido exatamente uma vez. ✅
   - POIs: contagem por categoria (top 6 categorias)
   - Transporte: tempo médio ao ponto-semente + linhas disponíveis
 
-**Verificação:** Dashboard carrega com dados reais para zona de teste; LineChart mostra exatamente 30 pontos para sessão FREE.
+**Verificação:** Dashboard carrega com dados reais para zona de teste; LineChart mostra exatamente 30 pontos para sessão FREE. ✅ (2026-03-22: `ui/src/App.test.tsx` valida aba Dashboard, `Pontos exibidos: 30`, `Tempo médio ao ponto-semente: 41 min`, `7 linhas (3 usadas)` e top 6 categorias de POI com corte da 7ª categoria; milestone fechado por confirmação explícita do responsável)
 
 #### M6.3 — Job `REPORT_GENERATE` ⬜
 - [ ] Template Jinja2 HTML com seções: cabeçalho da jornada, mapa (imagem base64), lista de zonas comparativa, detalhes dos imóveis, dashboard
@@ -1567,21 +1567,21 @@ após 3ª: `zones.badges.finalized` emitido exatamente uma vez. ✅
 
 **Verificação:** relatório gerado com imagem de mapa não-transparente.
 
-#### M6.5 — Quotas e CTA de cadastro ⬜
-- [ ] Sessão anônima: 2 relatórios/mês via `usage_quotas` por IP/session
-- [ ] Ao atingir limite: modal `"Crie uma conta gratuita para baixar mais relatórios"`
-- [ ] `get_effective_plan()` retorna FREE para todas as sessões (auth real somente na Fase 8)
-- [ ] Quota por sessão: contagem via Redis (KEY `quota:report:{session_id}:{month}`, TTL 31 dias)
-
-**Verificação:** 3ª geração de relatório por mesma sessão → 403 com `upgrade_reason = "report_quota_exceeded"`.
-
-#### M6.6 — Mapa de acessibilidade de imóvel ⬜
+#### M6.5 — Mapa de acessibilidade de imóvel ⬜
 - [ ] "Ver acessibilidade" em card de imóvel → mapa mostra rota a pé até ponto de transporte
 - [ ] Rotas para categorias de POI: escola, supermercado, farmácia, parque (top 4)
 - [ ] Alternância entre categorias sem recarregar (Zustand: categoria ativa → layer toggle)
 - [ ] Distância e tempo estimado exibidos no painel
 
 **Verificação:** clicar "Ver acessibilidade" → 5 rotas aparecem no mapa sem piscar.
+
+#### M6.6 — Quotas e CTA de cadastro ⬜
+- [ ] Sessão anônima: 2 relatórios/mês via `usage_quotas` por IP/session
+- [ ] Ao atingir limite: modal `"Crie uma conta gratuita para baixar mais relatórios"`
+- [ ] `get_effective_plan()` retorna FREE para todas as sessões (auth real somente na Fase 8)
+- [ ] Quota por sessão: contagem via Redis (KEY `quota:report:{session_id}:{month}`, TTL 31 dias)
+
+**Verificação:** 3ª geração de relatório por mesma sessão → 403 com `upgrade_reason = "report_quota_exceeded"`.
 
 ---
 

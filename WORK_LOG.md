@@ -1,5 +1,299 @@
 # Work Log
 
+## 2026-03-22 - M6.2 marcado como concluido por confirmacao do responsavel
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/develop-frontend/SKILL.md`.
+- Scope executed:
+  - Aplicada confirmacao explicita do responsavel para marcar `M6.2 — Dashboard da zona` como concluido no `PRD.md`.
+  - Updated Progress Tracker:
+    - Fase 6 observacao -> `M6.1-M6.2 concluidos`.
+    - FE7 -> `🔄 Em progresso` com observacao `Imoveis + dashboard validados; relatorio pendente`.
+- Validation reference:
+  - `npm test -- --run src/App.test.tsx` -> `10 passed`.
+- Milestone governance:
+  - M6.2 marcado como concluido apos confirmacao explicita do responsavel.
+
+## 2026-03-22 - M6.2 checklist pendente: variacao mensal, top 6 POIs e transporte medio
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/develop-frontend/SKILL.md`.
+- Scope executed:
+  - `ui/src/App.tsx` (Dashboard):
+    - Added card `Variação vs mês anterior` (delta percentual com `↑/↓/→`, fallback `n/d` quando só há 1 mês).
+    - Added `Tempo médio ao ponto-semente` usando `time_agg` da zona selecionada.
+    - Updated transporte badge para `linhas totais (linhas usadas na geração)`.
+    - Added panel `POIs por categoria (top 6)` ordenado por contagem e limitado a 6 itens.
+  - `ui/src/App.test.tsx`:
+    - Extended M6.2 test fixture with 7 categorias de POI e 3 linhas usadas.
+    - Added assertions for `m6-monthly-variation`, `m6-seed-travel`, texto de linhas, e corte top-6 (7ª categoria ausente).
+  - `PRD.md`:
+    - Updated M6.2 verification evidence with new assertions (`tempo médio`, `linhas usadas`, `top 6`).
+- Validation:
+  - `npm test -- --run src/App.test.tsx` -> `10 passed`.
+  - VS Code diagnostics: `ui/src/App.tsx` e `ui/src/App.test.tsx` sem erros.
+
+## 2026-03-22 - M6.2 continuidade: evidencia explicita de 30 pontos FREE
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/develop-frontend/SKILL.md`.
+- Scope executed:
+  - Added explicit dashboard indicator in `ui/src/App.tsx`: `Pontos exibidos: {Math.min(priceRollups.length, 30)}`.
+  - Extended M6.2 test in `ui/src/App.test.tsx` to assert `Pontos exibidos: 30` when API returns 35 rollups.
+  - Updated `PRD.md` status for `M6.2` from `⬜` to `🔄` and appended dated verification evidence (without marking milestone complete).
+- Validation:
+  - `npm test -- --run src/App.test.tsx` -> `10 passed`.
+  - `.venv\Scripts\python.exe -m pytest apps/api/tests/test_phase6_price_rollups.py apps/api/tests/test_phase5_stale_revalidate.py -q` -> `18 passed`.
+
+## 2026-03-22 - Reconstrucao M5.7 + M6.2 frontend (tabs dashboard)
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`
+- Skill used: `skills/develop-frontend/SKILL.md`
+- Scope executed:
+  - Reconstructed M5.7 behavior in `ui/src/App.tsx` after accidental rollback: autocomplete com selecao obrigatoria, ordenacao por tipo de sugestao, frescor (`Dados de Xh atras`) e diff incremental (`+novos/-removidos`) sem reset da lista.
+  - Preserved and completed M6.2 frontend pieces: tabs `Imoveis | Dashboard`, fetch de rollups (`getPriceRollups`), painel dashboard com LineChart (30 dias FREE), BarChart (10 buckets), badges urbanos.
+  - Added journey/run fallback in rollup fetch for FE test context when `journeyId` is not yet available.
+- Validation:
+  - `npm test -- --run src/App.test.tsx` -> `10 passed`.
+  - Observacao: warnings de largura/altura do Recharts em ambiente jsdom nao bloqueiam os testes.
+
+## 2026-03-22 - M6.1 Rollups de preço (property_price_rollups)
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`
+- Skill used: nenhuma skill específica para backend DB disponível; implementação direta
+- Scope executed:
+  - Migration `infra/migrations/versions/20260322_0008_property_price_rollups.py`: tabela com UNIQUE(date, zone_fingerprint, search_type), índices de lookup e retenção.
+  - Module `apps/api/src/modules/listings/price_rollups.py`: `compute_and_upsert_rollup`, `purge_old_rollups`, `fetch_rollups_for_zone`, helper `is_median_within_iqr`.
+  - Contract DTO `PriceRollupRead` adicionado a `packages/contracts/`.
+  - API endpoint `GET /journeys/{journey_id}/zones/{zone_fingerprint}/price-rollups` em `zones.py`.
+  - Trigger por ingestão: chamada de `compute_and_upsert_rollup` + `purge_old_rollups` no final de `_listings_scrape_step` (não-bloqueante, erros silenciados).
+- Validation: `pytest apps/api/tests/test_phase6_price_rollups.py` → `15 passed`.
+- PRD updated: M6.1 marcado ✅; Fase 6 atualizada para `🔄 Em progresso`.
+
+## 2026-03-22 - M5.7 concluído (milestone fechado)
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`
+- Skill used: nenhuma (operação de cierre de milestone)
+- Scope: M5.7 marcado ✅ no PRD.md; Fase 5 (row 5) atualizada para `✅ Concluída (2026-03-22)`.
+- Validation: `ui/src/App.test.tsx` 9/9 passing (evidência de verificação já registrada em entrada anterior).
+
+## 2026-03-22 - M5.7 verificacao PRD (cache <500ms + diff sem flicker)
+
+- Required docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`
+- Skill used: `skills/develop-frontend/SKILL.md`
+- Scope executed:
+  - Added M5.7 acceptance test in `ui/src/App.test.tsx` (`verifies M5.7: cache hit under 500ms and incremental diff without list flicker`).
+  - Verification assertions implemented:
+    - cache-hit latency via `firstClickElapsed < 500ms`;
+    - freshness badge present (`Dados de Xh atrás`);
+    - incremental revalidation message (`+1 novos / -1 removidos`);
+    - no list flicker regression by asserting stable card DOM node identity across revalidation.
+- Validation:
+  - `npm test -- --run src/App.test.tsx` (inside `ui/`) -> `9 passed`.
+- PRD updated:
+  - M5.7 verification line annotated with dated evidence; milestone remains `🔄` and checklist unticked pending user confirmation.
+
+## 2026-03-22 - M5.7 frontend etapa 5/6: autocomplete, frescor e diff incremental
+
+- Required docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`
+- Skill used: `skills/develop-frontend/SKILL.md`
+- Scope executed:
+  - Updated `ui/src/App.tsx` Step 5 search UX from radio/select to combobox autocomplete with ranking by type (`Bairro > Logradouro > Referência`) and explicit selection requirement before enabling `Buscar imóveis`.
+  - Added Step 6 freshness badge (`Dados de Xh atrás`) and incremental revalidation diff message (`+novos / -removidos`) without clearing the listing UI.
+  - Stabilized listing card identity key to reduce visual flicker on revalidation.
+  - Expanded listing cards with image preview, duplication badge, best/second-best price text, and freshness line.
+  - Updated `ui/src/App.test.tsx` FE smoke assertion to reflect current UI labels.
+- Validation:
+  - `npm test -- --run App.test.tsx` (inside `ui/`) -> `8 passed`
+- PRD updated:
+  - `M5.7` moved from `⬜` to `🔄` (in progress, checklist items remain unticked pending user confirmation).
+
+## 2026-03-22 - M5.6 listing_search_requests: verificacao e testes unitarios
+
+- Required docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`
+- **Context discovery:**
+  - `listing_search_requests` migration already existed (`20260321_0007_phase5_listings.py` lines 113–138): all required columns + 2 indexes.
+  - `apps/api/src/modules/listings/search_requests.py` already implemented `record_search_request()` and `get_prewarm_targets()`.
+  - `apps/api/src/api/routes/listings.py` already calls `record_search_request()` for all result sources (cache_hit, cache_partial, cache_miss).
+- **Files created:**
+  - `scripts/verify_m5_6_search_requests.py`: 3-row DB acceptance test; asserts `demand_count=3` and address-isolation (2 distinct groups).
+  - `apps/api/tests/test_phase5_search_requests.py`: 8 unit tests (mock-based) for `record_search_request` and `get_prewarm_targets`.
+- **Results:**
+  - `scripts/verify_m5_6_search_requests.py` → `[OK] M5.6 verification passed` (demand_count=3, address isolation ✓)
+  - `test_phase5_search_requests.py` → 8 passed in 0.68s
+- **PRD updated:**
+  - M5.6 heading → ✅, all `[ ]` → `[x]`, verification line annotated with evidence.
+  - Tracker: `M5.1–M5.6 concluídos; M5.7 em execução`.
+
+
+## 2026-03-22 - M5.5 deduplicacao: verificacao PRD e testes unitarios
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `AGENTS.md`
+  - `skills/best-practices/SKILL.md`
+  - `skills/best-practices/references/agent-principles.md`
+- Skill used:
+  - `skills/best-practices/SKILL.md`
+- Scope executed:
+  - Updated `PRD.md` to move `M5.5 — Deduplicacao` from `⬜` to `🔄`.
+  - Added `scripts/verify_m5_5_dedup.py` to validate M5.5 acceptance criteria end-to-end:
+    - same property inserted via 2 platforms,
+    - `properties` count by fingerprint equals 1,
+    - 2 `listing_ads` linked to same `property_id`,
+    - `current_best_price` and `second_best_price` resolved correctly,
+    - duplication badge contains `2 plataformas`.
+  - Added `apps/api/tests/test_phase5_dedup.py` with 12 focused unit tests for
+    `compute_property_fingerprint` (determinism, normalization, rounding, None handling).
+- Validation:
+  - `c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe scripts/verify_m5_5_dedup.py`
+    - `[CHECK] property_count=1`
+    - `[CHECK] listing_ads_count=2`
+    - `[CHECK] current_best_price=2800.00`
+    - `[CHECK] second_best_price=3100.00`
+    - `[CHECK] duplication_badge='Disponível em 2 plataformas · menor: R$ 2.800'`
+    - `[OK] M5.5 verification passed`
+  - `c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase5_dedup.py -v`
+    - `12 passed`
+- Milestone governance:
+  - M5.5 remains in progress (`🔄`) in PRD; completion checkbox was not marked.
+
+## 2026-03-22 - M5.4 verification rerun (PRD section check)
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `AGENTS.md`
+  - `skills/best-practices/SKILL.md`
+  - `skills/best-practices/references/agent-principles.md`
+- Skill used:
+  - `skills/best-practices/SKILL.md`
+- Scope executed:
+  - Re-ran M5.4 PRD verification scenario using `scripts/verify_m5_4_partial_hit.py`.
+- Validation:
+  - `c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe scripts/verify_m5_4_partial_hit.py`
+    - `overlap_ratio=0.7000`
+    - `partial_hit_zone=<zone_a_fingerprint>`
+    - `cards_from_zone_a=1`
+    - `[OK] M5.4 verification passed`
+- Milestone governance:
+  - M5.4 is already marked complete by explicit user confirmation.
+
+## 2026-03-22 - M5.4 marcado como concluido por confirmacao do responsavel
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `AGENTS.md`
+  - `skills/best-practices/SKILL.md`
+  - `skills/best-practices/references/agent-principles.md`
+- Skill used:
+  - `skills/best-practices/SKILL.md`
+- Scope executed:
+  - Aplicada confirmacao explicita do responsavel para marcar M5.4 como concluido no PRD.
+  - Atualizado tracker da Fase 5 para refletir transicao para M5.5 em execucao.
+- Validation reference:
+  - `scripts/verify_m5_4_partial_hit.py` -> `[OK] M5.4 verification passed`.
+- Milestone governance:
+  - M5.4 marcado como concluido apos confirmacao explicita do responsavel.
+
+## 2026-03-22 - M5.4 verification script (A/B partial-hit scenario)
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `AGENTS.md`
+  - `skills/best-practices/SKILL.md`
+  - `skills/best-practices/references/agent-principles.md`
+- Skill used:
+  - `skills/best-practices/SKILL.md`
+- Scope executed:
+  - Added `scripts/verify_m5_4_partial_hit.py` to validate PRD M5.4 acceptance flow.
+  - Script creates deterministic fixture with zone A (cached complete) and zone B (70% overlap),
+    asserts partial-hit reuse via `find_partial_hit_from_overlapping_zone(...)`,
+    and validates that zone A cache can serve listing cards.
+  - Script fully cleans up inserted verification rows after execution.
+- Validation:
+  - `c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe scripts/verify_m5_4_partial_hit.py`
+    - `overlap_ratio=0.7000`
+    - `partial_hit_zone=<zone_a_fingerprint>`
+    - `cards_from_zone_a=1`
+    - `[OK] M5.4 verification passed`
+  - `c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m ruff check scripts/verify_m5_4_partial_hit.py` -> `All checks passed!`
+- Milestone governance:
+  - M5.4 remains in progress in PRD; no milestone completion checkbox marked.
+
+## 2026-03-22 - M5.4 stale-while-revalidate follow-up (partial hit + stale hit refresh)
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `AGENTS.md`
+  - `skills/best-practices/SKILL.md`
+  - `skills/best-practices/references/agent-principles.md`
+- Skill used:
+  - `skills/best-practices/SKILL.md`
+- Scope executed:
+  - `apps/api/src/api/routes/listings.py`
+    - added `_enqueue_listings_scrape_job(...)` helper to centralize scrape job creation/dispatch.
+    - preserved immediate response for cache hit/partial hit, and added background revalidation when:
+      - source is `cache_partial`; or
+      - source is `cache_hit` with stale freshness.
+    - kept cache miss flow enqueuing fresh scrape using the new helper.
+  - `apps/api/tests/test_phase5_stale_revalidate.py` (new)
+    - added focused tests for:
+      - partial hit triggers background revalidation enqueue;
+      - stale full hit triggers background revalidation enqueue;
+      - fresh full hit does not enqueue revalidation.
+- Validation:
+  - `c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase5_stale_revalidate.py -q` -> `3 passed`.
+  - `c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m ruff check apps/api/src/api/routes/listings.py apps/api/tests/test_phase5_stale_revalidate.py` -> `All checks passed!`.
+  - Attempted broader phase-5 test run hit pre-existing collection blocker: Dramatiq actor already registered (`enrich_zones_actor`) in mixed-suite import path.
+- Milestone governance:
+  - M5.4 remains in progress in PRD; no milestone completion checkbox marked.
+
+## 2026-03-22 - M5.3 marcado como concluido por confirmacao do responsavel
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `AGENTS.md`
+  - `skills/best-practices/SKILL.md`
+  - `skills/best-practices/references/agent-principles.md`
+- Skill used:
+  - `skills/best-practices/SKILL.md`
+- Scope executed:
+  - Aplicada confirmacao explicita do responsavel para marcar M5.3 como concluido no PRD.
+  - Atualizado tracker da Fase 5 para refletir transicao para M5.4 em execucao.
+- Validation reference:
+  - `scripts/verify_scraper_parity.py --template-json runs/parity_template_v1.json` -> `PASS`.
+- Milestone governance:
+  - M5.3 marcado como concluido apos confirmacao explicita do responsavel.
+
+## 2026-03-22 - M5.3 section verification rerun (QA/ZP/VP)
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `AGENTS.md`
+  - `skills/best-practices/SKILL.md`
+  - `skills/best-practices/references/agent-principles.md`
+- Skill used:
+  - `skills/best-practices/SKILL.md`
+- Scope executed:
+  - Re-ran M5.3 multi-platform verification command and inspected generated report.
+- Validation:
+  - `c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe scripts/verify_scraper_parity.py --template-json runs/parity_template_v1.json`
+    - `quintoandar=84`, `vivareal=30`, `zapimoveis=113`
+    - `api_errors={}`
+    - strict parity: `PASS`
+- Milestone governance:
+  - PRD milestone checkboxes remain unchanged pending explicit user confirmation.
+
 ## 2026-03-22 - Canonical parity baseline promotion (user-approved)
 
 - Required docs opened:

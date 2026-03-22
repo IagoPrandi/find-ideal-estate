@@ -24,6 +24,7 @@ import {
   getFinalListings,
   getFinalListingsJson,
   getJourneyTransportPoints,
+  getPriceRollups,
   getRunStatus,
   getTransportLayers,
   getTransportStops,
@@ -35,12 +36,23 @@ import {
 } from "./api/client";
 import type {
   ListingsCollection,
+  PriceRollupRead,
   RunCreateResponse,
   RunStatusResponse,
   TransportPointRead,
   ZoneDetailResponse,
   ZonesCollection
 } from "./api/schemas";
+import {
+  Bar,
+  BarChart,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis
+} from "recharts";
 
 type LayerKey = "routes" | "train" | "busStops" | "zones" | "flood" | "green" | "pois" | "transportCandidates" | "transportRadius";
 type InteractionMode = "primary" | "interest";
@@ -74,6 +86,13 @@ type TransportAnchorPoint = {
 };
 
 type ListingSortMode = "price-asc" | "price-desc" | "size-desc" | "size-asc";
+type SearchSuggestionType = "neighborhood" | "street" | "reference";
+
+type SearchSuggestion = {
+  label: string;
+  normalized: string;
+  type: SearchSuggestionType;
+};
 
 const MAPBOX_TOKEN =
   import.meta.env.VITE_MAPBOX_ACCESS_TOKEN || (import.meta.env.MODE === "test" ? "test-token" : "");
@@ -111,6 +130,12 @@ const ZONE_INFO_LABELS: Record<ZoneInfoKey, string> = {
   green: "Área verde da zona",
   flood: "Alagamento da zona",
   publicSafety: "Segurança pública"
+};
+
+const SUGGESTION_TYPE_LABEL: Record<SearchSuggestionType, string> = {
+  neighborhood: "Bairro",
+  street: "Logradouro",
+  reference: "Referência"
 };
 
 const EXECUTION_STAGE_META: Record<ExecutionStageKey, { label: string; expectedSec: number }> = {
@@ -246,8 +271,10 @@ export default function App() {
   const [zoneSelectionMessage, setZoneSelectionMessage] = useState("Selecione uma zona consolidada.");
   const [zoneDetailData, setZoneDetailData] = useState<ZoneDetailResponse | null>(null);
   const [zoneListingMessage, setZoneListingMessage] = useState("Aguardando seleção e detalhamento da zona.");
-  const [streetFilterMode, setStreetFilterMode] = useState<"all" | "specific">("all");
+  const [streetFilterMode, setStreetFilterMode] = useState<"all" | "specific">("specific");
   const [selectedStreet, setSelectedStreet] = useState("");
+  const [selectedStreetType, setSelectedStreetType] = useState<SearchSuggestionType | null>(null);
+  const [streetQuery, setStreetQuery] = useState("");
   const [zoneRadiusM, setZoneRadiusM] = useState(900);
   const [maxTravelTimeMin, setMaxTravelTimeMin] = useState(25);
   const [seedBusSearchMaxDistM, setSeedBusSearchMaxDistM] = useState(250);
@@ -267,11 +294,16 @@ export default function App() {
   const [zoneDownstreamPoints, setZoneDownstreamPoints] = useState<TransportAnchorPoint[]>([]);
   const [finalListings, setFinalListings] = useState<ListingFeature[]>([]);
   const [listingsWithoutCoords, setListingsWithoutCoords] = useState<Array<Record<string, unknown>>>([]);
+  const [freshnessBadgeText, setFreshnessBadgeText] = useState("Dados ainda não carregados.");
+  const [listingDiffMessage, setListingDiffMessage] = useState("");
+  const [newlyAddedListingKeys, setNewlyAddedListingKeys] = useState<string[]>([]);
   const [focusedListingKey, setFocusedListingKey] = useState<string>("");
   const [selectedListingKeys, setSelectedListingKeys] = useState<string[]>([]);
   const [listingSortMode, setListingSortMode] = useState<ListingSortMode>("price-asc");
   const [poiCountRadiusM, setPoiCountRadiusM] = useState(800);
   const [finalizeMessage, setFinalizeMessage] = useState("Finalize o run para carregar os imóveis.");
+  const [activePanelTab, setActivePanelTab] = useState<"listings" | "dashboard">("listings");
+  const [priceRollups, setPriceRollups] = useState<PriceRollupRead[]>([]);
   const [isSelectingZone, setIsSelectingZone] = useState(false);
   const [isDetailingZone, setIsDetailingZone] = useState(false);
   const [isListingZone, setIsListingZone] = useState(false);
@@ -2065,11 +2097,16 @@ export default function App() {
       setZoneDetailData(null);
       setZoneStreets([]);
       setSelectedStreet("");
+      setSelectedStreetType(null);
+      setStreetQuery("");
       setZoneListingMessage("Aguardando seleção e detalhamento da zona.");
     }
     if (step <= 3) {
       setFinalListings([]);
       setListingsWithoutCoords([]);
+      setFreshnessBadgeText("Dados ainda não carregados.");
+      setListingDiffMessage("");
+      setNewlyAddedListingKeys([]);
       setFocusedListingKey("");
       setFinalizeMessage("Finalize o run para carregar os imóveis.");
     }
@@ -2086,9 +2123,6 @@ export default function App() {
       .then((data) => {
         if (!cancelled) {
           setZoneStreets(data.streets || []);
-          if (data.streets?.length && !selectedStreet) {
-            setSelectedStreet(data.streets[0]);
-          }
         }
       })
       .catch(() => {
@@ -2100,6 +2134,82 @@ export default function App() {
       cancelled = true;
     };
   }, [runId, selectedZoneUid, zoneDetailData]);
+
+  const streetSuggestions = useMemo<SearchSuggestion[]>(() => {
+    const query = streetQuery.trim().toLocaleLowerCase("pt-BR");
+    if (!zoneDetailData || query.length === 0) {
+      return [];
+    }
+
+    const suggestions: SearchSuggestion[] = [];
+    const seen = new Set<string>();
+    const pushSuggestion = (label: string, type: SearchSuggestionType) => {
+      const normalized = label.trim();
+      if (!normalized) return;
+      const key = `${type}:${normalized.toLocaleLowerCase("pt-BR")}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      suggestions.push({ label: normalized, normalized: normalized.toLocaleLowerCase("pt-BR"), type });
+    };
+
+    pushSuggestion(zoneDetailData.zone_name, "neighborhood");
+    zoneStreets.forEach((street) => pushSuggestion(street, "street"));
+    (zoneDetailData.poi_points || []).forEach((poi) => {
+      const poiName = String((poi as Record<string, unknown>).name || "").trim();
+      if (poiName) {
+        pushSuggestion(poiName, "reference");
+      }
+    });
+
+    const rank: Record<SearchSuggestionType, number> = {
+      neighborhood: 0,
+      street: 1,
+      reference: 2
+    };
+
+    return suggestions
+      .filter((item) => item.label.toLocaleLowerCase("pt-BR").includes(query))
+      .sort((a, b) => {
+        const byType = rank[a.type] - rank[b.type];
+        if (byType !== 0) return byType;
+        return a.label.localeCompare(b.label, "pt-BR");
+      })
+      .slice(0, 12);
+  }, [streetQuery, zoneDetailData, zoneStreets]);
+
+  useEffect(() => {
+    setActivePanelTab("listings");
+    setPriceRollups([]);
+  }, [selectedZoneUid]);
+
+  useEffect(() => {
+    const rollupScopeId = journeyId || runId;
+    if (!rollupScopeId || !selectedZoneUid || !zoneDetailData) {
+      return;
+    }
+
+    let cancelled = false;
+    getPriceRollups(
+      rollupScopeId,
+      selectedZoneUid,
+      propertyMode === "buy" ? "sale" : "rent",
+      30
+    )
+      .then((rows) => {
+        if (!cancelled) {
+          setPriceRollups(rows);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPriceRollups([]);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [journeyId, propertyMode, runId, selectedZoneUid, zoneDetailData]);
 
   const handleDetailZone = async () => {
     if (!runId || !selectedZoneUid || isDetailingZone) {
@@ -2147,6 +2257,11 @@ export default function App() {
       return;
     }
 
+    if (!selectedStreet) {
+      setZoneListingMessage("Selecione um endereço no autocomplete para habilitar a busca.");
+      return;
+    }
+
     const streetFilter = streetFilterMode === "specific" && selectedStreet ? selectedStreet : undefined;
 
     let succeeded = false;
@@ -2164,7 +2279,47 @@ export default function App() {
       setLoadingText("Consolidando resultado final...");
       await finalizeRun(runId);
       const [finalGeo, finalJson] = await Promise.all([getFinalListings(runId), getFinalListingsJson(runId)]);
+
+      const previousKeys = new Set(finalListings.map((item, idx) => getListingKey(item, idx)));
+      const nextKeys = new Set((finalGeo.features || []).map((item, idx) => getListingKey(item, idx)));
+      const addedKeys: string[] = [];
+      const removedKeys: string[] = [];
+      nextKeys.forEach((key) => {
+        if (!previousKeys.has(key)) {
+          addedKeys.push(key);
+        }
+      });
+      previousKeys.forEach((key) => {
+        if (!nextKeys.has(key)) {
+          removedKeys.push(key);
+        }
+      });
+
+      const observedAtCandidates = (finalGeo.features || [])
+        .map((feature) => {
+          const props = feature.properties || {};
+          return String(props.observed_at || props.last_seen_at || props.updated_at || "");
+        })
+        .filter(Boolean)
+        .map((raw) => Date.parse(raw))
+        .filter((ts) => Number.isFinite(ts));
+      const freshestTimestamp = observedAtCandidates.length > 0 ? Math.max(...observedAtCandidates) : Number.NaN;
+
       setFinalListings(finalGeo.features || []);
+      if (Number.isFinite(freshestTimestamp)) {
+        const elapsedHours = Math.max(0, Math.round((Date.now() - freshestTimestamp) / 3600000));
+        setFreshnessBadgeText(`Dados de ${elapsedHours}h atrás`);
+      } else {
+        setFreshnessBadgeText("Dados recém-atualizados");
+      }
+      if (addedKeys.length > 0 || removedKeys.length > 0) {
+        setListingDiffMessage(`Revalidação concluída: +${addedKeys.length} novos / -${removedKeys.length} removidos.`);
+      } else {
+        setListingDiffMessage("Revalidação concluída sem mudanças nos cards.");
+      }
+      setNewlyAddedListingKeys(addedKeys);
+      window.setTimeout(() => setNewlyAddedListingKeys([]), 3500);
+
       const withoutCoords = (finalJson || []).filter((item) => {
         const lat = Number(item.lat ?? item.latitude);
         const lon = Number(item.lon ?? item.longitude);
@@ -2481,6 +2636,60 @@ export default function App() {
     };
   }, [selectedListingsForComparison]);
 
+  const selectedZoneFeature = useMemo(
+    () => zonesCollection.find((feature) => String(feature.properties?.zone_uid || "") === selectedZoneUid) || null,
+    [selectedZoneUid, zonesCollection]
+  );
+
+  const seedTravelTimeMin = useMemo(() => {
+    const raw = selectedZoneFeature?.properties?.time_agg;
+    const value = typeof raw === "number" ? raw : Number(raw);
+    return Number.isFinite(value) ? Math.max(0, value) : null;
+  }, [selectedZoneFeature]);
+
+  const topPoiCategories = useMemo(() => {
+    return Object.entries(zoneDetailData?.poi_count_by_category || {})
+      .filter(([, count]) => Number.isFinite(count))
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6);
+  }, [zoneDetailData?.poi_count_by_category]);
+
+  const monthlyVariation = useMemo(() => {
+    const monthlyMap = new Map<string, { total: number; count: number }>();
+    for (const row of priceRollups) {
+      const monthKey = String(row.date || "").slice(0, 7);
+      const median = Number(row.median_price || 0);
+      if (!monthKey || monthKey.length !== 7 || !Number.isFinite(median) || median <= 0) {
+        continue;
+      }
+      const current = monthlyMap.get(monthKey) || { total: 0, count: 0 };
+      current.total += median;
+      current.count += 1;
+      monthlyMap.set(monthKey, current);
+    }
+
+    const months = Array.from(monthlyMap.keys()).sort((a, b) => b.localeCompare(a));
+    if (months.length < 2) {
+      return { pct: null as number | null, trend: "n/d" as "up" | "down" | "flat" | "n/d" };
+    }
+
+    const currentMonth = monthlyMap.get(months[0]);
+    const previousMonth = monthlyMap.get(months[1]);
+    if (!currentMonth || !previousMonth || currentMonth.count === 0 || previousMonth.count === 0) {
+      return { pct: null as number | null, trend: "n/d" as "up" | "down" | "flat" | "n/d" };
+    }
+
+    const currentMedian = currentMonth.total / currentMonth.count;
+    const previousMedian = previousMonth.total / previousMonth.count;
+    if (!Number.isFinite(previousMedian) || previousMedian <= 0) {
+      return { pct: null as number | null, trend: "n/d" as "up" | "down" | "flat" | "n/d" };
+    }
+
+    const pct = ((currentMedian - previousMedian) / previousMedian) * 100;
+    const trend = Math.abs(pct) < 0.01 ? "flat" : pct > 0 ? "up" : "down";
+    return { pct, trend };
+  }, [priceRollups]);
+
   const getComparisonCellClass = (
     value: number | null,
     min: number | null,
@@ -2723,7 +2932,7 @@ export default function App() {
         </section>
 
         <aside
-          className={`bg-white h-full shadow-2xl z-40 flex flex-col border-l border-slate-200 shrink-0 relative overflow-visible transition-[width] duration-300 ${isPanelMinimized ? "w-0 border-l-0" : "w-[400px]"} max-lg:fixed max-lg:bottom-0 max-lg:left-0 max-lg:right-0 max-lg:z-30 max-lg:w-full max-lg:border-l-0 max-lg:border-t max-lg:h-[48vh]`}
+          className={`bg-white h-full shadow-2xl z-40 flex flex-col border-l border-slate-200 shrink-0 relative overflow-visible transition-[width] duration-300 ${isPanelMinimized ? "w-0 border-l-0" : activeStep === 3 ? "w-[540px]" : "w-[400px]"} max-lg:fixed max-lg:bottom-0 max-lg:left-0 max-lg:right-0 max-lg:z-30 max-lg:w-full max-lg:border-l-0 max-lg:border-t max-lg:h-[48vh]`}
           aria-label="Painel lateral"
         >
           <button
@@ -3273,48 +3482,82 @@ export default function App() {
               ) : null}
 
               {activeStep === 3 ? (
+              <section className="mt-4 rounded-panel border border-border p-3 text-sm">
+                <div className="inline-flex rounded-lg border border-border bg-bg p-1">
+                  <button
+                    type="button"
+                    onClick={() => setActivePanelTab("listings")}
+                    className={`rounded-md px-3 py-1.5 text-xs font-semibold ${
+                      activePanelTab === "listings" ? "bg-primary text-white" : "text-muted"
+                    }`}
+                  >
+                    Imóveis
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActivePanelTab("dashboard")}
+                    className={`rounded-md px-3 py-1.5 text-xs font-semibold ${
+                      activePanelTab === "dashboard" ? "bg-primary text-white" : "text-muted"
+                    }`}
+                  >
+                    Dashboard
+                  </button>
+                </div>
+              </section>
+              ) : null}
+
+              {activeStep === 3 && activePanelTab === "listings" ? (
               <section className="mt-4 rounded-panel border border-border p-4 text-sm">
                 <h2 className="font-semibold">Buscar imóveis</h2>
                 <div className="mt-2 space-y-2">
-                  <div className="flex flex-wrap gap-2">
-                    <label className="flex cursor-pointer items-center gap-1.5 text-xs">
-                      <input
-                        type="radio"
-                        name="street-mode"
-                        checked={streetFilterMode === "all"}
-                        onChange={() => setStreetFilterMode("all")}
-                        className="accent-primary"
-                      />
-                      Todas as ruas da zona
-                    </label>
-                    <label className="flex cursor-pointer items-center gap-1.5 text-xs">
-                      <input
-                        type="radio"
-                        name="street-mode"
-                        checked={streetFilterMode === "specific"}
-                        onChange={() => setStreetFilterMode("specific")}
-                        className="accent-primary"
-                      />
-                      Rua específica
-                    </label>
-                  </div>
-                  {streetFilterMode === "specific" && zoneStreets.length > 0 ? (
-                    <label className="block">
-                      <span className="mb-1 block text-[11px] text-muted">Selecione a rua</span>
-                      <select
-                        value={selectedStreet}
-                        onChange={(e) => setSelectedStreet(e.target.value)}
-                        className="w-full rounded-lg border border-border px-2 py-1.5 text-sm"
-                      >
-                        {zoneStreets.map((s) => (
-                          <option key={s} value={s}>
-                            {s}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
+                  <label className="block">
+                    <span className="mb-1 block text-[11px] text-muted">
+                      Endereço da busca (autocomplete da zona: bairros {">"} logradouros {">"} referências)
+                    </span>
+                    <input
+                      value={streetQuery}
+                      onChange={(event) => {
+                        setStreetFilterMode("specific");
+                        setStreetQuery(event.target.value);
+                        setSelectedStreet("");
+                        setSelectedStreetType(null);
+                      }}
+                      placeholder="Digite bairro, rua ou referência"
+                      className="w-full rounded-lg border border-border px-2 py-1.5 text-sm"
+                    />
+                  </label>
+
+                  {streetSuggestions.length > 0 ? (
+                    <ul className="max-h-40 space-y-1 overflow-y-auto rounded-lg border border-border/70 bg-bg p-2">
+                      {streetSuggestions.map((item) => {
+                        const isSelected = selectedStreet === item.label;
+                        return (
+                          <li key={`${item.type}:${item.normalized}`}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setStreetFilterMode("specific");
+                                setSelectedStreet(item.label);
+                                setSelectedStreetType(item.type);
+                                setStreetQuery(item.label);
+                              }}
+                              className={`w-full rounded-md px-2 py-1.5 text-left text-xs ${
+                                isSelected ? "bg-primary/10 text-primary" : "hover:bg-white"
+                              }`}
+                            >
+                              <span className="font-semibold text-text">{item.label}</span>
+                              <span className="ml-2 text-[11px] text-muted">{SUGGESTION_TYPE_LABEL[item.type]}</span>
+                            </button>
+                          </li>
+                        );
+                      })}
+                    </ul>
                   ) : null}
-                  <p className="text-[11px] text-muted">A rua selecionada não é destacada no mapa; o filtro é aplicado somente na busca.</p>
+
+                  <p className="text-[11px] text-muted">
+                    A busca fica habilitada apenas depois da seleção de uma sugestão válida.
+                    {selectedStreetType ? ` Selecionado: ${SUGGESTION_TYPE_LABEL[selectedStreetType]}.` : ""}
+                  </p>
                   <div className="grid grid-cols-1 gap-2">
                     <button
                       type="button"
@@ -3323,7 +3566,7 @@ export default function App() {
                         !selectedZoneUid ||
                         !zoneDetailData ||
                         isListingZone ||
-                        (streetFilterMode === "specific" && !selectedStreet)
+                        !selectedStreet
                       }
                       className="rounded border border-border px-2 py-1.5 text-xs font-semibold disabled:opacity-50"
                     >
@@ -3336,10 +3579,18 @@ export default function App() {
               </section>
               ) : null}
 
-              {activeStep === 3 ? (
+              {activeStep === 3 && activePanelTab === "listings" ? (
               <section className="mt-4 rounded-panel border border-border p-4 text-sm">
                 <h2 className="font-semibold">Imóveis finais</h2>
                 <p className="mt-2 text-xs text-muted">{finalizeMessage}</p>
+                <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
+                  <span className="rounded-full border border-border bg-bg px-2 py-1 text-muted">{freshnessBadgeText}</span>
+                  {listingDiffMessage ? (
+                    <span className="rounded-full border border-primary/30 bg-primary/5 px-2 py-1 text-primary">
+                      {listingDiffMessage}
+                    </span>
+                  ) : null}
+                </div>
 
                 {runId ? (
                   <div className="mt-2 flex flex-wrap gap-2 text-xs">
@@ -3516,16 +3767,20 @@ export default function App() {
                     <ul className="mt-3 space-y-2">
                     {sortedListings.map(({ feature, index, info, analytics }) => {
                       const isSelected = selectedListingKeys.includes(analytics.listingKey);
+                      const isRecentlyAdded = newlyAddedListingKeys.includes(analytics.listingKey);
                       return (
                         <li
                           key={analytics.listingKey}
-                          className={`rounded-lg border px-2 py-2 text-xs cursor-pointer hover:border-primary ${isSelected ? "border-primary" : "border-border"}`}
+                          className={`rounded-lg border px-2 py-2 text-xs cursor-pointer hover:border-primary ${
+                            isSelected ? "border-primary" : "border-border"
+                          } ${isRecentlyAdded ? "bg-success/5" : ""}`}
                           onClick={() => handleListingCardClick(feature, index)}
                         >
                           <p className="font-semibold text-text">{info.priceLabel}</p>
                           <p className="text-muted">Plataforma: {analytics.platform}</p>
                           <p className="text-muted">{info.address}</p>
                           <p className="text-muted">Tamanho: {analytics.sizeM2 ? `${analytics.sizeM2.toFixed(0)} m²` : "n/d"} · Quartos: {analytics.bedrooms ? `${analytics.bedrooms}` : "n/d"}</p>
+                          <p className="mt-1 text-[11px] text-muted">{freshnessBadgeText}</p>
                           {info.url ? (
                             <a
                               href={info.url}
@@ -3593,6 +3848,128 @@ export default function App() {
                     </ul>
                   </div>
                 ) : null}
+              </section>
+              ) : null}
+
+              {activeStep === 3 && activePanelTab === "dashboard" ? (
+              <section className="mt-4 rounded-panel border border-border p-4 text-sm" data-testid="m6-dashboard-panel">
+                <h2 className="font-semibold">Dashboard da zona</h2>
+                <p className="mt-1 text-xs text-muted">Resumo urbano e histórico de preços (FREE: 30 dias).</p>
+
+                <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                  <div className="rounded border border-border px-2 py-2">
+                    <p className="text-muted">Preço mediano atual</p>
+                    <p className="font-semibold text-text">
+                      {priceRollups[0]?.median_price ? `R$ ${Number(priceRollups[0].median_price).toLocaleString("pt-BR")}` : "n/d"}
+                    </p>
+                  </div>
+                  <div className="rounded border border-border px-2 py-2">
+                    <p className="text-muted">Amostra</p>
+                    <p className="font-semibold text-text">{priceRollups[0]?.sample_count ?? 0} imóveis</p>
+                  </div>
+                  <div className="rounded border border-border px-2 py-2" data-testid="m6-monthly-variation">
+                    <p className="text-muted">Variação vs mês anterior</p>
+                    <p className="font-semibold text-text">
+                      {monthlyVariation.pct === null
+                        ? "n/d"
+                        : `${monthlyVariation.trend === "up" ? "↑" : monthlyVariation.trend === "down" ? "↓" : "→"} ${Math.abs(
+                            monthlyVariation.pct
+                          ).toFixed(1)}%`}
+                    </p>
+                  </div>
+                  <div className="rounded border border-border px-2 py-2" data-testid="m6-seed-travel">
+                    <p className="text-muted">Tempo médio ao ponto-semente</p>
+                    <p className="font-semibold text-text">{seedTravelTimeMin === null ? "n/d" : `${seedTravelTimeMin.toFixed(0)} min`}</p>
+                  </div>
+                </div>
+
+                <div className="mt-3 rounded border border-border/70 bg-bg p-2">
+                  <p className="mb-1 text-[11px] font-semibold text-text">Histórico mediano (30 dias)</p>
+                  <p className="mb-2 text-[10px] text-muted" data-testid="m6-linechart-points">
+                    Pontos exibidos: {Math.min(priceRollups.length, 30)}
+                  </p>
+                  <div className="h-40 w-full" data-testid="m6-linechart-wrapper">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={priceRollups.slice(0, 30).map((row) => ({ day: row.date.slice(5), median: Number(row.median_price || 0) })).reverse()}>
+                        <XAxis dataKey="day" tick={{ fontSize: 10 }} interval="preserveStartEnd" />
+                        <YAxis tick={{ fontSize: 10 }} width={60} />
+                        <Tooltip />
+                        <Line type="monotone" dataKey="median" stroke="#2563eb" strokeWidth={2} dot={false} />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                <div className="mt-3 rounded border border-border/70 bg-bg p-2">
+                  <p className="mb-1 text-[11px] font-semibold text-text">Distribuição por faixas (10 buckets)</p>
+                  <div className="h-40 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart
+                        data={(() => {
+                          const prices = finalListings
+                            .map((item) => Number(item.properties?.current_best_price || item.properties?.price || 0))
+                            .filter((value) => Number.isFinite(value) && value > 0);
+                          if (prices.length === 0) {
+                            return Array.from({ length: 10 }, (_, idx) => ({ bucket: `${idx + 1}`, count: 0 }));
+                          }
+                          const min = Math.min(...prices);
+                          const max = Math.max(...prices);
+                          const span = Math.max(1, max - min);
+                          const step = span / 10;
+                          const counts = Array.from({ length: 10 }, () => 0);
+                          prices.forEach((price) => {
+                            const index = Math.min(9, Math.floor((price - min) / step));
+                            counts[index] += 1;
+                          });
+                          return counts.map((count, idx) => ({ bucket: `${idx + 1}`, count }));
+                        })()}
+                      >
+                        <XAxis dataKey="bucket" tick={{ fontSize: 10 }} />
+                        <YAxis tick={{ fontSize: 10 }} width={35} />
+                        <Tooltip />
+                        <Bar dataKey="count" fill="#16a34a" radius={[4, 4, 0, 0]} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+
+                {zoneDetailData ? (
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                    <div className="rounded border border-border px-2 py-1.5">
+                      <p className="text-muted">Segurança</p>
+                      <p className="font-semibold text-text">{zoneDetailData.public_safety?.summary?.ocorrencias_no_raio_total ?? "n/d"} ocorrências</p>
+                    </div>
+                    <div className="rounded border border-border px-2 py-1.5">
+                      <p className="text-muted">Área verde</p>
+                      <p className="font-semibold text-text">{((zoneDetailData.green_area_ratio ?? 0) * 100).toFixed(1)}%</p>
+                    </div>
+                    <div className="rounded border border-border px-2 py-1.5">
+                      <p className="text-muted">Risco alagamento</p>
+                      <p className="font-semibold text-text">{((zoneDetailData.flood_area_ratio ?? 0) * 100).toFixed(1)}%</p>
+                    </div>
+                    <div className="rounded border border-border px-2 py-1.5">
+                      <p className="text-muted">Transporte</p>
+                      <p className="font-semibold text-text">
+                        {zoneDetailData.bus_lines_count + zoneDetailData.train_lines_count} linhas ({zoneDetailData.lines_used_for_generation.length} usadas)
+                      </p>
+                    </div>
+                  </div>
+                ) : null}
+
+                <div className="mt-3 rounded border border-border/70 bg-bg p-2 text-xs" data-testid="m6-top-pois">
+                  <p className="mb-1 font-semibold text-text">POIs por categoria (top 6)</p>
+                  {topPoiCategories.length > 0 ? (
+                    <ul className="grid grid-cols-2 gap-x-3 gap-y-1">
+                      {topPoiCategories.map(([category, count]) => (
+                        <li key={category} className="text-muted">
+                          <span className="text-text">{category}</span>: {count}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-muted">Sem categorias de POI para esta zona.</p>
+                  )}
+                </div>
               </section>
               ) : null}
               </div>

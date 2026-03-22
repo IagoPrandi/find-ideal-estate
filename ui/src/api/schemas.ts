@@ -102,6 +102,30 @@ export const ListingsCollectionSchema = z.object({
 
 export const FinalListingsJsonSchema = z.array(z.record(z.unknown()));
 
+export const PriceRollupReadSchema = z.object({
+  id: z.string(),
+  date: z.string(),
+  zone_fingerprint: z.string(),
+  search_type: z.string(),
+  median_price: z.string().optional(),
+  p25_price: z.string().optional(),
+  p75_price: z.string().optional(),
+  sample_count: z.number(),
+  computed_at: z.string()
+});
+
+export type PriceRollupRead = {
+  id: string;
+  date: string;
+  zone_fingerprint: string;
+  search_type: string;
+  median_price?: string;
+  p25_price?: string;
+  p75_price?: string;
+  sample_count: number;
+  computed_at: string;
+};
+
 export const TransportFeatureSchema = z.object({
   type: z.literal("Feature"),
   geometry: z

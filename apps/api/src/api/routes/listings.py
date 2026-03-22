@@ -48,6 +48,45 @@ class ListingsSearchRequest(BaseModel):
     platforms: list[str] | None = None
 
 
+async def _enqueue_listings_scrape_job(
+    *,
+    journey_id: UUID,
+    zone_fingerprint: str,
+    search_address: str,
+    search_type: str,
+    usage_type: str,
+    platforms: list[str],
+) -> UUID:
+    """Create and dispatch a listings_scrape job, returning the created job id."""
+    engine = _get_engine()
+    async with engine.begin() as conn:
+        job_result = await conn.execute(
+            text(
+                """
+                INSERT INTO jobs (journey_id, job_type, state, result_ref)
+                VALUES (:journey_id, 'listings_scrape', 'pending', :result_ref::jsonb)
+                RETURNING id
+                """
+            ),
+            {
+                "journey_id": journey_id,
+                "result_ref": json.dumps(
+                    {
+                        "zone_fingerprint": zone_fingerprint,
+                        "search_address": search_address,
+                        "search_type": search_type,
+                        "usage_type": usage_type,
+                        "platforms": platforms,
+                    }
+                ),
+            },
+        )
+        job_id = job_result.scalar_one()
+
+    listings_scrape_actor.send(str(job_id))
+    return job_id
+
+
 @router.post(
     "/{journey_id}/listings/search",
     response_model=ListingsRequestResult,
@@ -109,31 +148,14 @@ async def listings_search(
         # Ensure cache row exists (for lock coordination) and enqueue scrape job
         await create_cache_record(body.zone_fingerprint, config_hash)
 
-        # Store context needed by the worker by creating a job with result_ref
-        engine = _get_engine()
-        async with engine.begin() as conn:
-            job_result = await conn.execute(
-                text(
-                    """
-                    INSERT INTO jobs (journey_id, job_type, state, result_ref)
-                    VALUES (:journey_id, 'listings_scrape', 'pending', :result_ref::jsonb)
-                    RETURNING id
-                    """
-                ),
-                {
-                    "journey_id": journey_id,
-                    "result_ref": json.dumps({
-                        "zone_fingerprint": body.zone_fingerprint,
-                        "search_address": body.search_location_label,
-                        "search_type": body.search_type,
-                        "usage_type": body.usage_type,
-                        "platforms": platforms,
-                    }),
-                },
-            )
-            job_id = job_result.scalar_one()
-
-        listings_scrape_actor.send(str(job_id))
+        await _enqueue_listings_scrape_job(
+            journey_id=journey_id,
+            zone_fingerprint=body.zone_fingerprint,
+            search_address=body.search_location_label,
+            search_type=body.search_type,
+            usage_type=body.usage_type,
+            platforms=platforms,
+        )
 
         return ListingsRequestResult(
             source="none",
@@ -154,6 +176,21 @@ async def listings_search(
 
     age_hours = cache_age_hours(cache)
     freshness = "fresh" if (age_hours is not None and age_hours < 2) else "stale"
+
+    # M5.4 stale-while-revalidate: serve immediately and refresh in background.
+    should_revalidate = result_source == "cache_partial" or (
+        result_source == "cache_hit" and freshness == "stale"
+    )
+    if should_revalidate:
+        await create_cache_record(body.zone_fingerprint, config_hash)
+        await _enqueue_listings_scrape_job(
+            journey_id=journey_id,
+            zone_fingerprint=body.zone_fingerprint,
+            search_address=body.search_location_label,
+            search_type=body.search_type,
+            usage_type=body.usage_type,
+            platforms=platforms,
+        )
 
     return ListingsRequestResult(
         source="cache",

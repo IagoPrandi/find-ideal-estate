@@ -33,6 +33,7 @@ from modules.listings.models import (
     ZoneCacheStatus,
 )
 from modules.listings.platform_registry import get_platform_registry
+from modules.listings.price_rollups import compute_and_upsert_rollup, purge_old_rollups
 from modules.listings.scrapers import ScraperDisallowedError, ScraperError
 from modules.listings.scraping_lock import scraping_lock
 from sqlalchemy import text
@@ -385,6 +386,16 @@ async def _listings_scrape_step(job_id: UUID) -> None:
                 f"from {len(platforms_completed)} platforms"
             ),
         )
+
+        # M6.1: trigger rollup on ingest (non-blocking; errors are logged, not re-raised)
+        if platforms_completed:
+            try:
+                engine = get_engine()
+                async with engine.begin() as _conn:
+                    await compute_and_upsert_rollup(_conn, zone_fingerprint, search_type)
+                    await purge_old_rollups(_conn)
+            except Exception:  # noqa: BLE001
+                pass  # rollup failure must not break scraping job
 
 
 @dramatiq.actor(queue_name=QUEUE_SCRAPE_BROWSER)

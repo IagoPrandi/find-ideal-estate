@@ -98,5 +98,18 @@ class SearchAddressSuggestion(BaseModel):
     label: str
     normalized: str
     location_type: str  # 'neighborhood' | 'street' | 'address' | 'landmark'
+
+
+class PriceRollupRead(BaseModel):
+    """One daily price-percentile snapshot for a zone (M6.1)."""
+    id: UUID
+    date: str            # ISO date string: YYYY-MM-DD
+    zone_fingerprint: str
+    search_type: str     # 'rent' | 'sale'
+    median_price: Decimal | None = None
+    p25_price: Decimal | None = None
+    p75_price: Decimal | None = None
+    sample_count: int = 0
+    computed_at: datetime
     lat: float
     lon: float

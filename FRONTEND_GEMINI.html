@@ -1,0 +1,773 @@
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Find Ideal Estate</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            'pastel-violet': {
+              50: '#f3f0ff',
+              100: '#e5dbff',
+              200: '#d0bfff',
+              300: '#b197fc',
+              400: '#9775fa', // Cor principal clara
+              500: '#845ef7', // Cor principal (Hover/Destaques)
+              600: '#7048e8', // Texto forte / Bordas
+              700: '#6741d9',
+              800: '#5f3dc4',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  
+  <!-- React & ReactDOM -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  
+  <!-- Babel Standalone (para compilar JSX no browser) -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <!-- Google Material Symbols -->
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" rel="stylesheet" />
+
+  <style>
+    body { margin: 0; padding: 0; overflow: hidden; background-color: #f8fafc; }
+    .material-symbols-outlined {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      vertical-align: middle;
+      line-height: 1;
+    }
+    /* Estilo para esconder barra de scroll */
+    .no-scrollbar::-webkit-scrollbar { display: none; }
+    .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    // --- GRÁFICOS PERSONALIZADOS SVG ---
+    const MiniLineChart = ({ data }) => {
+      const min = Math.min(...data.map(d => d.price));
+      const max = Math.max(...data.map(d => d.price));
+      const range = max - min || 1;
+      
+      const points = data.map((d, i) => {
+        const x = (i / (data.length - 1)) * 100;
+        const y = 100 - ((d.price - min) / range) * 100;
+        return `${x},${y}`;
+      }).join(' ');
+
+      return (
+        <div className="w-full h-full relative flex flex-col justify-between py-2">
+          {/* Grid lines */}
+          <div className="absolute inset-0 border-t border-b border-slate-100 border-dashed top-1/2 -translate-y-1/2 h-1/2 w-full z-0"></div>
+          
+          <svg viewBox="0 0 100 100" className="w-full h-full relative z-10 overflow-visible" preserveAspectRatio="none">
+             <polyline fill="none" stroke="#9775fa" strokeWidth="2" vectorEffect="non-scaling-stroke" points={points} />
+             {data.map((d, i) => {
+                const x = (i / (data.length - 1)) * 100;
+                const y = 100 - ((d.price - min) / range) * 100;
+                return <circle key={i} cx={x} cy={y} r="1.5" fill="#9775fa" stroke="white" strokeWidth="0.5" vectorEffect="non-scaling-stroke" />
+             })}
+          </svg>
+        </div>
+      );
+    };
+
+    const MiniBarChart = ({ data }) => {
+      const max = Math.max(...data.map(d => d.count));
+      return (
+        <div className="w-full h-full flex items-end gap-2 px-1 pb-1">
+          {data.map((d, i) => (
+            <div key={i} className="flex-1 flex flex-col items-center justify-end h-full group relative cursor-pointer">
+              <div 
+                className="w-full bg-slate-300 rounded-t-sm transition-colors group-hover:bg-pastel-violet-400" 
+                style={{ height: `${(d.count / max) * 100}%` }}
+              ></div>
+              <div className="text-[10px] text-slate-500 mt-2 truncate max-w-full font-medium">{d.range}</div>
+              
+              {/* Tooltip */}
+              <div className="opacity-0 group-hover:opacity-100 absolute -top-8 bg-slate-800 text-white text-[10px] py-1 px-2 rounded pointer-events-none transition-opacity whitespace-nowrap z-20 shadow-lg">
+                {d.count} imóveis
+              </div>
+            </div>
+          ))}
+        </div>
+      );
+    };
+
+    // --- ICON MAPPING ---
+    const Icon = ({ name, size=24, className="" }) => (
+      <span className={`material-symbols-outlined ${className}`} style={{fontSize: size}}>{name}</span>
+    );
+
+    const MapPin = (p) => <Icon name="location_on" {...p} />;
+    const Clock = (p) => <Icon name="schedule" {...p} />;
+    const Search = (p) => <Icon name="search" {...p} />;
+    const ShieldAlert = (p) => <Icon name="gpp_maybe" {...p} />;
+    const Trees = (p) => <Icon name="forest" {...p} />;
+    const Droplets = (p) => <Icon name="water_drop" {...p} />;
+    const Building = (p) => <Icon name="business" {...p} />;
+    const Train = (p) => <Icon name="train" {...p} />;
+    const Bus = (p) => <Icon name="directions_bus" {...p} />;
+    const Info = (p) => <Icon name="info" {...p} />;
+    const ArrowRight = (p) => <Icon name="arrow_forward" {...p} />;
+    const ExternalLink = (p) => <Icon name="open_in_new" {...p} />;
+    const Lock = (p) => <Icon name="lock" {...p} />;
+    const Home = (p) => <Icon name="home" {...p} />;
+    const MapIcon = (p) => <Icon name="map" {...p} />;
+    const Route = (p) => <Icon name="route" {...p} />;
+    const AlertTriangle = (p) => <Icon name="warning" {...p} />;
+    const Crosshair = (p) => <Icon name="my_location" {...p} />;
+    const Star = (p) => <Icon name="star" {...p} />;
+    const CheckCircle2 = (p) => <Icon name="check_circle" {...p} />;
+    const ChevronLeft = (p) => <Icon name="chevron_left" {...p} />;
+    const Building2 = (p) => <Icon name="apartment" {...p} />;
+
+    // --- MOCK DATA ---
+    const MOCK_TRANSPORT_POINTS = [
+      { id: 't1', name: 'Estação Paulista (Linha 4)', distance: 450, time: 6, type: 'metro', lines: 1, lat: 40, lon: 30 },
+      { id: 't2', name: 'Parada Consolação', distance: 600, time: 8, type: 'bus', lines: 12, lat: 60, lon: 50 },
+      { id: 't3', name: 'Estação Clínicas (Linha 2)', distance: 850, time: 12, type: 'metro', lines: 1, lat: 20, lon: 70 },
+    ];
+
+    const MOCK_ZONES = [
+      { id: 'z1', name: 'Zona Paulista / Consolação', time: 15, modal: 'transit', safety: 'best', green: 'neutral', flood: 'best', pois: 'above', path: 'M30,40 Q50,20 70,30 T80,60 Q70,80 40,70 T30,40' },
+      { id: 'z2', name: 'Zona Pinheiros / Fradique', time: 22, modal: 'transit', safety: 'above', green: 'best', flood: 'neutral', pois: 'best', path: 'M50,50 Q70,40 80,60 T70,80 Q50,90 40,70 T50,50' },
+      { id: 'z3', name: 'Zona Vila Madalena', time: 28, modal: 'transit', safety: 'above', green: 'best', flood: 'best', pois: 'above', path: 'M20,60 Q40,50 50,70 T40,90 Q20,80 10,70 T20,60' },
+    ];
+
+    const MOCK_PROPERTIES = [
+      { id: 'p1', type: 'Locação', price: 4200, area: 65, beds: 2, address: 'Rua Bela Cintra, Consolação', platform: 'QuintoAndar', duplicate: true, altPrice: 4350, image: 'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?auto=format&fit=crop&w=300&q=80', lat: 45, lon: 35 },
+      { id: 'p2', type: 'Locação', price: 3800, area: 50, beds: 1, address: 'Rua Fernando de Albuquerque', platform: 'Zap', duplicate: false, image: 'https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?auto=format&fit=crop&w=300&q=80', lat: 38, lon: 45 },
+      { id: 'p3', type: 'Locação', price: 5100, area: 85, beds: 2, address: 'Rua Haddock Lobo, Cerqueira César', platform: 'QuintoAndar', duplicate: false, image: 'https://images.unsplash.com/photo-1502672260266-1c1c24240f57?auto=format&fit=crop&w=300&q=80', lat: 55, lon: 25 },
+    ];
+
+    const DASHBOARD_PRICE_HISTORY = Array.from({ length: 30 }, (_, i) => ({
+      day: i + 1, price: 4000 + Math.random() * 500 + (i * 10),
+    }));
+
+    const DASHBOARD_DISTRIBUTION = [
+      { range: '2k-3k', count: 12 }, { range: '3k-4k', count: 45 }, { range: '4k-5k', count: 30 },
+      { range: '5k-6k', count: 15 }, { range: '6k+', count: 8 }
+    ];
+
+    // --- COMPONENTS ---
+
+    // 1. Map Component (Visualizes the data layers)
+    const InteractiveMap = ({ step, selectedTransport, selectedZone, progress }) => {
+      return (
+        <div className="absolute inset-0 bg-[#e5e7eb] overflow-hidden z-0">
+          {/* Fake Map Grid & Base Layers */}
+          <div className="absolute inset-0 opacity-20" style={{ backgroundImage: 'radial-gradient(#9ca3af 1px, transparent 1px)', backgroundSize: '20px 20px' }} />
+          <div className="absolute inset-0 bg-gradient-to-tr from-slate-200 to-slate-100 mix-blend-multiply" />
+          
+          <svg className="absolute inset-0 w-full h-full" preserveAspectRatio="none" viewBox="0 0 100 100">
+            {/* Step 3: Zone Generation Animation */}
+            {step === 3 && MOCK_ZONES.map((zone, idx) => (
+              <path 
+                key={zone.id} d={zone.path} 
+                fill="rgba(151, 117, 250, 0.2)" 
+                stroke="#9775fa" strokeWidth="0.5"
+                className="transition-all duration-1000 origin-center"
+                style={{ 
+                  opacity: progress > (idx * 30) ? 1 : 0,
+                  transform: progress > (idx * 30) ? 'scale(1)' : 'scale(0.8)'
+                }} 
+              />
+            ))}
+
+            {/* Step 4-6: Zones Rendered */}
+            {step >= 4 && MOCK_ZONES.map(zone => {
+              const isSelected = selectedZone === zone.id;
+              const isFaded = selectedZone && !isSelected;
+              return (
+                <path 
+                  key={zone.id} d={zone.path} 
+                  fill={isSelected ? "rgba(151, 117, 250, 0.3)" : "rgba(148, 163, 184, 0.2)"} 
+                  stroke={isSelected ? "#845ef7" : "#94a3b8"} strokeWidth={isSelected ? "0.8" : "0.4"}
+                  className={`transition-all duration-500 cursor-pointer ${isFaded ? 'opacity-30' : 'opacity-100'}`}
+                />
+              );
+            })}
+
+            {/* Step 6: Properties */}
+            {step === 6 && selectedZone && MOCK_PROPERTIES.map(p => (
+              <g key={p.id} transform={`translate(${p.lat}, ${p.lon})`} className="cursor-pointer hover:scale-110 transition-transform">
+                <circle cx="0" cy="0" r="1.5" fill="#845ef7" stroke="white" strokeWidth="0.5" />
+              </g>
+            ))}
+
+            {/* Reference Point */}
+            {step < 5 && (
+              <g transform="translate(50, 45)">
+                <circle cx="0" cy="0" r="1.5" fill="#000" />
+                <circle cx="0" cy="0" r="4" fill="transparent" stroke="#000" strokeWidth="0.2" strokeDasharray="1 1" className="animate-spin-slow" />
+              </g>
+            )}
+
+            {/* Transport Points */}
+            {step === 2 && MOCK_TRANSPORT_POINTS.map(tp => (
+              <g key={tp.id} transform={`translate(${tp.lat}, ${tp.lon})`} className="transition-all duration-300">
+                <circle cx="0" cy="0" r={selectedTransport === tp.id ? "3" : "1"} fill={selectedTransport === tp.id ? "#9775fa" : "#64748b"} />
+                {selectedTransport === tp.id && <circle cx="0" cy="0" r="6" fill="transparent" stroke="#9775fa" strokeWidth="0.2" className="animate-ping" />}
+              </g>
+            ))}
+          </svg>
+          
+          <div className="absolute right-4 bottom-4 flex flex-col gap-2">
+            <button className="w-10 h-10 bg-white rounded-lg shadow-md flex items-center justify-center text-slate-700 hover:bg-slate-50"><Crosshair size={20} /></button>
+            <button className="w-10 h-10 bg-white rounded-lg shadow-md flex items-center justify-center text-slate-700 hover:bg-slate-50"><MapIcon size={20} /></button>
+          </div>
+        </div>
+      );
+    };
+
+    // 2. Badges Component
+    const Badge = ({ type, value }) => {
+      const configs = {
+        best: { bg: 'bg-emerald-100', text: 'text-emerald-700', icon: <CheckCircle2 size={12} className="mr-1" /> },
+        above: { bg: 'bg-blue-100', text: 'text-blue-700', icon: <Star size={12} className="mr-1" /> },
+        neutral: { bg: 'bg-slate-100', text: 'text-slate-600', icon: <div className="w-1.5 h-1.5 rounded-full bg-slate-400 mr-1.5" /> },
+        below: { bg: 'bg-rose-100', text: 'text-rose-700', icon: <AlertTriangle size={12} className="mr-1" /> }
+      };
+      const config = configs[value] || configs.neutral;
+      const labels = { safety: 'Segurança', green: 'Verde', flood: 'Alagamento', pois: 'Serviços' };
+
+      return (
+        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${config.bg} ${config.text}`}>
+          {config.icon} {labels[type]}
+        </span>
+      );
+    };
+
+    // --- PROGRESS TRACKER ---
+    const ProgressTracker = ({ currentStep, maxStep, onStepClick, isCollapsed, onToggleCollapse }) => {
+       const steps = [
+          { id: 1, label: 'Configuração', icon: 'tune' },
+          { id: 2, label: 'Origem', icon: 'directions_transit' },
+          { id: 3, label: 'Zonas', icon: 'sync' },
+          { id: 4, label: 'Comparação', icon: 'layers' },
+          { id: 5, label: 'Endereço', icon: 'my_location' },
+          { id: 6, label: 'Análise', icon: 'analytics' }
+       ];
+
+       return (
+          <div className="bg-white/95 backdrop-blur-md shadow-md rounded-2xl p-2.5 shrink-0 flex items-center justify-between border border-slate-200 pointer-events-auto transition-all">
+             <div className="flex items-center gap-1 overflow-x-auto no-scrollbar flex-1 px-1">
+                {steps.map((s, i) => {
+                   const isPast = s.id < currentStep;
+                   const isCurrent = s.id === currentStep;
+                   const isLocked = s.id > maxStep;
+
+                   return (
+                      <div key={s.id} className="flex items-center">
+                         <button 
+                            disabled={isLocked}
+                            onClick={() => onStepClick(s.id)}
+                            className={`flex items-center justify-center w-8 h-8 rounded-full transition-colors shrink-0 ${
+                               isCurrent ? 'bg-pastel-violet-500 text-white shadow-md' :
+                               isPast ? 'bg-pastel-violet-100 text-pastel-violet-600 hover:bg-pastel-violet-200' :
+                               'bg-slate-100 text-slate-400'
+                            }`}
+                            title={s.label}
+                         >
+                            <Icon name={s.icon} size={16} />
+                         </button>
+                         {i < steps.length - 1 && (
+                            <div className={`w-3 sm:w-4 h-[2px] mx-1 rounded-full ${s.id < currentStep ? 'bg-pastel-violet-300' : 'bg-slate-200'}`} />
+                         )}
+                      </div>
+                   )
+                })}
+             </div>
+             
+             {/* Toggle Expand/Collapse */}
+             <button 
+                onClick={onToggleCollapse} 
+                className="w-8 h-8 flex items-center justify-center rounded-lg text-slate-500 hover:text-pastel-violet-600 hover:bg-pastel-violet-50 transition-colors ml-3 shrink-0 border border-slate-100"
+                title={isCollapsed ? "Expandir Painel" : "Recolher Painel"}
+             >
+                <Icon name={isCollapsed ? 'expand_more' : 'expand_less'} size={24} />
+             </button>
+          </div>
+       );
+    };
+
+    // --- MAIN APP COMPONENT ---
+    function App() {
+      const [step, setStep] = useState(1);
+      const [maxStep, setMaxStep] = useState(1);
+      const [panelWidth, setPanelWidth] = useState(420);
+      const [isCollapsed, setIsCollapsed] = useState(false);
+      
+      const [config, setConfig] = useState({ type: 'rent', modal: 'transit', time: 30 });
+      const [selectedTransport, setSelectedTransport] = useState(null);
+      const [progress, setProgress] = useState(0);
+      const [selectedZone, setSelectedZone] = useState(null);
+      const [activeTab, setActiveTab] = useState('imoveis');
+
+      const goToStep = (newStep) => {
+        setStep(newStep);
+        if (newStep > maxStep) setMaxStep(newStep);
+        if (newStep === 6) setPanelWidth(600);
+        else setPanelWidth(420);
+        setIsCollapsed(false); // Sempre expande quando avança de etapa
+      };
+
+      // Simulate Step 3
+      useEffect(() => {
+        if (step === 3) {
+          setProgress(0);
+          const interval = setInterval(() => {
+            setProgress(p => {
+              if (p >= 100) {
+                clearInterval(interval);
+                setTimeout(() => goToStep(4), 400);
+                return 100;
+              }
+              return p + Math.random() * 15;
+            });
+          }, 300);
+          return () => clearInterval(interval);
+        }
+      }, [step]);
+
+      // --- RENDERERS FOR EACH STEP ---
+      const renderStep1 = () => (
+        <div className="flex flex-col h-full animate-[fadeIn_0.3s_ease-out]">
+          <div className="p-5 border-b border-slate-100 flex-shrink-0">
+            <h2 className="text-xl font-semibold text-slate-800 tracking-tight">Configurar Busca</h2>
+            <p className="text-sm text-slate-500 mt-1">Defina o seu perfil de deslocação.</p>
+          </div>
+          
+          <div className="p-5 flex-1 overflow-y-auto space-y-6">
+            <div className="space-y-3">
+              <label className="text-sm font-medium text-slate-700">Ponto de Referência (Trabalho/Escola)</label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                <input type="text" defaultValue="Av. Paulista, 1578" className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-pastel-violet-400 focus:outline-none text-sm transition-all" />
+              </div>
+            </div>
+
+            <div className="flex p-1 bg-slate-100 rounded-xl">
+              <button className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${config.type === 'rent' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`} onClick={() => setConfig({...config, type: 'rent'})}>Aluguel</button>
+              <button className={`flex-1 py-2 text-sm font-medium rounded-lg transition-all ${config.type === 'buy' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`} onClick={() => setConfig({...config, type: 'buy'})}>Compra</button>
+            </div>
+
+            <div className="space-y-3">
+              <label className="text-sm font-medium text-slate-700">Como se pretende deslocar?</label>
+              <div className="grid grid-cols-3 gap-2">
+                <button className={`flex flex-col items-center justify-center p-3 rounded-xl border ${config.modal === 'transit' ? 'border-pastel-violet-400 bg-pastel-violet-50 text-pastel-violet-600' : 'border-slate-200 hover:border-slate-300 text-slate-600'} transition-all`} onClick={() => setConfig({...config, modal: 'transit'})}>
+                  <Bus size={20} className="mb-1" />
+                  <span className="text-xs font-medium">Público</span>
+                </button>
+                <button className={`flex flex-col items-center justify-center p-3 rounded-xl border ${config.modal === 'walk' ? 'border-pastel-violet-400 bg-pastel-violet-50 text-pastel-violet-600' : 'border-slate-200 hover:border-slate-300 text-slate-600'} transition-all`} onClick={() => setConfig({...config, modal: 'walk'})}>
+                  <Route size={20} className="mb-1" />
+                  <span className="text-xs font-medium">A pé</span>
+                </button>
+                <button className="flex flex-col items-center justify-center p-3 rounded-xl border border-slate-100 bg-slate-50 text-slate-400 cursor-not-allowed relative overflow-hidden">
+                  <div className="absolute top-1 right-1"><Lock size={10} /></div>
+                  <Building2 size={20} className="mb-1" />
+                  <span className="text-xs font-medium">Carro (Pro)</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <div className="flex justify-between items-center">
+                <label className="text-sm font-medium text-slate-700">Tempo máximo de viagem</label>
+                <span className="text-sm font-bold text-pastel-violet-600">{config.time} min</span>
+              </div>
+              <input type="range" min="10" max="60" step="5" value={config.time} onChange={(e) => setConfig({...config, time: parseInt(e.target.value)})} className="w-full accent-pastel-violet-500" />
+            </div>
+
+            <div className="space-y-3 pt-2 border-t border-slate-100">
+              <label className="text-sm font-medium text-slate-700">Analisar nas zonas (Enriquecimento)</label>
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { id: 'safety', label: 'Segurança', icon: <ShieldAlert size={16} /> },
+                  { id: 'green', label: 'Áreas Verdes', icon: <Trees size={16} /> },
+                  { id: 'flood', label: 'Alagamento', icon: <Droplets size={16} /> },
+                  { id: 'pois', label: 'Serviços (POIs)', icon: <MapPin size={16} /> },
+                ].map(item => (
+                  <label key={item.id} className="flex items-center gap-2 p-2 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50 transition-colors">
+                    <input type="checkbox" defaultChecked className="rounded text-pastel-violet-500 focus:ring-pastel-violet-400" />
+                    <span className="text-slate-500">{item.icon}</span>
+                    <span className="text-sm text-slate-700">{item.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <div className="p-5 border-t border-slate-100 bg-white flex-shrink-0">
+            <button onClick={() => goToStep(2)} className="w-full bg-pastel-violet-500 hover:bg-pastel-violet-600 text-white font-medium py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all shadow-sm shadow-pastel-violet-200">
+              Achar pontos de transporte <ArrowRight size={18} />
+            </button>
+          </div>
+        </div>
+      );
+
+      const renderStep2 = () => (
+        <div className="flex flex-col h-full animate-[fadeInRight_0.3s_ease-out]">
+          <div className="p-5 border-b border-slate-100 flex items-center gap-3 shrink-0">
+            <div>
+              <h2 className="text-xl font-semibold text-slate-800 tracking-tight">Transporte</h2>
+              <p className="text-sm text-slate-500">Selecione os pontos de partida.</p>
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            {MOCK_TRANSPORT_POINTS.map(tp => (
+              <div 
+                key={tp.id}
+                onClick={() => setSelectedTransport(tp.id)}
+                className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${selectedTransport === tp.id ? 'border-pastel-violet-400 bg-pastel-violet-50' : 'border-transparent hover:border-slate-200 bg-white shadow-sm hover:shadow-md'}`}
+              >
+                <div className="flex items-start justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className={`p-2 rounded-lg ${tp.type === 'metro' ? 'bg-pastel-violet-100 text-pastel-violet-600' : 'bg-slate-100 text-slate-600'}`}>
+                      {tp.type === 'metro' ? <Train size={20} /> : <Bus size={20} />}
+                    </div>
+                    <div>
+                      <h3 className="font-medium text-slate-800 text-sm">{tp.name}</h3>
+                      <div className="flex items-center gap-3 mt-1 text-xs text-slate-500">
+                        <span className="flex items-center gap-1"><Route size={14}/> {tp.distance}m</span>
+                        <span className="flex items-center gap-1"><Clock size={14}/> {tp.time} min a pé</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="w-5 h-5 rounded-full border border-slate-300 flex items-center justify-center shrink-0">
+                    {selectedTransport === tp.id && <div className="w-3 h-3 rounded-full bg-pastel-violet-500" />}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="p-5 border-t border-slate-100 bg-white shrink-0">
+            <button 
+              disabled={!selectedTransport}
+              onClick={() => goToStep(3)} 
+              className="w-full bg-slate-900 hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-400 text-white font-medium py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all"
+            >
+              Gerar zonas de isócrona <MapIcon size={18} />
+            </button>
+          </div>
+        </div>
+      );
+
+      const renderStep3 = () => (
+        <div className="flex flex-col h-full items-center justify-center p-8 text-center animate-[fadeIn_0.5s_ease-out]">
+          <div className="w-16 h-16 rounded-2xl bg-pastel-violet-50 flex items-center justify-center text-pastel-violet-500 mb-6 relative">
+            <MapIcon size={32} />
+            <div className="absolute inset-0 border-4 border-pastel-violet-200 rounded-2xl animate-ping opacity-20" />
+          </div>
+          
+          <h2 className="text-xl font-semibold text-slate-800 mb-2">Calculando Zonas...</h2>
+          <p className="text-sm text-slate-500 mb-8">Processando rede via Valhalla e dados urbanos.</p>
+
+          <div className="w-full max-w-xs space-y-2">
+            <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+              <div className="h-full bg-pastel-violet-500 transition-all duration-300 ease-out" style={{ width: `${progress}%` }} />
+            </div>
+            <div className="flex justify-between text-xs font-medium text-slate-400">
+              <span>{progress < 40 ? 'Isócronas' : progress < 80 ? 'Enriquecimento' : 'Finalizando'}</span>
+              <span>{Math.round(progress)}%</span>
+            </div>
+          </div>
+          
+          <button onClick={() => goToStep(2)} className="mt-8 text-sm font-medium text-slate-400 hover:text-rose-600 transition-colors">
+            Cancelar Operação
+          </button>
+        </div>
+      );
+
+      const renderStep4 = () => (
+        <div className="flex flex-col h-full animate-[fadeInRight_0.3s_ease-out]">
+          <div className="p-5 border-b border-slate-100 shrink-0">
+            <div className="flex items-center justify-between mb-1">
+              <h2 className="text-xl font-semibold text-slate-800 tracking-tight">Zonas Encontradas</h2>
+              <span className="bg-emerald-100 text-emerald-700 text-xs font-bold px-2 py-1 rounded-md">Concluído</span>
+            </div>
+            <p className="text-sm text-slate-500">Selecione uma zona para procurar imóveis.</p>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50/50">
+            {MOCK_ZONES.map(zone => (
+              <div 
+                key={zone.id}
+                onClick={() => setSelectedZone(zone.id)}
+                className={`bg-white p-4 rounded-xl border shadow-sm cursor-pointer transition-all hover:shadow-md ${selectedZone === zone.id ? 'border-pastel-violet-400 ring-1 ring-pastel-violet-400' : 'border-slate-200'}`}
+              >
+                <div className="flex justify-between items-start mb-3">
+                  <h3 className="font-semibold text-slate-800 text-sm">{zone.name}</h3>
+                  <span className="text-xs font-bold bg-slate-100 text-slate-600 px-2 py-1 rounded">Até {zone.time}m</span>
+                </div>
+                
+                <div className="flex flex-wrap gap-2 mb-3">
+                  <Badge type="safety" value={zone.safety} />
+                  <Badge type="green" value={zone.green} />
+                  <Badge type="flood" value={zone.flood} />
+                  <Badge type="pois" value={zone.pois} />
+                </div>
+                
+                {selectedZone === zone.id && (
+                  <div className="mt-4 pt-3 border-t border-slate-100 animate-[fadeIn_0.2s_ease-out]">
+                    <button onClick={() => goToStep(5)} className="w-full bg-pastel-violet-500 hover:bg-pastel-violet-600 text-white font-medium py-2 px-4 rounded-lg flex items-center justify-center gap-2 transition-all text-sm shadow-sm shadow-pastel-violet-200">
+                      Procurar Imóveis nesta Zona <Search size={16} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+
+      const renderStep5 = () => (
+        <div className="flex flex-col h-full animate-[fadeInUp_0.3s_ease-out]">
+          <div className="p-5 border-b border-slate-100 flex items-center gap-3 shrink-0">
+            <div>
+              <h2 className="text-xl font-semibold text-slate-800 tracking-tight">Refinar Busca</h2>
+              <p className="text-sm text-slate-500">Filtrado dentro do polígono da zona.</p>
+            </div>
+          </div>
+
+          <div className="p-5 flex-1 overflow-y-auto space-y-6">
+            <div className="bg-pastel-violet-50 text-pastel-violet-800 p-4 rounded-xl text-sm flex gap-3 items-start border border-pastel-violet-100">
+              <Info size={20} className="shrink-0 text-pastel-violet-500 mt-0.5" />
+              <p>Selecionou uma zona. Digite um arruamento ou bairro contido na área destacada no mapa para focarmos a extração de dados.</p>
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-700">Endereço alvo na Zona</label>
+              <div className="relative">
+                 <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+                 <input type="text" defaultValue="Rua Bela Cintra" className="w-full pl-10 pr-4 py-3 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-pastel-violet-400 focus:border-pastel-violet-400 outline-none transition-all shadow-sm" />
+              </div>
+              <div className="bg-white border border-slate-100 rounded-lg shadow-sm mt-1 overflow-hidden animate-[fadeInDown_0.3s_ease-out]">
+                 <div className="p-3 border-b border-slate-50 text-sm hover:bg-slate-50 cursor-pointer flex items-center gap-2"><MapPin size={14} className="text-slate-400"/> Rua Bela Cintra, Consolação</div>
+                 <div className="p-3 text-sm hover:bg-slate-50 cursor-pointer flex items-center gap-2"><MapPin size={14} className="text-slate-400"/> Rua Haddock Lobo, Cerqueira César</div>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-5 border-t border-slate-100 bg-white shrink-0">
+            <button onClick={() => goToStep(6)} className="w-full bg-slate-900 hover:bg-slate-800 text-white font-medium py-3 px-4 rounded-xl flex items-center justify-center gap-2 transition-all">
+              Iniciar Scraping e Ver Resultados <ArrowRight size={18} />
+            </button>
+          </div>
+        </div>
+      );
+
+      const renderStep6 = () => (
+        <div className="flex flex-col h-full bg-slate-50 animate-[fadeInRight_0.5s_ease-out]">
+          {/* Header and Tabs */}
+          <div className="bg-white border-b border-slate-200 shrink-0">
+            <div className="p-5 pb-0">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h2 className="text-2xl font-bold text-slate-800 tracking-tight">Resultados</h2>
+                  <p className="text-sm text-slate-500 mt-1 flex items-center gap-2">
+                    <CheckCircle2 size={14} className="text-emerald-500"/>
+                    Dados em cache (há 2h) • Plano Gratuito
+                  </p>
+                </div>
+                <button className="text-sm font-medium text-pastel-violet-600 bg-pastel-violet-50 hover:bg-pastel-violet-100 px-3 py-1.5 rounded-lg transition-colors">
+                  Gerar Relatório PDF
+                </button>
+              </div>
+              
+              <div className="flex gap-6 border-b border-transparent">
+                <button 
+                  onClick={() => setActiveTab('imoveis')}
+                  className={`pb-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'imoveis' ? 'border-pastel-violet-500 text-pastel-violet-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+                >
+                  Imóveis ({MOCK_PROPERTIES.length})
+                </button>
+                <button 
+                  onClick={() => setActiveTab('dashboard')}
+                  className={`pb-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'dashboard' ? 'border-pastel-violet-500 text-pastel-violet-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+                >
+                  Dashboard Analítico
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {/* Content Area */}
+          <div className="flex-1 overflow-y-auto p-5">
+            {activeTab === 'imoveis' && (
+              <div className="space-y-4 animate-[fadeIn_0.3s_ease-out]">
+                {MOCK_PROPERTIES.map(p => (
+                  <div key={p.id} className="bg-white border border-slate-200 rounded-2xl overflow-hidden hover:shadow-lg transition-shadow flex flex-col sm:flex-row group">
+                    <div className="h-40 sm:h-auto sm:w-48 relative shrink-0">
+                      <img src={p.image} alt="Imóvel" className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                      <div className="absolute top-2 left-2 bg-white/90 backdrop-blur-sm text-xs font-bold px-2 py-1 rounded shadow-sm text-slate-700">
+                        {p.platform}
+                      </div>
+                    </div>
+                    <div className="p-4 flex-1 flex flex-col">
+                      <div className="flex justify-between items-start mb-1">
+                        <p className="text-sm text-slate-500">{p.type}</p>
+                        <h3 className="text-xl font-bold text-slate-800">R$ {p.price.toLocaleString('pt-BR')}</h3>
+                      </div>
+                      <h4 className="font-medium text-slate-700 text-sm mb-2 line-clamp-1">{p.address}</h4>
+                      
+                      <div className="flex items-center gap-4 text-sm text-slate-600 mb-4">
+                        <span className="flex items-center gap-1"><MapIcon size={14}/> {p.area}m²</span>
+                        <span className="flex items-center gap-1"><Home size={14}/> {p.beds} dorms</span>
+                      </div>
+
+                      {p.duplicate && (
+                        <div className="mb-3 inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 text-amber-700 rounded-md text-xs font-medium border border-amber-100">
+                          <AlertTriangle size={12} />
+                          Disponível em 2 plataformas · menor: R$ {p.altPrice}
+                        </div>
+                      )}
+
+                      <div className="mt-auto pt-3 border-t border-slate-100 flex gap-2">
+                        <button className="flex-1 bg-slate-50 hover:bg-slate-100 text-slate-700 text-sm font-medium py-2 rounded-lg transition-colors">Ver Acessibilidade</button>
+                        <button className="w-10 flex items-center justify-center bg-pastel-violet-50 text-pastel-violet-500 hover:bg-pastel-violet-100 rounded-lg transition-colors"><ExternalLink size={16}/></button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+
+                <div className="mt-6 bg-gradient-to-br from-pastel-violet-50 to-white p-5 rounded-2xl border border-pastel-violet-100 flex items-start gap-4 shadow-sm">
+                  <div className="p-2 bg-white rounded-xl shadow-sm text-pastel-violet-500 shrink-0"><Lock size={20}/></div>
+                  <div>
+                    <h4 className="font-bold text-slate-800 text-sm">Adicione VivaReal à sua pesquisa</h4>
+                    <p className="text-sm text-slate-600 mt-1 mb-3">O plano Gratuito pesquisa apenas no QuintoAndar e Zap. Desbloqueie todas as plataformas e a extração em tempo real.</p>
+                    <button className="bg-pastel-violet-500 text-white text-sm font-medium px-4 py-2 rounded-lg hover:bg-pastel-violet-600 transition-colors shadow-sm shadow-pastel-violet-200">
+                      Assinar Pro (R$ 29/mês)
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeTab === 'dashboard' && (
+              <div className="space-y-6 animate-[fadeIn_0.3s_ease-out]">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-white p-4 rounded-xl border border-slate-200">
+                    <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">Preço Mediano</p>
+                    <div className="flex items-baseline gap-2">
+                      <h3 className="text-2xl font-bold text-slate-800">R$ 4.250</h3>
+                      <span className="text-xs font-medium text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded flex items-center">↓ 2%</span>
+                    </div>
+                  </div>
+                  <div className="bg-white p-4 rounded-xl border border-slate-200">
+                    <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-1">Custo / m²</p>
+                    <h3 className="text-2xl font-bold text-slate-800">R$ 65,30</h3>
+                  </div>
+                </div>
+
+                <div className="bg-white p-5 rounded-xl border border-slate-200">
+                  <div className="flex justify-between items-center mb-4">
+                    <h4 className="font-bold text-slate-800 text-sm">Evolução do Preço (30 dias)</h4>
+                    <span className="text-xs text-slate-400 font-medium px-2 py-1 bg-slate-50 rounded">Plano Free</span>
+                  </div>
+                  <div className="h-40 w-full mt-2">
+                    <MiniLineChart data={DASHBOARD_PRICE_HISTORY} />
+                  </div>
+                </div>
+
+                 <div className="bg-white p-5 rounded-xl border border-slate-200">
+                  <h4 className="font-bold text-slate-800 text-sm mb-4">Distribuição por Faixa</h4>
+                  <div className="h-40 w-full mt-2">
+                    <MiniBarChart data={DASHBOARD_DISTRIBUTION} />
+                  </div>
+                </div>
+                
+                <h4 className="font-bold text-slate-800 text-sm pt-2">Indicadores da Zona</h4>
+                <div className="grid grid-cols-2 gap-3">
+                   {[
+                    { label: 'Segurança', val: 'Acima da Média', icon: ShieldAlert, color: 'text-pastel-violet-600', bg: 'bg-pastel-violet-50' },
+                    { label: 'Área Verde', val: 'Excelente', icon: Trees, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+                    { label: 'Alagamento', val: 'Baixo Risco', icon: Droplets, color: 'text-emerald-600', bg: 'bg-emerald-50' },
+                    { label: 'Serviços', val: 'Alta densidade', icon: MapIcon, color: 'text-pastel-violet-600', bg: 'bg-pastel-violet-50' },
+                   ].map((idx, i) => (
+                     <div key={i} className="bg-white border border-slate-100 p-3 rounded-lg flex items-center gap-3">
+                       <div className={`p-2 rounded-lg ${idx.bg} ${idx.color}`}><idx.icon size={16}/></div>
+                       <div>
+                         <p className="text-xs text-slate-500 font-medium">{idx.label}</p>
+                         <p className="text-sm font-semibold text-slate-800">{idx.val}</p>
+                       </div>
+                     </div>
+                   ))}
+                </div>
+
+              </div>
+            )}
+          </div>
+        </div>
+      );
+
+      return (
+        <div className="relative w-full h-screen font-sans bg-slate-900 text-slate-900 overflow-hidden flex flex-col">
+          <style dangerouslySetInnerHTML={{__html:`
+            @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+            @keyframes fadeInRight { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+            @keyframes fadeInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+            @keyframes fadeInDown { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+          `}} />
+
+          {/* Background Map Simulation */}
+          <InteractiveMap step={step} selectedTransport={selectedTransport} selectedZone={selectedZone} progress={progress} />
+
+          {/* Product Logo / Header (Floating) */}
+          <div className="absolute top-4 right-4 z-20 bg-white/90 backdrop-blur-md shadow-sm border border-slate-200 px-4 py-2 rounded-full flex items-center gap-2 pointer-events-none">
+             <div className="w-6 h-6 bg-pastel-violet-500 rounded-md flex items-center justify-center text-white"><MapIcon size={14} /></div>
+             <span className="font-bold text-slate-800 tracking-tight text-sm">Find Ideal Estate <span className="text-pastel-violet-500">2.0</span></span>
+          </div>
+
+          {/* Wrapper Principal: Tracker + Panel */}
+          <div 
+            className="absolute top-4 left-4 bottom-4 z-10 flex flex-col gap-3 transition-all duration-500 ease-[cubic-bezier(0.25,1,0.5,1)] pointer-events-none"
+            style={{ width: `${panelWidth}px` }}
+          >
+            {/* 1. Progress Tracker Header */}
+            <ProgressTracker 
+              currentStep={step} 
+              maxStep={maxStep} 
+              onStepClick={goToStep} 
+              isCollapsed={isCollapsed} 
+              onToggleCollapse={() => setIsCollapsed(!isCollapsed)} 
+            />
+
+            {/* 2. Main Config Panel (Flex-1 takes remaining height conditionally) */}
+            <div className={`bg-white shadow-2xl rounded-2xl flex-col overflow-hidden transition-all duration-500 ease-in-out pointer-events-auto border border-slate-200 ${isCollapsed ? 'opacity-0 scale-95 flex-none' : 'opacity-100 flex flex-1 max-h-full'}`} style={{ height: isCollapsed ? '0px' : 'auto' }}>
+              {step === 1 && renderStep1()}
+              {step === 2 && renderStep2()}
+              {step === 3 && renderStep3()}
+              {step === 4 && renderStep4()}
+              {step === 5 && renderStep5()}
+              {step === 6 && renderStep6()}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
