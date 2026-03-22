@@ -1,19 +1,18 @@
-"""VivaReal Playwright scraper — aligned with legacy cods_ok/realestate_meta_search.py.
+"""VivaReal Playwright scraper.
 
-Strategy (from legacy):
-  1. Launch persistent context with stealth JS + non-headless for Glue platforms.
-  2. Install page.route() handler to promote Glue count-only requests to full listings.
-  3. Navigate to vivareal.com.br with search address.
-  4. Intercept Glue API responses.
-  5. Replay paginated Glue URLs.
-  6. Fallback: direct Glue API calls with Nominatim geocoding.
+Strategy:
+  1. Navigate to vivareal.com.br with the search address in the URL.
+  2. Intercept responses from the Glue API (glue-api.vivareal.com.br).
+  3. Parse search.result.listings from intercepted JSON payloads.
+
+robots.txt: vivareal.com.br allows browsing listing pages.
+We only interact with the public search UI.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import re
 import unicodedata
 from typing import Any
@@ -23,16 +22,11 @@ from urllib.request import Request, urlopen
 from .base import (
     PLAYWRIGHT_LAUNCH_ARGS,
     REALISTIC_USER_AGENT,
-    STEALTH_JS,
     ScraperBase,
     _as_float,
     _as_int,
     _get_by_path,
-    _prepare_persistent_profile,
-    is_cloudflare_block,
 )
-
-logger = logging.getLogger(__name__)
 
 VIVAREAL_BASE = "https://www.vivareal.com.br"
 GLUE_API_HOST = "glue-api.vivareal.com.br"
@@ -40,27 +34,22 @@ GLUE_API_ALT_HOST = "glue-api.vivareal.com"
 
 COMMON_LISTING_PATHS = [
     "search.result.listings",
+    "search.result.listings",
     "result.listings",
     "listings",
 ]
 
 
 def _tweak_glue_listings_url(url: str, *, size: int, from_: int) -> str:
-    """Normalise a Glue URL to request full listings with pagination (from legacy)."""
-    parts = urlsplit(url.strip())
-    q = dict(parse_qsl(parts.query, keep_blank_values=True))
-    q["size"] = str(size)
-    q["from"] = str(from_)
-    if "page" in q:
-        q["page"] = str(int(from_ / max(size, 1)) + 1)
-    inc = q.get("includeFields", "")
-    if "search(totalCount)" in inc or inc.strip() in (
-        "facets,search(totalCount)",
-        "facets%2Csearch%28totalCount%29",
-    ):
-        q.pop("includeFields", None)
+    parts = urlsplit(url)
+    query = dict(parse_qsl(parts.query, keep_blank_values=True))
+    query["size"] = str(size)
+    query["from"] = str(from_)
+    if "includeFields" in query and "listings" not in str(query["includeFields"]):
+        query.pop("includeFields", None)
+    query_str = urlencode(query, doseq=True)
     return urlunsplit(
-        (parts.scheme, parts.netloc, parts.path, urlencode(q, doseq=True), parts.fragment)
+        (parts.scheme, parts.netloc, parts.path, query_str, parts.fragment)
     )
 
 
@@ -83,7 +72,6 @@ def _infer_city_state_from_address(address: str) -> tuple[str, str]:
 
 
 def _geocode_address_nominatim(address: str) -> tuple[float, float, str, str] | None:
-    """Geocode an address using Nominatim (from legacy)."""
     query = (address or "").strip()
     if not query:
         return None
@@ -176,10 +164,10 @@ async def _fetch_glue_fallback_payloads(
     x_domain: str,
     referer: str,
 ) -> list[dict[str, Any]]:
-    """Direct Glue API calls with Nominatim geocoding (from legacy)."""
     resolved = await asyncio.to_thread(_geocode_address_nominatim, search_address)
     if resolved is None:
         city, state = _infer_city_state_from_address(search_address)
+        # Retry with inferred city/state and a Sao Paulo center fallback.
         resolved = (-23.55052, -46.633308, city, state)
 
     lat, lon, city, state = resolved
@@ -194,7 +182,11 @@ async def _fetch_glue_fallback_payloads(
         "origin": referer.rstrip("/"),
         "accept": "application/json, text/plain, */*",
         "accept-language": "pt-BR,pt;q=0.9,en;q=0.8",
-        "User-Agent": REALISTIC_USER_AGENT,
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/131.0.0.0 Safari/537.36"
+        ),
         "sec-ch-ua": '"Chromium";v="131", "Not_A Brand";v="24"',
         "sec-ch-ua-mobile": "?0",
         "sec-ch-ua-platform": '"Windows"',
@@ -227,16 +219,11 @@ async def _fetch_glue_fallback_payloads(
 
         if not isinstance(payload, dict):
             break
-        if is_cloudflare_block(payload):
-            logger.warning("Cloudflare block detected on Glue fallback page %d", pg)
-            break
         payloads.append(payload)
 
         listings = _get_by_path(payload, "search.result.listings")
         if not isinstance(listings, list) or not listings:
             break
-
-        await asyncio.sleep(1.0)
 
     return payloads
 
@@ -258,74 +245,38 @@ class VivaRealScraper(ScraperBase):
         intercepted_payloads: list[dict[str, Any]] = []
         glue_urls: set[str] = set()
 
-        user_data_dir = _prepare_persistent_profile("vivareal")
-
         async with async_playwright() as pw:
-            try:
-                context = await pw.chromium.launch_persistent_context(
-                    user_data_dir=user_data_dir,
-                    headless=False,
-                    locale="pt-BR",
-                    timezone_id="America/Sao_Paulo",
-                    viewport={"width": 1920, "height": 1080},
-                    user_agent=REALISTIC_USER_AGENT,
-                    args=PLAYWRIGHT_LAUNCH_ARGS,
-                    ignore_default_args=["--enable-automation"],
-                    ignore_https_errors=True,
-                )
-            except Exception:
-                context = await pw.chromium.launch_persistent_context(
-                    user_data_dir=user_data_dir,
-                    headless=True,
-                    locale="pt-BR",
-                    timezone_id="America/Sao_Paulo",
-                    viewport={"width": 1920, "height": 1080},
-                    user_agent=REALISTIC_USER_AGENT,
-                    args=PLAYWRIGHT_LAUNCH_ARGS,
-                    ignore_https_errors=True,
-                )
-
-            await context.add_init_script(STEALTH_JS)
-            page = context.pages[0] if context.pages else await context.new_page()
-            await page.add_init_script(STEALTH_JS)
+            browser = await pw.chromium.launch(
+                headless=not self._prefer_headful(),
+                args=PLAYWRIGHT_LAUNCH_ARGS,
+            )
+            context = await browser.new_context(
+                user_agent=REALISTIC_USER_AGENT,
+                locale="pt-BR",
+                timezone_id="America/Sao_Paulo",
+                viewport={"width": 1280, "height": 800},
+                extra_http_headers={
+                    "x-domain": "www.vivareal.com.br",
+                    "referer": "https://www.vivareal.com.br/",
+                    "accept-language": "pt-BR,pt;q=0.9,en;q=0.8",
+                },
+            )
+            page = await context.new_page()
 
             async def _capture_response(response: Any) -> None:
-                try:
-                    url = response.url
-                    if (
-                        (GLUE_API_HOST in url or GLUE_API_ALT_HOST in url)
-                        and response.status == 200
-                    ):
-                        glue_urls.add(url)
-                        try:
-                            body = await response.json()
-                            if isinstance(body, dict) and not is_cloudflare_block(body):
-                                intercepted_payloads.append(body)
-                        except Exception:
-                            pass
-                except Exception:
-                    pass
+                url = response.url
+                if (
+                    (GLUE_API_HOST in url or GLUE_API_ALT_HOST in url)
+                    and response.status == 200
+                ):
+                    glue_urls.add(url)
+                    try:
+                        body = await response.json()
+                        intercepted_payloads.append(body)
+                    except Exception:
+                        pass
 
             page.on("response", _capture_response)
-
-            glue_domain = GLUE_API_HOST
-            glue_route_pattern = f"**/{glue_domain}/v2/listings**"
-
-            async def _glue_route_handler(route: Any) -> None:
-                """Promote count-only Glue requests to full listings (from legacy)."""
-                req = route.request
-                url_raw = req.url
-                parts_ = urlsplit(url_raw)
-                q_ = dict(parse_qsl(parts_.query, keep_blank_values=True))
-                inc_ = q_.get("includeFields", "")
-                if "totalCount" in inc_ and "listings" not in inc_.lower():
-                    tweaked = _tweak_glue_listings_url(url_raw, size=36, from_=0)
-                    logger.info("[vivareal] route: promoting count-only to listings")
-                    await route.continue_(url=tweaked)
-                else:
-                    await route.continue_()
-
-            await page.route(glue_route_pattern, _glue_route_handler)
 
             tx = "alugar" if self.search_type == "rent" else "venda"
             search_encoded = quote_plus(self.search_address)
@@ -341,27 +292,21 @@ class VivaRealScraper(ScraperBase):
                     f"&__vt=ov"
                 )
 
-            cf_retries = 3
-            for attempt in range(cf_retries):
-                try:
-                    await page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
-                    break
-                except Exception:
-                    if attempt < cf_retries - 1:
-                        await asyncio.sleep(5 * (attempt + 1))
-                    else:
-                        raise
-
+            await page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
             try:
                 await page.wait_for_load_state("networkidle", timeout=15000)
             except Exception:
+                # Some pages keep background requests open; continue with a
+                # human-like pause so hydration can still complete.
                 await self._human_delay(2000, 3000)
 
-            max_pages = self._configured_max_pages(default=4)
+            max_pages = self._configured_max_pages(default=1)
             for _ in range(max_pages):
                 try:
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
                 except Exception:
+                    # VivaReal can navigate/refresh while hydration completes.
+                    # Skip this scroll attempt and continue collecting responses.
                     pass
                 try:
                     await page.wait_for_load_state("networkidle", timeout=4000)
@@ -369,6 +314,7 @@ class VivaRealScraper(ScraperBase):
                     pass
                 await self._human_delay(700, 1400)
 
+            # Replay paginated Glue URLs inside the same browser context/cookies.
             for raw_url in sorted(glue_urls):
                 for page_idx in range(1, max_pages):
                     replay_url = _tweak_glue_listings_url(
@@ -380,22 +326,22 @@ class VivaRealScraper(ScraperBase):
                         response = await context.request.get(replay_url)
                         if response.ok:
                             payload = await response.json()
-                            if isinstance(payload, dict) and not is_cloudflare_block(payload):
+                            if isinstance(payload, dict):
                                 intercepted_payloads.append(payload)
                     except Exception:
                         continue
-                    await asyncio.sleep(1.0)
 
+            # Legacy parity fallback: direct Glue pagination based on geocoded point.
             preview_count = 0
             for payload in intercepted_payloads:
                 preview_count += len(
                     _extract_from_glue_payload(payload, "vivareal", self.search_type)
                 )
             if preview_count < 20:
-                for gd in (GLUE_API_HOST, GLUE_API_ALT_HOST):
+                for glue_domain in (GLUE_API_HOST, GLUE_API_ALT_HOST):
                     intercepted_payloads.extend(
                         await _fetch_glue_fallback_payloads(
-                            glue_domain=gd,
+                            glue_domain=glue_domain,
                             max_pages=max_pages,
                             search_type=self.search_type,
                             search_address=self.search_address,
@@ -416,14 +362,14 @@ class VivaRealScraper(ScraperBase):
                 """
             )
 
-            await context.close()
+            await browser.close()
 
         listings: list[dict[str, Any]] = []
         for payload in intercepted_payloads:
             listings.extend(_extract_from_glue_payload(payload, "vivareal", self.search_type))
 
         if not listings and isinstance(dom_rows, list):
-            listings.extend(_extract_from_dom_rows(dom_rows, "vivareal", VIVAREAL_BASE))
+            listings.extend(_extract_from_dom_rows(dom_rows, "vivareal"))
 
         seen: set[str] = set()
         unique = []
@@ -440,11 +386,7 @@ def _extract_from_glue_payload(
     platform: str,
     search_type: str,
 ) -> list[dict[str, Any]]:
-    """Extract listings from a Glue API payload (from legacy)."""
     results: list[dict[str, Any]] = []
-
-    if is_cloudflare_block(payload):
-        return results
 
     raw_listings: Any = None
     for path in COMMON_LISTING_PATHS:
@@ -489,9 +431,8 @@ def _extract_from_glue_payload(
         listing = entry.get("listing") or entry
 
         lid = str(
-            listing.get("id")
-            or listing.get("listingId")
-            or listing.get("listing_id")
+            _get_by_path(listing, "id")
+            or _get_by_path(listing, "listingId")
             or ""
         )
         if not lid:
@@ -499,12 +440,10 @@ def _extract_from_glue_payload(
 
         lat = _as_float(
             _get_by_path(listing, "address.point.lat")
-            or _get_by_path(listing, "address.point.latitude")
             or _get_by_path(listing, "geoLocation.precision.lat")
         )
         lon = _as_float(
             _get_by_path(listing, "address.point.lon")
-            or _get_by_path(listing, "address.point.longitude")
             or _get_by_path(listing, "geoLocation.precision.lon")
         )
 
@@ -513,8 +452,6 @@ def _extract_from_glue_payload(
         condo_fee = None
         iptu = None
         for pi in (pricing_infos if isinstance(pricing_infos, list) else []):
-            if not isinstance(pi, dict):
-                continue
             btype = str(pi.get("businessType") or "").upper()
             if btype == "RENTAL" and search_type == "rent":
                 price = _as_float(pi.get("rentalTotalPrice") or pi.get("price"))
@@ -524,78 +461,42 @@ def _extract_from_glue_payload(
             elif btype == "SALE" and search_type == "sale":
                 price = _as_float(pi.get("price"))
                 break
-        if price is None and isinstance(pricing_infos, list) and pricing_infos:
-            pi0 = pricing_infos[0] if isinstance(pricing_infos[0], dict) else {}
-            price = _as_float(
-                pi0.get("price")
-                or pi0.get("rentalTotalPrice")
-                or pi0.get("monthlyCondoFee")
-            )
-
-        if price is None and isinstance(listing.get("pricingInfo"), dict):
-            pi_dict = listing["pricingInfo"]
-            price = _as_float(
-                pi_dict.get("price")
-                or pi_dict.get("rentalTotalPrice")
-            )
 
         address_parts = [
             _get_by_path(listing, "address.street"),
             _get_by_path(listing, "address.neighborhood"),
             _get_by_path(listing, "address.city"),
-            _get_by_path(listing, "address.stateAcronym") or _get_by_path(listing, "address.state"),
+            _get_by_path(listing, "address.stateAcronym"),
         ]
         address = ", ".join(str(p) for p in address_parts if p)
 
-        raw_url = _pick_first_url(entry, listing, platform)
-        if not raw_url:
-            ext_id = _get_by_path(listing, "externalId") or lid
-            if platform == "zapimoveis":
-                raw_url = f"https://www.zapimoveis.com.br/imovel/{ext_id}/"
-            else:
-                raw_url = f"https://www.vivareal.com.br/imovel/{ext_id}/"
-
-        area_raw = _get_by_path(listing, "usableAreas")
-        if isinstance(area_raw, list) and area_raw:
-            area = _as_float(area_raw[0])
-        else:
-            area = _as_float(
-                listing.get("usableArea")
-                or listing.get("area")
-                or _get_by_path(listing, "totalAreas.0")
-                or listing.get("totalArea")
-            )
-
-        bedrooms_raw = _get_by_path(listing, "bedrooms")
-        if isinstance(bedrooms_raw, list) and bedrooms_raw:
-            bedrooms = _as_int(bedrooms_raw[0])
-        else:
-            bedrooms = _as_int(bedrooms_raw or listing.get("bedroomCount"))
-
-        bathrooms_raw = _get_by_path(listing, "bathrooms")
-        if isinstance(bathrooms_raw, list) and bathrooms_raw:
-            bathrooms = _as_int(bathrooms_raw[0])
-        else:
-            bathrooms = _as_int(bathrooms_raw or listing.get("bathroomCount"))
-
-        parking_raw = _get_by_path(listing, "parkingSpaces")
-        if isinstance(parking_raw, list) and parking_raw:
-            parking = _as_int(parking_raw[0])
-        else:
-            parking = _as_int(parking_raw or listing.get("parking") or listing.get("garageSpaces"))
+        url = _get_by_path(listing, "externalId") or lid
+        link = _get_by_path(entry, "link.href") or f"https://www.vivareal.com.br/imovel/{url}/"
 
         results.append(
             {
                 "platform": platform,
                 "platform_listing_id": lid,
-                "url": raw_url,
+                "url": link,
                 "lat": lat,
                 "lon": lon,
                 "price_brl": price,
-                "area_m2": area,
-                "bedrooms": bedrooms,
-                "bathrooms": bathrooms,
-                "parking": parking,
+                "area_m2": _as_float(
+                    _get_by_path(listing, "usableAreas.0")
+                    or _get_by_path(listing, "totalAreas.0")
+                ),
+                "bedrooms": _as_int(
+                    _get_by_path(listing, "bedrooms.0")
+                    or _get_by_path(listing, "bedrooms")
+                ),
+                "bathrooms": _as_int(
+                    _get_by_path(listing, "bathrooms.0")
+                    or _get_by_path(listing, "bathrooms")
+                ),
+                "parking": _as_int(
+                    _get_by_path(listing, "parkingSpaces.0")
+                    or _get_by_path(listing, "parkingSpaces")
+                ),
                 "address": address or None,
                 "condo_fee_brl": condo_fee,
                 "iptu_brl": iptu,
@@ -605,34 +506,7 @@ def _extract_from_glue_payload(
     return results
 
 
-def _pick_first_url(entry: dict, listing: dict, platform: str) -> str | None:
-    """Extract the best URL from a listing entry (from legacy)."""
-    link_obj = entry.get("link") if isinstance(entry.get("link"), dict) else {}
-    link_href = link_obj.get("href")
-    if isinstance(link_href, str) and link_href.strip():
-        if link_href.startswith("http"):
-            return link_href
-        base = "https://www.zapimoveis.com.br" if platform == "zapimoveis" else VIVAREAL_BASE
-        return f"{base}{link_href}"
-
-    for k in ("url", "uri", "canonicalUrl", "canonicalURI", "href"):
-        v = listing.get(k)
-        if isinstance(v, str) and v.strip():
-            if v.startswith("http"):
-                return v
-            if v.startswith("/"):
-                zap = "https://www.zapimoveis.com.br"
-                base = zap if platform == "zapimoveis" else VIVAREAL_BASE
-                return f"{base}{v}"
-    return None
-
-
-def _extract_from_dom_rows(
-    rows: list[dict[str, Any]],
-    platform: str,
-    base_url: str,
-) -> list[dict[str, Any]]:
-    """Fallback DOM extraction with correct base URL per platform."""
+def _extract_from_dom_rows(rows: list[dict[str, Any]], platform: str) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     for row in rows:
         href = str(row.get("href") or "")
@@ -655,7 +529,7 @@ def _extract_from_dom_rows(
             re.IGNORECASE,
         )
 
-        link = href if href.startswith("http") else f"{base_url}{href}"
+        link = href if href.startswith("http") else f"{VIVAREAL_BASE}{href}"
         results.append(
             {
                 "platform": platform,

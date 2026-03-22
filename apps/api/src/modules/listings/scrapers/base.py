@@ -1,50 +1,28 @@
-"""Base scraper class shared by all platform adapters.
-
-Aligned with the working legacy scraper (cods_ok/realestate_meta_search.py) for
-anti-detection, stealth JS injection, and persistent-context support.
-"""
+"""Base scraper class shared by all platform adapters."""
 
 from __future__ import annotations
 
 import asyncio
-import os
 import re
-import shutil
 from abc import ABC, abstractmethod
 from typing import Any
 from urllib.request import Request, urlopen
 
-# Windows UA matches what a real desktop user would send.
-# Legacy uses this exact UA string successfully.
+# Linux UA matches container runtime. A Windows UA inside Linux containers can
+# increase bot-detection score on target sites.
 REALISTIC_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "Mozilla/5.0 (X11; Linux x86_64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/131.0.0.0 Safari/537.36"
+    "Chrome/122.0.0.0 Safari/537.36"
 )
 
+# Chromium needs these flags in containerized environments.
 PLAYWRIGHT_LAUNCH_ARGS: list[str] = [
-    "--disable-blink-features=AutomationControlled",
-    "--no-first-run",
-    "--no-default-browser-check",
-    "--disable-infobars",
-    "--disable-extensions",
     "--no-sandbox",
     "--disable-dev-shm-usage",
     "--disable-gpu",
     "--disable-setuid-sandbox",
 ]
-
-STEALTH_JS = """
-    Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-    window.chrome = {runtime: {}, loadTimes: function(){}, csi: function(){}};
-    Object.defineProperty(navigator, 'plugins', {get: () => [1,2,3,4,5]});
-    Object.defineProperty(navigator, 'languages', {get: () => ['pt-BR','pt','en-US','en']});
-    const originalQuery = window.navigator.permissions.query;
-    window.navigator.permissions.query = (parameters) =>
-        parameters.name === 'notifications'
-            ? Promise.resolve({state: Notification.permission})
-            : originalQuery(parameters);
-"""
 
 
 class ScraperError(RuntimeError):
@@ -66,8 +44,10 @@ def check_robots_txt(base_url: str, path: str, user_agent: str = "*") -> bool:
         with urlopen(req, timeout=5) as resp:
             content = resp.read().decode("utf-8", errors="ignore")
     except Exception:
+        # If we can't fetch robots.txt, proceed (fail open)
         return True
 
+    # Very simple parser: check Disallow directives for User-agent: *
     in_relevant_block = False
     for line in content.splitlines():
         line = line.strip()
@@ -92,30 +72,12 @@ def _as_float(x: Any) -> float | None:
         if isinstance(x, (int, float)):
             return float(x)
         if isinstance(x, str):
-            s = x.strip()
+            s = re.sub(r"[^\d,.]", "", x.replace(" ", ""))
+            # pt-BR: "3.500,00" -> "3500.00"
+            s = s.replace(".", "").replace(",", ".")
             if not s:
                 return None
-            # Preserve sign
-            sign = ""
-            if s.startswith("-"):
-                sign = "-"
-                s = s[1:]
-            elif s.startswith("+"):
-                s = s[1:]
-            # Remove currency symbols, R$, spaces
-            s = re.sub(r"[^\d,.]", "", s)
-            if not s:
-                return None
-            has_dot = "." in s
-            has_comma = "," in s
-            if has_dot and has_comma:
-                # pt-BR price: "3.500,00" → "3500.00"
-                s = s.replace(".", "").replace(",", ".")
-            elif has_comma and not has_dot:
-                # pt-BR decimal: "3500,50" → "3500.50"
-                s = s.replace(",", ".")
-            # If only dot, treat as standard decimal (e.g. "-23.5672")
-            return float(sign + s)
+            return float(s)
     except Exception:
         return None
     return None
@@ -143,44 +105,6 @@ def _get_by_path(obj: Any, path: str) -> Any:
     return cur
 
 
-def is_cloudflare_block(payload: Any) -> bool:
-    """Detect Cloudflare challenge/block pages in payloads."""
-    try:
-        if isinstance(payload, dict):
-            body = payload.get("body") or payload.get("html") or payload.get("text")
-            if isinstance(body, str):
-                s = body.lower()
-                if "cloudflare" in s and "attention required" in s:
-                    return True
-                if "cf-ray" in s or "__cf" in s:
-                    return True
-            msg = payload.get("error") or payload.get("message")
-            if isinstance(msg, str):
-                s = msg.lower()
-                if "cloudflare" in s:
-                    return True
-        if isinstance(payload, str):
-            s = payload.lower()
-            if "cloudflare" in s and "attention required" in s:
-                return True
-    except Exception:
-        return False
-    return False
-
-
-def _prepare_persistent_profile(platform_name: str) -> str:
-    """Clear and return a fresh persistent profile directory for Glue platforms."""
-    base_dir = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)),
-        ".profiles",
-        platform_name,
-    )
-    if os.path.isdir(base_dir):
-        shutil.rmtree(base_dir, ignore_errors=True)
-    os.makedirs(base_dir, exist_ok=True)
-    return base_dir
-
-
 class ScraperBase(ABC):
     platform: str
     base_url: str
@@ -192,7 +116,7 @@ class ScraperBase(ABC):
         platform_config: dict[str, Any] | None = None,
     ) -> None:
         self.search_address = search_address
-        self.search_type = search_type
+        self.search_type = search_type  # 'rent' | 'sale'
         self.platform_config = platform_config or {}
 
     def _mode_key(self) -> str:

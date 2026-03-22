@@ -135,7 +135,7 @@ class TestVivaRealExtraction:
 
     def test_dom_fallback_yields_five_listings(self) -> None:
         rows = _make_dom_rows(8, "vivareal")
-        results = _extract_from_dom_rows(rows, "vivareal", "https://www.vivareal.com.br")
+        results = _extract_from_dom_rows(rows, "vivareal")
         assert len(results) >= 5
         for r in results:
             assert r["platform"] == "vivareal"
@@ -144,12 +144,12 @@ class TestVivaRealExtraction:
 
     def test_dom_fallback_skips_rows_without_id(self) -> None:
         rows = [{"href": "/sem-numero/", "text": "Apartamento"}]
-        results = _extract_from_dom_rows(rows, "vivareal", "https://www.vivareal.com.br")
+        results = _extract_from_dom_rows(rows, "vivareal")
         assert results == []
 
     def test_dom_fallback_parses_price_and_area(self) -> None:
         rows = [{"href": "/imovel/123456/", "text": "R$ 3.500,00  75 m²  2 quartos"}]
-        results = _extract_from_dom_rows(rows, "vivareal", "https://www.vivareal.com.br")
+        results = _extract_from_dom_rows(rows, "vivareal")
         assert len(results) == 1
         r = results[0]
         assert r["area_m2"] == 75.0
@@ -171,7 +171,7 @@ class TestZapImoveisExtraction:
 
     def test_dom_fallback_yields_five_listings(self) -> None:
         rows = _make_dom_rows(8, "zapimoveis")
-        results = _extract_from_dom_rows(rows, "zapimoveis", "https://www.zapimoveis.com.br")
+        results = _extract_from_dom_rows(rows, "zapimoveis")
         assert len(results) >= 5
 
 
