@@ -166,12 +166,13 @@ async def _fetch_glue_fallback_payloads(
 ) -> list[dict[str, Any]]:
     resolved = await asyncio.to_thread(_geocode_address_nominatim, search_address)
     if resolved is None:
-        city, state = _infer_city_state_from_address(search_address)
-        # Retry with inferred city/state and a Sao Paulo center fallback.
-        resolved = (-23.55052, -46.633308, city, state)
+        # Fail closed: do not invent coordinates.
+        # Returning fabricated center points creates non-real results and
+        # diverges from strict legacy parity expectations.
+        return []
 
     lat, lon, city, state = resolved
-    if not lat or not lon:
+    if lat is None or lon is None:
         return []
 
     business = "RENTAL" if search_type == "rent" else "SALE"
@@ -385,6 +386,8 @@ def _extract_from_glue_payload(
     payload: dict[str, Any],
     platform: str,
     search_type: str,
+    *,
+    include_recommendations: bool = True,
 ) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
 
@@ -399,7 +402,7 @@ def _extract_from_glue_payload(
                 raw_listings = nested
                 break
 
-    if not isinstance(raw_listings, list):
+    if not isinstance(raw_listings, list) and include_recommendations:
         recs = payload.get("recommendations")
         if isinstance(recs, list) and recs:
             flattened: list[dict[str, Any]] = []

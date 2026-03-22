@@ -9,6 +9,7 @@ either an API payload or DOM fallback rows.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 
@@ -22,6 +23,7 @@ from modules.listings.scrapers.quintoandar import (  # noqa: E402
 from modules.listings.scrapers.vivareal import (  # noqa: E402
     _extract_from_dom_rows,
     _extract_from_glue_payload,
+    _fetch_glue_fallback_payloads,
 )
 from modules.listings.scrapers.zapimoveis import (  # noqa: E402
     _extract_from_glue_payload as zap_extract_glue,
@@ -155,6 +157,24 @@ class TestVivaRealExtraction:
         assert r["area_m2"] == 75.0
         assert r["bedrooms"] == 2
 
+    def test_glue_fallback_does_not_fabricate_coordinates(self, monkeypatch) -> None:
+        async def _run() -> list[dict]:
+            return await _fetch_glue_fallback_payloads(
+                glue_domain="glue-api.vivareal.com.br",
+                max_pages=2,
+                search_type="rent",
+                search_address="Endereco invalido",
+                x_domain="www.vivareal.com.br",
+                referer="https://www.vivareal.com.br/",
+            )
+
+        monkeypatch.setattr(
+            "modules.listings.scrapers.vivareal._geocode_address_nominatim",
+            lambda _address: None,
+        )
+        payloads = asyncio.run(_run())
+        assert payloads == []
+
 
 # ---------------------------------------------------------------------------
 # ZapImoveis
@@ -173,6 +193,34 @@ class TestZapImoveisExtraction:
         rows = _make_dom_rows(8, "zapimoveis")
         results = _extract_from_dom_rows(rows, "zapimoveis")
         assert len(results) >= 5
+
+    def test_glue_extraction_can_ignore_recommendations_for_zap(self) -> None:
+        payload = {
+            "recommendations": [
+                {
+                    "scores": [
+                        {
+                            "listing": {
+                                "listing": {
+                                    "id": "zap-rec-1",
+                                    "address": {"point": {"lat": -23.55, "lon": -46.63}},
+                                    "pricingInfos": [
+                                        {"businessType": "RENTAL", "rentalTotalPrice": "3200"}
+                                    ],
+                                }
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+        results = zap_extract_glue(
+            payload,
+            "zapimoveis",
+            "rent",
+            include_recommendations=False,
+        )
+        assert results == []
 
 
 # ---------------------------------------------------------------------------

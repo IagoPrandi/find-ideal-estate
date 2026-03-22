@@ -33,6 +33,36 @@
 - Milestone governance:
   - PRD milestone checkboxes remain unchanged pending explicit user confirmation.
 
+## 2026-03-22 - M5.3 strict-real parity hardening (no fabricated fallback results)
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `AGENTS.md`
+  - `skills/best-practices/SKILL.md`
+  - `skills/best-practices/references/agent-principles.md`
+- Skill used:
+  - `skills/best-practices/SKILL.md`
+- Scope executed:
+  - Removed non-real fallback coordinate injection in VivaReal fallback flow:
+    - `apps/api/src/modules/listings/scrapers/vivareal.py`
+    - `_fetch_glue_fallback_payloads(...)` now fails closed (`[]`) when geocoding fails, instead of using fabricated São Paulo center coordinates.
+  - Added parser-level switch to control recommendation extraction:
+    - `apps/api/src/modules/listings/scrapers/vivareal.py`
+    - `_extract_from_glue_payload(..., include_recommendations: bool = True)`.
+  - Enforced stricter Zap parity by disabling recommendation-only extraction:
+    - `apps/api/src/modules/listings/scrapers/zapimoveis.py`
+    - calls to `_extract_from_glue_payload(...)` now use `include_recommendations=False` for both preview and final extraction.
+  - Added regression tests:
+    - `apps/api/tests/test_phase5_scraper_extraction.py`
+      - `test_glue_fallback_does_not_fabricate_coordinates`
+      - `test_glue_extraction_can_ignore_recommendations_for_zap`
+- Validation status:
+  - `python3 -m pytest apps/api/tests/test_phase5_scraper_extraction.py -q` -> `13 passed`.
+  - `python3 -m ruff check apps/api/src/modules/listings/scrapers/vivareal.py apps/api/src/modules/listings/scrapers/zapimoveis.py apps/api/tests/test_phase5_scraper_extraction.py` -> `All checks passed!`.
+- Milestone governance:
+  - PRD milestone checkboxes remain unchanged pending explicit user confirmation.
+
 ## 2026-03-21 - M5.3 parity deep pass (legacy fallback bridge + evidence)
 
 - Required docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`

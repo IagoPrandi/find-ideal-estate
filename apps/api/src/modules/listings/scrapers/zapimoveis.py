@@ -124,7 +124,12 @@ class ZapImoveisScraper(ScraperBase):
             preview_count = 0
             for payload in intercepted_payloads:
                 preview_count += len(
-                    _extract_from_glue_payload(payload, "zapimoveis", self.search_type)
+                    _extract_from_glue_payload(
+                        payload,
+                        "zapimoveis",
+                        self.search_type,
+                        include_recommendations=False,
+                    )
                 )
             if preview_count < 20:
                 for glue_domain in (ZAP_GLUE_HOST, ZAP_GLUE_ALT_HOST):
@@ -156,7 +161,12 @@ class ZapImoveisScraper(ScraperBase):
         listings: list[dict[str, Any]] = []
         for payload in intercepted_payloads:
             listings.extend(
-                _extract_from_glue_payload(payload, "zapimoveis", self.search_type)
+                _extract_from_glue_payload(
+                    payload,
+                    "zapimoveis",
+                    self.search_type,
+                    include_recommendations=False,
+                )
             )
 
         if not listings and isinstance(dom_rows, list):
