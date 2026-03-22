@@ -41,6 +41,7 @@ export function MapShell({ primaryPoint, secondaryPoint, activePointTarget, onPi
       center: DEFAULT_CENTER,
       zoom: 10.6,
       attributionControl: false,
+      preserveDrawingBuffer: true,
     });
 
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), "top-right");
@@ -63,9 +64,7 @@ export function MapShell({ primaryPoint, secondaryPoint, activePointTarget, onPi
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map) {
-      return;
-    }
+    if (!map) return;
 
     const upsertMarker = (
       markerRef: React.MutableRefObject<maplibregl.Marker | null>,
@@ -77,11 +76,9 @@ export function MapShell({ primaryPoint, secondaryPoint, activePointTarget, onPi
         markerRef.current = null;
         return;
       }
-
       if (!markerRef.current) {
         markerRef.current = new maplibregl.Marker({ color }).addTo(map);
       }
-
       markerRef.current
         .setLngLat([point.lon, point.lat])
         .setPopup(
@@ -91,8 +88,8 @@ export function MapShell({ primaryPoint, secondaryPoint, activePointTarget, onPi
         );
     };
 
-    upsertMarker(primaryMarkerRef, primaryPoint, "#145c52");
-    upsertMarker(secondaryMarkerRef, secondaryPoint, "#c47e23");
+    upsertMarker(primaryMarkerRef, primaryPoint, "#2563eb");
+    upsertMarker(secondaryMarkerRef, secondaryPoint, "#d97706");
 
     const visiblePoints = [primaryPoint, secondaryPoint].filter(Boolean) as Point[];
     if (visiblePoints.length === 1) {
@@ -109,18 +106,18 @@ export function MapShell({ primaryPoint, secondaryPoint, activePointTarget, onPi
 
   if (!maptilerKey) {
     return (
-      <div className="mapFallback">
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "center",
+        height: "100%", padding: "40px", textAlign: "center",
+        color: "var(--color-muted)", fontSize: "0.9rem",
+      }}>
         <div>
-          <p className="mapEyebrow">Mapa indisponível</p>
-          <h3>Defina NEXT_PUBLIC_MAPTILER_API_KEY para ativar o MapLibre.</h3>
-          <p>
-            O formulário continua funcional com coordenadas manuais. Quando a chave estiver presente, o clique no
-            mapa passa a preencher os pontos automaticamente.
-          </p>
+          <p style={{ fontWeight: 600, marginBottom: 8 }}>Mapa indisponível</p>
+          <p>Defina <code>NEXT_PUBLIC_MAPTILER_API_KEY</code> para ativar o MapLibre.</p>
         </div>
       </div>
     );
   }
 
-  return <div className="mapCanvas" ref={containerRef} aria-label="Mapa interativo para seleção de pontos" />;
+  return <div ref={containerRef} style={{ width: "100%", height: "100%" }} aria-label="Mapa interativo" />;
 }

@@ -47,7 +47,6 @@ const numberFromText = (value: string) => {
 };
 
 export function JourneyStudio() {
-  // Etapa state
   const [currentEtapa, setCurrentEtapa] = useState<EtapaStep>(1);
   const [journeyId, setJourneyId] = useState<string | null>(null);
   const [selectedTransportPointIds, setSelectedTransportPointIds] = useState<string[]>([]);
@@ -60,7 +59,6 @@ export function JourneyStudio() {
     job_id?: string;
   } | null>(null);
 
-  // Etapa 1 state
   const [primaryPoint, setPrimaryPoint] = useState<PointForm>(INITIAL_PRIMARY);
   const [secondaryPoint, setSecondaryPoint] = useState<PointForm>(INITIAL_SECONDARY);
   const [activePointTarget, setActivePointTarget] = useState<PointTarget>("primary");
@@ -75,77 +73,57 @@ export function JourneyStudio() {
     safety: true,
     pois: true,
   });
-  const [statusMessage, setStatusMessage] = useState(
-    "Selecione o ponto principal no mapa ou informe as coordenadas.",
-  );
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const primaryPreview = useMemo(() => {
     const lat = numberFromText(primaryPoint.lat);
     const lon = numberFromText(primaryPoint.lon);
-    if (lat === null || lon === null) {
-      return null;
-    }
+    if (lat === null || lon === null) return null;
     return { lat, lon, label: primaryPoint.label || "Referência principal" };
   }, [primaryPoint]);
 
   const secondaryPreview = useMemo(() => {
     const lat = numberFromText(secondaryPoint.lat);
     const lon = numberFromText(secondaryPoint.lon);
-    if (lat === null || lon === null) {
-      return null;
-    }
+    if (lat === null || lon === null) return null;
     return { lat, lon, label: secondaryPoint.label || "Ponto secundário" };
   }, [secondaryPoint]);
 
   const handlePointPick = (target: PointTarget, coords: { lat: number; lon: number }) => {
-    const patch = {
-      lat: coords.lat.toFixed(6),
-      lon: coords.lon.toFixed(6),
-    };
-
+    const patch = { lat: coords.lat.toFixed(6), lon: coords.lon.toFixed(6) };
     if (target === "primary") {
-      setPrimaryPoint((current) => ({ ...current, ...patch }));
-      setStatusMessage("Ponto principal atualizado a partir do mapa.");
-      return;
+      setPrimaryPoint((c) => ({ ...c, ...patch }));
+    } else {
+      setSecondaryPoint((c) => ({ ...c, ...patch }));
     }
-
-    setSecondaryPoint((current) => ({ ...current, ...patch }));
-    setStatusMessage("Ponto secundário atualizado a partir do mapa.");
   };
 
   const updatePointField = (target: PointTarget, field: keyof PointForm, value: string) => {
     if (target === "primary") {
-      setPrimaryPoint((current) => ({ ...current, [field]: value }));
-      return;
+      setPrimaryPoint((c) => ({ ...c, [field]: value }));
+    } else {
+      setSecondaryPoint((c) => ({ ...c, [field]: value }));
     }
-    setSecondaryPoint((current) => ({ ...current, [field]: value }));
   };
 
-  const toggleAnalysis = (analysis: AnalysisKey) => {
-    setAnalyses((current) => ({ ...current, [analysis]: !current[analysis] }));
+  const toggleAnalysis = (key: AnalysisKey) => {
+    setAnalyses((c) => ({ ...c, [key]: !c[key] }));
   };
 
   const handleEtapa1Submit = async () => {
     setSubmitError(null);
-
     const primaryLat = numberFromText(primaryPoint.lat);
     const primaryLon = numberFromText(primaryPoint.lon);
-
     if (primaryLat === null || primaryLon === null) {
-      setSubmitError("Defina um ponto principal válido antes de criar a jornada.");
+      setSubmitError("Defina um ponto principal válido antes de continuar.");
       return;
     }
 
     const payload = {
       input_snapshot: {
         step: 1,
-        reference_point: {
-          lat: primaryLat,
-          lon: primaryLon,
-          label: primaryPoint.label || "Referência principal",
-        },
+        reference_point: { lat: primaryLat, lon: primaryLon, label: primaryPoint.label || "Referência principal" },
         property_mode: housingMode,
         travel_mode: travelMode,
         zone_radius_meters: zoneRadiusMeters,
@@ -154,680 +132,536 @@ export function JourneyStudio() {
         analyses,
       },
       secondary_reference_label: secondaryPreview?.label ?? null,
-      secondary_reference_point: secondaryPreview
-        ? {
-            lat: secondaryPreview.lat,
-            lon: secondaryPreview.lon,
-          }
-        : null,
+      secondary_reference_point: secondaryPreview ? { lat: secondaryPreview.lat, lon: secondaryPreview.lon } : null,
     };
 
     setIsSubmitting(true);
-    setStatusMessage("Persistindo configuração inicial da jornada...");
-
     try {
-      const response = await fetch("/api/journeys", {
+      const res = await fetch("/api/journeys", {
         method: "POST",
-        headers: {
-          "content-type": "application/json",
-        },
+        headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),
       });
-
-      const data = (await response.json()) as JourneyResponse | { detail?: string };
-      if (!response.ok) {
-        throw new Error(
-          "detail" in data && data.detail ? data.detail : "A API recusou a criação da jornada.",
-        );
-      }
-
+      const data = (await res.json()) as JourneyResponse | { detail?: string };
+      if (!res.ok) throw new Error("detail" in data && data.detail ? data.detail : "Erro ao criar jornada.");
       const journey = data as JourneyResponse;
       setJourneyId(journey.id);
       setCurrentEtapa(2);
-      setStatusMessage("Jornada criada com sucesso. Avançando para Etapa 2...");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Falha inesperada ao criar a jornada.";
-      setSubmitError(message);
-      setStatusMessage("Não foi possível salvar a jornada. Revise os campos e tente novamente.");
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : "Falha inesperada.");
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleEtapa2Next = (selectedIds: string[]) => {
-    setSelectedTransportPointIds(selectedIds);
-    setCurrentEtapa(3);
-  };
-
-  const handleEtapa3Next = () => {
-    setCurrentEtapa(4);
-  };
-
-  const handleEtapa4SelectZone = (fingerprint: string) => {
-    setSelectedZoneFingerprint(fingerprint);
-    setCurrentEtapa(5);
-  };
-
+  const handleEtapa2Next = (ids: string[]) => { setSelectedTransportPointIds(ids); setCurrentEtapa(3); };
+  const handleEtapa3Next = () => { setCurrentEtapa(4); };
+  const handleEtapa4SelectZone = (fp: string) => { setSelectedZoneFingerprint(fp); setCurrentEtapa(5); };
   const handleListingsReady = (result: {
-    listings: unknown[];
-    total_count: number;
-    cache_age_hours?: number;
-    freshness_status?: string;
-    job_id?: string;
-  }) => {
-    setListingsResult(result);
-    setCurrentEtapa(6);
-  };
-
-  const pointCard = (title: string, target: PointTarget, values: PointForm, hint: string) => (
-    <div className="card pointCard">
-      <div className="pointCardHeader">
-        <div>
-          <p className="eyebrow">{title}</p>
-          <h3>{hint}</h3>
-        </div>
-        <button
-          className={`ghostButton ${activePointTarget === target ? "ghostButtonActive" : ""}`}
-          type="button"
-          onClick={() => setActivePointTarget(target)}
-        >
-          {activePointTarget === target ? "Clique ativo" : "Definir no mapa"}
-        </button>
-      </div>
-
-      <label className="fieldLabel">
-        Nome exibido
-        <input
-          className="fieldInput"
-          value={values.label}
-          onChange={(event) => updatePointField(target, "label", event.target.value)}
-          placeholder="Ex.: Escritório na Paulista"
-        />
-      </label>
-
-      <div className="fieldGrid compactGrid">
-        <label className="fieldLabel">
-          Latitude
-          <input
-            className="fieldInput"
-            value={values.lat}
-            onChange={(event) => updatePointField(target, "lat", event.target.value)}
-            inputMode="decimal"
-            placeholder="-23.550520"
-          />
-        </label>
-        <label className="fieldLabel">
-          Longitude
-          <input
-            className="fieldInput"
-            value={values.lon}
-            onChange={(event) => updatePointField(target, "lon", event.target.value)}
-            inputMode="decimal"
-            placeholder="-46.633308"
-          />
-        </label>
-      </div>
-    </div>
-  );
+    listings: unknown[]; total_count: number;
+    cache_age_hours?: number; freshness_status?: string; job_id?: string;
+  }) => { setListingsResult(result); setCurrentEtapa(6); };
 
   return (
-    <main className="shell">
-      {currentEtapa === 1 && (
-        <>
-          <section className="hero card">
-            <div>
-              <p className="eyebrow">Fase 3 · M3.1</p>
-              <h1>Etapa 1: Configuração inicial da jornada</h1>
-            </div>
-            <p className="heroCopy">
-              Defina seu ponto de referência no mapa e configure os parâmetros de busca. Todos os dados são salvos
-              automaticamente.
-            </p>
-          </section>
+    <main className="app">
+      {/* Map — always visible, always full screen */}
+      <section className="mapArea">
+        <MapShell
+          primaryPoint={primaryPreview}
+          secondaryPoint={secondaryPreview}
+          activePointTarget={activePointTarget}
+          onPickPoint={handlePointPick}
+        />
+      </section>
 
-          <section className="studioLayout">
-            <div className="mapColumn card">
-              <div className="mapHeader">
-                <div>
-                  <p className="eyebrow">Mapa vivo</p>
-                  <h2>
-                    {activePointTarget === "primary"
-                      ? "Clique para definir a referência principal"
-                      : "Clique para definir o ponto secundário"}
-                  </h2>
-                </div>
-                <p className="mapHint">Centro inicial em São Paulo. O painel permanece responsivo.</p>
+      {/* Panel — right sidebar */}
+      <aside className="panel">
+        <div className="panelScroll">
+          {currentEtapa === 1 && (
+            <>
+              <div className="panelHeader">
+                <h1 className="panelTitle">Ponto de Referência</h1>
               </div>
 
-              <MapShell
-                primaryPoint={primaryPreview}
-                secondaryPoint={secondaryPreview}
-                activePointTarget={activePointTarget}
-                onPickPoint={handlePointPick}
-              />
+              {/* Primary point */}
+              <div className="section">
+                <div className="sectionHeader">
+                  <span className="sectionIcon">📍</span>
+                  <h2 className="sectionTitle">Ponto Principal</h2>
+                </div>
+                <p className="hint">
+                  Clique no mapa em &quot;{activePointTarget === "primary" ? "Definir principal" : "Adicionar Interesse"}&quot;.
+                </p>
 
-              <div className="statusRibbon">
-                <strong>Status:</strong>
-                <span>{statusMessage}</span>
+                <div className="btnRow">
+                  <button
+                    className={`toggleBtn ${activePointTarget === "primary" ? "toggleBtnActive" : ""}`}
+                    type="button"
+                    onClick={() => setActivePointTarget("primary")}
+                  >
+                    Definir principal
+                  </button>
+                  <button
+                    className={`toggleBtn ${activePointTarget === "secondary" ? "toggleBtnActive" : ""}`}
+                    type="button"
+                    onClick={() => setActivePointTarget("secondary")}
+                  >
+                    Adicionar Interesse
+                  </button>
+                </div>
+
+                {primaryPreview && (
+                  <div className="coordDisplay">
+                    <span>Lat: {primaryPreview.lat.toFixed(5)}</span>
+                    <span>Lon: {primaryPreview.lon.toFixed(5)}</span>
+                  </div>
+                )}
+                {!primaryPreview && (
+                  <button className="outlineBtn" type="button" onClick={() => setActivePointTarget("primary")}>
+                    Usar centro atual
+                  </button>
+                )}
               </div>
-            </div>
 
-            <aside className="panelColumn">
-              <section className="card">
-                <p className="eyebrow">Configuração inicial</p>
-                <h2>Defina os parâmetros</h2>
-                <p className="panelIntro">Configure tempo máximo de deslocamento e análises desejadas.</p>
-
-                <div className="segmentedRow" role="radiogroup" aria-label="Tipo de busca">
-                  {[
-                    { key: "rent", label: "Aluguel" },
-                    { key: "buy", label: "Compra" },
-                  ].map((option) => (
-                    <button
-                      key={option.key}
-                      type="button"
-                      className={`segmentButton ${housingMode === option.key ? "segmentButtonActive" : ""}`}
-                      onClick={() => setHousingMode(option.key as HousingMode)}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
+              {/* Secondary point (minimized) */}
+              <div className="section">
+                <div className="sectionHeader">
+                  <h2 className="sectionTitle">Interesses (opcional)</h2>
                 </div>
+                <p className="hint">
+                  Clique em &quot;Adicionar Interesse&quot; para abrir o mapa e marcar pontos de interesse.
+                </p>
+                {secondaryPreview && (
+                  <div className="coordDisplay">
+                    <span>Lat: {secondaryPreview.lat.toFixed(5)}</span>
+                    <span>Lon: {secondaryPreview.lon.toFixed(5)}</span>
+                  </div>
+                )}
+              </div>
 
-                <div className="segmentedRow" role="radiogroup" aria-label="Modal de deslocamento">
-                  {[
-                    { key: "transit", label: "Transporte público", disabled: false },
-                    { key: "walking", label: "A pé", disabled: false },
-                    { key: "car", label: "Carro · Pro", disabled: true },
-                  ].map((option) => (
-                    <button
-                      key={option.key}
-                      type="button"
-                      className={`segmentButton ${travelMode === option.key ? "segmentButtonActive" : ""}`}
-                      onClick={() => !option.disabled && setTravelMode(option.key as TravelMode)}
-                      disabled={option.disabled}
-                    >
-                      {option.label}
-                    </button>
-                  ))}
+              <div className="divider" />
+
+              {/* Housing mode */}
+              <div className="section">
+                <h2 className="sectionTitle">Tipo de busca</h2>
+                <div className="segRow">
+                  <button
+                    className={`segBtn ${housingMode === "rent" ? "segBtnActive" : ""}`}
+                    type="button"
+                    onClick={() => setHousingMode("rent")}
+                  >
+                    Alugar
+                  </button>
+                  <button
+                    className={`segBtn ${housingMode === "buy" ? "segBtnActive" : ""}`}
+                    type="button"
+                    onClick={() => setHousingMode("buy")}
+                  >
+                    Comprar
+                  </button>
                 </div>
+              </div>
 
-                <div className="fieldGrid">
-                  <label className="fieldLabel">
-                    Raio da zona (m)
-                    <input
-                      className="fieldInput"
-                      type="range"
-                      min={300}
-                      max={2500}
-                      step={50}
-                      value={zoneRadiusMeters}
-                      onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                        setZoneRadiusMeters(Number(event.target.value))
-                      }
-                    />
-                    <span className="fieldValue">{zoneRadiusMeters} m</span>
-                  </label>
+              {/* Zone radius */}
+              <div className="section">
+                <h2 className="sectionTitle">Raio da zona (visual)</h2>
+                <p className="hint">Ajuste o raio dos círculos exibidos no mapa antes de gerar as zonas ({zoneRadiusMeters} m).</p>
+                <div className="sliderRow">
+                  <input
+                    className="slider"
+                    type="range"
+                    min={300}
+                    max={2500}
+                    step={50}
+                    value={zoneRadiusMeters}
+                    onChange={(e: ChangeEvent<HTMLInputElement>) => setZoneRadiusMeters(Number(e.target.value))}
+                  />
+                  <span className="sliderValue">{zoneRadiusMeters}<small> m</small></span>
+                </div>
+              </div>
 
-                  <label className="fieldLabel">
-                    Tempo máximo
+              {/* Transport config */}
+              <div className="section">
+                <h2 className="sectionTitle">Transporte (configuração)</h2>
+                <p className="hint">
+                  Defina tempo máximo de viagem e distância máxima para buscar seeds de ônibus e trem/metrô.
+                </p>
+
+                <label className="fieldLabel">
+                  Tempo máximo de viagem (min)
+                  <div className="sliderRow">
                     <input
-                      className="fieldInput"
+                      className="slider"
                       type="range"
                       min={10}
                       max={90}
                       step={5}
                       value={maxTravelMinutes}
-                      onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                        setMaxTravelMinutes(Number(event.target.value))
-                      }
+                      onChange={(e: ChangeEvent<HTMLInputElement>) => setMaxTravelMinutes(Number(e.target.value))}
                     />
-                    <span className="fieldValue">{maxTravelMinutes} min</span>
-                  </label>
+                    <span className="sliderValue">{maxTravelMinutes}</span>
+                  </div>
+                </label>
 
-                  <label className="fieldLabel">
-                    Distância ao seed
+                <label className="fieldLabel">
+                  Distância máxima seed ônibus (m)
+                  <div className="sliderRow">
                     <input
-                      className="fieldInput"
+                      className="slider"
                       type="range"
                       min={100}
                       max={1600}
                       step={50}
                       value={seedDistanceMeters}
-                      onChange={(event: ChangeEvent<HTMLInputElement>) =>
-                        setSeedDistanceMeters(Number(event.target.value))
-                      }
+                      onChange={(e: ChangeEvent<HTMLInputElement>) => setSeedDistanceMeters(Number(e.target.value))}
                     />
-                    <span className="fieldValue">{seedDistanceMeters} m</span>
-                  </label>
-                </div>
+                    <span className="sliderValue">{seedDistanceMeters}</span>
+                  </div>
+                </label>
 
-                <div className="analysisGrid" aria-label="Análises ativadas">
-                  {[
-                    { key: "green", title: "Área verde", note: "Vegetação e respiro urbano" },
-                    { key: "flood", title: "Alagamento", note: "Manchas e exposição hídrica" },
-                    { key: "safety", title: "Segurança", note: "Ocorrências e leitura pública" },
-                    { key: "pois", title: "POIs", note: "Supermercados, parques, farmácias" },
-                  ].map((item) => (
-                    <button
-                      key={item.key}
-                      type="button"
-                      className={`analysisCard ${analyses[item.key as AnalysisKey] ? "analysisCardActive" : ""}`}
-                      onClick={() => toggleAnalysis(item.key as AnalysisKey)}
-                    >
-                      <strong>{item.title}</strong>
-                      <span>{item.note}</span>
-                    </button>
+                <label className="fieldLabel">
+                  Distância máxima seed trem/metrô (m)
+                  <div className="sliderRow">
+                    <input className="slider" type="range" min={300} max={3000} step={100} value={1200} readOnly />
+                    <span className="sliderValue">1200</span>
+                  </div>
+                </label>
+              </div>
+
+              <div className="divider" />
+
+              {/* Analysis toggles */}
+              <div className="section">
+                <h2 className="sectionTitle">Análises</h2>
+                <div className="analysisGrid">
+                  {([
+                    { key: "green" as AnalysisKey, label: "Área verde" },
+                    { key: "flood" as AnalysisKey, label: "Alagamento" },
+                    { key: "safety" as AnalysisKey, label: "Segurança" },
+                    { key: "pois" as AnalysisKey, label: "POIs" },
+                  ]).map((item) => (
+                    <label key={item.key} className="checkItem">
+                      <input
+                        type="checkbox"
+                        checked={analyses[item.key]}
+                        onChange={() => toggleAnalysis(item.key)}
+                      />
+                      {item.label}
+                    </label>
                   ))}
                 </div>
-              </section>
+              </div>
 
-              {pointCard("Referência principal", "primary", primaryPoint, "Origem da análise")}
-              {pointCard("Referência secundária", "secondary", secondaryPoint, "Opcional para contexto")}
+              {/* Submit */}
+              {submitError && <div className="errorMsg">{submitError}</div>}
 
-              <section className="card submitCard">
-                <div>
-                  <p className="eyebrow">Persistência</p>
-                  <h2>Salvar Etapa 1</h2>
-                </div>
+              <button
+                className="primaryBtn"
+                type="button"
+                onClick={handleEtapa1Submit}
+                disabled={isSubmitting || !primaryPreview}
+              >
+                {isSubmitting ? "Criando jornada..." : "Criar jornada e continuar →"}
+              </button>
+            </>
+          )}
 
-                {submitError && <p className="feedback feedbackError">{submitError}</p>}
-
-                <button
-                  className="primaryButton"
-                  type="button"
-                  onClick={handleEtapa1Submit}
-                  disabled={isSubmitting}
-                >
-                  {isSubmitting ? "Salvando jornada..." : "Criar jornada e continuar"}
-                </button>
-              </section>
-            </aside>
-          </section>
-        </>
-      )}
-
-      {currentEtapa === 2 && journeyId && (
-        <div className="etapa-container">
-          <Etapa2TransportSelection journeyId={journeyId} onNext={handleEtapa2Next} />
+          {currentEtapa === 2 && journeyId && (
+            <Etapa2TransportSelection journeyId={journeyId} onNext={handleEtapa2Next} />
+          )}
+          {currentEtapa === 3 && journeyId && (
+            <Etapa3ZoneGeneration
+              journeyId={journeyId}
+              selectedTransportPointIds={selectedTransportPointIds}
+              onNext={handleEtapa3Next}
+            />
+          )}
+          {currentEtapa === 4 && journeyId && (
+            <Etapa4ZoneComparison journeyId={journeyId} onSelectZone={handleEtapa4SelectZone} />
+          )}
+          {currentEtapa === 5 && journeyId && selectedZoneFingerprint && (
+            <Etapa5ListingsSearch
+              journeyId={journeyId}
+              zoneFingerprint={selectedZoneFingerprint}
+              zoneLabel={selectedZoneFingerprint}
+              searchType={housingMode}
+              onListingsReady={handleListingsReady}
+            />
+          )}
+          {currentEtapa === 6 && journeyId && selectedZoneFingerprint && (
+            <Etapa6Listings
+              journeyId={journeyId}
+              zoneFingerprint={selectedZoneFingerprint}
+              searchType={housingMode}
+              initialListings={listingsResult?.listings as import("./etapa6-listings").Etapa6Props["initialListings"]}
+              cacheAgeHours={listingsResult?.cache_age_hours}
+              freshnessStatus={listingsResult?.freshness_status}
+              jobId={listingsResult?.job_id}
+            />
+          )}
         </div>
-      )}
-
-      {currentEtapa === 3 && journeyId && (
-        <div className="etapa-container">
-          <Etapa3ZoneGeneration
-            journeyId={journeyId}
-            selectedTransportPointIds={selectedTransportPointIds}
-            onNext={handleEtapa3Next}
-          />
-        </div>
-      )}
-
-      {currentEtapa === 4 && journeyId && (
-        <div className="etapa-container">
-          <Etapa4ZoneComparison journeyId={journeyId} onSelectZone={handleEtapa4SelectZone} />
-        </div>
-      )}
-
-      {currentEtapa === 5 && journeyId && selectedZoneFingerprint && (
-        <div className="etapa-container">
-          <Etapa5ListingsSearch
-            journeyId={journeyId}
-            zoneFingerprint={selectedZoneFingerprint}
-            zoneLabel={selectedZoneFingerprint}
-            searchType={housingMode}
-            onListingsReady={handleListingsReady}
-          />
-        </div>
-      )}
-
-      {currentEtapa === 6 && journeyId && selectedZoneFingerprint && (
-        <div className="etapa-container">
-          <Etapa6Listings
-            journeyId={journeyId}
-            zoneFingerprint={selectedZoneFingerprint}
-            searchType={housingMode}
-            initialListings={
-              listingsResult?.listings as import("./etapa6-listings").Etapa6Props["initialListings"]
-            }
-            cacheAgeHours={listingsResult?.cache_age_hours}
-            freshnessStatus={listingsResult?.freshness_status}
-            jobId={listingsResult?.job_id}
-          />
-        </div>
-      )}
+      </aside>
 
       <style jsx>{`
-        .shell {
-          display: grid;
-          gap: 24px;
-          padding: 24px;
-          max-width: 1920px;
-          margin: 0 auto;
-        }
-
-        .etapa-container {
-          max-width: 1400px;
-          margin: 0 auto;
+        .app {
+          display: flex;
+          height: 100vh;
           width: 100%;
+          overflow: hidden;
         }
 
-        .card {
-          border: 1px solid var(--line);
-          background: var(--panel);
-          box-shadow: var(--shadow);
-          backdrop-filter: blur(18px);
-          border-radius: var(--radius-xl);
+        .mapArea {
+          position: relative;
+          flex: 1;
+          min-width: 0;
+          height: 100%;
+          background: #e5e3df;
         }
 
-        .hero {
-          display: grid;
-          gap: 12px;
-          padding: 28px;
-        }
-
-        .hero h1,
-        .mapHeader h2,
-        .panelColumn h2,
-        .pointCard h3 {
-          margin: 0;
-          font-family: var(--font-display), sans-serif;
-          font-weight: 700;
-          letter-spacing: -0.04em;
-        }
-
-        .hero h1 {
-          font-size: clamp(2rem, 4vw, 3.8rem);
-          max-width: 14ch;
-        }
-
-        .heroCopy,
-        .panelIntro,
-        .mapHint {
-          margin: 0;
-          color: var(--muted);
-          font-size: 1rem;
-          line-height: 1.5;
-          max-width: 70ch;
-        }
-
-        .eyebrow {
-          margin: 0 0 8px;
-          color: var(--accent);
-          font-size: 0.78rem;
-          font-weight: 700;
-          letter-spacing: 0.14em;
-          text-transform: uppercase;
-        }
-
-        .studioLayout {
-          display: grid;
-          grid-template-columns: minmax(0, 1.3fr) minmax(320px, 460px);
-          gap: 24px;
-          align-items: start;
+        .panel {
+          width: 400px;
+          height: 100%;
+          background: var(--color-panel);
+          border-left: 1px solid var(--color-border);
+          box-shadow: -4px 0 24px rgba(15, 23, 42, 0.06);
+          flex-shrink: 0;
         }
 
         @media (max-width: 1024px) {
-          .studioLayout {
-            grid-template-columns: 1fr;
+          .app {
+            flex-direction: column;
+          }
+          .mapArea {
+            height: 55vh;
+          }
+          .panel {
+            width: 100%;
+            height: 45vh;
+            border-left: none;
+            border-top: 1px solid var(--color-border);
           }
         }
 
-        .mapColumn {
-          display: grid;
-          gap: 18px;
-          padding: 20px;
-        }
-
-        .mapHeader {
+        .panelScroll {
+          height: 100%;
+          overflow-y: auto;
+          padding: 24px 20px;
           display: flex;
-          justify-content: space-between;
+          flex-direction: column;
           gap: 16px;
-          align-items: end;
         }
 
-        .mapCanvas {
-          min-height: 68vh;
-          border-radius: calc(var(--radius-xl) - 6px);
-          overflow: hidden;
-          border: 1px solid var(--line-strong);
-          background: linear-gradient(135deg, rgba(20, 92, 82, 0.16), transparent 50%),
-            linear-gradient(180deg, #f3ecdd 0%, #e8efe8 100%);
+        .panelHeader {
+          margin-bottom: 4px;
         }
 
-        .statusRibbon {
+        .panelTitle {
+          margin: 0;
+          font-size: 1.25rem;
+          font-weight: 700;
+          color: var(--color-text);
+        }
+
+        .section {
           display: flex;
-          gap: 10px;
+          flex-direction: column;
+          gap: 8px;
+        }
+
+        .sectionHeader {
+          display: flex;
           align-items: center;
-          padding: 14px 16px;
-          border-radius: var(--radius-md);
-          background: var(--accent-soft);
-          color: var(--accent-strong);
+          gap: 8px;
+        }
+
+        .sectionIcon {
+          font-size: 1rem;
+        }
+
+        .sectionTitle {
+          margin: 0;
           font-size: 0.95rem;
+          font-weight: 600;
+          color: var(--color-text);
         }
 
-        .panelColumn {
-          display: grid;
-          gap: 18px;
-          grid-auto-rows: max-content;
+        .hint {
+          margin: 0;
+          font-size: 0.82rem;
+          color: var(--color-muted);
+          line-height: 1.4;
         }
 
-        .panelColumn h2 {
-          font-size: 1.4rem;
-          margin-bottom: 8px;
+        .divider {
+          height: 1px;
+          background: var(--color-border);
+          margin: 4px 0;
         }
 
-        .panelColumn .card {
-          padding: 20px;
+        .btnRow {
+          display: flex;
+          gap: 8px;
+        }
+
+        .toggleBtn {
+          flex: 1;
+          padding: 8px 12px;
+          border: 1px solid var(--color-border);
+          background: var(--color-panel);
+          border-radius: var(--radius-md);
+          font-size: 0.82rem;
+          font-weight: 500;
+          color: var(--color-muted);
+          transition: all 150ms;
+        }
+
+        .toggleBtn:hover {
+          border-color: var(--color-primary);
+          color: var(--color-primary);
+        }
+
+        .toggleBtnActive {
+          border-color: var(--color-primary);
+          background: var(--color-primary);
+          color: white;
+        }
+
+        .coordDisplay {
+          display: flex;
+          gap: 16px;
+          font-size: 0.82rem;
+          color: var(--color-muted);
+          font-variant-numeric: tabular-nums;
+        }
+
+        .outlineBtn {
+          padding: 8px 14px;
+          border: 1px solid var(--color-border);
+          background: transparent;
+          border-radius: var(--radius-md);
+          font-size: 0.82rem;
+          font-weight: 500;
+          color: var(--color-muted);
+          transition: all 150ms;
+        }
+
+        .outlineBtn:hover {
+          border-color: var(--color-primary);
+          color: var(--color-primary);
+        }
+
+        .segRow {
+          display: flex;
+          gap: 8px;
+        }
+
+        .segBtn {
+          padding: 7px 16px;
+          border: 1px solid var(--color-border);
+          background: var(--color-panel);
+          border-radius: var(--radius-sm);
+          font-size: 0.82rem;
+          font-weight: 600;
+          color: var(--color-text);
+          transition: all 150ms;
+        }
+
+        .segBtn:hover:not(:disabled) {
+          border-color: var(--color-primary);
+        }
+
+        .segBtnActive {
+          background: var(--color-primary);
+          border-color: var(--color-primary);
+          color: white;
         }
 
         .fieldLabel {
           display: flex;
           flex-direction: column;
-          gap: 8px;
+          gap: 6px;
+          font-size: 0.82rem;
           font-weight: 500;
-          font-size: 0.95rem;
+          color: var(--color-muted);
+        }
+
+        .sliderRow {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+        }
+
+        .slider {
+          flex: 1;
+          accent-color: var(--color-primary);
           cursor: pointer;
         }
 
-        .fieldInput {
-          padding: 10px 12px;
-          border: 1px solid var(--line);
-          border-radius: var(--radius-md);
-          background: var(--panel);
-          font-size: 1rem;
-          transition: border 200ms ease;
-        }
-
-        .fieldInput:focus {
-          outline: none;
-          border-color: var(--accent);
-          box-shadow: 0 0 0 3px var(--accent-soft);
-        }
-
-        .fieldGrid {
-          display: grid;
-          gap: 16px;
-        }
-
-        .compactGrid {
-          grid-template-columns: 1fr 1fr;
-        }
-
-        .fieldValue {
-          font-weight: 700;
-          color: var(--accent-strong);
+        .sliderValue {
+          min-width: 50px;
+          text-align: right;
           font-size: 0.9rem;
+          font-weight: 700;
+          color: var(--color-text);
+          font-variant-numeric: tabular-nums;
         }
 
-        .segmentedRow {
-          display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-          gap: 8px;
-          margin-bottom: 16px;
-        }
-
-        .segmentButton {
-          padding: 10px;
-          border: 1px solid var(--line);
-          background: transparent;
-          border-radius: var(--radius-md);
-          cursor: pointer;
-          font-weight: 500;
-          transition: all 200ms ease;
-        }
-
-        .segmentButton:hover:not(:disabled) {
-          border-color: var(--accent);
-          background: var(--accent-soft);
-        }
-
-        .segmentButtonActive {
-          border-color: var(--accent-strong);
-          background: var(--accent);
-          color: var(--panel);
-        }
-
-        .segmentButton:disabled {
-          opacity: 0.5;
-          cursor: not-allowed;
+        .sliderValue small {
+          font-weight: 400;
+          color: var(--color-muted);
         }
 
         .analysisGrid {
           display: grid;
-          grid-template-columns: repeat(2, 1fr);
-          gap: 12px;
-          margin-top: 16px;
+          grid-template-columns: 1fr 1fr;
+          gap: 8px;
         }
 
-        .analysisCard {
-          padding: 12px;
-          border: 1px solid var(--line);
-          background: transparent;
-          border-radius: var(--radius-md);
-          cursor: pointer;
-          text-align: left;
-          transition: all 200ms ease;
-        }
-
-        .analysisCard:hover {
-          border-color: var(--accent);
-          background: var(--accent-soft);
-        }
-
-        .analysisCardActive {
-          border-color: var(--accent-strong);
-          background: var(--accent-soft);
-        }
-
-        .analysisCard strong {
-          display: block;
-          font-size: 0.95rem;
-          margin-bottom: 4px;
-        }
-
-        .analysisCard span {
-          font-size: 0.8rem;
-          color: var(--muted);
-        }
-
-        .pointCard {
-          padding: 20px;
-        }
-
-        .pointCardHeader {
+        .checkItem {
           display: flex;
-          justify-content: space-between;
-          align-items: start;
-          margin-bottom: 16px;
-        }
-
-        .pointCard h3 {
-          font-size: 1.2rem;
-          margin-bottom: 4px;
-        }
-
-        .ghostButton {
-          padding: 8px 12px;
-          border: 1px solid var(--line);
-          background: transparent;
-          border-radius: var(--radius-md);
-          cursor: pointer;
+          align-items: center;
+          gap: 6px;
           font-size: 0.85rem;
           font-weight: 500;
-          color: var(--muted);
-          transition: all 200ms ease;
-          white-space: nowrap;
+          color: var(--color-text);
+          cursor: pointer;
         }
 
-        .ghostButton:hover {
-          border-color: var(--accent);
-          color: var(--accent);
+        .checkItem input[type="checkbox"] {
+          accent-color: var(--color-primary);
+          width: 16px;
+          height: 16px;
         }
 
-        .ghostButtonActive {
-          border-color: var(--accent-strong);
-          background: var(--accent-soft);
-          color: var(--accent-strong);
+        .errorMsg {
+          padding: 10px 12px;
+          border-radius: var(--radius-sm);
+          background: rgba(220, 38, 38, 0.08);
+          color: var(--color-danger);
+          font-size: 0.85rem;
+          border: 1px solid rgba(220, 38, 38, 0.2);
         }
 
-        .submitCard {
-          padding: 20px;
-        }
-
-        .submitCard h2 {
-          font-size: 1.2rem;
-          margin-bottom: 12px;
-        }
-
-        .primaryButton {
+        .primaryBtn {
           width: 100%;
           padding: 12px 24px;
-          background: var(--accent);
-          color: var(--panel);
+          background: var(--color-primary);
+          color: white;
           border: none;
           border-radius: var(--radius-md);
           font-weight: 600;
-          font-size: 1rem;
-          cursor: pointer;
-          transition: background 200ms ease;
-        }
-
-        .primaryButton:hover:not(:disabled) {
-          background: var(--accent-strong);
-        }
-
-        .primaryButton:disabled {
-          opacity: 0.6;
-          cursor: not-allowed;
-        }
-
-        .feedback {
-          padding: 12px;
-          border-radius: var(--radius-md);
-          margin-bottom: 12px;
           font-size: 0.95rem;
-          display: grid;
-          gap: 4px;
+          transition: background 150ms;
+          margin-top: 4px;
         }
 
-        .feedbackError {
-          background: rgba(159, 43, 34, 0.14);
-          color: var(--danger);
+        .primaryBtn:hover:not(:disabled) {
+          background: var(--color-primary-hover);
         }
 
-        .feedbackSuccess {
-          background: rgba(20, 92, 82, 0.14);
-          color: var(--accent-strong);
-        }
-
-        .feedbackSuccess strong {
-          display: block;
-        }
-
-        .feedbackSuccess span {
-          font-size: 0.85rem;
-          opacity: 0.9;
+        .primaryBtn:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
         }
       `}</style>
     </main>
