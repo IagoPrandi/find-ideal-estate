@@ -1,6 +1,6 @@
 FROM node:20-alpine
-WORKDIR /ui
-COPY ui/package*.json ./
+WORKDIR /web
+COPY apps/web/package*.json ./
 RUN npm ci
-COPY ui ./
+COPY apps/web ./
 EXPOSE 5173

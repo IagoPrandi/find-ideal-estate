@@ -63,11 +63,16 @@ services:
     build:
       context: .
       dockerfile: docker/ui.Dockerfile
+    env_file: .env
+    working_dir: /web
     environment:
       - VITE_API_BASE=http://localhost:8000
-      - VITE_MAPBOX_ACCESS_TOKEN=${MAPBOX_ACCESS_TOKEN}
+      - VITE_MAPTILER_API_KEY=${VITE_MAPTILER_API_KEY:-${MAPTILER_API_KEY:-local-dev-key}}
     ports:
       - "5173:5173"
+    volumes:
+      - ./apps/web:/web
+      - /web/node_modules
     command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
 
 networks:

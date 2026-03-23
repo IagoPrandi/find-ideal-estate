@@ -128,15 +128,17 @@ principal/
 │   ├── zapImoveis.py                              # Parser/scraper ZAP Imóveis
 │   └── segurancaRegiao.py                         # Consulta de segurança pública (SSP/CEM)
 │
-├── ui/                         # Frontend (Vite + React + TypeScript)
+├── apps/web/                   # Frontend canônico (Vite + React + TypeScript)
 │   ├── src/
-│   │   ├── App.tsx             # Componente principal (fluxo 3 etapas)
+│   │   ├── features/app/FindIdealApp.tsx  # App principal (fluxo 3 etapas)
 │   │   ├── App.test.tsx        # Testes de fluxo frontend (Vitest)
 │   │   └── ...
 │   ├── package.json
 │   ├── vite.config.ts
 │   ├── tailwind.config.ts
 │   └── tsconfig.json
+│
+├── ui/                         # Legado — use `apps/web` (ver `ui/README.md`)
 │
 ├── data_cache/                 # Cache local de dados (montado read-only no Docker)
 │   ├── gtfs/                   # Arquivos GTFS (stops.txt, trips.txt, etc.)
@@ -966,9 +968,9 @@ Parsers/scrapers específicos por plataforma. Normalizam os campos para o esquem
 
 ## 9. Frontend (UI)
 
-**Stack:** Vite 5 + React 18 + TypeScript 5 + Tailwind CSS 3 + Mapbox GL JS 3
+**Stack:** Vite 5 + React 18 + TypeScript 5 + Tailwind CSS 3 + MapLibre GL JS + MapTiler
 
-**Localização:** `ui/`
+**Localização:** `apps/web/` (diretório `ui/` está deprecado; ver `ui/README.md`)
 
 ### Estrutura de navegação (3 etapas)
 
@@ -1048,9 +1050,9 @@ Parsers/scrapers específicos por plataforma. Normalizam os campos para o esquem
 |-----|-----|-------------|
 | Mapbox Tilequery | Coleta nomes de ruas (`encontrarRuasRaio.py`) | `MAPBOX_ACCESS_TOKEN` |
 | Mapbox Search Box Category | Coleta POIs por categoria (`pois_categoria_raio.py`) | `MAPBOX_ACCESS_TOKEN` |
-| Mapbox GL JS | Renderização de mapa interativo (frontend) | `VITE_MAPBOX_ACCESS_TOKEN` |
+| MapLibre GL JS + MapTiler | Tiles e mapa interativo (`apps/web/`) | `VITE_MAPTILER_API_KEY` (mesmo valor que `MAPTILER_API_KEY` no compose) |
 
-**Variável de ambiente obrigatória:** `MAPBOX_ACCESS_TOKEN` (backend e frontend compartilham o mesmo token)
+**Variáveis:** `MAPBOX_ACCESS_TOKEN` — apenas backend/scripts legados (Tilequery, etc.). O frontend Vite usa **MapLibre** + **MapTiler** (`VITE_MAPTILER_API_KEY`), alinhado ao PRD.
 
 ### Plataformas de Imóveis (Scraping via Playwright)
 
@@ -1175,7 +1177,8 @@ Dados que devem existir localmente **antes** de executar o pipeline.
 
 | Variável | Obrigatória | Descrição |
 |----------|-------------|-----------|
-| `MAPBOX_ACCESS_TOKEN` | **Sim** | Token Mapbox para ruas e POIs |
+| `MAPTILER_API_KEY` | Recomendada | Tiles MapTiler (API e, via compose, `VITE_MAPTILER_API_KEY` no UI) |
+| `MAPBOX_ACCESS_TOKEN` | **Sim** (scripts legados) | Token Mapbox para ruas e POIs (backend/offline) |
 | `CORS_ALLOW_ORIGINS` | Não | Origens CORS permitidas (default: `http://localhost:5173,http://127.0.0.1:5173`) |
 | `RUNS_DIR` | Não | Diretório de runs (default: `runs`) |
 
@@ -1184,7 +1187,7 @@ Dados que devem existir localmente **antes** de executar o pipeline.
 | Variável | Descrição |
 |----------|-----------|
 | `VITE_API_BASE` | URL base da API (default: `http://localhost:8000`) |
-| `VITE_MAPBOX_ACCESS_TOKEN` | Token Mapbox para o mapa no frontend |
+| `VITE_MAPTILER_API_KEY` | Chave MapTiler (tiles + geocoding no browser; default no compose: `MAPTILER_API_KEY`) |
 
 ### `platforms.yaml`
 
@@ -1363,12 +1366,12 @@ Usuário (UI)
 | `isort` | Ordenação de imports |
 | `ruff` | Linting rápido |
 
-### Frontend (`ui/package.json`)
+### Frontend (`apps/web/package.json`)
 
 | Pacote | Versão | Uso |
 |--------|--------|-----|
 | `react` + `react-dom` | 18.3.1 | UI framework |
-| `mapbox-gl` | 3.12.0 | Mapa interativo |
+| `maplibre-gl` | ^4.7 | Mapa interativo (tiles MapTiler) |
 | `zod` | 3.24.1 | Validação de schemas |
 | `lucide-react` | ^0.576.0 | Ícones |
 | `tailwindcss` | 3.4.17 | CSS utilitário |

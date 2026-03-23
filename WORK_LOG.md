@@ -1,5 +1,44 @@
 # Work Log
 
+## 2026-03-23 - Migracao: analytics e formatacao de imoveis extraidos de `FindIdealApp`
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`.
+- Skill used: `skills/develop-frontend/SKILL.md`.
+- Scope executed:
+  - `lib/listingFormat.ts`: `formatCurrencyBr`, `parseFiniteNumber`, `normalizeCategory`.
+  - `features/app/listingAnalytics.ts`: `getListingKey`, `resolveListingFeatureText`, `computeListingAnalytics` (POIs / comparação).
+  - `features/steps/listingSort.ts`: `sortDecoratedListings`.
+  - `features/steps/step3Helpers.ts`: `computeComparisonExtremes` (min/max para tabela de comparação).
+  - `FindIdealApp.tsx`: deixa de definir essas funcoes inline; `ListingFeature` importado de `listingAnalytics.ts`.
+- Validation: `npm run typecheck`, `npm run test:run`, `npm run build` em `apps/web` — sucesso.
+- Progress Tracker: sem alteracao de milestone.
+
+## 2026-03-23 - Migracao incremental: extrair utilitarios de `FindIdealApp` (`apps/web`)
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`.
+- Skill used: `skills/develop-frontend/SKILL.md`.
+- Scope executed:
+  - `lib/geo.ts`: `buildCircleCoordinates`, `haversineMeters`.
+  - `features/app/wizardExecution.ts`: estados de execução (`ExecutionStageKey`, `createInitialExecutionStages`, metas/ordem).
+  - `features/app/wizardSteps.ts`: `WIZARD_STEPS` (passos do tracker).
+  - `features/steps/step3DerivedMetrics.ts`: variacao mensal e top POIs a partir de rollups/detalhe da zona.
+  - `features/steps/suggestionLabels.ts`: rotulos de autocomplete de ruas.
+  - `FindIdealApp.tsx`: imports dos modulos acima; ~100 linhas a menos de logica inline.
+- Validation: `npm run typecheck`, `npm run test:run`, `npm run build` em `apps/web` — sucesso.
+- Progress Tracker: sem alteracao de milestone.
+
+## 2026-03-23 - Modularizacao do passo 3 (`Step3ZonePanel`) em `apps/web`
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`.
+- Skill used: `skills/develop-frontend/SKILL.md`.
+- Scope executed:
+  - `Step3ZonePanel.tsx` reduzido a compositor: delega para `Step3ZoneDetailSection`, `Step3PanelTabBar`, `Step3SearchListingsSection`, `Step3FinalListingsSection`, `Step3DashboardSection` (Recharts e `data-testid` M6 preservados no dashboard).
+  - `features/steps/index.ts`: tipos `Step3SortedListingRow` e `Step3ZonePanelProps` exportados a partir de `step3Types.ts`; `Step3ZonePanel` continua a reexportar os tipos para compatibilidade.
+  - `apps/web/README.md`: estrutura atualizada (`HelpModal`, fatia do passo 3).
+- Validation:
+  - `npm run typecheck`, `npm run test:run`, `npm run build` em `apps/web` — sucesso.
+- Progress Tracker: sem alteracao de milestone (refactor estrutural; marcar tick apenas apos confirmacao do responsavel).
+
 ## 2026-03-22 - M6.2 marcado como concluido por confirmacao do responsavel
 
 - Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`.
