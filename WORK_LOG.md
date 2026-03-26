@@ -1,5 +1,39 @@
 # Work Log
 
+## 2026-03-26 - Camadas de vegetacao e alagamento visiveis no mapa (vector tiles)
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/develop-frontend/SKILL.md`.
+- Scope executed:
+  - Diagnostico de visualizacao das camadas ambientais no frontend em `apps/web/src/features/app/FindIdealApp.tsx`.
+  - Confirmado que as sources/layers de vector tiles ja estavam corretas (`/transport/tiles/environment/green/...` e `/transport/tiles/environment/flood/...`, com `source-layer` `green_areas` e `flood_areas`).
+  - Causa raiz identificada: visibilidade inicial desativada no estado local (`flood: false`, `green: false`).
+  - Correcao aplicada para exibicao padrao das duas camadas (`flood: true`, `green: true`).
+- Validation:
+  - Validacao estatica do arquivo alterado sem novos erros reportados pelo editor.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-25 - Correcao de cobertura modal na busca de transporte (ônibus + metrô + trem)
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`.
+- Skill used: `skills/develop-frontend/SKILL.md`.
+- Scope executed:
+  - Ajuste do backend em `apps/api/src/modules/transport/points_service.py` para garantir cobertura multimodal no Step 2.
+  - Busca de ônibus deixou de depender apenas de GTFS e passou a incluir também:
+    - `geosampa_bus_stops`
+    - `geosampa_bus_terminals`
+  - Mantidos resultados de metrô e trem (`geosampa_metro_stations` e `geosampa_trem_stations`).
+  - Enriquecimento de rótulos para estações/terminais no payload retornado.
+  - Inclusão de `LIMIT 200` na query para evitar lista excessiva no painel.
+  - Normalização do filtro modal para usar tokens semânticos (`bus`, `metro`, `trem`) no `input_snapshot`.
+- Validation:
+  - VS Code diagnostics em `apps/api/src/modules/transport/points_service.py`: sem erros.
+  - Não foi possível coletar saída dos comandos de validação runtime via terminal integrado nesta rodada (terminal retornou buffer alternativo sem stdout legível).
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
 ## 2026-03-25 - Correcao de contrato FE para busca de transporte (erro de payload invalido)
 
 - Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`.

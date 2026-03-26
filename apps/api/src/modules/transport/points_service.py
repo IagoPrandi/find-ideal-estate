@@ -38,7 +38,7 @@ class TransportSearchError(RuntimeError):
 
 def _source_filter_tokens(input_snapshot: dict[str, Any] | None) -> set[str]:
     if not isinstance(input_snapshot, dict):
-        return {"gtfs", "metro", "trem"}
+        return {"bus", "metro", "trem"}
 
     raw_modal = (
         input_snapshot.get("transport_modal")
@@ -47,16 +47,16 @@ def _source_filter_tokens(input_snapshot: dict[str, Any] | None) -> set[str]:
     )
     modal = str(raw_modal or "transit").strip().lower()
     if modal in {"transit", "public", "public_transport", "bus+metro+trem"}:
-        return {"gtfs", "metro", "trem"}
+        return {"bus", "metro", "trem"}
     if modal in {"bus", "onibus"}:
-        return {"gtfs"}
+        return {"bus"}
     if modal in {"metro", "subway"}:
         return {"metro"}
     if modal in {"trem", "train", "rail"}:
         return {"trem"}
 
     # Non-transit selection keeps full set for now until FE step 2 introduces strict modal choices.
-    return {"gtfs", "metro", "trem"}
+    return {"bus", "metro", "trem"}
 
 
 def _extract_reference_point(
@@ -91,12 +91,12 @@ def _extract_radius_meters(input_snapshot: dict[str, Any] | None) -> int:
 
 
 def _build_transport_search_sql(source_tokens: set[str]) -> str:
-    include_gtfs = "gtfs" in source_tokens
+    include_bus = "bus" in source_tokens
     include_metro = "metro" in source_tokens
     include_trem = "trem" in source_tokens
 
     selects: list[str] = []
-    if include_gtfs:
+    if include_bus:
         selects.append(
             """
             SELECT
@@ -123,13 +123,47 @@ def _build_transport_search_sql(source_tokens: set[str]) -> str:
             WHERE ST_DWithin(s.location::geography, ref.ref_point::geography, ref.radius_m)
             """
         )
+        selects.append(
+            """
+            SELECT
+                'geosampa_bus_stop'::text AS source,
+                md5(ST_AsEWKB(g.geometry)::text) AS external_id,
+                COALESCE(NULLIF(g.nm_ponto_onibus, ''), 'Ponto de ônibus')::text AS name,
+                ST_Y(ST_PointOnSurface(g.geometry)) AS lat,
+                ST_X(ST_PointOnSurface(g.geometry)) AS lon,
+                ST_Distance(ST_PointOnSurface(g.geometry)::geography, ref.ref_point::geography) AS walk_distance_m,
+                0 AS route_count,
+                ARRAY[]::text[] AS route_ids,
+                ARRAY['bus']::text[] AS modal_types
+            FROM geosampa_bus_stops g
+            CROSS JOIN ref
+            WHERE ST_DWithin(ST_PointOnSurface(g.geometry)::geography, ref.ref_point::geography, ref.radius_m)
+            """
+        )
+        selects.append(
+            """
+            SELECT
+                'geosampa_bus_terminal'::text AS source,
+                md5(ST_AsEWKB(g.geometry)::text) AS external_id,
+                COALESCE(NULLIF(g.nm_terminal, ''), 'Terminal de ônibus')::text AS name,
+                ST_Y(ST_PointOnSurface(g.geometry)) AS lat,
+                ST_X(ST_PointOnSurface(g.geometry)) AS lon,
+                ST_Distance(ST_PointOnSurface(g.geometry)::geography, ref.ref_point::geography) AS walk_distance_m,
+                0 AS route_count,
+                ARRAY[]::text[] AS route_ids,
+                ARRAY['bus']::text[] AS modal_types
+            FROM geosampa_bus_terminals g
+            CROSS JOIN ref
+            WHERE ST_DWithin(ST_PointOnSurface(g.geometry)::geography, ref.ref_point::geography, ref.radius_m)
+            """
+        )
     if include_metro:
         selects.append(
             """
             SELECT
                 'geosampa_metro_station'::text AS source,
                 md5(ST_AsEWKB(g.geometry)::text) AS external_id,
-                NULL::text AS name,
+                COALESCE(NULLIF(g.nm_estacao_metro_trem, ''), 'Estação de metrô')::text AS name,
                 ST_Y(ST_PointOnSurface(g.geometry)) AS lat,
                 ST_X(ST_PointOnSurface(g.geometry)) AS lon,
                 ST_Distance(ST_PointOnSurface(g.geometry)::geography, ref.ref_point::geography) AS walk_distance_m,
@@ -147,7 +181,7 @@ def _build_transport_search_sql(source_tokens: set[str]) -> str:
             SELECT
                 'geosampa_trem_station'::text AS source,
                 md5(ST_AsEWKB(g.geometry)::text) AS external_id,
-                NULL::text AS name,
+                COALESCE(NULLIF(g.nm_estacao_metro_trem, ''), 'Estação de trem')::text AS name,
                 ST_Y(ST_PointOnSurface(g.geometry)) AS lat,
                 ST_X(ST_PointOnSurface(g.geometry)) AS lon,
                 ST_Distance(ST_PointOnSurface(g.geometry)::geography, ref.ref_point::geography) AS walk_distance_m,
@@ -200,6 +234,7 @@ def _build_transport_search_sql(source_tokens: set[str]) -> str:
         {' UNION ALL '.join(selects)}
     ) ranked
     ORDER BY walk_distance_m ASC, route_count DESC
+    LIMIT 200
     """
 
 

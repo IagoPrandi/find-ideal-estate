@@ -1,4 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+"""Reescreve FindIdealApp.tsx com versão limpa (apenas mapa + camadas)."""
+import pathlib
+
+TARGET = pathlib.Path(r"c:\Users\iagoo\PESSOAL\projetos\onde_morar\principal\apps\web\src\features\app\FindIdealApp.tsx")
+
+CLEAN = r'''import { useEffect, useRef, useState } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { API_BASE } from "../../api/client";
@@ -16,14 +21,14 @@ export function FindIdealApp() {
   const mapRef = useRef<maplibregl.Map | null>(null);
   const [isMapReady, setIsMapReady] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
-  const layerVisibility = {
+  const [layerVisibility, setLayerVisibility] = useState<Record<string, boolean>>({
     routes: true,
     metro: true,
     train: true,
     busStops: true,
-    flood: true,
-    green: true,
-  };
+    flood: false,
+    green: false,
+  });
 
   useEffect(() => {
     if (!mapContainerRef.current) return;
@@ -222,3 +227,7 @@ export function FindIdealApp() {
     </main>
   );
 }
+'''
+
+TARGET.write_text(CLEAN, encoding="utf-8")
+print(f"✅ Wrote {len(CLEAN.splitlines())} lines to {TARGET}")
