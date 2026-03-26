@@ -130,6 +130,18 @@ async def _run_job_inline(job: JobRead) -> None:
             stage="zone_enrichment",
             execute_step=lambda: _zone_enrichment_step(job.id),
         )
+        return
+
+    if job.job_type == JobType.LISTINGS_SCRAPE:
+        from workers.handlers.listings import _listings_scrape_step
+
+        await run_job_with_retry(
+            job.id,
+            JobType.LISTINGS_SCRAPE,
+            stage="listings_scrape",
+            execute_step=lambda: _listings_scrape_step(job.id),
+        )
+        return
 
 
 async def enqueue_job(job: JobRead) -> None:
@@ -148,6 +160,10 @@ async def enqueue_job(job: JobRead) -> None:
     elif job.job_type == JobType.ZONE_ENRICHMENT:
         from workers.handlers.enrichment import enrich_zones_actor
         enrich_zones_actor.send(str(job.id))
+    elif job.job_type == JobType.LISTINGS_SCRAPE:
+        from workers.handlers.listings import listings_scrape_actor
+
+        listings_scrape_actor.send(str(job.id))
 
 
 async def update_job_execution_state(

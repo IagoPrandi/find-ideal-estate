@@ -1,0 +1,1 @@
+{"type": "FeatureCollection", "features": [{"type": "Feature", "geometry": {"type": "LineString", "coordinates": [[-46.6301, -23.5501], [-46.6402, -23.5602]]}, "properties": {"id": "SH1", "name": "Route One", "mode": "bus"}}]}

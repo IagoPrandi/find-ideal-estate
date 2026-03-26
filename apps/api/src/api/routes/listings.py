@@ -32,7 +32,7 @@ from modules.listings.platform_registry import PlatformRegistryError, get_platfo
 from modules.listings.search_requests import record_search_request
 from pydantic import BaseModel
 from sqlalchemy import text
-from workers.handlers.listings import listings_scrape_actor
+from modules.jobs.service import enqueue_job, get_job
 
 router = APIRouter(prefix="/journeys", tags=["listings"])
 
@@ -64,7 +64,7 @@ async def _enqueue_listings_scrape_job(
             text(
                 """
                 INSERT INTO jobs (journey_id, job_type, state, result_ref)
-                VALUES (:journey_id, 'listings_scrape', 'pending', :result_ref::jsonb)
+                VALUES (:journey_id, 'listings_scrape', 'pending', CAST(:result_ref AS JSONB))
                 RETURNING id
                 """
             ),
@@ -83,7 +83,11 @@ async def _enqueue_listings_scrape_job(
         )
         job_id = job_result.scalar_one()
 
-    listings_scrape_actor.send(str(job_id))
+    job = await get_job(job_id)
+    if job is None:
+        raise RuntimeError(f"Failed to fetch listings job after insert: {job_id}")
+
+    await enqueue_job(job)
     return job_id
 
 

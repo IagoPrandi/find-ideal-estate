@@ -6,25 +6,21 @@ import {
   API_BASE,
   apiActionHint,
   createJourney,
-  createRun,
+  createZoneEnrichmentJob,
   createZoneGenerationJob,
-  finalizeRun,
-  getFinalListings,
-  getFinalListingsJson,
+  createTransportSearchJob,
+  getJourneyZonesCollection,
   getJourneyTransportPoints,
+  getJob,
   getPriceRollups,
-  getRunStatus,
-  getTransportLayers,
+  getZoneAddressSuggestions,
+  getZoneListings,
   getTransportStops,
-  getZoneDetail,
-  getZoneStreets,
-  getZones,
-  scrapeZoneListings,
-  selectZones
+  searchZoneListings,
+  type SearchAddressSuggestion as BackendAddressSuggestion
 } from "../../api/client";
 import type {
   PriceRollupRead,
-  RunCreateResponse,
   RunStatusResponse,
   TransportPointRead,
   ZoneDetailResponse,
@@ -65,9 +61,9 @@ import {
 import {
   computeListingAnalytics,
   getListingKey,
-  resolveListingFeatureText,
-  type ListingFeature
+  resolveListingFeatureText
 } from "./listingAnalytics";
+import type { ListingFeature } from "../steps/step3Types";
 import { createInitialExecutionStages, type ExecutionStageKey } from "./wizardExecution";
 import { type WizardStepId, WIZARD_STEPS as STEPS } from "./wizardSteps";
 
@@ -89,6 +85,8 @@ const MAPTILER_KEY =
 const mapTilerStyleUrl = (key: string) =>
   `https://api.maptiler.com/maps/bright-v2/style.json?key=${encodeURIComponent(key)}`;
 
+const apiTileUrl = (path: string) => `${API_BASE}${path}`;
+
 export function FindIdealApp() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -98,7 +96,6 @@ export function FindIdealApp() {
   const interactionModeRef = useRef<InteractionMode>("primary");
   const interestLabelRef = useRef("");
   const interestCategoryRef = useRef<string>(INTEREST_CATEGORIES[0]);
-  const runIdRef = useRef("");
 
   const [searchValue, setSearchValue] = useState("");
   const [addressSearchLeftPx, setAddressSearchLeftPx] = useState<number | null>(null);
@@ -112,6 +109,7 @@ export function FindIdealApp() {
   const [viewport, setViewport] = useState({ lat: -23.55052, lon: -46.633308, zoom: 10.7 });
   const [layerVisibility, setLayerVisibility] = useState<Record<LayerKey, boolean>>({
     routes: true,
+    metro: true,
     train: true,
     busStops: true,
     zones: true,
@@ -158,6 +156,7 @@ export function FindIdealApp() {
   const [selectedStreet, setSelectedStreet] = useState("");
   const [selectedStreetType, setSelectedStreetType] = useState<SearchSuggestionType | null>(null);
   const [streetQuery, setStreetQuery] = useState("");
+  const [zoneAddressSuggestions, setZoneAddressSuggestions] = useState<BackendAddressSuggestion[]>([]);
   const [zoneRadiusM, setZoneRadiusM] = useState(900);
   const [maxTravelTimeMin, setMaxTravelTimeMin] = useState(25);
   const [seedBusSearchMaxDistM, setSeedBusSearchMaxDistM] = useState(250);
@@ -169,8 +168,6 @@ export function FindIdealApp() {
     flood: true,
     publicSafety: true
   });
-  const [zoneStreets, setZoneStreets] = useState<string[]>([]);
-  const [, setStopsLoading] = useState(false);
   const [loadingText, setLoadingText] = useState("");
   const [originalSeedPoint, setOriginalSeedPoint] = useState<TransportAnchorPoint | null>(null);
   const [zoneSeedPoints, setZoneSeedPoints] = useState<TransportAnchorPoint[]>([]);
@@ -187,7 +184,7 @@ export function FindIdealApp() {
   const [finalizeMessage, setFinalizeMessage] = useState("Finalize o run para carregar os imóveis.");
   const [activePanelTab, setActivePanelTab] = useState<"listings" | "dashboard">("listings");
   const [priceRollups, setPriceRollups] = useState<PriceRollupRead[]>([]);
-  const [isSelectingZone, setIsSelectingZone] = useState(false);
+  const [isSelectingZone] = useState(false);
   const [isDetailingZone, setIsDetailingZone] = useState(false);
   const [isListingZone, setIsListingZone] = useState(false);
   const [executionProgress, setExecutionProgress] = useState<{
@@ -209,11 +206,10 @@ export function FindIdealApp() {
 
   const initialViewport = useRef(viewport);
   const progressTimerRef = useRef<number | null>(null);
-  const stopsDebounceRef = useRef<number | null>(null);
   const progressStartRef = useRef<number>(0);
   const progressExpectedRef = useRef<number>(0);
 
-  const hasRouteData = Boolean(runId && zonesCollection.length > 0);
+  const hasRouteData = isMapReady;
 
   const isLoading =
     isCreatingRun ||
@@ -273,10 +269,6 @@ export function FindIdealApp() {
   }, [interestCategory]);
 
   useEffect(() => {
-    runIdRef.current = runId;
-  }, [runId]);
-
-  useEffect(() => {
     const map = mapRef.current;
     if (!map || !isMapReady) {
       return;
@@ -328,64 +320,39 @@ export function FindIdealApp() {
     mapRef.current = map;
 
     map.on("load", () => {
-      map.addSource("transport-demo", {
-        type: "geojson",
-        data: {
-          type: "FeatureCollection",
-          features: []
-        }
+      map.addSource("transport-lines-source", {
+        type: "vector",
+        tiles: [apiTileUrl("/transport/tiles/lines/{z}/{x}/{y}.pbf")],
+        minzoom: 8,
+        maxzoom: 16,
+        attribution: "Dados GTFS + GeoSampa"
       });
 
-      map.addSource("env-demo", {
-        type: "geojson",
-        data: {
-          type: "FeatureCollection",
-          features: [
-            {
-              type: "Feature",
-              geometry: {
-                type: "Polygon",
-                coordinates: [
-                  [
-                    [-46.67, -23.57],
-                    [-46.64, -23.57],
-                    [-46.64, -23.54],
-                    [-46.67, -23.54],
-                    [-46.67, -23.57]
-                  ]
-                ]
-              },
-              properties: { kind: "flood" }
-            },
-            {
-              type: "Feature",
-              geometry: {
-                type: "Polygon",
-                coordinates: [
-                  [
-                    [-46.62, -23.55],
-                    [-46.59, -23.55],
-                    [-46.59, -23.52],
-                    [-46.62, -23.52],
-                    [-46.62, -23.55]
-                  ]
-                ]
-              },
-              properties: { kind: "green" }
-            }
-          ]
-        }
+      map.addSource("transport-stops-source", {
+        type: "vector",
+        tiles: [apiTileUrl("/transport/tiles/stops/{z}/{x}/{y}.pbf")],
+        minzoom: 9,
+        maxzoom: 17,
+        attribution: "Dados GTFS + GeoSampa"
+      });
+
+      map.addSource("green-areas-source", {
+        type: "vector",
+        tiles: [apiTileUrl("/transport/tiles/environment/green/{z}/{x}/{y}.pbf")],
+        minzoom: 9,
+        maxzoom: 17,
+        attribution: "GeoSampa"
+      });
+
+      map.addSource("flood-areas-source", {
+        type: "vector",
+        tiles: [apiTileUrl("/transport/tiles/environment/flood/{z}/{x}/{y}.pbf")],
+        minzoom: 9,
+        maxzoom: 17,
+        attribution: "GeoSampa"
       });
 
       map.addSource("poi-zone-source", {
-        type: "geojson",
-        data: {
-          type: "FeatureCollection",
-          features: []
-        }
-      });
-
-      map.addSource("bus-stop-demo", {
         type: "geojson",
         data: {
           type: "FeatureCollection",
@@ -435,32 +402,61 @@ export function FindIdealApp() {
       });
 
       map.addLayer({
-        id: "bus-layer",
+        id: "bus-line-layer",
         type: "line",
-        source: "transport-demo",
+        source: "transport-lines-source",
+        "source-layer": "transport_lines",
         filter: ["==", ["get", "mode"], "bus"],
-        paint: { "line-color": "#9775fa", "line-width": 4, "line-dasharray": [1.5, 1.5] }
+        paint: {
+          "line-color": "#845ef7",
+          "line-width": ["interpolate", ["linear"], ["zoom"], 8, 1.2, 12, 2.2, 15, 3.5],
+          "line-opacity": 0.72,
+          "line-dasharray": [1.4, 1.1]
+        }
       });
       map.addLayer({
-        id: "train-layer",
+        id: "metro-line-layer",
         type: "line",
-        source: "transport-demo",
+        source: "transport-lines-source",
+        "source-layer": "transport_lines",
+        filter: ["==", ["get", "mode"], "metro"],
+        paint: {
+          "line-color": "#e11d48",
+          "line-width": ["interpolate", ["linear"], ["zoom"], 8, 1.8, 12, 3.2, 15, 4.8],
+          "line-opacity": 0.9
+        }
+      });
+      map.addLayer({
+        id: "train-line-layer",
+        type: "line",
+        source: "transport-lines-source",
+        "source-layer": "transport_lines",
         filter: ["==", ["get", "mode"], "train"],
-        paint: { "line-color": "#0f766e", "line-width": 4 }
+        paint: {
+          "line-color": "#0f766e",
+          "line-width": ["interpolate", ["linear"], ["zoom"], 8, 1.5, 12, 2.8, 15, 4.2],
+          "line-opacity": 0.88
+        }
       });
       map.addLayer({
         id: "flood-layer",
         type: "fill",
-        source: "env-demo",
-        filter: ["==", ["get", "kind"], "flood"],
-        paint: { "fill-color": "#7c3aed", "fill-opacity": 0.28 }
+        source: "flood-areas-source",
+        "source-layer": "flood_areas",
+        paint: {
+          "fill-color": "#378add",
+          "fill-opacity": ["interpolate", ["linear"], ["zoom"], 9, 0.12, 13, 0.2, 16, 0.3]
+        }
       });
       map.addLayer({
         id: "green-layer",
         type: "fill",
-        source: "env-demo",
-        filter: ["==", ["get", "kind"], "green"],
-        paint: { "fill-color": "#16a34a", "fill-opacity": 0.28 }
+        source: "green-areas-source",
+        "source-layer": "green_areas",
+        paint: {
+          "fill-color": "#6a9f2b",
+          "fill-opacity": ["interpolate", ["linear"], ["zoom"], 9, 0.1, 13, 0.18, 16, 0.28]
+        }
       });
       map.addLayer({
         id: "poi-layer",
@@ -476,13 +472,43 @@ export function FindIdealApp() {
       map.addLayer({
         id: "bus-stop-layer",
         type: "circle",
-        source: "bus-stop-demo",
+        source: "transport-stops-source",
+        "source-layer": "transport_stops",
+        filter: ["match", ["get", "kind"], ["bus_stop", "bus_terminal"], true, false],
         paint: {
-          "circle-radius": ["match", ["get", "kind"], "station", 5.5, 4.5],
-          "circle-color": ["match", ["get", "kind"], "station", "#0f766e", "#845ef7"],
+          "circle-radius": ["case", ["==", ["get", "kind"], "bus_terminal"], 5.8, 4.2],
+          "circle-color": ["case", ["==", ["get", "kind"], "bus_terminal"], "#f97316", "#845ef7"],
           "circle-stroke-color": "#ffffff",
           "circle-stroke-width": 1.5,
           "circle-opacity": 0.95
+        }
+      });
+      map.addLayer({
+        id: "metro-station-layer",
+        type: "circle",
+        source: "transport-stops-source",
+        "source-layer": "transport_stops",
+        filter: ["==", ["get", "kind"], "metro_station"],
+        paint: {
+          "circle-radius": 5.4,
+          "circle-color": "#e11d48",
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 1.6,
+          "circle-opacity": 0.96
+        }
+      });
+      map.addLayer({
+        id: "train-station-layer",
+        type: "circle",
+        source: "transport-stops-source",
+        "source-layer": "transport_stops",
+        filter: ["==", ["get", "kind"], "train_station"],
+        paint: {
+          "circle-radius": 5,
+          "circle-color": "#0f766e",
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 1.6,
+          "circle-opacity": 0.96
         }
       });
       map.addLayer({
@@ -686,36 +712,11 @@ export function FindIdealApp() {
         });
         if (features.length > 0) {
           const uid = features[0].properties?.zone_uid as string | undefined;
-          const currentRunId = runIdRef.current;
-          if (uid && currentRunId) {
+          if (uid && journeyId) {
             setSelectedZoneUid(uid);
-            setZoneSelectionMessage(`Zona ${uid} selecionada no mapa. Carregando detalhes...`);
+            setZoneSelectionMessage(`Zona ${uid} selecionada no mapa. Avance para detalhamento.`);
+            setZoneListingMessage("Zona selecionada. Clique em 'Carregar detalhamento'.");
             setActiveStep(4);
-            void (async () => {
-              setIsSelectingZone(true);
-              setIsDetailingZone(true);
-              try {
-                await selectZones(currentRunId, [uid]);
-                const detail = await getZoneDetail(currentRunId, uid);
-                setZoneDetailData(detail);
-                setLayerVisibility((current) => ({
-                  ...current,
-                  pois: Boolean(detail.has_poi_data),
-                  busStops: Boolean(detail.has_transport_data)
-                }));
-                setZoneListingMessage("Detalhamento concluído. Escolha como buscar imóveis.");
-                setStatusMessage(`Detalhamento finalizado para ${uid}.`);
-                setActiveStep(5);
-              } catch (error) {
-                const hint = apiActionHint(error);
-                setZoneSelectionMessage(hint);
-                setZoneListingMessage(hint);
-                setStatusMessage(hint);
-              } finally {
-                setIsSelectingZone(false);
-                setIsDetailingZone(false);
-              }
-            })();
             return;
           }
           if (uid) {
@@ -775,9 +776,12 @@ export function FindIdealApp() {
     }
 
     const visibility = (value: boolean) => (value ? "visible" : "none");
-    map.setLayoutProperty("bus-layer", "visibility", visibility(layerVisibility.routes && hasRouteData));
-    map.setLayoutProperty("train-layer", "visibility", visibility(layerVisibility.train && hasRouteData));
+    map.setLayoutProperty("bus-line-layer", "visibility", visibility(layerVisibility.routes && hasRouteData));
+    map.setLayoutProperty("metro-line-layer", "visibility", visibility(layerVisibility.metro && hasRouteData));
+    map.setLayoutProperty("train-line-layer", "visibility", visibility(layerVisibility.train && hasRouteData));
     map.setLayoutProperty("bus-stop-layer", "visibility", visibility(layerVisibility.busStops));
+    map.setLayoutProperty("metro-station-layer", "visibility", visibility(layerVisibility.busStops));
+    map.setLayoutProperty("train-station-layer", "visibility", visibility(layerVisibility.busStops));
     map.setLayoutProperty("original-seed-layer", "visibility", visibility(layerVisibility.busStops && Boolean(originalSeedPoint)));
     map.setLayoutProperty("zones-seed-layer", "visibility", visibility(layerVisibility.busStops && zoneSeedPoints.length > 0));
     map.setLayoutProperty(
@@ -904,84 +908,6 @@ export function FindIdealApp() {
       }))
     });
   }, [isMapReady, zoneDownstreamPoints, zoneSeedPoints]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !isMapReady) {
-      return;
-    }
-
-    const busStopSource = map.getSource("bus-stop-demo") as maplibregl.GeoJSONSource | undefined;
-    if (!busStopSource) {
-      return;
-    }
-
-    if (selectedZoneUid && zoneDetailData) {
-      const features = (zoneDetailData.transport_points || [])
-        .filter((point) => Number.isFinite(point.lon) && Number.isFinite(point.lat))
-        .map((point) => ({
-          type: "Feature" as const,
-          geometry: {
-            type: "Point" as const,
-            coordinates: [point.lon, point.lat] as [number, number]
-          },
-          properties: {
-            kind: point.kind,
-            id: point.id || "",
-            name: point.name || ""
-          }
-        }));
-      busStopSource.setData({ type: "FeatureCollection", features: features as unknown as any[] });
-      setStopsLoading(false);
-      return;
-    }
-
-    let cancelled = false;
-
-    const loadStops = () => {
-      const bounds = map.getBounds();
-      if (!bounds) {
-        return;
-      }
-      const bbox = {
-        minLon: bounds.getWest(),
-        minLat: bounds.getSouth(),
-        maxLon: bounds.getEast(),
-        maxLat: bounds.getNorth()
-      };
-
-      setStopsLoading(true);
-      getTransportStops(0, 0, 2500, bbox)
-        .then((stops) => {
-          if (!cancelled) {
-            busStopSource.setData(stops);
-          }
-        })
-        .catch(() => {
-          if (!cancelled) {
-            busStopSource.setData({ type: "FeatureCollection", features: [] });
-          }
-        })
-        .finally(() => {
-          if (!cancelled) {
-            setStopsLoading(false);
-          }
-        });
-    };
-
-    if (stopsDebounceRef.current) {
-      window.clearTimeout(stopsDebounceRef.current);
-    }
-    stopsDebounceRef.current = window.setTimeout(loadStops, 350);
-
-    return () => {
-      cancelled = true;
-      if (stopsDebounceRef.current) {
-        window.clearTimeout(stopsDebounceRef.current);
-        stopsDebounceRef.current = null;
-      }
-    };
-  }, [isMapReady, selectedZoneUid, zoneDetailData, viewport.lat, viewport.lon, viewport.zoom]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1195,7 +1121,7 @@ export function FindIdealApp() {
     }
     const features = finalListings
       .map((feature, index) => {
-        if (feature.geometry.type !== "Point") {
+        if (!feature.geometry || feature.geometry.type !== "Point") {
           return null;
         }
         const listingKey = getListingKey(feature, index);
@@ -1374,54 +1300,7 @@ export function FindIdealApp() {
   }, [interests, isMapReady]);
 
   useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !isMapReady) {
-      return;
-    }
-
-    const routeSource = map.getSource("transport-demo") as maplibregl.GeoJSONSource | undefined;
-    if (!routeSource) {
-      return;
-    }
-
-    if (!runId || zonesCollection.length === 0) {
-      routeSource.setData({
-        type: "FeatureCollection",
-        features: []
-      });
-      return;
-    }
-
-    let cancelled = false;
-
-    const loadRealTransportLayers = async () => {
-      try {
-        const layers = await getTransportLayers(runId);
-        if (cancelled) {
-          return;
-        }
-        routeSource.setData(layers.routes);
-      } catch (error) {
-        if (cancelled) {
-          return;
-        }
-        routeSource.setData({
-          type: "FeatureCollection",
-          features: []
-        });
-        setZoneSelectionMessage(`Camadas de transporte indisponíveis agora. ${apiActionHint(error)}`);
-      }
-    };
-
-    void loadRealTransportLayers();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [isMapReady, runId, zonesCollection.length]);
-
-  useEffect(() => {
-    if (!runId || zonesCollection.length === 0) {
+    if (!journeyId || zonesCollection.length === 0) {
       setOriginalSeedPoint(null);
       setZoneSeedPoints([]);
       setZoneDownstreamPoints([]);
@@ -1556,115 +1435,111 @@ export function FindIdealApp() {
     return () => {
       cancelled = true;
     };
-  }, [primaryPoint, runId, zonesCollection]);
+  }, [journeyId, primaryPoint, zonesCollection]);
 
   useEffect(() => {
-    if (!runId || !isPolling) {
+    if (!journeyId || !zoneGenerationJobId || !isPolling) {
       return;
     }
 
     let cancelled = false;
-    let timeoutId: number | undefined;
-    let attempt = 0;
 
-    const loadZonesContract = async () => {
+    const terminalStates = new Set(["completed", "failed", "cancelled", "cancelled_partial"]);
+
+    const loadJourneyZones = async () => {
       setZonesState("loading");
-      setZonesStateMessage("Validando payload de zonas (contrato Zod)...");
-      try {
-        const zones = await getZones(runId);
-        if ((zones.features || []).length === 0) {
-          setZonesCollection([]);
-          setSelectedZoneUid("");
-          setZonesState("empty");
-          setZonesStateMessage("Nenhuma zona consolidada retornada. Revise os dados de referência.");
-          setZoneSelectionMessage("Nenhuma zona disponível para seleção.");
-        } else {
-          setZonesCollection(zones.features);
-          setSelectedZoneUid(zones.features[0]?.properties.zone_uid || "");
-          setZonesState("ready");
-          setZonesStateMessage(`Payload válido: ${zones.features.length} zonas consolidadas.`);
-          setZoneSelectionMessage("Selecione 1 zona e prossiga para detalhamento/listings.");
-          setZoneDetailData(null);
-          setZoneListingMessage("Aguardando detalhamento da zona selecionada.");
-          setFinalListings([]);
-          setListingsWithoutCoords([]);
-          setFinalizeMessage("Finalize o run para carregar os imóveis.");
-        }
-      } catch (error) {
-        const hint = apiActionHint(error);
-        const recoverable = hint.includes("Tente novamente") || hint.includes("run_id existe");
-        setZonesState(recoverable ? "error-recoverable" : "error-fatal");
-        setZonesStateMessage(hint);
+      setZonesStateMessage("Validando payload de zonas (contrato journey)...");
+      const zones = await getJourneyZonesCollection(journeyId);
+      if ((zones.features || []).length === 0) {
         setZonesCollection([]);
         setSelectedZoneUid("");
-        setZoneSelectionMessage(hint);
-      }
-    };
-
-    const poll = async () => {
-      if (cancelled) {
+        setZonesState("empty");
+        setZonesStateMessage("Nenhuma zona consolidada retornada. Revise os dados de referência.");
+        setZoneSelectionMessage("Nenhuma zona disponível para seleção.");
         return;
       }
 
-      try {
-        const data = await getRunStatus(runId);
-        setRunStatus(data.status);
-        setStatusMessage(`Run ${runId}: ${data.status.stage} (${data.status.state})`);
-
-        if (data.status.state === "success") {
-          setIsPolling(false);
-          setActiveStep(2);
-          setStatusMessage("Zonas candidatas prontas. Avance para o passo 2.");
-          setExecutionProgress((current) => ({
-            ...current,
-            active: true,
-            label: "Zonas candidatas prontas.",
-            percent: 100,
-            etaSec: 0
-          }));
-          window.setTimeout(() => stopExecutionProgress("Zonas candidatas prontas."), 900);
-          await loadZonesContract();
-          return;
-        }
-
-        if (data.status.state === "failed") {
-          setIsPolling(false);
-          setActiveStep(1);
-          setZonesState("error-recoverable");
-          setZonesStateMessage("Run falhou antes de gerar zonas. Ajuste ponto/parâmetros e tente novamente.");
-          setStatusMessage("Run falhou. Ajuste o ponto principal e tente novamente.");
-          stopExecutionProgress("Execução interrompida com erro.", "error");
-          return;
-        }
-
-        const base = Math.min(10000, 1400 * 2 ** attempt);
-        const jitter = Math.floor(Math.random() * 300);
-        timeoutId = window.setTimeout(poll, base + jitter);
-        attempt += 1;
-      } catch (error) {
-        const hint = apiActionHint(error);
-        setStatusMessage(hint);
-        setZonesState("error-recoverable");
-        setZonesStateMessage(hint);
-
-        const retryDelay = Math.min(10000, 1800 * 2 ** attempt);
-        timeoutId = window.setTimeout(poll, retryDelay);
-        attempt += 1;
-      }
+      setZonesCollection(zones.features);
+      setSelectedZoneUid(zones.features[0]?.properties.zone_uid || "");
+      setZonesState("ready");
+      setZonesStateMessage(`Payload válido: ${zones.features.length} zonas consolidadas.`);
+      setZoneSelectionMessage("Selecione 1 zona e prossiga para detalhamento/listings.");
+      setZoneDetailData(null);
+      setZoneListingMessage("Aguardando detalhamento da zona selecionada.");
+      setFinalListings([]);
+      setListingsWithoutCoords([]);
+      setFinalizeMessage("Dados prontos para busca de imóveis.");
     };
 
-    void poll();
+    const waitJob = async (jobId: string, label: string): Promise<void> => {
+      const start = Date.now();
+      let attempt = 0;
+
+      while (!cancelled && Date.now() - start < 180_000) {
+        const job = await getJob(jobId);
+        setRunStatus({
+          state: String(job.state),
+          stage: String(job.current_stage || job.job_type || label)
+        });
+        setStatusMessage(`${label}: ${String(job.current_stage || job.job_type || "processing")} (${String(job.state)})`);
+
+        if (terminalStates.has(String(job.state))) {
+          if (String(job.state) !== "completed") {
+            throw new Error(`${label} finalizado com estado ${String(job.state)}`);
+          }
+          return;
+        }
+
+        const delay = Math.min(2400, 300 * 2 ** attempt);
+        attempt += 1;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+
+      throw new Error(`${label} excedeu tempo limite de processamento.`);
+    };
+
+    void (async () => {
+      try {
+        await waitJob(zoneGenerationJobId, "Geracao de zonas");
+        if (cancelled) {
+          return;
+        }
+
+        const enrichJob = await createZoneEnrichmentJob(journeyId);
+        await waitJob(enrichJob.id, "Enriquecimento de zonas");
+        if (cancelled) {
+          return;
+        }
+
+        await loadJourneyZones();
+        setIsPolling(false);
+        setActiveStep(3);
+        setStatusMessage("Zonas candidatas prontas. Avance para comparar zonas.");
+        setExecutionProgress((current) => ({
+          ...current,
+          active: true,
+          label: "Zonas candidatas prontas.",
+          percent: 100,
+          etaSec: 0
+        }));
+        window.setTimeout(() => stopExecutionProgress("Zonas candidatas prontas."), 900);
+      } catch (error) {
+        const hint = apiActionHint(error);
+        setIsPolling(false);
+        setZonesState("error-recoverable");
+        setZonesStateMessage(hint);
+        setStatusMessage(hint);
+        stopExecutionProgress("Execução interrompida com erro.", "error");
+      }
+    })();
 
     return () => {
       cancelled = true;
-      if (timeoutId) {
-        window.clearTimeout(timeoutId);
-      }
     };
-  }, [isPolling, runId]);
+  }, [isPolling, journeyId, zoneGenerationJobId]);
 
   useEffect(() => {
-    if (activeStep !== 2 || !primaryPoint || !runId) {
+    if (activeStep !== 2 || !primaryPoint) {
       return;
     }
 
@@ -1674,6 +1549,7 @@ export function FindIdealApp() {
       setTransportPointsLoading(true);
       setTransportPointsMessage("Carregando pontos de transporte...");
       try {
+        const transportSearchRadius = Math.max(seedBusSearchMaxDistM, seedRailSearchMaxDistM, 800);
         let journeyRef = journeyId;
         if (!journeyRef) {
           const createdJourney = await createJourney({
@@ -1682,8 +1558,16 @@ export function FindIdealApp() {
                 lat: primaryPoint.lat,
                 lon: primaryPoint.lon
               },
-              transport_search_radius_m: seedBusSearchMaxDistM,
-              run_id: runId
+              transport_search_radius_meters: transportSearchRadius,
+              zone_radius_meters: zoneRadiusM,
+              max_travel_time_minutes: maxTravelTimeMin,
+              seed_rail_search_max_dist_meters: seedRailSearchMaxDistM,
+              mode: propertyMode,
+              zone_detail_include_pois: zoneInfoSelection.pois,
+              zone_detail_include_transport: zoneInfoSelection.transport,
+              zone_detail_include_green: zoneInfoSelection.green,
+              zone_detail_include_flood: zoneInfoSelection.flood,
+              zone_detail_include_public_safety: zoneInfoSelection.publicSafety
             }
           });
           if (cancelled) {
@@ -1691,12 +1575,35 @@ export function FindIdealApp() {
           }
           journeyRef = createdJourney.id;
           setJourneyId(createdJourney.id);
-          setTransportSearchRadiusM(
-            Math.max(100, Number((createdJourney.input_snapshot as Record<string, unknown> | undefined)?.transport_search_radius_m) || seedBusSearchMaxDistM)
-          );
+          setRunId(createdJourney.id);
+          const rawRadius = (createdJourney.input_snapshot as Record<string, unknown> | undefined)
+            ?.transport_search_radius_meters;
+          setTransportSearchRadiusM(Math.max(100, Number(rawRadius) || transportSearchRadius));
         }
 
-        const points = await getJourneyTransportPoints(journeyRef);
+        const existing = await getJourneyTransportPoints(journeyRef);
+        let points = existing;
+
+        if (existing.length === 0) {
+          const job = await createTransportSearchJob(journeyRef);
+          const terminalStates = new Set(["completed", "failed", "cancelled", "cancelled_partial"]);
+          const start = Date.now();
+          let attempt = 0;
+          while (Date.now() - start < 45_000) {
+            const current = await getJob(job.id);
+            if (terminalStates.has(String(current.state))) {
+              if (String(current.state) !== "completed") {
+                throw new Error(`Busca de transporte finalizou com estado ${String(current.state)}.`);
+              }
+              break;
+            }
+            const waitMs = Math.min(2000, 250 * 2 ** attempt);
+            attempt += 1;
+            await new Promise((resolve) => setTimeout(resolve, waitMs));
+          }
+          points = await getJourneyTransportPoints(journeyRef);
+        }
+
         if (cancelled) {
           return;
         }
@@ -1727,7 +1634,17 @@ export function FindIdealApp() {
     return () => {
       cancelled = true;
     };
-  }, [activeStep, journeyId, primaryPoint, runId, seedBusSearchMaxDistM]);
+  }, [
+    activeStep,
+    journeyId,
+    maxTravelTimeMin,
+    primaryPoint,
+    propertyMode,
+    seedBusSearchMaxDistM,
+    seedRailSearchMaxDistM,
+    zoneInfoSelection,
+    zoneRadiusM
+  ]);
 
   const mapBusyMessage = useMemo(() => {
     if (isCreatingRun) {
@@ -1882,78 +1799,104 @@ export function FindIdealApp() {
       return;
     }
 
-    // O botão só é exibido na etapa 1; evita POST /runs espúrio se o handler for acionado fora desse passo.
+    // O botão só é exibido na etapa 1; evita chamadas legadas fora do passo correto.
     if (activeStep !== 1) {
       return;
     }
 
+    setRunId("");
+    setRunStatus(null);
+    setIsPolling(false);
     setJourneyId("");
     setTransportPoints([]);
     setHoveredTransportPointId("");
     setSelectedTransportPointId("");
     setZoneGenerationJobId("");
-    setTransportPointsMessage("Gere zonas candidatas para carregar os pontos de transporte.");
+    setTransportPointsMessage("Criando jornada e buscando pontos de transporte...");
     resetExecutionTracking();
-    startExecutionProgress("zones", "Gerando zonas candidatas...", 180);
+    startExecutionProgress("zones", "Buscando pontos de transporte...", 60);
     setIsCreatingRun(true);
-    setLoadingText("Analisando rotas de transporte e gerando zonas isócronas...");
-    setStatusMessage("Criando run...");
+    setLoadingText("Criando jornada e executando busca de transporte...");
+    setStatusMessage("Criando jornada...");
     setZonesState("idle");
     setZonesStateMessage("Aguardando processamento das zonas.");
 
     try {
-      const data: RunCreateResponse = await createRun({
-        reference_points: [
-          {
-            name: primaryPoint.name,
+      const transportSearchRadius = Math.max(seedBusSearchMaxDistM, seedRailSearchMaxDistM, 800);
+      setTransportPointsLoading(true);
+      const createdJourney = await createJourney({
+        input_snapshot: {
+          reference_point: {
             lat: primaryPoint.lat,
             lon: primaryPoint.lon
-          }
-        ],
-        params: {
-          cache_dir: "data_cache",
-          public_safety_enabled: zoneInfoSelection.publicSafety,
-          public_safety_fail_on_error: false,
-          public_safety_radius_km: 1.0,
-          public_safety_year: 2025,
+          },
+          transport_search_radius_meters: transportSearchRadius,
+          zone_radius_meters: zoneRadiusM,
+          max_travel_time_minutes: maxTravelTimeMin,
+          seed_rail_search_max_dist_meters: seedRailSearchMaxDistM,
+          mode: propertyMode,
           zone_detail_include_pois: zoneInfoSelection.pois,
           zone_detail_include_transport: zoneInfoSelection.transport,
           zone_detail_include_green: zoneInfoSelection.green,
           zone_detail_include_flood: zoneInfoSelection.flood,
-          zone_detail_include_public_safety: zoneInfoSelection.publicSafety,
-          zone_dedupe_m: 50,
-          zone_radius_m: zoneRadiusM,
-          t_bus: maxTravelTimeMin,
-          t_rail: maxTravelTimeMin,
-          seed_bus_max_dist_m: seedBusSearchMaxDistM,
-          seed_rail_max_dist_m: seedRailSearchMaxDistM,
-          max_streets_per_zone: 3,
-          listing_max_pages: 2,
-          listing_mode: propertyMode
+          zone_detail_include_public_safety: zoneInfoSelection.publicSafety
         }
       });
-      setRunId(data.run_id);
-      setRunStatus(data.status);
-      setIsPolling(true);
-      setStatusMessage(`Run criada: ${data.run_id}. Aguardando zonas...`);
-      setZonesState("loading");
-      setZonesStateMessage("Pipeline iniciado. Aguardando status da run...");
-      setZonesCollection([]);
-      setSelectedZoneUid("");
-      setZoneSelectionMessage("Aguardando zonas consolidadas.");
-      setZoneDetailData(null);
-      setZoneListingMessage("Aguardando seleção e detalhamento da zona.");
-      setFinalListings([]);
-      setListingsWithoutCoords([]);
-      setFinalizeMessage("Finalize o run para carregar os imóveis.");
+
+      setJourneyId(createdJourney.id);
+      setRunId(createdJourney.id);
+      const rawRadius = (createdJourney.input_snapshot as Record<string, unknown> | undefined)
+        ?.transport_search_radius_meters;
+      setTransportSearchRadiusM(Math.max(100, Number(rawRadius) || transportSearchRadius));
+      const transportJob = await createTransportSearchJob(createdJourney.id);
+      setStatusMessage("Busca de transporte em andamento...");
+
+      const terminalStates = new Set(["completed", "failed", "cancelled", "cancelled_partial"]);
+      const start = Date.now();
+      let attempt = 0;
+      let completed = false;
+
+      // Mesmo com StubBroker inline, seguimos o contrato assíncrono para evitar corrida.
+      while (Date.now() - start < 45_000) {
+        const job = await getJob(transportJob.id);
+        if (terminalStates.has(String(job.state))) {
+          if (String(job.state) !== "completed") {
+            throw new Error(`Transport job terminou com estado: ${String(job.state)}`);
+          }
+          completed = true;
+          break;
+        }
+
+        const delayMs = Math.min(2000, 250 * 2 ** attempt);
+        attempt += 1;
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
+
+      if (!completed) {
+        throw new Error("Tempo limite excedido aguardando conclusão da busca de transporte.");
+      }
+
+      const points = await getJourneyTransportPoints(createdJourney.id);
+      setTransportPoints(points);
+      if (points.length > 0) {
+        setSelectedTransportPointId(points[0].id);
+        setTransportPointsMessage(`${points.length} ponto(s) de transporte encontrado(s).`);
+      } else {
+        setSelectedTransportPointId("");
+        setTransportPointsMessage("Nenhum ponto retornado para esta jornada. Ajuste o ponto principal e tente novamente.");
+      }
+
+      stopExecutionProgress("Pontos de transporte prontos.", "done");
+      setActiveStep(2);
+      setStatusMessage("Pontos de transporte prontos. Avance para gerar zonas.");
     } catch (error) {
       const message = apiActionHint(error);
       setStatusMessage(message);
-      setIsPolling(false);
       setZonesState("error-recoverable");
       setZonesStateMessage(message);
-      stopExecutionProgress("Falha ao criar run.", "error");
+      stopExecutionProgress("Falha ao buscar pontos de transporte.", "error");
     } finally {
+      setTransportPointsLoading(false);
       setIsCreatingRun(false);
     }
   };
@@ -1978,7 +1921,7 @@ export function FindIdealApp() {
     setZoneListingMessage("Aguardando seleção e detalhamento da zona.");
     setFinalListings([]);
     setListingsWithoutCoords([]);
-    setFinalizeMessage("Finalize o run para carregar os imóveis.");
+    setFinalizeMessage("Dados prontos para busca de imóveis.");
     resetExecutionTracking();
     setActiveStep(1);
     setStatusMessage("Ponto principal removido.");
@@ -1991,7 +1934,7 @@ export function FindIdealApp() {
     }
     if (step <= 3) {
       setZoneDetailData(null);
-      setZoneStreets([]);
+      setZoneAddressSuggestions([]);
       setSelectedStreet("");
       setSelectedStreetType(null);
       setStreetQuery("");
@@ -2005,32 +1948,35 @@ export function FindIdealApp() {
       setListingDiffMessage("");
       setNewlyAddedListingKeys([]);
       setFocusedListingKey("");
-      setFinalizeMessage("Finalize o run para carregar os imóveis.");
+      setFinalizeMessage("Dados prontos para busca de imóveis.");
     }
   };
 
   useEffect(() => {
-    if (!runId || !selectedZoneUid || !zoneDetailData) {
-      setZoneStreets([]);
+    if (!journeyId || !selectedZoneUid || streetQuery.trim().length < 2) {
+      setZoneAddressSuggestions([]);
       return;
     }
 
     let cancelled = false;
-    getZoneStreets(runId, selectedZoneUid)
-      .then((data) => {
+    const debounce = window.setTimeout(async () => {
+      try {
+        const items = await getZoneAddressSuggestions(journeyId, selectedZoneUid, streetQuery.trim());
         if (!cancelled) {
-          setZoneStreets(data.streets || []);
+          setZoneAddressSuggestions(items);
         }
-      })
-      .catch(() => {
+      } catch {
         if (!cancelled) {
-          setZoneStreets([]);
+          setZoneAddressSuggestions([]);
         }
-      });
+      }
+    }, 220);
+
     return () => {
       cancelled = true;
+      window.clearTimeout(debounce);
     };
-  }, [runId, selectedZoneUid, zoneDetailData]);
+  }, [journeyId, selectedZoneUid, streetQuery]);
 
   const streetSuggestions = useMemo<SearchSuggestion[]>(() => {
     const query = streetQuery.trim().toLocaleLowerCase("pt-BR");
@@ -2050,12 +1996,14 @@ export function FindIdealApp() {
     };
 
     pushSuggestion(zoneDetailData.zone_name, "neighborhood");
-    zoneStreets.forEach((street) => pushSuggestion(street, "street"));
-    (zoneDetailData.poi_points || []).forEach((poi) => {
-      const poiName = String((poi as Record<string, unknown>).name || "").trim();
-      if (poiName) {
-        pushSuggestion(poiName, "reference");
-      }
+    zoneAddressSuggestions.forEach((item) => {
+      const locationType = String(item.location_type || "street").toLowerCase();
+      const mappedType: SearchSuggestionType = locationType === "neighborhood"
+        ? "neighborhood"
+        : locationType === "reference" || locationType === "landmark"
+          ? "reference"
+          : "street";
+      pushSuggestion(item.label, mappedType);
     });
 
     const rank: Record<SearchSuggestionType, number> = {
@@ -2072,7 +2020,7 @@ export function FindIdealApp() {
         return a.label.localeCompare(b.label, "pt-BR");
       })
       .slice(0, 12);
-  }, [streetQuery, zoneDetailData, zoneStreets]);
+  }, [streetQuery, zoneAddressSuggestions, zoneDetailData]);
 
   useEffect(() => {
     setActivePanelTab("listings");
@@ -2080,14 +2028,13 @@ export function FindIdealApp() {
   }, [selectedZoneUid]);
 
   useEffect(() => {
-    const rollupScopeId = journeyId || runId;
-    if (!rollupScopeId || !selectedZoneUid || !zoneDetailData) {
+    if (!journeyId || !selectedZoneUid || !zoneDetailData) {
       return;
     }
 
     let cancelled = false;
     getPriceRollups(
-      rollupScopeId,
+      journeyId,
       selectedZoneUid,
       propertyMode === "buy" ? "sale" : "rent",
       30
@@ -2106,20 +2053,109 @@ export function FindIdealApp() {
     return () => {
       cancelled = true;
     };
-  }, [journeyId, propertyMode, runId, selectedZoneUid, zoneDetailData]);
+  }, [journeyId, propertyMode, selectedZoneUid, zoneDetailData]);
 
   const handleDetailZone = async () => {
-    if (!runId || !selectedZoneUid || isDetailingZone) {
+    if (!journeyId || !selectedZoneUid || isDetailingZone) {
       return;
     }
 
     let succeeded = false;
     startExecutionProgress("detailZone", "Detalhando zona...", 60);
     setIsDetailingZone(true);
-    setLoadingText("Cruzando bases geográficas, recolhendo ruas e efetuando scraping dos imóveis...");
+    setLoadingText("Consolidando indicadores da zona selecionada...");
     setZoneListingMessage("Executando detalhamento da zona...");
     try {
-      const detail = await getZoneDetail(runId, selectedZoneUid);
+      const zoneFeature = zonesCollection.find(
+        (feature) => String(feature.properties?.zone_uid || "") === selectedZoneUid
+      );
+      if (!zoneFeature) {
+        throw new Error("Zona selecionada não encontrada no conjunto consolidado.");
+      }
+
+      const zoneProps = (zoneFeature.properties || {}) as Record<string, unknown>;
+      const selectedTransportPoint =
+        transportPoints.find((point) => point.id === selectedTransportPointId) || transportPoints[0] || null;
+
+      const rawPoiCounts = zoneProps.poi_counts;
+      const poiCounts =
+        rawPoiCounts && typeof rawPoiCounts === "object"
+          ? (rawPoiCounts as Record<string, number>)
+          : ({} as Record<string, number>);
+
+      const rawGreen = Number(zoneProps.green_area_ratio ?? 0);
+      const rawFlood = Number(zoneProps.flood_area_ratio ?? 0);
+      const zoneAreaM2 = Math.PI * Math.pow(Math.max(100, zoneRadiusM), 2);
+      const normalizedGreen = Number.isFinite(rawGreen) ? (rawGreen > 1 ? rawGreen / zoneAreaM2 : rawGreen) : 0;
+      const normalizedFlood = Number.isFinite(rawFlood) ? (rawFlood > 1 ? rawFlood / zoneAreaM2 : rawFlood) : 0;
+      const greenRatio = Math.max(0, Math.min(1, normalizedGreen));
+      const floodRatio = Math.max(0, Math.min(1, normalizedFlood));
+      const safetyCount = Number(zoneProps.safety_incidents_count ?? 0);
+      const safeIncidents = Number.isFinite(safetyCount) ? Math.max(0, Math.round(safetyCount)) : 0;
+
+      const detail: ZoneDetailResponse = {
+        zone_uid: selectedZoneUid,
+        zone_name:
+          String(zoneProps.zone_name || zoneProps.label || "").trim() ||
+          `Zona ${selectedZoneUid.slice(0, 8)}`,
+        green_area_ratio: greenRatio,
+        flood_area_ratio: floodRatio,
+        poi_count_by_category: poiCounts,
+        bus_lines_count: selectedTransportPoint?.route_count || 0,
+        train_lines_count: 0,
+        bus_stop_count: transportPoints.length,
+        train_station_count: 0,
+        lines_used_for_generation: selectedTransportPoint
+          ? (selectedTransportPoint.route_ids || []).slice(0, 3).map((routeId, index) => ({
+              mode: selectedTransportPoint.modal_types?.[index] || selectedTransportPoint.modal_types?.[0] || "transit",
+              route_id: routeId,
+              line_name: selectedTransportPoint.name || `Linha ${index + 1}`
+            }))
+          : [],
+        reference_transport_point: selectedTransportPoint
+          ? {
+              kind: "transport",
+              id: selectedTransportPoint.id,
+              name: selectedTransportPoint.name || "Ponto selecionado",
+              lat: selectedTransportPoint.lat,
+              lon: selectedTransportPoint.lon
+            }
+          : null,
+        seed_transport_point: selectedTransportPoint
+          ? {
+              kind: "transport",
+              id: selectedTransportPoint.id,
+              name: selectedTransportPoint.name || "Ponto selecionado",
+              lat: selectedTransportPoint.lat,
+              lon: selectedTransportPoint.lon
+            }
+          : null,
+        downstream_transport_point: null,
+        transport_points: transportPoints.map((point) => ({
+          kind: "transport",
+          id: point.id,
+          name: point.name,
+          lat: point.lat,
+          lon: point.lon
+        })),
+        poi_points: [],
+        streets_count: zoneAddressSuggestions.length,
+        has_street_data: zoneAddressSuggestions.length > 0,
+        has_poi_data: Object.keys(poiCounts).length > 0,
+        has_transport_data: transportPoints.length > 0,
+        public_safety: {
+          enabled: true,
+          year: new Date().getFullYear(),
+          radius_km: Number((zoneRadiusM / 1000).toFixed(2)),
+          summary: {
+            ocorrencias_no_raio_total: safeIncidents,
+            delta_pct_vs_cidade: 0,
+            top_delitos_no_raio: [],
+            delegacias_mais_proximas: []
+          }
+        }
+      };
+
       setZoneDetailData(detail);
       setLayerVisibility((current) => ({
         ...current,
@@ -2150,7 +2186,7 @@ export function FindIdealApp() {
   };
 
   const handleZoneListings = async () => {
-    if (!runId || !selectedZoneUid || !zoneDetailData || isListingZone) {
+    if (!journeyId || !selectedZoneUid || !zoneDetailData || isListingZone) {
       return;
     }
 
@@ -2159,7 +2195,9 @@ export function FindIdealApp() {
       return;
     }
 
-    const streetFilter = streetFilterMode === "specific" && selectedStreet ? selectedStreet : undefined;
+    const streetFilter = streetFilterMode === "specific" && selectedStreet ? selectedStreet : "Zona selecionada";
+    const searchType = propertyMode === "buy" ? "sale" : "rent";
+    const usageType = "residential";
 
     let succeeded = false;
     startExecutionProgress("zoneListings", "Coletando imóveis por rua...", 180);
@@ -2169,37 +2207,79 @@ export function FindIdealApp() {
       streetFilter ? `Buscando imóveis na rua ${streetFilter}...` : "Buscando imóveis em todas as ruas da zona..."
     );
     try {
-      const result = await scrapeZoneListings(runId, selectedZoneUid, streetFilter);
+      const searchResult = await searchZoneListings(journeyId, selectedZoneUid, {
+        search_location_normalized: streetFilter.toLocaleLowerCase("pt-BR"),
+        search_location_label: streetFilter,
+        search_location_type: selectedStreetType === "neighborhood" ? "neighborhood" : "street",
+        search_type: searchType,
+        usage_type: usageType
+      });
+
       setZoneListingMessage(
-        `Coleta concluída: ${result.listings_count} lote(s) processados. Consolidando resultado...`
+        searchResult.source === "none"
+          ? "Busca enfileirada. Aguardando atualização de cache da zona..."
+          : `Cache disponível: ${searchResult.total_count} imóvel(is) retornado(s).`
       );
-      setLoadingText("Consolidando resultado final...");
-      await finalizeRun(runId);
-      const [finalGeo, finalJson] = await Promise.all([getFinalListings(runId), getFinalListingsJson(runId)]);
+
+      let listingsResult = await getZoneListings(journeyId, selectedZoneUid, searchType, usageType);
+      if (searchResult.source === "none" && listingsResult.source === "none") {
+        for (let attempt = 0; attempt < 10; attempt += 1) {
+          await new Promise((resolve) => setTimeout(resolve, 1800));
+          listingsResult = await getZoneListings(journeyId, selectedZoneUid, searchType, usageType);
+          if (listingsResult.source !== "none") {
+            break;
+          }
+        }
+      }
+
+      const cards = Array.isArray(listingsResult.listings) ? listingsResult.listings : [];
+      const finalGeoFeatures: ListingFeature[] = cards.map((card) => {
+        const data = card as Record<string, unknown>;
+        const lat = Number(data.lat ?? data.latitude);
+        const lon = Number(data.lon ?? data.longitude);
+        const geometry = Number.isFinite(lat) && Number.isFinite(lon)
+          ? {
+              type: "Point" as const,
+              coordinates: [lon, lat] as [number, number]
+            }
+          : undefined;
+
+        return {
+          type: "Feature",
+          geometry,
+          properties: data
+        };
+      });
+
+      const finalGeo = {
+        type: "FeatureCollection" as const,
+        features: finalGeoFeatures
+      };
+      const finalJson = cards.map((card) => card as Record<string, unknown>);
 
       const previousKeys = new Set(finalListings.map((item, idx) => getListingKey(item, idx)));
-      const nextKeys = new Set((finalGeo.features || []).map((item, idx) => getListingKey(item, idx)));
+      const nextKeys = new Set((finalGeo.features || []).map((item: ListingFeature, idx: number) => getListingKey(item, idx)));
       const addedKeys: string[] = [];
       const removedKeys: string[] = [];
-      nextKeys.forEach((key) => {
+      nextKeys.forEach((key: string) => {
         if (!previousKeys.has(key)) {
           addedKeys.push(key);
         }
       });
-      previousKeys.forEach((key) => {
+      previousKeys.forEach((key: string) => {
         if (!nextKeys.has(key)) {
           removedKeys.push(key);
         }
       });
 
       const observedAtCandidates = (finalGeo.features || [])
-        .map((feature) => {
+        .map((feature: ListingFeature) => {
           const props = feature.properties || {};
           return String(props.observed_at || props.last_seen_at || props.updated_at || "");
         })
         .filter(Boolean)
-        .map((raw) => Date.parse(raw))
-        .filter((ts) => Number.isFinite(ts));
+        .map((raw: string) => Date.parse(raw))
+        .filter((ts: number) => Number.isFinite(ts));
       const freshestTimestamp = observedAtCandidates.length > 0 ? Math.max(...observedAtCandidates) : Number.NaN;
 
       setFinalListings(finalGeo.features || []);
@@ -2217,16 +2297,16 @@ export function FindIdealApp() {
       setNewlyAddedListingKeys(addedKeys);
       window.setTimeout(() => setNewlyAddedListingKeys([]), 3500);
 
-      const withoutCoords = (finalJson || []).filter((item) => {
+      const withoutCoords = (finalJson || []).filter((item: Record<string, unknown>) => {
         const lat = Number(item.lat ?? item.latitude);
         const lon = Number(item.lon ?? item.longitude);
         return !Number.isFinite(lat) || !Number.isFinite(lon);
       });
       setListingsWithoutCoords(withoutCoords);
       setFinalizeMessage(
-        `Resultado final pronto: ${finalGeo.features.length} no mapa e ${withoutCoords.length} sem localização no mapa.`
+        `Resultado final pronto: ${finalGeo.features.length} card(s) e ${withoutCoords.length} sem localização no mapa.`
       );
-      setStatusMessage("Busca e consolidação concluídas. Cards e exports disponíveis no painel.");
+      setStatusMessage("Busca concluída. Cards e dashboard atualizados.");
       setActiveStep(6);
       succeeded = true;
     } catch (error) {
@@ -2273,7 +2353,7 @@ export function FindIdealApp() {
         setSelectedZoneUid("");
         setZoneSelectionMessage("Selecione uma zona consolidada.");
         setZoneDetailData(null);
-        setZoneStreets([]);
+        setZoneAddressSuggestions([]);
         setZoneListingMessage("Aguardando seleção e detalhamento da zona.");
         setFinalListings([]);
         setListingsWithoutCoords([]);
@@ -2281,7 +2361,7 @@ export function FindIdealApp() {
         setListingDiffMessage("");
         setNewlyAddedListingKeys([]);
         setFocusedListingKey("");
-        setFinalizeMessage("Finalize o run para carregar os imóveis.");
+        setFinalizeMessage("Dados prontos para busca de imóveis.");
       }
       setActiveStep(targetStep);
       return;
@@ -2299,10 +2379,10 @@ export function FindIdealApp() {
       return false;
     }
     if (stepId === 2) {
-      return !(runId && zonesCollection.length > 0);
+      return !(journeyId && transportPoints.length > 0);
     }
     if (stepId === 3) {
-      return !(journeyId || (runId && zonesCollection.length > 0));
+      return !journeyId;
     }
     if (stepId === 4) {
       return zonesCollection.length === 0;
@@ -2314,7 +2394,14 @@ export function FindIdealApp() {
   };
 
   const panelWidth = activeStep >= 5 ? 600 : 420;
+  const [isCompactPanel, setIsCompactPanel] = useState(() => window.innerWidth <= 1024);
   const zonesReadyForCompare = zonesState === "ready" && zonesCollection.length > 0;
+
+  useEffect(() => {
+    const handleResize = () => setIsCompactPanel(window.innerWidth <= 1024);
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   const toggleLayer = (key: LayerKey) => {
     setLayerVisibility((current) => ({ ...current, [key]: !current[key] }));
@@ -2330,15 +2417,19 @@ export function FindIdealApp() {
     }
 
     setIsQueueingZoneGeneration(true);
+    setIsPolling(true);
+    setZonesState("loading");
+    setZonesStateMessage("Executando geração e enriquecimento das zonas...");
     setTransportPointsMessage("Enfileirando job de geração de zonas...");
     try {
       const job = await createZoneGenerationJob(journeyId);
       setZoneGenerationJobId(job.id);
       setTransportPointsMessage(`Job ${job.id} enfileirado com sucesso.`);
-      setStatusMessage("Geração de zonas enfileirada. Avance para a etapa 3.");
+      setStatusMessage("Geração de zonas enfileirada. Aguardando processamento...");
       setActiveStep(3);
     } catch (error) {
       const hint = apiActionHint(error);
+      setIsPolling(false);
       setTransportPointsMessage(hint);
       setStatusMessage(hint);
     } finally {
@@ -2386,7 +2477,7 @@ export function FindIdealApp() {
   const monthlyVariation = useMemo(() => computeMonthlyVariationFromRollups(priceRollups), [priceRollups]);
 
   const focusListingOnMap = (feature: ListingFeature, index: number) => {
-    if (feature.geometry.type !== "Point") {
+    if (!feature.geometry || feature.geometry.type !== "Point") {
       return;
     }
     const [lon, lat] = feature.geometry.coordinates;
@@ -2418,10 +2509,12 @@ export function FindIdealApp() {
   };
 
   return (
-    <main className="relative h-screen w-full overflow-hidden bg-slate-100 font-sans text-slate-800 select-none">
+    <main className="relative h-screen w-full overflow-hidden bg-slate-100 text-slate-800 select-none">
       <div className="absolute inset-0 bg-[#e5e7eb]">
         <section className="relative h-full w-full overflow-hidden">
           <div ref={mapContainerRef} className="h-full w-full" aria-label="Mapa principal" />
+
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.72),transparent_32%),radial-gradient(circle_at_bottom_right,rgba(132,94,247,0.14),transparent_28%)]" />
 
           <div className="pointer-events-none absolute inset-0">
             <AddressSearchBar
@@ -2432,8 +2525,10 @@ export function FindIdealApp() {
                 left: addressSearchLeftPx
                   ? `${addressSearchLeftPx}px`
                   : isPanelMinimized
-                    ? "6rem"
-                    : `calc(min(${panelWidth}px, calc(100vw - 2rem)) + 2rem)`
+                    ? "1rem"
+                    : isCompactPanel
+                      ? "1rem"
+                      : `calc(min(${panelWidth}px, calc(100vw - 2rem)) + 2rem)`
               }}
             />
             <MapToolbarRight
@@ -2462,9 +2557,14 @@ export function FindIdealApp() {
 
       {/* Painel flutuante: tracker + conteúdo */}
       <div
-        className="pointer-events-none absolute bottom-4 left-4 top-4 z-10 flex max-h-full flex-col gap-3 max-lg:bottom-4 max-lg:left-4 max-lg:right-4 max-lg:top-4 max-lg:h-[min(48vh,560px)] max-lg:w-auto"
+        className="wizard-shell pointer-events-none absolute z-10 flex max-h-full flex-col gap-3"
         style={{
-          width: isPanelMinimized ? "11rem" : `min(${panelWidth}px, calc(100vw - 2rem))`
+          left: isCompactPanel ? "1rem" : "1rem",
+          right: isCompactPanel ? "1rem" : "auto",
+          top: isCompactPanel ? "auto" : "1rem",
+          bottom: "1rem",
+          height: isCompactPanel ? "min(52vh, 520px)" : "auto",
+          width: isCompactPanel ? "auto" : isPanelMinimized ? "14rem" : `min(${panelWidth}px, calc(100vw - 2rem))`
         }}
       >
         <div ref={progressTrackerMeasureRef} className="pointer-events-auto">
@@ -2479,22 +2579,27 @@ export function FindIdealApp() {
         </div>
 
         <aside
-          className={`pointer-events-auto flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl transition-all duration-500 ${
+          className={`gem-shell pointer-events-auto flex min-h-0 flex-1 flex-col overflow-hidden transition-all duration-500 ${
             isPanelMinimized ? "max-h-0 flex-none opacity-0" : "opacity-100"
-          } max-lg:max-h-none`}
+          }`}
           style={{ display: isPanelMinimized ? "none" : "flex" }}
           aria-label="Painel lateral"
         >
-          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-100 bg-white px-4 py-3">
+          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-slate-100 bg-gradient-to-br from-white via-[#fcfbff] to-[#f2edff] px-5 py-4">
             <button
               type="button"
               onClick={() => navigateToStep(Math.max(1, activeStep - 1) as WizardStepId)}
               disabled={activeStep === 1}
-              className="flex items-center text-xs font-bold text-pastel-violet-600 hover:underline disabled:opacity-50"
+              className="inline-flex items-center gap-1 rounded-full border border-pastel-violet-200 bg-white px-3 py-1.5 text-xs font-bold text-pastel-violet-700 transition hover:border-pastel-violet-300 disabled:opacity-50"
             >
-              <ChevronLeft className="mr-1 h-4 w-4" /> Voltar
+              <ChevronLeft className="h-4 w-4" /> Voltar
             </button>
-            <span className="text-xs font-semibold text-slate-500">{STEPS[activeStep - 1]?.title ?? ""}</span>
+            <div className="text-right">
+              <p className="gem-eyebrow">Etapa ativa</p>
+              <span className="text-sm font-bold text-slate-900">
+                Etapa {activeStep}: {STEPS[activeStep - 1]?.title ?? ""}
+              </span>
+            </div>
           </div>
 
           {!isPanelMinimized ? (

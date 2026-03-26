@@ -29,8 +29,6 @@ export function Step3FinalListingsSection({
   finalizeMessage,
   freshnessBadgeText,
   listingDiffMessage,
-  runId,
-  apiBase,
   finalListings,
   listingSortMode,
   onListingSortModeChange,
@@ -47,56 +45,36 @@ export function Step3FinalListingsSection({
   formatCurrencyBr
 }: Step3FinalListingsSectionProps) {
   return (
-    <section className="mt-4 rounded-xl border border-slate-200 bg-white p-4 text-sm shadow-sm">
-      <h2 className="font-semibold">Imóveis finais</h2>
-      <p className="mt-2 text-xs text-slate-500">{finalizeMessage}</p>
+    <section className="gem-panel-section animate-[fadeInRight_0.4s_ease-out] text-sm">
+      <div className="gem-panel-header">
+        <p className="gem-eyebrow">Etapa 6</p>
+        <h2 className="gem-title mt-1">Imóveis finais da zona</h2>
+        <p className="gem-subtitle mt-1">Use ordenação, comparação e POIs próximos para decidir com base em critérios objetivos.</p>
+      </div>
+      <div className="gem-panel-body">
+      <p className="text-xs text-slate-500">{finalizeMessage}</p>
       <div className="mt-2 flex flex-wrap gap-2 text-[11px]">
-        <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-slate-500">{freshnessBadgeText}</span>
+        <span className="gem-chip">{freshnessBadgeText}</span>
         {listingDiffMessage ? (
-          <span className="rounded-full border border-pastel-violet-400/30 bg-pastel-violet-500/5 px-2 py-1 text-pastel-violet-600">
+          <span className="gem-chip border-pastel-violet-300 bg-pastel-violet-50 text-pastel-violet-600">
             {listingDiffMessage}
           </span>
         ) : null}
       </div>
 
-      {runId ? (
-        <div className="mt-2 flex flex-wrap gap-2 text-xs">
-          <a
-            href={`${apiBase}/runs/${runId}/final/listings`}
-            target="_blank"
-            rel="noreferrer"
-            className="rounded border border-slate-200 px-2 py-1 font-semibold text-pastel-violet-600"
-          >
-            Export GeoJSON
-          </a>
-          <a
-            href={`${apiBase}/runs/${runId}/final/listings.csv`}
-            target="_blank"
-            rel="noreferrer"
-            className="rounded border border-slate-200 px-2 py-1 font-semibold text-pastel-violet-600"
-          >
-            Export CSV
-          </a>
-          <a
-            href={`${apiBase}/runs/${runId}/final/listings.json`}
-            target="_blank"
-            rel="noreferrer"
-            className="rounded border border-slate-200 px-2 py-1 font-semibold text-pastel-violet-600"
-          >
-            Export JSON
-          </a>
-        </div>
-      ) : null}
+      <div className="mt-2 rounded-2xl border border-slate-200/80 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+        Export desabilitado durante a migração para `journeys/jobs`.
+      </div>
 
       {finalListings.length > 0 ? (
         <>
           <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
             <label className="col-span-2">
-              <span className="mb-1 block text-[11px] text-slate-500">Ordenar imóveis</span>
+              <span className="mb-1 block text-[11px] font-semibold text-slate-500">Ordenar imóveis</span>
               <select
                 value={listingSortMode}
                 onChange={(event) => onListingSortModeChange(event.target.value as ListingSortMode)}
-                className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
+                className="gem-select"
               >
                 <option value="price-asc">Preço (menor → maior)</option>
                 <option value="price-desc">Preço (maior → menor)</option>
@@ -105,20 +83,20 @@ export function Step3FinalListingsSection({
               </select>
             </label>
             <label className="col-span-2">
-              <span className="mb-1 block text-[11px] text-slate-500">Raio para contagem de POIs (m)</span>
+              <span className="mb-1 block text-[11px] font-semibold text-slate-500">Raio para contagem de POIs (m)</span>
               <input
                 type="number"
                 min={100}
                 step={50}
                 value={poiCountRadiusM}
                 onChange={(event) => onPoiCountRadiusChange(Math.max(100, Number(event.target.value) || 100))}
-                className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
+                className="gem-input"
               />
             </label>
           </div>
 
           {selectedListingsForComparison.length > 1 ? (
-            <div className="mt-3 rounded-lg border border-slate-200/80 bg-slate-50 px-3 py-3 text-xs">
+            <div className="mt-3 rounded-[22px] border border-slate-200/80 bg-slate-50 px-3 py-3 text-xs">
               <h3 className="font-semibold text-slate-800">Comparação ({selectedListingsForComparison.length} imóveis)</h3>
               <p className="mt-1 text-slate-500">
                 Comparando preço, tamanho, distância de transporte e POIs em até {poiCountRadiusM} m.
@@ -244,33 +222,37 @@ export function Step3FinalListingsSection({
             </div>
           ) : null}
 
-          <ul className="mt-3 space-y-2">
+          <ul className="mt-3 space-y-2.5">
             {sortedListings.map(({ feature, index, info, analytics }) => {
               const isSelected = selectedListingKeys.includes(analytics.listingKey);
               const isRecentlyAdded = newlyAddedListingKeys.includes(analytics.listingKey);
               return (
                 <li
                   key={analytics.listingKey}
-                  className={`rounded-lg border px-2 py-2 text-xs cursor-pointer hover:border-pastel-violet-400 ${
-                    isSelected ? "border-pastel-violet-400" : "border-slate-200"
-                  } ${isRecentlyAdded ? "bg-success/5" : ""}`}
+                  className={`cursor-pointer rounded-[22px] border px-4 py-4 text-xs transition hover:border-pastel-violet-400 hover:shadow-md ${
+                    isSelected ? "border-pastel-violet-300 bg-pastel-violet-50/60 shadow-sm" : "border-slate-200 bg-white"
+                  } ${isRecentlyAdded ? "bg-emerald-50" : ""}`}
                   onClick={() => onListingCardClick(feature, index)}
                 >
-                  <p className="font-semibold text-slate-800">{info.priceLabel}</p>
-                  <p className="text-slate-500">Plataforma: {analytics.platform}</p>
-                  <p className="text-slate-500">{info.address}</p>
-                  <p className="text-slate-500">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-base font-extrabold text-slate-900">{info.priceLabel}</p>
+                      <p className="mt-1 text-slate-500">Plataforma: {analytics.platform}</p>
+                      <p className="text-slate-500">{info.address}</p>
+                    </div>
+                    <span className="gem-chip">{freshnessBadgeText}</span>
+                  </div>
+                  <p className="mt-3 text-slate-500">
                     Tamanho: {analytics.sizeM2 ? `${analytics.sizeM2.toFixed(0)} m²` : "n/d"} · Quartos:{" "}
                     {analytics.bedrooms ? `${analytics.bedrooms}` : "n/d"}
                   </p>
-                  <p className="mt-1 text-[11px] text-slate-500">{freshnessBadgeText}</p>
                   {info.url ? (
-                    <a href={info.url} target="_blank" rel="noreferrer" className="text-pastel-violet-600 underline">
+                    <a href={info.url} target="_blank" rel="noreferrer" className="mt-2 inline-flex text-pastel-violet-600 underline">
                       Abrir anúncio
                     </a>
                   ) : null}
                   {isSelected ? (
-                    <div className="mt-2 rounded border border-slate-200/80 bg-slate-50 px-2 py-2 text-[11px] text-slate-500">
+                    <div className="mt-3 rounded-2xl border border-slate-200/80 bg-white px-3 py-3 text-[11px] text-slate-500">
                       <p className="font-semibold text-slate-800">Distâncias para POIs de maior interesse</p>
                       <ul className="mt-1 space-y-0.5">
                         {analytics.nearestPoiByCategory.length > 0 ? (
@@ -297,13 +279,13 @@ export function Step3FinalListingsSection({
       ) : null}
 
       {listingsWithoutCoords.length > 0 ? (
-        <div className="mt-4 rounded-lg border border-slate-200/80 bg-slate-50 px-3 py-3 text-xs">
+        <div className="mt-4 rounded-2xl border border-slate-200/80 bg-slate-50 px-3 py-3 text-xs">
           <h3 className="font-semibold text-slate-800">Sem localização no mapa ({listingsWithoutCoords.length})</h3>
           <ul className="mt-2 space-y-2">
             {listingsWithoutCoords.map((item, index) => {
               const info = resolveRawListingText(item, formatCurrencyBr);
               return (
-                <li key={`without_coords_${index}`} className="rounded border border-slate-200 px-2 py-2">
+                <li key={`without_coords_${index}`} className="rounded-2xl border border-slate-200 bg-white px-3 py-3">
                   <p className="font-semibold text-slate-800">{info.priceLabel}</p>
                   <p className="text-slate-500">
                     Plataforma: {String(item.source || item.platform || item.site || "PLATAFORMA N/D").toUpperCase()}
@@ -324,6 +306,7 @@ export function Step3FinalListingsSection({
           </ul>
         </div>
       ) : null}
+      </div>
     </section>
   );
 }

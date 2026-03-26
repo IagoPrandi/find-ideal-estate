@@ -1,0 +1,12 @@
+{
+    "name": "find-ideal-stops",
+    "description": "Bus stops and rail stations",
+    "version": "2",
+    "minzoom": "9",
+    "maxzoom": "16",
+    "center": "-46.639709,-23.560200,16",
+    "bounds": "-46.640200,-23.560200,-46.630100,-23.550100",
+    "type": "overlay",
+    "format": "pbf",
+    "json": "{\"vector_layers\": [ { \"id\": \"transport_stops\", \"description\": \"\", \"minzoom\": 9, \"maxzoom\": 16, \"fields\": {\"id\": \"String\", \"kind\": \"String\", \"name\": \"String\"} } ],\"tilestats\": {\"layerCount\": 1,\"layers\": [{\"layer\": \"transport_stops\",\"count\": 2,\"geometry\": \"Point\",\"attributeCount\": 3,\"attributes\": [{\"attribute\": \"id\",\"count\": 2,\"type\": \"string\",\"values\": [\"S1\",\"S2\"]},{\"attribute\": \"kind\",\"count\": 1,\"type\": \"string\",\"values\": [\"bus_stop\"]},{\"attribute\": \"name\",\"count\": 2,\"type\": \"string\",\"values\": [\"Stop One\",\"Stop Two\"]}]}]}}"
+}

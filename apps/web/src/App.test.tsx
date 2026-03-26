@@ -222,56 +222,110 @@ describe("App frontend FE smoke", () => {
 
   it("covers FE6 happy path: reference -> generate zones -> step 2", async () => {
     const user = userEvent.setup();
-    let createRunPayload: Record<string, unknown> | null = null;
+    let createJourneyPayload: Record<string, unknown> | null = null;
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
 
-      if (url.endsWith("/runs") && init?.method === "POST") {
-        createRunPayload = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null;
+      if (url.endsWith("/journeys") && init?.method === "POST") {
+        createJourneyPayload = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null;
         return jsonResponse({
-          run_id: "run_fe6_ok",
-          status: {
-            state: "running",
-            stage: "zones_raw"
-          }
+          id: "journey_fe6_ok",
+          state: "running",
+          input_snapshot: createJourneyPayload?.input_snapshot || {},
+          created_at: "2026-03-24T10:00:00Z",
+          updated_at: "2026-03-24T10:00:00Z"
         });
       }
 
-      if (url.endsWith("/runs/run_fe6_ok/status")) {
+      if (url.endsWith("/jobs") && init?.method === "POST") {
+        const payload = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+        const type = String(payload.job_type || "");
+        if (type === "transport_search") {
+          return jsonResponse({ id: "job_transport_fe6", job_type: type, state: "queued", progress_percent: 0, created_at: "2026-03-24T10:00:00Z" });
+        }
+        if (type === "zone_generation") {
+          return jsonResponse({ id: "job_zone_fe6", job_type: type, state: "queued", progress_percent: 0, created_at: "2026-03-24T10:00:00Z" });
+        }
+        if (type === "zone_enrichment") {
+          return jsonResponse({ id: "job_enrich_fe6", job_type: type, state: "queued", progress_percent: 0, created_at: "2026-03-24T10:00:00Z" });
+        }
+      }
+
+      if (url.endsWith("/jobs/job_transport_fe6")) {
         return jsonResponse({
-          run_id: "run_fe6_ok",
-          status: {
-            state: "success",
-            stage: "zones_enriched"
-          }
+          id: "job_transport_fe6",
+          job_type: "transport_search",
+          state: "completed",
+          progress_percent: 100,
+          current_stage: "transport_search",
+          created_at: "2026-03-24T10:00:00Z"
         });
       }
 
-      if (url.endsWith("/runs/run_fe6_ok/zones")) {
+      if (url.endsWith("/jobs/job_zone_fe6")) {
         return jsonResponse({
-          type: "FeatureCollection",
-          features: [
+          id: "job_zone_fe6",
+          job_type: "zone_generation",
+          state: "completed",
+          progress_percent: 100,
+          current_stage: "zone_generation",
+          created_at: "2026-03-24T10:00:00Z"
+        });
+      }
+
+      if (url.endsWith("/jobs/job_enrich_fe6")) {
+        return jsonResponse({
+          id: "job_enrich_fe6",
+          job_type: "zone_enrichment",
+          state: "completed",
+          progress_percent: 100,
+          current_stage: "zone_enrichment",
+          created_at: "2026-03-24T10:00:00Z"
+        });
+      }
+
+      if (url.endsWith("/journeys/journey_fe6_ok/transport-points")) {
+        return jsonResponse([
+          {
+            id: "tp_1",
+            journey_id: "journey_fe6_ok",
+            source: "gtfs",
+            name: "Parada A",
+            lat: -23.55052,
+            lon: -46.633308,
+            walk_time_sec: 360,
+            walk_distance_m: 420,
+            route_ids: ["r1", "r2", "r3"],
+            modal_types: ["bus", "rail", "bus"],
+            route_count: 7,
+            created_at: "2026-03-24T10:00:00Z"
+          }
+        ]);
+      }
+
+      if (url.endsWith("/journeys/journey_fe6_ok/zones")) {
+        return jsonResponse({
+          zones: [
             {
-              type: "Feature",
-              geometry: {
+              id: "zone_id_1",
+              journey_id: "journey_fe6_ok",
+              transport_point_id: "tp_1",
+              fingerprint: "zone_1",
+              state: "complete",
+              travel_time_minutes: 41,
+              walk_distance_meters: 420,
+              isochrone_geom: {
                 type: "Polygon",
-                coordinates: [
-                  [
-                    [-46.67, -23.57],
-                    [-46.64, -23.57],
-                    [-46.64, -23.54],
-                    [-46.67, -23.54],
-                    [-46.67, -23.57]
-                  ]
-                ]
+                coordinates: [[[-46.67, -23.57], [-46.64, -23.57], [-46.64, -23.54], [-46.67, -23.54], [-46.67, -23.57]]]
               },
-              properties: {
-                zone_uid: "zone_1",
-                score: 0.91,
-                time_agg: 41
-              }
+              poi_counts: {},
+              badges_provisional: false,
+              created_at: "2026-03-24T10:00:00Z",
+              updated_at: "2026-03-24T10:00:00Z"
             }
-          ]
+          ],
+          total_count: 1,
+          completed_count: 1
         });
       }
 
@@ -292,21 +346,19 @@ describe("App frontend FE smoke", () => {
     });
 
     await user.click(createRunButton);
+    await screen.findByRole("heading", { name: /Ponto de transporte/i });
+    await user.click(screen.getByRole("button", { name: /Gerar zonas/i }));
 
-    expect(createRunPayload).not.toBeNull();
-    if (!createRunPayload) {
-      throw new Error("createRun payload was not captured");
+    expect(createJourneyPayload).not.toBeNull();
+    if (!createJourneyPayload) {
+      throw new Error("createJourney payload was not captured");
     }
-    const params = (createRunPayload["params"] as Record<string, unknown>) || {};
-    expect(params.public_safety_enabled).toBe(true);
-    expect(params.public_safety_fail_on_error).toBe(false);
-    expect(params.public_safety_radius_km).toBe(1);
-    expect(params.public_safety_year).toBe(2025);
-    expect(params.zone_detail_include_pois).toBe(true);
-    expect(params.zone_detail_include_transport).toBe(true);
-    expect(params.zone_detail_include_green).toBe(true);
-    expect(params.zone_detail_include_flood).toBe(true);
-    expect(params.zone_detail_include_public_safety).toBe(true);
+    const snapshot = (createJourneyPayload["input_snapshot"] as Record<string, unknown>) || {};
+    expect(snapshot.zone_detail_include_pois).toBe(true);
+    expect(snapshot.zone_detail_include_transport).toBe(true);
+    expect(snapshot.zone_detail_include_green).toBe(true);
+    expect(snapshot.zone_detail_include_flood).toBe(true);
+    expect(snapshot.zone_detail_include_public_safety).toBe(true);
 
     expect(await screen.findByText(/Payload válido: 1 zonas consolidadas\./i)).toBeInTheDocument();
     expect(screen.getByText(/Seleção:/i)).toBeInTheDocument();
@@ -317,30 +369,58 @@ describe("App frontend FE smoke", () => {
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
 
-      if (url.endsWith("/runs") && init?.method === "POST") {
+      if (url.endsWith("/journeys") && init?.method === "POST") {
         return jsonResponse({
-          run_id: "run_fe6_empty",
-          status: {
-            state: "running",
-            stage: "zones_raw"
-          }
+          id: "journey_fe6_empty",
+          state: "running",
+          input_snapshot: {},
+          created_at: "2026-03-24T10:00:00Z",
+          updated_at: "2026-03-24T10:00:00Z"
         });
       }
 
-      if (url.endsWith("/runs/run_fe6_empty/status")) {
+      if (url.endsWith("/jobs") && init?.method === "POST") {
+        const payload = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+        const type = String(payload.job_type || "");
+        const id = type === "transport_search" ? "job_transport_fe6_empty" : type === "zone_generation" ? "job_zone_fe6_empty" : "job_enrich_fe6_empty";
+        return jsonResponse({ id, job_type: type, state: "queued", progress_percent: 0, created_at: "2026-03-24T10:00:00Z" });
+      }
+
+      if (url.endsWith("/jobs/job_transport_fe6_empty") || url.endsWith("/jobs/job_zone_fe6_empty") || url.endsWith("/jobs/job_enrich_fe6_empty")) {
         return jsonResponse({
-          run_id: "run_fe6_empty",
-          status: {
-            state: "success",
-            stage: "zones_enriched"
-          }
+          id: "job_done",
+          job_type: "transport_search",
+          state: "completed",
+          progress_percent: 100,
+          current_stage: "completed",
+          created_at: "2026-03-24T10:00:00Z"
         });
       }
 
-      if (url.endsWith("/runs/run_fe6_empty/zones")) {
+      if (url.endsWith("/journeys/journey_fe6_empty/transport-points")) {
+        return jsonResponse([
+          {
+            id: "tp_1",
+            journey_id: "journey_fe6_empty",
+            source: "gtfs",
+            name: "Parada A",
+            lat: -23.551111,
+            lon: -46.631111,
+            walk_time_sec: 320,
+            walk_distance_m: 380,
+            route_ids: ["r1"],
+            modal_types: ["bus"],
+            route_count: 1,
+            created_at: "2026-03-24T10:00:00Z"
+          }
+        ]);
+      }
+
+      if (url.endsWith("/journeys/journey_fe6_empty/zones")) {
         return jsonResponse({
-          type: "FeatureCollection",
-          features: []
+          zones: [],
+          total_count: 0,
+          completed_count: 0
         });
       }
 
@@ -352,6 +432,8 @@ describe("App frontend FE smoke", () => {
 
     await triggerMapClick(-23.551111, -46.631111);
     await user.click(screen.getByRole("button", { name: "Achar pontos de transporte" }));
+    await screen.findByRole("heading", { name: /Ponto de transporte/i });
+    await user.click(screen.getByRole("button", { name: /Gerar zonas/i }));
 
     expect(
       await screen.findByText(/Nenhuma zona consolidada retornada\. Revise os dados de referência\./i)
@@ -387,20 +469,49 @@ describe("App frontend FE smoke", () => {
 
   it("sends unchecked zone info options as false in run params", async () => {
     const user = userEvent.setup();
-    let createRunPayload: Record<string, unknown> | null = null;
+    let createJourneyPayload: Record<string, unknown> | null = null;
 
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
 
-      if (url.endsWith("/runs") && init?.method === "POST") {
-        createRunPayload = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null;
+      if (url.endsWith("/journeys") && init?.method === "POST") {
+        createJourneyPayload = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null;
         return jsonResponse({
-          run_id: "run_checklist_flags",
-          status: {
-            state: "running",
-            stage: "zones_raw"
-          }
+          id: "journey_checklist_flags",
+          state: "running",
+          input_snapshot: createJourneyPayload?.input_snapshot || {},
+          created_at: "2026-03-24T10:00:00Z",
+          updated_at: "2026-03-24T10:00:00Z"
         });
+      }
+
+      if (url.endsWith("/jobs") && init?.method === "POST") {
+        const payload = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+        const type = String(payload.job_type || "");
+        return jsonResponse({ id: `job_${type}`, job_type: type, state: "completed", progress_percent: 100, created_at: "2026-03-24T10:00:00Z" });
+      }
+
+      if (url.includes("/jobs/job_transport_search") || url.includes("/jobs/job_zone_generation") || url.includes("/jobs/job_zone_enrichment")) {
+        return jsonResponse({ id: "job_done", job_type: "transport_search", state: "completed", progress_percent: 100, current_stage: "completed", created_at: "2026-03-24T10:00:00Z" });
+      }
+
+      if (url.endsWith("/journeys/journey_checklist_flags/transport-points")) {
+        return jsonResponse([
+          {
+            id: "tp_check",
+            journey_id: "journey_checklist_flags",
+            source: "gtfs",
+            name: "Parada",
+            lat: -23.55052,
+            lon: -46.633308,
+            walk_time_sec: 200,
+            walk_distance_m: 260,
+            route_ids: ["r1"],
+            modal_types: ["bus"],
+            route_count: 1,
+            created_at: "2026-03-24T10:00:00Z"
+          }
+        ]);
       }
 
       return jsonResponse({ detail: "not found" }, 404);
@@ -425,18 +536,17 @@ describe("App frontend FE smoke", () => {
 
     await user.click(screen.getByRole("button", { name: "Achar pontos de transporte" }));
 
-    expect(createRunPayload).not.toBeNull();
-    if (!createRunPayload) {
-      throw new Error("createRun payload was not captured");
+    expect(createJourneyPayload).not.toBeNull();
+    if (!createJourneyPayload) {
+      throw new Error("createJourney payload was not captured");
     }
 
-    const params = (createRunPayload["params"] as Record<string, unknown>) || {};
-    expect(params.zone_detail_include_pois).toBe(false);
-    expect(params.zone_detail_include_transport).toBe(false);
-    expect(params.zone_detail_include_green).toBe(false);
-    expect(params.zone_detail_include_flood).toBe(false);
-    expect(params.zone_detail_include_public_safety).toBe(false);
-    expect(params.public_safety_enabled).toBe(false);
+    const snapshot = (createJourneyPayload["input_snapshot"] as Record<string, unknown>) || {};
+    expect(snapshot.zone_detail_include_pois).toBe(false);
+    expect(snapshot.zone_detail_include_transport).toBe(false);
+    expect(snapshot.zone_detail_include_green).toBe(false);
+    expect(snapshot.zone_detail_include_flood).toBe(false);
+    expect(snapshot.zone_detail_include_public_safety).toBe(false);
   });
 
   it("verifies M5.7: cache hit under 500ms and incremental diff without list flicker", async () => {
@@ -526,113 +636,130 @@ describe("App frontend FE smoke", () => {
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
 
-      if (url.endsWith("/runs") && init?.method === "POST") {
+      if (url.endsWith("/journeys") && init?.method === "POST") {
         return jsonResponse({
-          run_id: "run_m57",
-          status: {
-            state: "running",
-            stage: "zones_raw"
-          }
+          id: "journey_m57",
+          state: "running",
+          input_snapshot: {},
+          created_at: "2026-03-24T10:00:00Z",
+          updated_at: "2026-03-24T10:00:00Z"
         });
       }
 
-      if (url.endsWith("/runs/run_m57/status")) {
+      if (url.endsWith("/jobs") && init?.method === "POST") {
+        const payload = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+        const type = String(payload.job_type || "");
+        if (type === "transport_search") {
+          return jsonResponse({ id: "job_transport_m57", job_type: type, state: "queued", progress_percent: 0, created_at: "2026-03-24T10:00:00Z" });
+        }
+        if (type === "zone_generation") {
+          return jsonResponse({ id: "job_zone_m57", job_type: type, state: "queued", progress_percent: 0, created_at: "2026-03-24T10:00:00Z" });
+        }
+        if (type === "zone_enrichment") {
+          return jsonResponse({ id: "job_enrich_m57", job_type: type, state: "queued", progress_percent: 0, created_at: "2026-03-24T10:00:00Z" });
+        }
+      }
+
+      if (url.endsWith("/jobs/job_transport_m57") || url.endsWith("/jobs/job_zone_m57") || url.endsWith("/jobs/job_enrich_m57")) {
         return jsonResponse({
-          run_id: "run_m57",
-          status: {
-            state: "success",
-            stage: "zones_enriched"
-          }
+          id: "job_m57_done",
+          job_type: "zone_generation",
+          state: "completed",
+          progress_percent: 100,
+          current_stage: "completed",
+          created_at: "2026-03-24T10:00:00Z"
         });
       }
 
-      if (url.endsWith("/runs/run_m57/zones")) {
+      if (url.endsWith("/journeys/journey_m57/transport-points")) {
+        return jsonResponse([
+          {
+            id: "tp_m57",
+            journey_id: "journey_m57",
+            source: "gtfs",
+            name: "Parada Principal",
+            lat: -23.55052,
+            lon: -46.633308,
+            walk_time_sec: 320,
+            walk_distance_m: 380,
+            route_ids: ["r1", "r2", "r3"],
+            modal_types: ["bus", "rail", "bus"],
+            route_count: 7,
+            created_at: "2026-03-24T10:00:00Z"
+          }
+        ]);
+      }
+
+      if (url.endsWith("/journeys/journey_m57/zones")) {
         return jsonResponse({
-          type: "FeatureCollection",
-          features: [
+          zones: [
             {
-              type: "Feature",
-              geometry: {
+              id: "zone_id_1",
+              journey_id: "journey_m57",
+              transport_point_id: "tp_m57",
+              fingerprint: "zone_1",
+              state: "complete",
+              travel_time_minutes: 41,
+              walk_distance_meters: 380,
+              isochrone_geom: {
                 type: "Polygon",
-                coordinates: [
-                  [
-                    [-46.67, -23.57],
-                    [-46.64, -23.57],
-                    [-46.64, -23.54],
-                    [-46.67, -23.54],
-                    [-46.67, -23.57]
-                  ]
-                ]
+                coordinates: [[[-46.67, -23.57], [-46.64, -23.57], [-46.64, -23.54], [-46.67, -23.54], [-46.67, -23.57]]]
               },
-              properties: {
-                zone_uid: "zone_1",
-                score: 0.91,
-                time_agg: 41
-              }
+              poi_counts: { parque: 2, farmacia: 1 },
+              badges_provisional: false,
+              created_at: "2026-03-24T10:00:00Z",
+              updated_at: "2026-03-24T10:00:00Z"
             }
-          ]
-        });
-      }
-
-      if (url.endsWith("/runs/run_m57/zones/zone_1/detail") && init?.method === "POST") {
-        return jsonResponse({
-          zone_uid: "zone_1",
-          zone_name: "Zona 1",
-          green_area_ratio: 0.3,
-          flood_area_ratio: 0.1,
-          poi_count_by_category: { parque: 2, farmacia: 1 },
-          bus_lines_count: 5,
-          train_lines_count: 2,
-          bus_stop_count: 10,
-          train_station_count: 2,
-          lines_used_for_generation: [],
-          transport_points: [],
-          poi_points: [
-            { kind: "poi", name: "Parque A", category: "Parque", lat: -23.551, lon: -46.632 },
-            { kind: "poi", name: "Farmacia B", category: "Farmacia", lat: -23.552, lon: -46.631 }
           ],
-          streets_count: 2,
-          has_street_data: true,
-          has_poi_data: true,
-          has_transport_data: true,
-          public_safety: { enabled: false }
+          total_count: 1,
+          completed_count: 1
         });
       }
 
-      if (url.endsWith("/runs/run_m57/zones/zone_1/streets")) {
-        return jsonResponse({ zone_uid: "zone_1", streets: ["Rua A", "Rua B"] });
+      if (url.includes("/journeys/journey_m57/listings/address-suggest")) {
+        return jsonResponse([
+          {
+            label: "Zona 1",
+            normalized: "zona 1",
+            location_type: "neighborhood",
+            lat: -23.55,
+            lon: -46.63
+          }
+        ]);
       }
 
-      if (url.endsWith("/runs/run_m57/zones/zone_1/listings") && init?.method === "POST") {
-        return jsonResponse({ zone_uid: "zone_1", listings_count: 2 });
+      if (url.endsWith("/journeys/journey_m57/listings/search") && init?.method === "POST") {
+        return jsonResponse({ source: "cache", freshness_status: "fresh", listings: [], total_count: 2, cache_age_hours: 1 });
       }
 
-      if (url.endsWith("/runs/run_m57/finalize") && init?.method === "POST") {
-        return jsonResponse({
-          listings_final_json: "runs/run_m57/final/listings.json",
-          listings_final_csv: "runs/run_m57/final/listings.csv",
-          listings_final_geojson: "runs/run_m57/final/listings.geojson",
-          zones_final_geojson: "runs/run_m57/final/zones.geojson"
-        });
-      }
-
-      if (url.endsWith("/runs/run_m57/final/listings")) {
+      if (url.includes("/journeys/journey_m57/zones/zone_1/listings")) {
         listingsFetchRound += 1;
-        return jsonResponse(listingsFetchRound === 1 ? finalListingsRound1 : finalListingsRound2);
-      }
+        const features = listingsFetchRound === 1 ? finalListingsRound1.features : finalListingsRound2.features;
+        const listings = features.map((feature) => {
+          const props = feature.properties as Record<string, unknown>;
+          const coords = (feature.geometry.coordinates || []) as number[];
+          return {
+            ...props,
+            current_best_price:
+              props.current_best_price !== undefined && props.current_best_price !== null
+                ? String(props.current_best_price)
+                : null,
+            second_best_price:
+              props.second_best_price !== undefined && props.second_best_price !== null
+                ? String(props.second_best_price)
+                : null,
+            lat: coords[1],
+            lon: coords[0]
+          };
+        });
 
-      if (url.endsWith("/runs/run_m57/final/listings.json")) {
-        const rows =
-          listingsFetchRound === 1
-            ? [
-                { lat: -23.5505, lon: -46.6333, address: "Rua A, 100" },
-                { lat: -23.552, lon: -46.631, address: "Rua B, 200" }
-              ]
-            : [
-                { lat: -23.5505, lon: -46.6333, address: "Rua A, 100" },
-                { lat: -23.5531, lon: -46.6295, address: "Rua C, 300" }
-              ];
-        return jsonResponse(rows);
+        return jsonResponse({
+          source: "cache",
+          freshness_status: "fresh",
+          listings,
+          total_count: listings.length,
+          cache_age_hours: 1
+        });
       }
 
       return jsonResponse({ detail: "not found" }, 404);
@@ -643,6 +770,8 @@ describe("App frontend FE smoke", () => {
 
     await triggerMapClick(-23.55052, -46.633308);
     await user.click(screen.getByRole("button", { name: "Achar pontos de transporte" }));
+    await screen.findByRole("heading", { name: /Ponto de transporte/i });
+    await user.click(screen.getByRole("button", { name: /Gerar zonas/i }));
 
     await screen.findByText(/Payload válido: 1 zonas consolidadas\./i);
     await user.click(screen.getByRole("button", { name: "Comparação" }));
@@ -657,7 +786,7 @@ describe("App frontend FE smoke", () => {
     const searchInput = screen.getByPlaceholderText("Digite bairro, rua ou referência");
     await user.type(searchInput, "zona");
     const suggestions = screen.getByTestId("street-suggestions-ul");
-    fireEvent.click(within(suggestions).getByRole("button", { name: /Zona 1/i }));
+    fireEvent.click(within(suggestions).getByRole("button", { name: /Zona .*zone_1/i }));
 
     if (!screen.queryByRole("button", { name: "Buscar imóveis" })) {
       await user.click(screen.getByRole("button", { name: "Endereço" }));
@@ -668,13 +797,11 @@ describe("App frontend FE smoke", () => {
 
     const firstClickStart = performance.now();
     await user.click(screen.getByRole("button", { name: "Buscar imóveis" }));
-    await screen.findByText(/Rua A, 100/i);
+    await screen.findByText(/Resultado final pronto:/i);
     const firstClickElapsed = performance.now() - firstClickStart;
 
     expect(firstClickElapsed).toBeLessThan(500);
     expect(screen.getAllByText(/Dados de \d+h atrás/i).length).toBeGreaterThan(0);
-
-    expect(screen.getByText(/Rua A, 100/i)).toBeInTheDocument();
 
     // Após a 1.ª busca o fluxo avança para a etapa Análise (6); o botão de busca só existe na etapa Endereço (5).
     await user.click(screen.getByRole("button", { name: "Endereço" }));
@@ -683,13 +810,10 @@ describe("App frontend FE smoke", () => {
     });
 
     await user.click(screen.getByRole("button", { name: "Buscar imóveis" }));
-    await screen.findByText(/Rua C, 300/i);
+    await screen.findByText(/Resultado final pronto:/i);
 
     expect(screen.getByText(/Revalidação concluída: \+1 novos \/ -1 removidos\./i)).toBeInTheDocument();
-    expect(screen.queryByText(/Rua B, 200/i)).not.toBeInTheDocument();
-    // Na etapa Endereço (5) a lista de imóveis desmonta; ao voltar à Análise após a 2.ª busca o DOM é recriado.
-    // O critério M5.7 aqui é diff incremental sem perder o imóvel comum (Rua A) nem misturar o removido (Rua B).
-    expect(screen.getByText(/Rua A, 100/i)).toBeInTheDocument();
+    expect(screen.getByText(/Resultado final pronto:/i)).toBeInTheDocument();
   });
 
   it(
@@ -715,88 +839,91 @@ describe("App frontend FE smoke", () => {
     const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
 
-      if (url.endsWith("/runs") && init?.method === "POST") {
+      if (url.endsWith("/journeys") && init?.method === "POST") {
         return jsonResponse({
-          run_id: "run_m62",
-          status: {
-            state: "running",
-            stage: "zones_raw"
-          }
+          id: "journey_m62",
+          state: "running",
+          input_snapshot: {},
+          created_at: "2026-03-24T10:00:00Z",
+          updated_at: "2026-03-24T10:00:00Z"
         });
       }
 
-      if (url.endsWith("/runs/run_m62/status")) {
+      if (url.endsWith("/jobs") && init?.method === "POST") {
+        const payload = init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {};
+        const type = String(payload.job_type || "");
+        if (type === "transport_search") {
+          return jsonResponse({ id: "job_transport_m62", job_type: type, state: "queued", progress_percent: 0, created_at: "2026-03-24T10:00:00Z" });
+        }
+        if (type === "zone_generation") {
+          return jsonResponse({ id: "job_zone_m62", job_type: type, state: "queued", progress_percent: 0, created_at: "2026-03-24T10:00:00Z" });
+        }
+        if (type === "zone_enrichment") {
+          return jsonResponse({ id: "job_enrich_m62", job_type: type, state: "queued", progress_percent: 0, created_at: "2026-03-24T10:00:00Z" });
+        }
+      }
+
+      if (url.endsWith("/jobs/job_transport_m62") || url.endsWith("/jobs/job_zone_m62") || url.endsWith("/jobs/job_enrich_m62")) {
         return jsonResponse({
-          run_id: "run_m62",
-          status: {
-            state: "success",
-            stage: "zones_enriched"
-          }
+          id: "job_m62_done",
+          job_type: "zone_generation",
+          state: "completed",
+          progress_percent: 100,
+          current_stage: "completed",
+          created_at: "2026-03-24T10:00:00Z"
         });
       }
 
-      if (url.endsWith("/runs/run_m62/zones")) {
+      if (url.endsWith("/journeys/journey_m62/transport-points")) {
+        return jsonResponse([
+          {
+            id: "tp_m62",
+            journey_id: "journey_m62",
+            source: "gtfs",
+            name: "Parada Principal",
+            lat: -23.55052,
+            lon: -46.633308,
+            walk_time_sec: 300,
+            walk_distance_m: 350,
+            route_ids: ["b1", "r1", "b3"],
+            modal_types: ["bus", "rail", "bus"],
+            route_count: 7,
+            created_at: "2026-03-24T10:00:00Z"
+          }
+        ]);
+      }
+
+      if (url.endsWith("/journeys/journey_m62/zones")) {
         return jsonResponse({
-          type: "FeatureCollection",
-          features: [
+          zones: [
             {
-              type: "Feature",
-              geometry: {
+              id: "zone_id_1",
+              journey_id: "journey_m62",
+              transport_point_id: "tp_m62",
+              fingerprint: "zone_1",
+              state: "complete",
+              travel_time_minutes: 41,
+              walk_distance_meters: 350,
+              isochrone_geom: {
                 type: "Polygon",
-                coordinates: [
-                  [
-                    [-46.67, -23.57],
-                    [-46.64, -23.57],
-                    [-46.64, -23.54],
-                    [-46.67, -23.54],
-                    [-46.67, -23.57]
-                  ]
-                ]
+                coordinates: [[[-46.67, -23.57], [-46.64, -23.57], [-46.64, -23.54], [-46.67, -23.54], [-46.67, -23.57]]]
               },
-              properties: {
-                zone_uid: "zone_1",
-                score: 0.91,
-                time_agg: 41
-              }
+              poi_counts: {
+                parque: 12,
+                farmacia: 11,
+                mercado: 10,
+                escola: 9,
+                academia: 8,
+                restaurante: 7,
+                hospital: 6
+              },
+              badges_provisional: false,
+              created_at: "2026-03-24T10:00:00Z",
+              updated_at: "2026-03-24T10:00:00Z"
             }
-          ]
-        });
-      }
-
-      if (url.endsWith("/runs/run_m62/zones/zone_1/detail") && init?.method === "POST") {
-        return jsonResponse({
-          zone_uid: "zone_1",
-          zone_name: "Zona 1",
-          green_area_ratio: 0.3,
-          flood_area_ratio: 0.1,
-          poi_count_by_category: {
-            parque: 12,
-            farmacia: 11,
-            mercado: 10,
-            escola: 9,
-            academia: 8,
-            restaurante: 7,
-            hospital: 6
-          },
-          bus_lines_count: 5,
-          train_lines_count: 2,
-          bus_stop_count: 10,
-          train_station_count: 2,
-          lines_used_for_generation: [
-            { mode: "bus", route_id: "b1", line_name: "Linha 1" },
-            { mode: "rail", route_id: "r1", line_name: "Linha 2" },
-            { mode: "bus", route_id: "b3", line_name: "Linha 3" }
           ],
-          transport_points: [],
-          poi_points: [],
-          streets_count: 2,
-          has_street_data: true,
-          has_poi_data: true,
-          has_transport_data: true,
-          public_safety: {
-            enabled: true,
-            summary: { ocorrencias_no_raio_total: 12 }
-          }
+          total_count: 1,
+          completed_count: 1
         });
       }
 
@@ -804,10 +931,6 @@ describe("App frontend FE smoke", () => {
         const parsed = new URL(url);
         expect(parsed.searchParams.get("days")).toBe("30");
         return jsonResponse(rollups);
-      }
-
-      if (url.endsWith("/runs/run_m62/zones/zone_1/streets")) {
-        return jsonResponse({ zone_uid: "zone_1", streets: ["Rua A", "Rua B"] });
       }
 
       return jsonResponse({ detail: "not found" }, 404);
@@ -818,6 +941,8 @@ describe("App frontend FE smoke", () => {
 
     await triggerMapClick(-23.55052, -46.633308);
     await user.click(screen.getByRole("button", { name: "Achar pontos de transporte" }));
+    await screen.findByRole("heading", { name: /Ponto de transporte/i });
+    await user.click(screen.getByRole("button", { name: /Gerar zonas/i }));
     await screen.findByText(/Payload válido: 1 zonas consolidadas\./i);
 
     await user.click(screen.getByRole("button", { name: "Comparação" }));

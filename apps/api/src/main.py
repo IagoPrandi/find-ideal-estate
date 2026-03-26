@@ -6,6 +6,7 @@ from api.routes.health import router as health_router
 from api.routes.jobs import router as jobs_router
 from api.routes.journeys import router as journeys_router
 from api.routes.listings import router as listings_router
+from api.routes.transport import router as transport_router
 from core.config import ConfigurationError, get_settings
 from core.container import AppContainer, reset_container, set_container
 from core.db import close_db, init_db
@@ -52,14 +53,28 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="Find Ideal Estate API", version="0.1.0", lifespan=lifespan)
 app.middleware("http")(request_id_middleware)
+
+# CORS must allow credentials because frontend uses cookie-backed anonymous sessions.
+_cors_origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:4173",
+    "http://127.0.0.1:4173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
+    allow_origin_regex=r"https://.*\.vercel\.app",
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 app.include_router(health_router)
 app.include_router(geocode_router)
+app.include_router(transport_router)
 app.include_router(journeys_router)
 app.include_router(jobs_router)
 app.include_router(listings_router)

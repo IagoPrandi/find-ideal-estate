@@ -28,8 +28,9 @@ export function ProgressTracker({
   onTogglePanelMinimized
 }: Props) {
   return (
-    <div className="pointer-events-auto flex shrink-0 items-center justify-between rounded-2xl border border-slate-200 bg-white/95 p-2.5 shadow-md backdrop-blur-md">
-      <div className="no-scrollbar flex flex-1 items-center gap-1 overflow-x-auto px-1">
+    <div className="gem-shell pointer-events-auto shrink-0 p-2.5">
+      <div className="flex items-center justify-between gap-3">
+        <div className="no-scrollbar flex flex-1 items-center gap-1 overflow-x-auto px-1">
         {steps.map((step, i) => {
           const StepIcon = step.Icon;
           const locked = isStepLocked(step.id);
@@ -41,37 +42,38 @@ export function ProgressTracker({
                 type="button"
                 disabled={locked}
                 onClick={() => onNavigateToStep(step.id)}
-                aria-label={step.title}
+                aria-label={`Etapa ${step.id}: ${step.title}`}
                 title={step.title}
-                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full transition-colors ${
+                className={`flex h-9 w-9 items-center justify-center rounded-full transition-colors ${
                   isCurrent
                     ? "bg-pastel-violet-500 text-white shadow-md"
                     : isPast
-                      ? "bg-pastel-violet-100 text-pastel-violet-600 hover:bg-pastel-violet-200"
+                      ? "bg-pastel-violet-100 text-pastel-violet-700 hover:bg-pastel-violet-200"
                       : locked
                         ? "cursor-not-allowed bg-slate-100 text-slate-400"
-                        : "bg-slate-100 text-slate-500"
+                        : "bg-slate-100 text-slate-500 hover:bg-slate-200"
                 }`}
               >
                 <StepIcon className="h-4 w-4" aria-hidden />
               </button>
               {i < steps.length - 1 ? (
-                <div
-                  className={`mx-1 h-0.5 w-3 rounded-full sm:w-4 ${isPast ? "bg-pastel-violet-300" : "bg-slate-200"}`}
-                />
+                <div className={`mx-1 h-[2px] w-3 sm:w-4 rounded-full ${step.id < activeStep ? "bg-pastel-violet-300" : "bg-slate-200"}`} />
               ) : null}
             </div>
           );
         })}
+
+        </div>
+
+        <button
+          type="button"
+          onClick={onTogglePanelMinimized}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-slate-100 bg-white text-slate-500 transition-colors hover:bg-pastel-violet-50 hover:text-pastel-violet-600"
+          title={isPanelMinimized ? "Expandir painel" : "Recolher painel"}
+        >
+          {isPanelMinimized ? <ChevronDown size={20} /> : <ChevronUp size={20} />}
+        </button>
       </div>
-      <button
-        type="button"
-        onClick={onTogglePanelMinimized}
-        className="ml-3 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-100 text-slate-500 transition-colors hover:bg-pastel-violet-50 hover:text-pastel-violet-600"
-        title={isPanelMinimized ? "Expandir painel" : "Minimizar painel"}
-      >
-        {isPanelMinimized ? <ChevronDown size={22} /> : <ChevronUp size={22} />}
-      </button>
     </div>
   );
 }

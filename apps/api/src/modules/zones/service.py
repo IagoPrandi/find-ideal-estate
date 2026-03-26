@@ -3,14 +3,18 @@ from __future__ import annotations
 import hashlib
 import json
 from dataclasses import dataclass
+import logging
+import math
 from typing import Any
 from uuid import UUID
 
 from core.db import get_engine
 from modules.transport import OTPAdapter, ValhallaAdapter
 from modules.transport.valhalla_adapter import GeoPoint
+from modules.transport.valhalla_adapter import ValhallaCommunicationError
 from sqlalchemy import text
 
+logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class ZoneGenerationOutcome:
@@ -53,8 +57,9 @@ def _extract_zone_config(input_snapshot: dict[str, Any] | None) -> tuple[str, in
         modal = "walking"
 
     raw_max_time = (
-        input_snapshot.get("max_time_minutes")
+        input_snapshot.get("max_travel_time_minutes")
         or input_snapshot.get("max_travel_time_min")
+        or input_snapshot.get("max_time_minutes")
         or input_snapshot.get("time_max_minutes")
     )
     if isinstance(raw_max_time, (int, float)) and raw_max_time > 0:
@@ -101,6 +106,18 @@ def _extract_isochrone_geometry(isochrone_geojson: dict[str, Any]) -> dict[str, 
         return isochrone_geojson
 
     raise ValueError("Valhalla isochrone response has no valid geometry")
+
+
+def _circle_polygon(lat: float, lon: float, radius_m: float, n_points: int = 36) -> dict[str, Any]:
+    """Approximate circle polygon when Valhalla is unavailable."""
+    coords: list[list[float]] = []
+    lat_r = math.radians(lat)
+    for i in range(n_points + 1):
+        angle = math.radians(i * 360 / n_points)
+        d_lat = (radius_m / 111_320) * math.cos(angle)
+        d_lon = (radius_m / (111_320 * max(math.cos(lat_r), 1e-6))) * math.sin(angle)
+        coords.append([lon + d_lon, lat + d_lat])
+    return {"type": "Polygon", "coordinates": [coords]}
 
 
 class ZoneService:
@@ -238,13 +255,17 @@ class ZoneService:
                     {"fingerprint": fingerprint},
                 )
 
-                # Generate isochrone from Valhalla
-                isochrone_geojson = await self._valhalla_adapter.isochrone(
-                    origin=GeoPoint(lat=float(lat), lon=float(lon)),
-                    costing=_modal_to_valhalla_costing(modal),
-                    contours_minutes=[max_time_minutes],
-                )
-                geometry = _extract_isochrone_geometry(isochrone_geojson)
+                # Generate isochrone (circle fallback when Valhalla unavailable)
+                try:
+                    isochrone_geojson = await self._valhalla_adapter.isochrone(
+                        origin=GeoPoint(lat=float(lat), lon=float(lon)),
+                        costing=_modal_to_valhalla_costing(modal),
+                        contours_minutes=[max_time_minutes],
+                    )
+                    geometry = _extract_isochrone_geometry(isochrone_geojson)
+                except (ValhallaCommunicationError, ValueError) as exc:
+                    logger.warning("Valhalla unavailable, using circle fallback: %s", exc)
+                    geometry = _circle_polygon(float(lat), float(lon), float(radius_meters))
 
                 # Insert zone
                 insert_result = await conn.execute(

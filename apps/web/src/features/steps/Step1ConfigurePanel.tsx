@@ -1,6 +1,25 @@
 import type { Dispatch, SetStateAction } from "react";
-import { ArrowRight, Bus, Car, Droplets, Footprints, Lock, MapPin, Search, ShieldAlert, Trees } from "lucide-react";
-import { INTEREST_CATEGORIES, ZONE_INFO_LABELS, ZONE_RADIUS_MAX_M, ZONE_RADIUS_MIN_M, ZONE_RADIUS_STEP_M, clampZoneRadius, type ZoneInfoKey } from "../../domain/wizardConstants";
+import {
+  ArrowRight,
+  Bus,
+  Car,
+  Droplets,
+  Footprints,
+  Lock,
+  MapPin,
+  Search,
+  ShieldAlert,
+  Trees
+} from "lucide-react";
+import {
+  INTEREST_CATEGORIES,
+  ZONE_INFO_LABELS,
+  ZONE_RADIUS_MAX_M,
+  ZONE_RADIUS_MIN_M,
+  ZONE_RADIUS_STEP_M,
+  clampZoneRadius,
+  type ZoneInfoKey
+} from "../../domain/wizardConstants";
 import type { InteractionMode } from "../../components/map";
 import type { InterestPoint, PropertyMode, ReferencePoint } from "./types";
 
@@ -70,133 +89,158 @@ export function Step1ConfigurePanel(props: Step1ConfigurePanelProps) {
 
   return (
     <div className={visible ? "block" : "hidden"}>
-      <div className="mb-5 border-b border-slate-100 pb-4">
-        <h2 className="text-xl font-semibold tracking-tight text-slate-800">Configurar Busca</h2>
-        <p className="mt-1 text-sm text-slate-500">Defina o seu perfil de deslocacao.</p>
+      <div className="mb-5 rounded-[24px] border border-slate-200/80 bg-gradient-to-br from-white via-[#fcfbff] to-[#f3f0ff] p-5 shadow-sm">
+        <p className="gem-eyebrow">Etapa 1</p>
+        <h2 className="mt-1 text-2xl font-extrabold tracking-tight text-slate-900">Configurar jornada de decisão</h2>
+        <p className="mt-2 text-sm leading-relaxed text-slate-500">
+          O mapa é o plano principal. Este painel define o ponto de referência, o perfil de deslocamento e as bases urbanas
+          que serão usadas nas etapas seguintes.
+        </p>
       </div>
 
       <div className="space-y-4">
-        <section className="rounded-xl border border-slate-200 bg-white p-4 text-sm shadow-sm">
-          <label className="mb-2 block text-sm font-medium text-slate-700">Ponto de Referencia (Trabalho/Escola)</label>
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input
-              readOnly
-              value={
-                primaryPoint
-                  ? `${primaryPoint.name} (${primaryPoint.lat.toFixed(5)}, ${primaryPoint.lon.toFixed(5)})`
-                  : "Clique no mapa em \"Definir principal\""
-              }
-              className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-3 text-sm text-slate-700"
-            />
+        <section className="gem-panel-section">
+          <div className="gem-panel-header">
+            <p className="gem-eyebrow">Referência principal</p>
+            <h3 className="gem-title mt-1">Onde a análise começa</h3>
+            <p className="gem-subtitle mt-1">Use trabalho, escola ou qualquer ponto que organize a rotina de deslocamento.</p>
           </div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => setInteractionMode("primary")}
-              className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-pastel-violet-300 hover:bg-pastel-violet-50"
-            >
-              Definir no mapa
-            </button>
-            {primaryPoint ? (
-              <button
-                type="button"
-                onClick={removePrimaryPoint}
-                className="rounded-lg border border-danger/40 px-3 py-1.5 text-xs font-semibold text-danger"
-              >
-                Remover
+          <div className="gem-panel-body space-y-3 text-sm">
+            <label className="block">
+              <span className="mb-2 flex items-center gap-2 text-sm font-semibold text-slate-700">
+                <MapPin className="h-4 w-4 text-pastel-violet-600" /> Ponto de referência
+              </span>
+              <div className="relative">
+                <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+                <input
+                  readOnly
+                  value={
+                    primaryPoint
+                      ? `${primaryPoint.name} (${primaryPoint.lat.toFixed(5)}, ${primaryPoint.lon.toFixed(5)})`
+                      : 'Clique no mapa em "Definir principal"'
+                  }
+                  className="gem-input pl-10"
+                />
+              </div>
+            </label>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={() => setInteractionMode("primary")} className="gem-secondary-button">
+                Definir no mapa
               </button>
-            ) : null}
+              {primaryPoint ? (
+                <button
+                  type="button"
+                  onClick={removePrimaryPoint}
+                  className="inline-flex items-center justify-center gap-2 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700"
+                >
+                  Remover ponto
+                </button>
+              ) : null}
+            </div>
           </div>
         </section>
 
-        <section className="rounded-xl border border-slate-200 bg-white p-4 text-sm shadow-sm">
-          <div className="inline-flex w-full rounded-xl bg-slate-100 p-1">
-            <button
-              type="button"
-              onClick={() => setPropertyMode("rent")}
-              className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium transition ${
-                propertyMode === "rent" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
-              }`}
-            >
-              Aluguel
-            </button>
-            <button
-              type="button"
-              onClick={() => setPropertyMode("buy")}
-              className={`flex-1 rounded-lg px-4 py-2 text-sm font-medium transition ${
-                propertyMode === "buy" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
-              }`}
-            >
-              Compra
-            </button>
+        <section className="gem-panel-section">
+          <div className="gem-panel-header">
+            <p className="gem-eyebrow">Perfil de busca</p>
+            <h3 className="gem-title mt-1">Modo do imóvel e deslocamento</h3>
+            <p className="gem-subtitle mt-1">As decisões das etapas seguintes usam estas definições como contrato da jornada.</p>
+          </div>
+          <div className="gem-panel-body space-y-4 text-sm">
+            <div className="rounded-2xl bg-slate-100 p-1.5">
+              <div className="grid grid-cols-2 gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setPropertyMode("rent")}
+                  className={`rounded-2xl px-4 py-3 text-sm font-bold transition ${
+                    propertyMode === "rent" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  Aluguel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPropertyMode("buy")}
+                  className={`rounded-2xl px-4 py-3 text-sm font-bold transition ${
+                    propertyMode === "buy" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  Compra
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <p className="mb-2 text-sm font-semibold text-slate-700">Modal considerado</p>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  className="rounded-2xl border border-pastel-violet-300 bg-pastel-violet-50 p-3 text-left text-pastel-violet-700"
+                >
+                  <Bus className="mb-2 h-5 w-5" />
+                  <p className="text-sm font-bold">Transporte público</p>
+                  <p className="mt-1 text-[11px] text-pastel-violet-700/80">Metrô, trem e ônibus elegíveis</p>
+                </button>
+                <button type="button" className="rounded-2xl border border-slate-200 bg-white p-3 text-left text-slate-600">
+                  <Footprints className="mb-2 h-5 w-5" />
+                  <p className="text-sm font-bold">A pé</p>
+                  <p className="mt-1 text-[11px] text-slate-500">Disponível só como referência visual</p>
+                </button>
+                <button
+                  type="button"
+                  disabled
+                  className="relative rounded-2xl border border-slate-100 bg-slate-50 p-3 text-left text-slate-400"
+                >
+                  <Lock className="absolute right-3 top-3 h-3.5 w-3.5" />
+                  <Car className="mb-2 h-5 w-5" />
+                  <p className="text-sm font-bold">Carro</p>
+                  <p className="mt-1 text-[11px] text-slate-400">Escopo futuro</p>
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+              <div className="gem-soft-card">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <label className="text-sm font-semibold text-slate-700">Tempo máximo de viagem</label>
+                  <span className="text-sm font-extrabold text-pastel-violet-700">{maxTravelTimeMin} min</span>
+                </div>
+                <input
+                  type="range"
+                  min={5}
+                  max={90}
+                  step={1}
+                  value={maxTravelTimeMin}
+                  onChange={(event) => setMaxTravelTimeMin(Math.max(1, Number(event.target.value) || 1))}
+                  className="h-2 w-full accent-pastel-violet-500"
+                />
+              </div>
+              <div className="gem-soft-card">
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <label className="text-sm font-semibold text-slate-700">Raio analítico da zona</label>
+                  <span className="text-sm font-extrabold text-pastel-violet-700">{zoneRadiusM} m</span>
+                </div>
+                <input
+                  type="range"
+                  min={ZONE_RADIUS_MIN_M}
+                  max={ZONE_RADIUS_MAX_M}
+                  step={ZONE_RADIUS_STEP_M}
+                  value={zoneRadiusM}
+                  onChange={(event) => setZoneRadiusM(clampZoneRadius(Number(event.target.value)))}
+                  className="h-2 w-full accent-pastel-violet-500"
+                />
+              </div>
+            </div>
           </div>
         </section>
 
-        <section className="rounded-xl border border-slate-200 bg-white p-4 text-sm shadow-sm">
-          <label className="mb-2 block text-sm font-medium text-slate-700">Como se pretende deslocar?</label>
-          <div className="grid grid-cols-3 gap-2">
-            <button
-              type="button"
-              className="flex flex-col items-center justify-center rounded-xl border border-pastel-violet-400 bg-pastel-violet-50 p-3 text-pastel-violet-600"
-            >
-              <Bus className="mb-1 h-5 w-5" />
-              <span className="text-xs font-medium">Publico</span>
-            </button>
-            <button
-              type="button"
-              className="flex flex-col items-center justify-center rounded-xl border border-slate-200 p-3 text-slate-600 hover:border-slate-300"
-            >
-              <Footprints className="mb-1 h-5 w-5" />
-              <span className="text-xs font-medium">A pe</span>
-            </button>
-            <button
-              type="button"
-              disabled
-              className="relative flex cursor-not-allowed flex-col items-center justify-center overflow-hidden rounded-xl border border-slate-100 bg-slate-50 p-3 text-slate-400"
-            >
-              <Lock className="absolute right-1 top-1 h-3 w-3" />
-              <Car className="mb-1 h-5 w-5" />
-              <span className="text-xs font-medium">Carro (Pro)</span>
-            </button>
+        <section className="gem-panel-section">
+          <div className="gem-panel-header">
+            <p className="gem-eyebrow">Enriquecimento</p>
+            <h3 className="gem-title mt-1">Quais bases entram na comparação</h3>
+            <p className="gem-subtitle mt-1">Sem score opaco: cada indicador urbano permanece explicável e separado.</p>
           </div>
-        </section>
-
-        <section className="rounded-xl border border-slate-200 bg-white p-4 text-sm shadow-sm">
-          <div className="mb-2 flex items-center justify-between">
-            <label className="text-sm font-medium text-slate-700">Tempo maximo de viagem</label>
-            <span className="text-sm font-bold text-pastel-violet-600">{maxTravelTimeMin} min</span>
-          </div>
-          <input
-            type="range"
-            min={5}
-            max={90}
-            step={1}
-            value={maxTravelTimeMin}
-            onChange={(event) => setMaxTravelTimeMin(Math.max(1, Number(event.target.value) || 1))}
-            className="h-2 w-full accent-pastel-violet-500"
-          />
-        </section>
-
-        <section className="rounded-xl border border-slate-200 bg-white p-4 text-sm shadow-sm">
-          <div className="mb-2 flex items-center justify-between">
-            <label className="text-sm font-medium text-slate-700">Raio da zona</label>
-            <span className="text-sm font-bold text-pastel-violet-600">{zoneRadiusM} m</span>
-          </div>
-          <input
-            type="range"
-            min={ZONE_RADIUS_MIN_M}
-            max={ZONE_RADIUS_MAX_M}
-            step={ZONE_RADIUS_STEP_M}
-            value={zoneRadiusM}
-            onChange={(event) => setZoneRadiusM(clampZoneRadius(Number(event.target.value)))}
-            className="h-2 w-full accent-pastel-violet-500"
-          />
-        </section>
-
-        <section className="rounded-xl border border-slate-200 bg-white p-4 text-sm shadow-sm">
-          <label className="mb-2 block text-sm font-medium text-slate-700">Analisar nas zonas (Enriquecimento)</label>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="gem-panel-body grid grid-cols-1 gap-3 sm:grid-cols-2">
             {(Object.keys(ZONE_INFO_LABELS) as ZoneInfoKey[]).map((key) => {
               const icon =
                 key === "publicSafety" ? (
@@ -211,7 +255,11 @@ export function Step1ConfigurePanel(props: Step1ConfigurePanelProps) {
               return (
                 <label
                   key={key}
-                  className="flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 p-2 text-xs text-slate-800 hover:bg-slate-50"
+                  className={`flex cursor-pointer items-start gap-3 rounded-2xl border p-3 transition ${
+                    zoneInfoSelection[key]
+                      ? "border-pastel-violet-200 bg-pastel-violet-50/70"
+                      : "border-slate-200 bg-white hover:bg-slate-50"
+                  }`}
                 >
                   <input
                     type="checkbox"
@@ -222,128 +270,136 @@ export function Step1ConfigurePanel(props: Step1ConfigurePanelProps) {
                         [key]: event.target.checked
                       }))
                     }
-                    className="h-4 w-4 accent-pastel-violet-500"
+                    className="mt-0.5 h-4 w-4 accent-pastel-violet-500"
                   />
-                  <span className="text-slate-500">{icon}</span>
-                  <span>{ZONE_INFO_LABELS[key]}</span>
+                  <span className="mt-0.5 text-pastel-violet-600">{icon}</span>
+                  <span>
+                    <span className="block text-sm font-semibold text-slate-900">{ZONE_INFO_LABELS[key]}</span>
+                    <span className="block text-[11px] text-slate-500">Inclui esse eixo no detalhamento e no dashboard.</span>
+                  </span>
                 </label>
               );
             })}
           </div>
         </section>
 
-        <section className="rounded-xl border border-slate-200 bg-white p-4 text-sm shadow-sm">
-          <div className="flex items-center justify-between gap-2">
-            <h3 className="text-sm font-semibold text-slate-800">Interesses opcionais</h3>
-            <button
-              type="button"
-              onClick={() => setIsOptionalInterestsExpanded((current) => !current)}
-              className="rounded-xl border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 transition hover:border-pastel-violet-300 hover:bg-pastel-violet-50"
-            >
-              {isOptionalInterestsExpanded ? "Minimizar" : "Adicionar interesse"}
-            </button>
-          </div>
-          {isOptionalInterestsExpanded ? (
-            <div className="mt-2 space-y-2">
-              <label className="block">
-                <span className="mb-1 block text-xs text-slate-500">Categoria</span>
-                <select
-                  value={interestCategory}
-                  onChange={(event) => setInterestCategory(event.target.value)}
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800"
-                >
-                  {INTEREST_CATEGORIES.map((category) => (
-                    <option key={category} value={category}>
-                      {category}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block">
-                <span className="mb-1 block text-xs text-slate-500">Rotulo (opcional)</span>
-                <input
-                  value={interestLabel}
-                  onChange={(event) => setInterestLabel(event.target.value)}
-                  placeholder="Ex.: Academia XYZ"
-                  className="w-full rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800"
-                />
-              </label>
+        <section className="gem-panel-section">
+          <div className="gem-panel-header">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="gem-eyebrow">Interesses opcionais</p>
+                <h3 className="gem-title mt-1">Pontos complementares do usuário</h3>
+              </div>
               <button
                 type="button"
-                onClick={() => setInteractionMode("interest")}
-                className="rounded-xl border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:border-pastel-violet-300 hover:bg-pastel-violet-50"
+                onClick={() => setIsOptionalInterestsExpanded((current) => !current)}
+                className="gem-secondary-button px-3 py-2 text-xs"
               >
-                Selecionar no mapa
+                {isOptionalInterestsExpanded ? "Recolher" : "Adicionar interesse"}
               </button>
             </div>
-          ) : (
-            <p className="mt-2 text-xs text-slate-500">Minimizado. Clique em "Adicionar interesse" para abrir.</p>
-          )}
+          </div>
+          <div className="gem-panel-body space-y-3 text-sm">
+            {isOptionalInterestsExpanded ? (
+              <div className="grid grid-cols-1 gap-3">
+                <label className="block">
+                  <span className="mb-1 block text-xs font-semibold text-slate-500">Categoria</span>
+                  <select value={interestCategory} onChange={(event) => setInterestCategory(event.target.value)} className="gem-select">
+                    {INTEREST_CATEGORIES.map((category) => (
+                      <option key={category} value={category}>
+                        {category}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-xs font-semibold text-slate-500">Rótulo opcional</span>
+                  <input
+                    value={interestLabel}
+                    onChange={(event) => setInterestLabel(event.target.value)}
+                    placeholder="Ex.: academia, escola, familiar"
+                    className="gem-input"
+                  />
+                </label>
+                <button type="button" onClick={() => setInteractionMode("interest")} className="gem-secondary-button">
+                  Selecionar interesse no mapa
+                </button>
+              </div>
+            ) : (
+              <p className="text-xs text-slate-500">Interesses não alteram a geração da zona. Servem apenas como camada complementar para leitura.</p>
+            )}
 
-          {interests.length > 0 ? (
-            <ul className="mt-3 space-y-2">
-              {interests.map((interest) => (
-                <li key={interest.id} className="rounded-lg border border-slate-200 px-2 py-2 text-xs text-slate-500">
-                  <div className="flex items-center justify-between gap-2">
+            {interests.length > 0 ? (
+              <ul className="space-y-2">
+                {interests.map((interest) => (
+                  <li key={interest.id} className="gem-soft-card flex items-start justify-between gap-3">
                     <div>
-                      <p className="font-semibold text-slate-800">{interest.label}</p>
-                      <p>
+                      <p className="text-sm font-bold text-slate-900">{interest.label}</p>
+                      <p className="text-xs text-slate-500">
                         {interest.category} · {interest.lat.toFixed(5)}, {interest.lon.toFixed(5)}
                       </p>
                     </div>
                     <button
                       type="button"
                       onClick={() => removeInterest(interest.id)}
-                      className="rounded border border-danger/40 px-2 py-1 font-semibold text-danger"
+                      className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700"
                     >
                       Remover
                     </button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          ) : null}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </div>
         </section>
 
-        <details className="rounded-xl border border-slate-200 bg-white p-4 text-sm shadow-sm">
-          <summary className="cursor-pointer text-xs font-semibold text-slate-700">Configuracoes avancadas de seed</summary>
-          <div className="mt-3 grid grid-cols-1 gap-3">
+        <details className="gem-panel-section overflow-hidden">
+          <summary className="cursor-pointer list-none px-5 py-4 text-sm font-bold text-slate-800">
+            Configurações avançadas de seed
+          </summary>
+          <div className="gem-panel-body grid grid-cols-1 gap-3 md:grid-cols-2">
             <label className="block">
-              <span className="mb-1 block text-xs text-slate-500">Distancia maxima seed onibus (m)</span>
+              <span className="mb-1 block text-xs font-semibold text-slate-500">Distância máxima seed ônibus (m)</span>
               <input
                 type="number"
                 min={50}
                 step={50}
                 value={seedBusSearchMaxDistM}
                 onChange={(event) => setSeedBusSearchMaxDistM(Math.max(50, Number(event.target.value) || 50))}
-                className="w-full rounded-xl border border-slate-200 px-2 py-1.5 text-xs text-slate-800"
+                className="gem-input"
               />
             </label>
             <label className="block">
-              <span className="mb-1 block text-xs text-slate-500">Distancia maxima seed trem/metro (m)</span>
+              <span className="mb-1 block text-xs font-semibold text-slate-500">Distância máxima seed trem/metrô (m)</span>
               <input
                 type="number"
                 min={100}
                 step={50}
                 value={seedRailSearchMaxDistM}
                 onChange={(event) => setSeedRailSearchMaxDistM(Math.max(100, Number(event.target.value) || 100))}
-                className="w-full rounded-xl border border-slate-200 px-2 py-1.5 text-xs text-slate-800"
+                className="gem-input"
               />
             </label>
           </div>
         </details>
 
-        <button
-          type="button"
-          onClick={onCreateRun}
-          disabled={!primaryPoint || isCreatingRun || isPolling}
-          className="w-full rounded-xl bg-pastel-violet-500 px-4 py-3.5 text-sm font-bold text-white shadow-lg shadow-pastel-violet-200 transition-colors hover:bg-pastel-violet-600 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <span className="inline-flex items-center gap-2">
-            Achar pontos de transporte
+        <div className="rounded-[24px] bg-slate-950 px-5 py-5 text-white shadow-2xl shadow-slate-950/20">
+          <p className="text-[10px] font-extrabold uppercase tracking-[0.24em] text-white/50">Próxima ação</p>
+          <h3 className="mt-1 text-lg font-extrabold tracking-tight">Encontrar transportes elegíveis</h3>
+          <p className="mt-2 text-sm leading-relaxed text-white/75">
+            A busca vai procurar pontos de ônibus, estações de trem e metrô próximos do ponto principal com o raio e tempo
+            definidos acima.
+          </p>
+          <button
+            type="button"
+            onClick={onCreateRun}
+            disabled={!primaryPoint || isCreatingRun || isPolling}
+            className="gem-primary-button mt-4 w-full justify-between bg-white text-slate-900 shadow-none hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <span>Encontrar pontos de transporte</span>
             <ArrowRight className="h-4 w-4" />
-          </span>
-        </button>
+          </button>
+        </div>
       </div>
     </div>
   );

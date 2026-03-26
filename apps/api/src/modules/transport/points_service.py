@@ -240,6 +240,8 @@ async def run_transport_search_for_job(job_id: UUID) -> int:
         )
         radius_m = _extract_radius_meters(input_snapshot)
         source_tokens = _source_filter_tokens(input_snapshot)
+        effective_radius_m = radius_m
+        used_relaxed_radius = False
 
         sql = _build_transport_search_sql(source_tokens)
         search_result = await conn.execute(
@@ -251,6 +253,22 @@ async def run_transport_search_for_job(job_id: UUID) -> int:
             },
         )
         rows = search_result.mappings().all()
+
+        if not rows:
+            # If strict radius finds nothing, expand search window once to avoid dead-end UX.
+            relaxed_radius_m = max(radius_m * 8, 5000)
+            relaxed_result = await conn.execute(
+                text(sql),
+                {
+                    "ref_lat": ref_lat,
+                    "ref_lon": ref_lon,
+                    "radius_m": relaxed_radius_m,
+                },
+            )
+            rows = relaxed_result.mappings().all()
+            if rows:
+                effective_radius_m = relaxed_radius_m
+                used_relaxed_radius = True
 
         await conn.execute(text("DELETE FROM transport_points WHERE journey_id = :journey_id"), {"journey_id": journey_id})
 
@@ -316,6 +334,8 @@ async def run_transport_search_for_job(job_id: UUID) -> int:
                     {
                         "transport_points_count": len(rows),
                         "source_filter": sorted(source_tokens),
+                        "radius_m": effective_radius_m,
+                        "used_relaxed_radius": used_relaxed_radius,
                     }
                 ),
             },

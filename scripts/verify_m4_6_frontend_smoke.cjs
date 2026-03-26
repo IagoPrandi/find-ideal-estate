@@ -1,6 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const { chromium } = require("playwright");
+const { chromium } = require("../apps/web/node_modules/playwright");
 
 const APP_URL = process.env.M4_6_APP_URL || "http://127.0.0.1:3000";
 const OUTPUT_DIR = path.join(process.cwd(), "runs", "m4_6_smoke");
@@ -9,9 +9,22 @@ function ensureDir(dir) {
   fs.mkdirSync(dir, { recursive: true });
 }
 
-async function fillPrimaryPoint(page) {
-  await page.locator('input[placeholder="-23.550520"]').first().fill("-23.550520");
-  await page.locator('input[placeholder="-46.633308"]').first().fill("-46.633308");
+/**
+ * Sets the primary point by clicking on the map at a safe coordinate
+ * (avoids the wizard panel area on the left at desktop widths).
+ */
+async function clickMapToSetPrimaryPoint(page) {
+  // The map is rendered via MapLibre GL (WebGL canvas). Wait for the canvas to be visible.
+  const canvas = page.locator('.maplibregl-canvas').first();
+  await canvas.waitFor({ state: 'visible', timeout: 20000 }).catch(() => null);
+  await page.waitForTimeout(800); // extra stabilisation after map tiles load
+
+  // interactionMode defaults to "primary", so a map click sets the primary point.
+  // Use page.mouse to fire a native pointer event on the canvas at a safe coordinate
+  // (desktop panel occupies ~360px on the left, so x=800 is safely in the map area).
+  await page.mouse.move(800, 420);
+  await page.mouse.click(800, 420);
+  await page.waitForTimeout(1200); // wait for React state update and re-render
 }
 
 async function maybeClick(buttonLocator) {
@@ -29,25 +42,26 @@ async function textOrNull(locator) {
   return (await locator.first().textContent())?.trim() || null;
 }
 
+/**
+ * Waits for transport points list items to appear in Step 2.
+ * Points now render as <li> elements inside the transport panel section.
+ */
 async function waitForTransportStage(page) {
-  const cards = page.locator(".transport-point-card");
-  const error = page.locator(".error-message");
-  const empty = page.locator(".empty-state");
-
+  // Transport points are rendered as list items with rounded-[22px] styling
+  const transportItems = page.locator('section').filter({ hasText: /Escolher o transporte elegível/i }).locator('li');
   const startedAt = Date.now();
   while (Date.now() - startedAt < 30000) {
-    if ((await cards.count()) > 0) {
+    if ((await transportItems.count()) > 0) {
       return "cards";
     }
-    if ((await error.count()) > 0) {
-      return "error";
-    }
-    if ((await empty.count()) > 0 && (await page.locator(".progress-card").count()) === 0) {
-      return "empty";
+    // Check if transport loading message became static (no results)
+    const loadingMsg = page.locator('p').filter({ hasText: /Carregando pontos de transporte/i });
+    if ((await loadingMsg.count()) === 0) {
+      const noResultsMsg = page.locator('p').filter({ hasText: /Gere zonas candidatas|Nenhum ponto/i });
+      if ((await noResultsMsg.count()) > 0) return "empty";
     }
     await page.waitForTimeout(500);
   }
-
   return "timeout";
 }
 
@@ -78,6 +92,8 @@ async function main() {
   };
 
   const browser = await chromium.launch({ headless: true });
+
+  // --- Desktop pass (1440×1100) ---
   const page = await browser.newPage({ viewport: { width: 1440, height: 1100 } });
 
   page.on("request", (request) => {
@@ -108,18 +124,86 @@ async function main() {
     }
   });
 
+  // --- Mobile position check (390×844, iPhone-style) ---
+  const mobilePage = await browser.newPage({ viewport: { width: 390, height: 844 } });
+
   try {
+    await mobilePage.goto(APP_URL, { waitUntil: "networkidle", timeout: 30000 });
+    // Capture mobile screenshot
+    const mobileScreenshotPath = path.join(OUTPUT_DIR, "ui_mobile_step1.png");
+    await mobilePage.screenshot({ path: mobileScreenshotPath });
+    evidence.stages.mobile_screenshot = mobileScreenshotPath;
+
+    // Probe shell BoundingClientRect to verify bottom-docking
+    const shellRect = await mobilePage.locator(".wizard-shell").first().boundingBox();
+    evidence.stages.mobile_shell_rect = shellRect;
+    if (shellRect) {
+      const viewportHeight = 844;
+      // Bottom of shell should be near bottom of viewport (within 32px of bottom)
+      const bottomEdge = shellRect.y + shellRect.height;
+      evidence.stages.mobile_bottom_docked = bottomEdge >= viewportHeight - 32;
+    } else {
+      evidence.stages.mobile_bottom_docked = false;
+    }
+  } finally {
+    await mobilePage.close();
+  }
+
+  try {
+    // --- Step 1: navigate and set primary point ---
     await page.goto(APP_URL, { waitUntil: "networkidle", timeout: 30000 });
-    evidence.stages.initial_heading = await textOrNull(page.getByRole("heading", { name: /Etapa 1/i }));
 
-    await fillPrimaryPoint(page);
-    await page.getByRole("button", { name: "Criar jornada e continuar" }).click();
+    const desktopStep1Path = path.join(OUTPUT_DIR, "ui_desktop_step1.png");
+    await page.screenshot({ path: desktopStep1Path });
+    evidence.stages.desktop_step1_screenshot = desktopStep1Path;
 
-    await page.waitForTimeout(1000);
+    // Step 1 heading (eyebrow + h2)
+    evidence.stages.initial_heading = await textOrNull(page.locator("h2").filter({ hasText: /Configurar jornada/i }));
+    evidence.stages.step1_eyebrow_visible = await page.locator(".gem-eyebrow").first().isVisible().catch(() => false);
 
-    const etapa2Heading = page.getByRole("heading", { name: /Etapa 2: Seleção de transporte/i });
-    const etapa3Heading = page.getByRole("heading", { name: /Etapa 3: Geracao de zonas/i });
-    const etapa4Heading = page.getByRole("heading", { name: /Etapa 4: Comparação de zonas/i });
+    // Set primary point by clicking on map (interactionMode defaults to "primary")
+    await clickMapToSetPrimaryPoint(page);
+
+    // Take screenshot after primary point set
+    const desktopAfterClickPath = path.join(OUTPUT_DIR, "ui_desktop_step1_clicked.png");
+    await page.screenshot({ path: desktopAfterClickPath });
+    evidence.stages.desktop_step1_after_click_screenshot = desktopAfterClickPath;
+
+    // Check primary point input is now populated (inputs use .inputValue(), not textContent)
+    const primaryInputValue = await page.locator('input[readonly]').first().inputValue().catch(() => '');
+    // When no point is selected the input shows hint text "Clique no mapa em..." – that is not a real point.
+    const isRealPoint = primaryInputValue.length > 0 && !primaryInputValue.includes('Clique no mapa');
+      console.error(`[DEBUG] primaryInputValue="${primaryInputValue}" isRealPoint=${isRealPoint}`);
+    evidence.stages.primary_point_set = isRealPoint;
+    evidence.stages.primary_point_value = primaryInputValue || null;
+
+    // Click "Encontrar pontos de transporte"
+    const createRunBtn = page.getByRole("button", { name: /Encontrar pontos de transporte/i });
+    evidence.stages.create_run_button_found = (await createRunBtn.count()) > 0;
+
+    if (evidence.stages.create_run_button_found) {
+      if (evidence.stages.primary_point_set) {
+        // Point was set — wait for button to become enabled, then click.
+        await createRunBtn.waitFor({ state: 'visible' });
+        await page.waitForTimeout(300);
+        await createRunBtn.click().catch(async () => {
+          // Button may still be disabled; attempt force click as last resort.
+          await createRunBtn.click({ force: true }).catch(() => {
+            evidence.stages.create_run_btn_click_failed = true;
+          });
+        });
+      } else {
+        evidence.stages.create_run_btn_click_failed = true;
+        evidence.stages.skipped_click_reason = "primary_point_not_set";
+      }
+      await page.waitForTimeout(1200);
+    }
+
+    // Step 2: transport panel
+    // Redesigned: h3 "Escolher o transporte elegível" inside a gem-panel-section
+    const etapa2Heading = page.locator("h3").filter({ hasText: /Escolher o transporte elegível/i });
+    const etapa3Heading = page.locator("h3").filter({ hasText: /Gerando zonas candidatas/i });
+    const etapa4Heading = page.locator("h3").filter({ hasText: /Detalhe urbano da zona/i });
 
     await etapa2Heading.waitFor({ state: "visible", timeout: 15000 }).catch(() => null);
 
@@ -128,37 +212,40 @@ async function main() {
     evidence.stages.etapa4_visible = await etapa4Heading.isVisible().catch(() => false);
 
     if (evidence.stages.etapa2_visible) {
+      // Screenshot at step 2
+      await page.screenshot({ path: path.join(OUTPUT_DIR, "ui_desktop_step2.png") });
+      evidence.stages.desktop_step2_screenshot = path.join(OUTPUT_DIR, "ui_desktop_step2.png");
+
       evidence.stages.transport_stage_resolution = await waitForTransportStage(page);
-      evidence.stages.progress_message = await textOrNull(page.locator(".progress-copy strong"));
-      evidence.stages.progress_percent_text = await textOrNull(page.locator(".progress-copy span"));
-      evidence.stages.etapa2_message = await textOrNull(page.locator(".empty-state, .error-message, .panel-intro, p"));
-      evidence.stages.transport_cards = await page.locator(".transport-point-card").count();
+
+      // Count transport point list items
+      const transportSection = page.locator("section").filter({ hasText: /Escolher o transporte elegível/i });
+      evidence.stages.transport_cards = await transportSection.locator("li").count();
+
+      // Status message text (gem-chip spans)
+      evidence.stages.etapa2_chips = await textOrNull(page.locator(".gem-chip").first());
       evidence.stages.generate_button_text = await textOrNull(page.getByRole("button", { name: /Gerar zonas/i }));
 
       if (evidence.stages.transport_cards > 0) {
-        await page.locator(".transport-point-card").first().click();
+        // Select the first transport point
+        await transportSection.locator("li").first().click();
         await maybeClick(page.getByRole("button", { name: /Gerar zonas/i }));
         await page.waitForTimeout(4000);
 
         evidence.stages.etapa3_visible_after_click = await etapa3Heading.isVisible().catch(() => false);
-        evidence.stages.progress_text = await textOrNull(page.locator(".progress-percent"));
-        evidence.stages.zone_items = await page.locator(".zone-item").count();
+        evidence.stages.zone_generation_progress_bar = await page.locator(".gem-panel-section").filter({ hasText: /Gerando zonas candidatas/i }).locator("[class*='bg-pastel-violet']").count() > 0;
         evidence.stages.stage3_runtime_detected = Boolean(
           evidence.stages.etapa3_visible_after_click ||
-            evidence.stages.progress_text ||
-            evidence.stages.zone_items > 0 ||
+            evidence.stages.zone_generation_progress_bar ||
             hasZoneGenerationRequest(evidence.requests) ||
             hasZoneFetch(evidence.requests),
         );
 
         if (evidence.stages.stage3_runtime_detected) {
           await page.waitForTimeout(5000);
-          evidence.stages.progress_text_after_wait = await textOrNull(page.locator(".progress-percent"));
-          evidence.stages.zone_items_after_wait = await page.locator(".zone-item, .zone-list-item").count();
-          evidence.stages.cancel_visible = await page.getByRole("button", { name: /Cancelar geracao|Cancelando/i }).isVisible().catch(() => false);
+          const continuarBtn = page.getByRole("button", { name: /Continuar para comparação de zonas/i });
+          evidence.stages.continuar_btn_visible = await continuarBtn.isVisible().catch(() => false);
           evidence.stages.etapa4_visible_after_wait = await etapa4Heading.isVisible().catch(() => false);
-          evidence.stages.search_cta_visible = await page.getByRole("button", { name: /Buscar imóveis nesta zona/i }).isVisible().catch(() => false);
-          evidence.stages.badges_provisional_visible = await page.getByText(/Badges calculados com dados parciais/i).isVisible().catch(() => false);
         }
       }
     }

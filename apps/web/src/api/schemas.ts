@@ -41,6 +41,76 @@ export const ZonesCollectionSchema = z.object({
   features: z.array(ZoneFeatureSchema)
 });
 
+// Backend: GET /journeys/{journey_id}/zones
+export const JourneyZoneReadSchema = z.object({
+  id: z.string(),
+  journey_id: z.string(),
+  transport_point_id: z.string().nullable().optional(),
+  fingerprint: z.string(),
+  state: z.string(),
+  travel_time_minutes: z.number().nullable().optional(),
+  walk_distance_meters: z.number().nullable().optional(),
+  isochrone_geom: z.any(),
+  green_area_m2: z.number().nullable().optional(),
+  flood_area_m2: z.number().nullable().optional(),
+  safety_incidents_count: z.number().nullable().optional(),
+  poi_counts: z.record(z.number()).nullable().optional(),
+  badges: z.any().nullable().optional(),
+  badges_provisional: z.any().nullable().optional(),
+  created_at: z.string().nullable().optional(),
+  updated_at: z.string().nullable().optional()
+});
+
+export const JourneyZonesListResponseSchema = z.object({
+  zones: z.array(JourneyZoneReadSchema),
+  total_count: z.number().optional(),
+  completed_count: z.number().optional()
+});
+
+// Backend: GET /journeys/{journey_id}/listings/address-suggest?zone_fingerprint=...&q=...
+export const SearchAddressSuggestionBackendSchema = z.object({
+  label: z.string(),
+  normalized: z.string(),
+  location_type: z.string(),
+  lat: z.number(),
+  lon: z.number()
+});
+
+// Backend: POST /journeys/{journey_id}/listings/search
+export const ListingCardReadBackendSchema = z.object({
+  // Campos principais retornados pelo listing scraper
+  property_id: z.string().nullable().optional(),
+  address_normalized: z.string().nullable().optional(),
+  area_m2: z.number().nullable().optional(),
+  bedrooms: z.number().nullable().optional(),
+  bathrooms: z.number().nullable().optional(),
+  parking: z.number().nullable().optional(),
+  usage_type: z.string().nullable().optional(),
+  platform: z.string().nullable().optional(),
+  platform_listing_id: z.string().nullable().optional(),
+  url: z.string().nullable().optional(),
+
+  // Preços atuais (o scraper pode retornar strings, ex: Decimal -> str)
+  current_best_price: z.string().nullable().optional(),
+  second_best_price: z.string().nullable().optional(),
+  duplication_badge: z.string().nullable().optional(),
+  observed_at: z.string().nullable().optional(),
+
+  // Mantém flexibilidade caso a API adicione campos no futuro
+  price: z.any().optional()
+}).passthrough();
+
+export const ListingsRequestResultBackendSchema = z.object({
+  source: z.string(),
+  job_id: z.string().nullable().optional(),
+  freshness_status: z.string().nullable().optional(),
+  upgrade_reason: z.string().nullable().optional(),
+  next_refresh_window: z.string().nullable().optional(),
+  listings: z.array(ListingCardReadBackendSchema).default([]),
+  total_count: z.number(),
+  cache_age_hours: z.number().nullable().optional()
+});
+
 export const ZoneDetailResponseSchema = z.object({
   zone_uid: z.string(),
   zone_name: z.string(),
@@ -157,8 +227,8 @@ export const TransportPointReadSchema = z.object({
   id: z.string(),
   journey_id: z.string(),
   source: z.string(),
-  external_id: z.string().optional(),
-  name: z.string().optional(),
+  external_id: z.string().nullish(),
+  name: z.string().nullish(),
   lat: z.number(),
   lon: z.number(),
   walk_time_sec: z.number(),
@@ -171,35 +241,35 @@ export const TransportPointReadSchema = z.object({
 
 export const JourneyReadSchema = z.object({
   id: z.string(),
-  user_id: z.string().optional(),
-  anonymous_session_id: z.string().optional(),
+  user_id: z.string().nullish(),
+  anonymous_session_id: z.string().nullish(),
   state: z.string(),
-  input_snapshot: z.record(z.unknown()).optional(),
-  selected_transport_point_id: z.string().optional(),
-  selected_zone_id: z.string().optional(),
-  selected_property_id: z.string().optional(),
-  last_completed_step: z.number().optional(),
-  secondary_reference_label: z.string().optional(),
-  secondary_reference_point: z.object({ lat: z.number(), lon: z.number() }).optional(),
+  input_snapshot: z.record(z.unknown()).nullish(),
+  selected_transport_point_id: z.string().nullish(),
+  selected_zone_id: z.string().nullish(),
+  selected_property_id: z.string().nullish(),
+  last_completed_step: z.number().nullish(),
+  secondary_reference_label: z.string().nullish(),
+  secondary_reference_point: z.object({ lat: z.number(), lon: z.number() }).nullish(),
   created_at: z.string(),
   updated_at: z.string(),
-  expires_at: z.string().optional()
+  expires_at: z.string().nullish()
 });
 
 export const JobReadSchema = z.object({
   id: z.string(),
-  journey_id: z.string().optional(),
+  journey_id: z.string().nullish(),
   job_type: z.string(),
   state: z.string(),
-  progress_percent: z.number(),
-  current_stage: z.string().optional(),
-  cancel_requested_at: z.string().optional(),
-  started_at: z.string().optional(),
-  finished_at: z.string().optional(),
-  worker_id: z.string().optional(),
-  result_ref: z.record(z.unknown()).optional(),
-  error_code: z.string().optional(),
-  error_message: z.string().optional(),
+  progress_percent: z.number().nullish().transform((v) => v ?? 0),
+  current_stage: z.string().nullish(),
+  cancel_requested_at: z.string().nullish(),
+  started_at: z.string().nullish(),
+  finished_at: z.string().nullish(),
+  worker_id: z.string().nullish(),
+  result_ref: z.record(z.unknown()).nullish(),
+  error_code: z.string().nullish(),
+  error_message: z.string().nullish(),
   created_at: z.string()
 });
 

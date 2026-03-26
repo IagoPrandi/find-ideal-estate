@@ -32,23 +32,25 @@ export function HelpModal({ open, onClose }: HelpModalProps) {
       aria-modal="true"
       aria-labelledby="help-modal-title"
     >
-      <div className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
-        <h2 id="help-modal-title" className="text-lg font-semibold text-slate-800">
-          Ajuda
+      <div className="w-full max-w-lg rounded-[28px] border border-white/70 bg-white/95 p-6 shadow-2xl">
+        <p className="gem-eyebrow">Ajuda rápida</p>
+        <h2 id="help-modal-title" className="mt-1 text-xl font-extrabold tracking-tight text-slate-900">
+          Fluxo guiado pelo PRD
         </h2>
-        <p className="mt-2 text-sm text-slate-500">
-          Selecione um ponto principal no mapa, ajuste o modo Alugar/Comprar e use “Gerar Zonas Candidatas” para iniciar o
-          run no backend.
+        <p className="mt-3 text-sm leading-relaxed text-slate-500">
+          Defina um ponto de referência no mapa, configure tempo e raio, encontre transportes elegíveis e siga a jornada até a
+          comparação final de imóveis e dashboard da zona.
         </p>
-        <p className="mt-3 text-sm text-slate-500">
-          Interesses são opcionais e não entram como seed de geração de zonas. O painel mostra o status de execução e as
-          ações do fluxo em 3 etapas.
-        </p>
+        <div className="mt-4 space-y-3 rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4 text-sm text-slate-600">
+          <p><strong className="text-slate-900">Etapa 1:</strong> ponto principal, critérios e enriquecimentos.</p>
+          <p><strong className="text-slate-900">Etapas 2 a 4:</strong> transporte, geração de zonas e detalhamento urbano.</p>
+          <p><strong className="text-slate-900">Etapas 5 e 6:</strong> busca, comparação e leitura analítica do mercado local.</p>
+        </div>
         <div className="mt-4 text-right">
           <button
             type="button"
             onClick={onClose}
-            className="rounded-xl bg-pastel-violet-500 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-pastel-violet-600"
+            className="gem-primary-button"
           >
             Fechar
           </button>

@@ -6,21 +6,33 @@ export type Step3GenerationHintProps = {
 
 export function Step3GenerationHint({ zonesReady, onContinueToCompare }: Step3GenerationHintProps) {
   return (
-    <section className="mt-4 rounded-xl border border-slate-200 bg-white p-4 text-sm shadow-sm">
-      <h3 className="text-sm font-semibold text-slate-800">Geração de zonas</h3>
-      <p className="mt-2 text-xs text-slate-500">
-        Acompanhe o progresso no bloco de estado acima. Quando as zonas aparecerem no mapa, avance para comparar e
-        escolher uma zona consolidada.
-      </p>
-      {zonesReady ? (
-        <button
-          type="button"
-          onClick={onContinueToCompare}
-          className="mt-4 w-full rounded-xl border border-slate-200 bg-pastel-violet-500 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-pastel-violet-600"
-        >
-          Continuar para comparação de zonas
-        </button>
-      ) : null}
+    <section className="gem-panel-section animate-[fadeIn_0.4s_ease-out] text-sm">
+      <div className="gem-panel-header">
+        <p className="gem-eyebrow">Etapa 3</p>
+        <h3 className="gem-title mt-1">Gerando zonas candidatas</h3>
+        <p className="gem-subtitle mt-1">
+          Acompanhe o progresso no bloco de estado acima. Quando as zonas aparecerem no mapa, avance para comparar e
+          escolher uma zona consolidada.
+        </p>
+      </div>
+      <div className="gem-panel-body space-y-4">
+        <div className="rounded-2xl border border-slate-200/80 bg-slate-50 px-3 py-3 text-xs text-slate-600">
+          <p className="font-semibold text-slate-800">Pipeline em execução</p>
+          <p className="mt-1">1. consolidar seed de transporte</p>
+          <p>2. calcular isócronas</p>
+          <p>3. enriquecer verde, alagamento, segurança e POIs</p>
+        </div>
+        <div className="h-2 w-full rounded-full bg-slate-100 overflow-hidden">
+          <div className={`h-2 rounded-full bg-pastel-violet-500 transition-all duration-700 ${zonesReady ? "w-full" : "w-2/3"}`} />
+        </div>
+        {zonesReady ? (
+          <button type="button" onClick={onContinueToCompare} className="gem-primary-button w-full">
+            Continuar para comparação de zonas
+          </button>
+        ) : (
+          <p className="text-xs text-slate-500">Aguarde a conclusão para liberar a comparação da etapa 4.</p>
+        )}
+      </div>
     </section>
   );
 }

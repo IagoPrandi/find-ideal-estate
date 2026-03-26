@@ -1,9 +1,8 @@
-import type { ListingsCollection, ZoneDetailResponse } from "../../api/schemas";
+import type { ZoneDetailResponse } from "../../api/schemas";
 import { haversineMeters } from "../../lib/geo";
 import { formatCurrencyBr, normalizeCategory, parseFiniteNumber } from "../../lib/listingFormat";
 import type { InterestPoint } from "../steps/types";
-
-export type ListingFeature = ListingsCollection["features"][number];
+import type { ListingFeature } from "../steps/step3Types";
 
 export function getListingKey(feature: ListingFeature, index: number): string {
   const props = feature.properties || {};
@@ -14,7 +13,10 @@ export function getListingKey(feature: ListingFeature, index: number): string {
   if (stableId) {
     return String(stableId);
   }
-  return `${index}_${feature.geometry.coordinates.join("_")}`;
+  if (feature.geometry?.coordinates?.length) {
+    return `${index}_${feature.geometry.coordinates.join("_")}`;
+  }
+  return `${index}_${JSON.stringify(props)}`;
 }
 
 export function resolveListingFeatureText(feature: ListingFeature): {
@@ -95,7 +97,7 @@ export function computeListingAnalytics(
   let poiCountWithinRadius = 0;
   const nearestPoiByCategory: Array<{ category: string; distanceM: number | null }> = [];
 
-  if (feature.geometry.type === "Point") {
+  if (feature.geometry?.type === "Point" && feature.geometry.coordinates) {
     const [lon, lat] = feature.geometry.coordinates;
     const categoriesPriority =
       interests.length > 0

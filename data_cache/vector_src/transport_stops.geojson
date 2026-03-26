@@ -1,0 +1,1 @@
+{"type": "FeatureCollection", "features": [{"type": "Feature", "geometry": {"type": "Point", "coordinates": [-46.6301, -23.5501]}, "properties": {"id": "S1", "name": "Stop One", "kind": "bus_stop"}}, {"type": "Feature", "geometry": {"type": "Point", "coordinates": [-46.6402, -23.5602]}, "properties": {"id": "S2", "name": "Stop Two", "kind": "bus_stop"}}]}

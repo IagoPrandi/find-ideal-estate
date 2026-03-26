@@ -21,7 +21,7 @@ for ($runAttempt = 1; $runAttempt -le $maxRunAttempts; $runAttempt++) {
     reference_points = @(
       @{
         name = "ref_0"
-        lat  = -23.52092538588677, 
+        lat  = -23.52092538588677
         lon  = -46.72715710892109
       }
     )

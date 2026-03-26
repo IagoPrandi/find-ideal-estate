@@ -1,4 +1,4 @@
-import type { ListingsCollection, PriceRollupRead, ZoneDetailResponse } from "../../api/schemas";
+import type { PriceRollupRead, ZoneDetailResponse } from "../../api/schemas";
 import type { ZoneInfoKey } from "../../domain/wizardConstants";
 import type {
   ListingSortMode,
@@ -8,7 +8,21 @@ import type {
   Step3MonthlyVariation
 } from "./types";
 
-export type ListingFeature = ListingsCollection["features"][number];
+/**
+ * Listing feature exibida na UI.
+ *
+ * O backend legado retornava uma FeatureCollection GeoJSON completa.
+ * No fluxo "journeys/jobs" (sem endpoints legados), podemos receber cards sem geometria.
+ * A UI deve tolerar `geometry` opcional.
+ */
+export type ListingFeature = {
+  type: "Feature";
+  geometry?: {
+    type: "Point";
+    coordinates: [number, number];
+  };
+  properties: Record<string, unknown>;
+};
 
 export type Step3SortedListingRow = {
   feature: ListingFeature;

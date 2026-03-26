@@ -17,8 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 _GEOSAMPA_DATASETS = (
     ("geosampa_metro_stations", "geoportal_estacao_metro_v2.gpkg"),
+    ("geosampa_metro_lines", "geoportal_linha_metro_v4.gpkg"),
     ("geosampa_trem_stations", "geoportal_estacao_trem_v2.gpkg"),
+    ("geosampa_trem_lines", "geoportal_linha_trem_v2.gpkg"),
     ("geosampa_bus_stops", "geoportal_ponto_onibus.gpkg"),
+    ("geosampa_bus_lines", "SIRGAS_GPKG_linhaonibus.gpkg"),
     ("geosampa_bus_terminals", "geoportal_terminal_onibus_v2.gpkg"),
     ("geosampa_bus_corridors", "geoportal_corredor_onibus_v2.gpkg"),
     ("geosampa_vegetacao_significativa", "SIRGAS_GPKG_VEGETACAO_SIGNIFICATIVA.gpkg"),

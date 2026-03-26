@@ -1,0 +1,12 @@
+{
+    "name": "find-ideal-transport",
+    "description": "Bus/train/metro lines",
+    "version": "2",
+    "minzoom": "8",
+    "maxzoom": "15",
+    "center": "-46.631470,-23.558952,15",
+    "bounds": "-46.640200,-23.560200,-46.630100,-23.550100",
+    "type": "overlay",
+    "format": "pbf",
+    "json": "{\"vector_layers\": [ { \"id\": \"transport_lines\", \"description\": \"\", \"minzoom\": 8, \"maxzoom\": 15, \"fields\": {\"id\": \"String\", \"mode\": \"String\", \"name\": \"String\"} } ],\"tilestats\": {\"layerCount\": 1,\"layers\": [{\"layer\": \"transport_lines\",\"count\": 1,\"geometry\": \"LineString\",\"attributeCount\": 3,\"attributes\": [{\"attribute\": \"id\",\"count\": 1,\"type\": \"string\",\"values\": [\"SH1\"]},{\"attribute\": \"mode\",\"count\": 1,\"type\": \"string\",\"values\": [\"bus\"]},{\"attribute\": \"name\",\"count\": 1,\"type\": \"string\",\"values\": [\"Route One\"]}]}]}}"
+}

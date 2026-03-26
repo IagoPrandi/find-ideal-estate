@@ -1,5 +1,6 @@
 export type MapLayerKey =
   | "routes"
+  | "metro"
   | "train"
   | "busStops"
   | "zones"
@@ -11,8 +12,9 @@ export type MapLayerKey =
 
 export const MAP_LAYER_INFO: Record<MapLayerKey, { label: string; color: string }> = {
   routes: { label: "Rotas de ônibus", color: "#9775fa" },
-  train: { label: "Metrô/Trem", color: "#0f766e" },
-  busStops: { label: "Paradas (ônibus/estações)", color: "#f97316" },
+  metro: { label: "Linhas de metrô", color: "#e11d48" },
+  train: { label: "Linhas de trem", color: "#0f766e" },
+  busStops: { label: "Paradas e estações", color: "#f97316" },
   zones: { label: "Zonas candidatas", color: "#845ef7" },
   flood: { label: "Alagamento", color: "#7c3aed" },
   green: { label: "Área verde", color: "#16a34a" },

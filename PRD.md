@@ -82,14 +82,14 @@ Encontrar imóvel para alugar ou comprar em São Paulo é um processo fragmentad
 
 | Fase | Título | Status | Concluída em | Observações |
 |---|---|---|---|---|
-| FE0 | Setup Vite/React inicial | 🔄 Em progresso | — | Herdado do sistema anterior |
-| FE1 | MapLibre + MapTiler integrado | 🔄 Em progresso | — | Tiles funcionando |
-| FE2 | Etapa 1: formulário de config | 🔄 Em progresso | — | — |
-| FE3 | Migração para Next.js App Router | ⬜ Não iniciada | — | Bloqueia FE4+ |
-| FE4 | Etapa 2: seleção de transporte | ⬜ Não iniciada | — | — |
-| FE5 | Etapa 3: progressão SSE + zonas | 🔄 Em progresso | — | Barra real SSE + mapa progressivo + cancelamento |
-| FE6 | Etapa 4: comparação de zonas | 🔄 Em progresso | — | Lista ordenada + badges incrementais + filtros |
-| FE7 | Etapa 5 + 6: imóveis + dashboard | 🔄 Em progresso | — | Imóveis + dashboard validados; relatório pendente |
+| FE0 | Setup Vite/React inicial | ✅ Concluída | 2026-03-24 | Base `apps/web` estabilizada em Vite + React |
+| FE1 | MapLibre + MapTiler integrado | ✅ Concluída | 2026-03-24 | Tiles e camadas principais validados no mapa |
+| FE2 | Etapa 1: formulário de config | ✅ Concluída | 2026-03-24 | Fluxo de criação de jornada validado |
+| FE3 | Migração para Next.js App Router | ⬜ Não iniciada | — | Replanejada; não bloqueia FE4+ no stack Vite atual |
+| FE4 | Etapa 2: seleção de transporte | ✅ Concluída | 2026-03-24 | Fluxo canônico `journeys/jobs` validado (sem fallback legado) |
+| FE5 | Etapa 3: progressão SSE + zonas | ✅ Concluída | 2026-03-24 | Geração/enriquecimento via jobs com polling e atualização progressiva |
+| FE6 | Etapa 4: comparação de zonas | ✅ Concluída | 2026-03-24 | Comparação de zonas com lista ordenada e badges/filtros validados |
+| FE7 | Etapa 5 + 6: imóveis + dashboard | ✅ Concluída | 2026-03-24 | Imóveis e dashboard validados; relatório permanece no escopo FE8 |
 | FE8 | Relatório + auth + planos | ⬜ Não iniciada | — | Download PDF, upgrade CTA |
 
 > **Regra de milestone:** a fase só é marcada como concluída após confirmação explícita do responsável. Não marcar na ausência de confirmação.
@@ -1321,14 +1321,14 @@ Desconectar e reconectar com `Last-Event-ID=X` → recebe eventos posteriores a 
 **Esforço estimado:** 8–10 dias · **Status:** 🔄 Em progresso
 **Dependências bloqueantes:** M2.1–M2.5. Hostinger VPS com Valhalla + OTP rodando.
 
-#### M3.1 — Migração frontend Vite → Next.js App Router ✅
-- [x] Novo `apps/web/` com Next.js 14+ App Router
+#### M3.1 — Baseline frontend em Vite + React ✅
+- [x] `apps/web/` consolidado com Vite + React 18
 - [x] MapLibre GL JS integrado; `MapShell` com `preserveDrawingBuffer: true`
 - [x] MapTiler como único provedor de tiles (chave via `NEXT_PUBLIC_MAPTILER_API_KEY`)
 - [x] Etapa 1 portada: formulário de configuração funcionando
-- [x] `next build` sem erros; `next start` responsivo
+- [x] `npm run build` (Vite) sem erros; `npm run preview` responsivo
 
-**Verificação:** `next build` verde; formulário de Etapa 1 salva jornada via `POST /journeys`.
+**Verificação:** `npm run build` verde em `apps/web`; formulário de Etapa 1 salva jornada via `POST /journeys`.
 
 #### M3.2 — Ingestão GTFS para PostGIS ✅
 - [x] Script de ingestão: download zip → hash check → staging → substituição atômica

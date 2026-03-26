@@ -14,6 +14,12 @@ export default defineConfig({
     trace: "on-first-retry",
     browserName: "chromium"
   },
+  webServer: {
+    command: "npm run dev -- --host 127.0.0.1 --port 5173",
+    url: baseURL,
+    reuseExistingServer: true,
+    timeout: 120_000
+  },
   reporter: [["html", { open: "never" }]]
 });
 

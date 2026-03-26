@@ -29,28 +29,39 @@ export function Step3DashboardSection({
   zoneDetailData,
   topPoiCategories
 }: Step3DashboardSectionProps) {
+  const trendBadgeClass =
+    monthlyVariation.trend === "up"
+      ? "text-rose-600 bg-rose-50"
+      : monthlyVariation.trend === "down"
+        ? "text-emerald-600 bg-emerald-50"
+        : "text-slate-600 bg-slate-100";
+
   return (
     <section
-      className="mt-4 rounded-xl border border-slate-200 bg-white p-4 text-sm shadow-sm"
+      className="gem-panel-section animate-[fadeIn_0.4s_ease-out] text-sm"
       data-testid="m6-dashboard-panel"
     >
-      <h2 className="font-semibold">Dashboard da zona</h2>
-      <p className="mt-1 text-xs text-slate-500">Resumo urbano e histórico de preços (FREE: 30 dias).</p>
+      <div className="gem-panel-header">
+        <p className="gem-eyebrow">Dashboard</p>
+        <h2 className="gem-title mt-1">Resumo analítico da zona</h2>
+        <p className="gem-subtitle mt-1">Preço, variação, transporte e indicadores urbanos em leitura direta.</p>
+      </div>
 
-      <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-        <div className="rounded border border-slate-200 px-2 py-2">
+      <div className="gem-panel-body">
+      <div className="grid grid-cols-2 gap-3 text-xs">
+        <div className="gem-metric-card">
           <p className="text-slate-500">Preço mediano atual</p>
           <p className="font-semibold text-slate-800">
             {priceRollups[0]?.median_price ? `R$ ${Number(priceRollups[0].median_price).toLocaleString("pt-BR")}` : "n/d"}
           </p>
         </div>
-        <div className="rounded border border-slate-200 px-2 py-2">
+        <div className="gem-metric-card">
           <p className="text-slate-500">Amostra</p>
           <p className="font-semibold text-slate-800">{priceRollups[0]?.sample_count ?? 0} imóveis</p>
         </div>
-        <div className="rounded border border-slate-200 px-2 py-2" data-testid="m6-monthly-variation">
+        <div className="gem-metric-card" data-testid="m6-monthly-variation">
           <p className="text-slate-500">Variação vs mês anterior</p>
-          <p className="font-semibold text-slate-800">
+          <p className={`inline-flex items-center rounded px-1.5 py-0.5 font-semibold ${trendBadgeClass}`}>
             {monthlyVariation.pct === null
               ? "n/d"
               : `${monthlyVariation.trend === "up" ? "↑" : monthlyVariation.trend === "down" ? "↓" : "→"} ${Math.abs(
@@ -58,7 +69,7 @@ export function Step3DashboardSection({
                 ).toFixed(1)}%`}
           </p>
         </div>
-        <div className="rounded border border-slate-200 px-2 py-2" data-testid="m6-seed-travel">
+        <div className="gem-metric-card" data-testid="m6-seed-travel">
           <p className="text-slate-500">Tempo médio ao ponto-semente</p>
           <p className="font-semibold text-slate-800">
             {seedTravelTimeMin === null ? "n/d" : `${seedTravelTimeMin.toFixed(0)} min`}
@@ -66,7 +77,7 @@ export function Step3DashboardSection({
         </div>
       </div>
 
-      <div className="mt-3 rounded border border-slate-200/80 bg-slate-50 p-2">
+      <div className="mt-4 rounded-[22px] border border-slate-200/80 bg-slate-50 p-3">
         <p className="mb-1 text-[11px] font-semibold text-slate-800">Histórico mediano (30 dias)</p>
         <p className="mb-2 text-[10px] text-slate-500" data-testid="m6-linechart-points">
           Pontos exibidos: {Math.min(priceRollups.length, 30)}
@@ -88,7 +99,7 @@ export function Step3DashboardSection({
         </div>
       </div>
 
-      <div className="mt-3 rounded border border-slate-200/80 bg-slate-50 p-2">
+      <div className="mt-4 rounded-[22px] border border-slate-200/80 bg-slate-50 p-3">
         <p className="mb-1 text-[11px] font-semibold text-slate-800">Distribuição por faixas (10 buckets)</p>
         <div className="h-40 min-h-40 w-full min-w-0">
           <ResponsiveContainer width="100%" height={160}>
@@ -122,22 +133,22 @@ export function Step3DashboardSection({
       </div>
 
       {zoneDetailData ? (
-        <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-          <div className="rounded border border-slate-200 px-2 py-1.5">
+        <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+          <div className="gem-metric-card">
             <p className="text-slate-500">Segurança</p>
             <p className="font-semibold text-slate-800">
               {zoneDetailData.public_safety?.summary?.ocorrencias_no_raio_total ?? "n/d"} ocorrências
             </p>
           </div>
-          <div className="rounded border border-slate-200 px-2 py-1.5">
+          <div className="gem-metric-card">
             <p className="text-slate-500">Área verde</p>
             <p className="font-semibold text-slate-800">{((zoneDetailData.green_area_ratio ?? 0) * 100).toFixed(1)}%</p>
           </div>
-          <div className="rounded border border-slate-200 px-2 py-1.5">
+          <div className="gem-metric-card">
             <p className="text-slate-500">Risco alagamento</p>
             <p className="font-semibold text-slate-800">{((zoneDetailData.flood_area_ratio ?? 0) * 100).toFixed(1)}%</p>
           </div>
-          <div className="rounded border border-slate-200 px-2 py-1.5">
+          <div className="gem-metric-card">
             <p className="text-slate-500">Transporte</p>
             <p className="font-semibold text-slate-800">
               {zoneDetailData.bus_lines_count + zoneDetailData.train_lines_count} linhas ({zoneDetailData.lines_used_for_generation.length}{" "}
@@ -147,7 +158,7 @@ export function Step3DashboardSection({
         </div>
       ) : null}
 
-      <div className="mt-3 rounded border border-slate-200/80 bg-slate-50 p-2 text-xs" data-testid="m6-top-pois">
+      <div className="mt-4 rounded-[22px] border border-slate-200/80 bg-slate-50 p-3 text-xs" data-testid="m6-top-pois">
         <p className="mb-1 font-semibold text-slate-800">POIs por categoria (top 6)</p>
         {topPoiCategories.length > 0 ? (
           <ul className="grid grid-cols-2 gap-x-3 gap-y-1">
@@ -160,6 +171,7 @@ export function Step3DashboardSection({
         ) : (
           <p className="text-slate-500">Sem categorias de POI para esta zona.</p>
         )}
+      </div>
       </div>
     </section>
   );
