@@ -1,5 +1,6 @@
 platforms:
   quinto_andar:
+    tier: free
     max_pages: 4
     start_urls:
       rent:
@@ -25,6 +26,7 @@ platforms:
       url: url
  
   vivareal:
+    tier: free
     max_pages: 4
     start_urls:
       rent:
@@ -49,6 +51,7 @@ platforms:
     prefer_headful: true
 
   zapimoveis:
+    tier: free
     max_pages: 4
     start_urls:
       rent:

@@ -31,31 +31,51 @@ WITH bounds AS (
     SELECT
         ST_TileEnvelope(:z, :x, :y) AS env_3857,
         ST_Transform(ST_TileEnvelope(:z, :x, :y), 4326) AS env_4326
-), gtfs_lines AS (
+), candidate_gtfs_shapes AS (
+    SELECT DISTINCT gs.shape_id::text AS shape_id
+    FROM gtfs_shapes gs
+    CROSS JOIN bounds b
+    WHERE gs.location && b.env_4326
+), gtfs_line_meta AS (
     SELECT
-        gs.shape_id::text AS id,
+        gt.shape_id::text AS shape_id,
         COALESCE(
             MIN(NULLIF(gr.route_long_name, '')),
             MIN(NULLIF(gr.route_short_name, '')),
-            gs.shape_id::text
+            gt.shape_id::text
         ) AS name,
         CASE
             WHEN MIN(gr.route_type) = 1 THEN 'metro'
             WHEN MIN(gr.route_type) = 2 THEN 'train'
             ELSE 'bus'
-        END AS mode,
+        END AS mode
+    FROM gtfs_trips gt
+    JOIN gtfs_routes gr ON gr.route_id = gt.route_id
+    JOIN candidate_gtfs_shapes cgs ON cgs.shape_id = gt.shape_id::text
+    GROUP BY gt.shape_id
+), gtfs_lines AS (
+    SELECT
+        cgs.shape_id AS id,
+        COALESCE(glm.name, cgs.shape_id) AS name,
+        COALESCE(glm.mode, 'bus') AS mode,
+        'gtfs_shape'::text AS source_kind,
+        0::int AS bus_count,
+        ''::text AS bus_list,
         ST_MakeLine(gs.location ORDER BY gs.shape_pt_sequence) AS geom_4326
     FROM gtfs_shapes gs
-    JOIN gtfs_trips gt ON gt.shape_id = gs.shape_id
-    JOIN gtfs_routes gr ON gr.route_id = gt.route_id
+    JOIN candidate_gtfs_shapes cgs ON cgs.shape_id = gs.shape_id::text
+    LEFT JOIN gtfs_line_meta glm ON glm.shape_id = cgs.shape_id
     CROSS JOIN bounds b
     WHERE gs.location && b.env_4326
-    GROUP BY gs.shape_id
+    GROUP BY cgs.shape_id, glm.name, glm.mode
 ), corridor_lines AS (
     SELECT
         md5(ST_AsEWKB(g.geometry)::text) AS id,
         COALESCE(NULLIF(g.nm_corredor, ''), 'Corredor de ônibus') AS name,
         'bus'::text AS mode,
+        'geosampa_bus_corridor'::text AS source_kind,
+        0::bigint AS bus_count,
+        ''::text AS bus_list,
         ST_LineMerge(g.geometry) AS geom_4326
     FROM geosampa_bus_corridors g
     CROSS JOIN bounds b
@@ -65,6 +85,9 @@ WITH bounds AS (
         md5(ST_AsEWKB(g.geometry)::text) AS id,
         COALESCE(NULLIF(g.nm_linha_metro_trem, ''), NULLIF(g.nr_nome_linha, ''), 'Linha de metrô') AS name,
         'metro'::text AS mode,
+        'geosampa_metro_line'::text AS source_kind,
+        0::bigint AS bus_count,
+        ''::text AS bus_list,
         ST_LineMerge(g.geometry) AS geom_4326
     FROM geosampa_metro_lines g
     CROSS JOIN bounds b
@@ -74,6 +97,9 @@ WITH bounds AS (
         md5(ST_AsEWKB(g.geometry)::text) AS id,
         COALESCE(NULLIF(g.nm_linha_metro_trem, ''), 'Linha de trem') AS name,
         'train'::text AS mode,
+        'geosampa_train_line'::text AS source_kind,
+        0::bigint AS bus_count,
+        ''::text AS bus_list,
         ST_LineMerge(g.geometry) AS geom_4326
     FROM geosampa_trem_lines g
     CROSS JOIN bounds b
@@ -83,20 +109,23 @@ WITH bounds AS (
         md5(ST_AsEWKB(g.geometry)::text) AS id,
         COALESCE(NULLIF(g.ln_nome, ''), 'Linha de ônibus') AS name,
         'bus'::text AS mode,
+        'geosampa_bus_line'::text AS source_kind,
+        0::bigint AS bus_count,
+        ''::text AS bus_list,
         ST_LineMerge(g.geometry) AS geom_4326
     FROM geosampa_bus_lines g
     CROSS JOIN bounds b
     WHERE g.geometry && b.env_4326
 ), merged AS (
-    SELECT id, name, mode, geom_4326
+    SELECT id, name, mode, source_kind, bus_count, bus_list, geom_4326
     FROM gtfs_lines, bounds
     WHERE geom_4326 IS NOT NULL AND ST_Intersects(geom_4326, env_4326)
     UNION ALL
-    SELECT id, name, mode, geom_4326
+    SELECT id, name, mode, source_kind, bus_count, bus_list, geom_4326
     FROM corridor_lines, bounds
     WHERE geom_4326 IS NOT NULL AND ST_Intersects(geom_4326, env_4326)
     UNION ALL
-    SELECT id, name, mode, geom_4326
+    SELECT id, name, mode, source_kind, bus_count, bus_list, geom_4326
     FROM geosampa_lines, bounds
     WHERE geom_4326 IS NOT NULL AND ST_Intersects(geom_4326, env_4326)
 ), mvtgeom AS (
@@ -104,6 +133,9 @@ WITH bounds AS (
         id,
         name,
         mode,
+        source_kind,
+        COALESCE(bus_count, 0)::int AS bus_count,
+        COALESCE(bus_list, '') AS bus_list,
         ST_AsMVTGeom(
             ST_Transform(geom_4326, 3857),
             env_3857,
@@ -125,20 +157,32 @@ WITH bounds AS (
     SELECT
         ST_TileEnvelope(:z, :x, :y) AS env_3857,
         ST_Transform(ST_TileEnvelope(:z, :x, :y), 4326) AS env_4326
-), stop_points AS (
+), candidate_gtfs_stops AS (
     SELECT
-        s.stop_id::text AS id,
-        COALESCE(NULLIF(s.stop_name, ''), s.stop_id::text) AS name,
-        'bus_stop'::text AS kind,
+        s.stop_id::text AS stop_id,
+        COALESCE(NULLIF(s.stop_name, ''), s.stop_id::text) AS stop_name,
         s.location AS geom_4326
     FROM gtfs_stops s
     CROSS JOIN bounds b
     WHERE s.location && b.env_4326
+), stop_points AS (
+    SELECT
+        cgs.stop_id AS id,
+        cgs.stop_name AS name,
+        'bus_stop'::text AS kind,
+        'gtfs_stop'::text AS source_kind,
+        0::int AS bus_count,
+        ''::text AS bus_list,
+        cgs.geom_4326
+    FROM candidate_gtfs_stops cgs
     UNION ALL
     SELECT
         md5(ST_AsEWKB(g.geometry)::text) AS id,
         COALESCE(NULLIF(g.nm_estacao_metro_trem, ''), 'Estação de metrô') AS name,
         'metro_station'::text AS kind,
+        'geosampa_metro_station'::text AS source_kind,
+        0::int AS bus_count,
+        ''::text AS bus_list,
         ST_PointOnSurface(g.geometry) AS geom_4326
     FROM geosampa_metro_stations g
     CROSS JOIN bounds b
@@ -148,6 +192,9 @@ WITH bounds AS (
         md5(ST_AsEWKB(g.geometry)::text) AS id,
         COALESCE(NULLIF(g.nm_estacao_metro_trem, ''), 'Estação de trem') AS name,
         'train_station'::text AS kind,
+        'geosampa_train_station'::text AS source_kind,
+        0::int AS bus_count,
+        ''::text AS bus_list,
         ST_PointOnSurface(g.geometry) AS geom_4326
     FROM geosampa_trem_stations g
     CROSS JOIN bounds b
@@ -157,6 +204,9 @@ WITH bounds AS (
         md5(ST_AsEWKB(g.geometry)::text) AS id,
         COALESCE(NULLIF(g.nm_ponto_onibus, ''), 'Ponto de ônibus') AS name,
         'bus_stop'::text AS kind,
+        'geosampa_bus_stop'::text AS source_kind,
+        0::int AS bus_count,
+        ''::text AS bus_list,
         ST_PointOnSurface(g.geometry) AS geom_4326
     FROM geosampa_bus_stops g
     CROSS JOIN bounds b
@@ -166,6 +216,9 @@ WITH bounds AS (
         md5(ST_AsEWKB(g.geometry)::text) AS id,
         COALESCE(NULLIF(g.nm_terminal, ''), 'Terminal de ônibus') AS name,
         'bus_terminal'::text AS kind,
+        'geosampa_bus_terminal'::text AS source_kind,
+        0::int AS bus_count,
+        ''::text AS bus_list,
         ST_PointOnSurface(g.geometry) AS geom_4326
     FROM geosampa_bus_terminals g
     CROSS JOIN bounds b
@@ -175,6 +228,9 @@ WITH bounds AS (
         id,
         name,
         kind,
+        source_kind,
+        bus_count,
+        bus_list,
         ST_AsMVTGeom(
             ST_Transform(geom_4326, 3857),
             env_3857,
@@ -189,6 +245,33 @@ WITH bounds AS (
 SELECT ST_AsMVT(mvtgeom, 'transport_stops', 4096, 'geom')
 FROM mvtgeom
 WHERE geom IS NOT NULL
+"""
+
+
+_BUS_LINE_DETAIL_SQL = """
+SELECT
+        COALESCE(NULLIF(gr.route_short_name, ''), gr.route_id) AS route_number,
+        COALESCE(NULLIF(gt.trip_headsign, ''), 'sentido não informado') AS direction
+FROM gtfs_trips gt
+JOIN gtfs_routes gr ON gr.route_id = gt.route_id
+WHERE gt.shape_id::text = :line_id
+    AND gr.route_type = 3
+GROUP BY route_number, direction
+ORDER BY route_number, direction
+"""
+
+
+_BUS_STOP_DETAIL_SQL = """
+SELECT
+        COALESCE(NULLIF(gr.route_short_name, ''), gr.route_id) AS route_number,
+        COALESCE(NULLIF(gt.trip_headsign, ''), 'sentido não informado') AS direction
+FROM gtfs_stop_times gst
+JOIN gtfs_trips gt ON gt.trip_id = gst.trip_id
+JOIN gtfs_routes gr ON gr.route_id = gt.route_id
+WHERE gst.stop_id::text = :stop_id
+    AND gr.route_type = 3
+GROUP BY route_number, direction
+ORDER BY route_number, direction
 """
 
 
@@ -288,6 +371,38 @@ async def get_flood_areas_tile(
     engine = get_engine()
     tile = await _query_vector_tile(engine, _FLOOD_TILE_SQL, {"z": z, "x": x, "y": y}, layer_name="flood_areas")
     return Response(content=tile, media_type=MVT_MEDIA_TYPE)
+
+
+@router.get("/details/bus-line")
+async def get_bus_line_details(
+    line_id: str = Query(..., min_length=1),
+) -> dict:
+    engine = get_engine()
+    async with engine.connect() as conn:
+        rows = (await conn.execute(text(_BUS_LINE_DETAIL_SQL), {"line_id": line_id})).mappings().all()
+
+    buses = [f"{row['route_number']} sentido {row['direction']}" for row in rows]
+    return {
+        "count": len(buses),
+        "buses": buses,
+        "source": "gtfs",
+    }
+
+
+@router.get("/details/bus-stop")
+async def get_bus_stop_details(
+    stop_id: str = Query(..., min_length=1),
+) -> dict:
+    engine = get_engine()
+    async with engine.connect() as conn:
+        rows = (await conn.execute(text(_BUS_STOP_DETAIL_SQL), {"stop_id": stop_id})).mappings().all()
+
+    buses = [f"{row['route_number']} sentido {row['direction']}" for row in rows]
+    return {
+        "count": len(buses),
+        "buses": buses,
+        "source": "gtfs",
+    }
 
 
 async def _safe_query_features(engine, sql: str, params: dict) -> list[dict]:

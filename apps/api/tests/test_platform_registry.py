@@ -42,6 +42,13 @@ def test_registry_resolves_alias_and_scraper_config() -> None:
     assert isinstance(cfg["start_urls"].get("rent"), list)
 
 
+def test_registry_default_free_platforms_include_vivareal() -> None:
+    root = Path(__file__).resolve().parents[3]
+    registry = PlatformRegistry(root / "platforms.yaml")
+
+    assert registry.default_free_platforms() == ["quintoandar", "vivareal", "zapimoveis"]
+
+
 def test_registry_rejects_unknown_platform() -> None:
     root = Path(__file__).resolve().parents[3]
     registry = PlatformRegistry(root / "platforms.yaml")

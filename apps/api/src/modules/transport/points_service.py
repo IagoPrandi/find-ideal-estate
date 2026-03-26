@@ -36,7 +36,36 @@ class TransportSearchError(RuntimeError):
     """Raised when transport point search cannot run with current journey payload."""
 
 
+def _normalize_public_transport_mode(input_snapshot: dict[str, Any] | None) -> str:
+    if not isinstance(input_snapshot, dict):
+        return "mixed"
+
+    raw_transport_mode = (
+        input_snapshot.get("transport_mode")
+        or input_snapshot.get("transport_modal")
+        or input_snapshot.get("travel_mode")
+        or input_snapshot.get("modal")
+    )
+    transport_mode = str(raw_transport_mode or "transit").strip().lower()
+    if transport_mode not in {"transit", "public", "public_transport"}:
+        return "mixed"
+
+    raw_public_transport_mode = input_snapshot.get("public_transport_mode")
+    normalized = str(raw_public_transport_mode or "mixed").strip().lower()
+    if normalized in {"bus", "onibus"}:
+        return "bus"
+    if normalized in {"rail", "metro", "train", "trem", "subway"}:
+        return "rail"
+    return "mixed"
+
+
 def _source_filter_tokens(input_snapshot: dict[str, Any] | None) -> set[str]:
+    public_transport_mode = _normalize_public_transport_mode(input_snapshot)
+    if public_transport_mode == "bus":
+        return {"bus"}
+    if public_transport_mode == "rail":
+        return {"metro", "trem"}
+
     if not isinstance(input_snapshot, dict):
         return {"bus", "metro", "trem"}
 

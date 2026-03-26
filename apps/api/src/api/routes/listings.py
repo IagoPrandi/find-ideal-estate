@@ -17,6 +17,7 @@ import json
 from uuid import UUID
 
 from contracts import ListingsRequestResult, SearchAddressSuggestion
+from core.config import get_settings
 from core.db import get_engine as _get_engine
 from fastapi import APIRouter, Cookie, HTTPException, Query
 from modules.listings.cache import (
@@ -29,6 +30,7 @@ from modules.listings.cache import (
 )
 from modules.listings.dedup import fetch_listing_cards_for_zone
 from modules.listings.platform_registry import PlatformRegistryError, get_platform_registry
+from modules.listings.address_suggestions import get_zone_address_suggestions
 from modules.listings.search_requests import record_search_request
 from pydantic import BaseModel
 from sqlalchemy import text
@@ -108,7 +110,10 @@ async def listings_search(
       - partial hit from overlapping zone -> return with partial badge.
       - cache miss -> return queued result ; search is still recorded for prewarm.
     """
-    registry = get_platform_registry()
+    try:
+        registry = get_platform_registry()
+    except PlatformRegistryError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
     raw_platforms = body.platforms or registry.default_free_platforms()
     try:
         platforms = registry.resolve_names(raw_platforms)
@@ -212,48 +217,71 @@ async def listings_search(
 async def address_suggest(
     journey_id: UUID,
     zone_fingerprint: str = Query(...),
-    q: str = Query(..., min_length=2),
+        q: str = Query(default=""),
 ) -> list[SearchAddressSuggestion]:
     """
-    M5.7: Autocomplete addresses filtered by ST_Contains(zone, address_point).
+        M5.7: Combobox suggestions for streets inside the selected zone.
+
+        Current pipeline:
+            - sample points inside zone geometry
+            - query Mapbox Tilequery for nearby roads
+            - reverse geocode representative points
+            - return scraper-ready labels in the form:
+                "Rua, Bairro, Cidade-UF"
     """
     engine = _get_engine()
     async with engine.connect() as conn:
-        rows = await conn.execute(
+        zone_result = await conn.execute(
             text(
                 """
-                WITH zone_geom AS (
-                    SELECT isochrone_geom FROM zones WHERE fingerprint = :fp LIMIT 1
-                )
                 SELECT
-                    COALESCE(street_name, stop_name)  AS label,
-                    LOWER(COALESCE(street_name, stop_name)) AS normalized,
-                    'street'                           AS location_type,
-                    ST_Y(location::geometry)           AS lat,
-                    ST_X(location::geometry)           AS lon
-                FROM gtfs_stops, zone_geom
-                WHERE ST_Within(location::geometry, zone_geom.isochrone_geom)
-                  AND (
-                    stop_name ILIKE :q
-                    OR street_name ILIKE :q
-                  )
-                LIMIT 20
+                    z.fingerprint,
+                    ST_AsGeoJSON(z.isochrone_geom) AS isochrone_geom,
+                    ST_X(ST_Centroid(z.isochrone_geom)) AS centroid_lon,
+                    ST_Y(ST_Centroid(z.isochrone_geom)) AS centroid_lat,
+                    ST_XMin(z.isochrone_geom)::DOUBLE PRECISION AS xmin,
+                    ST_YMin(z.isochrone_geom)::DOUBLE PRECISION AS ymin,
+                    ST_XMax(z.isochrone_geom)::DOUBLE PRECISION AS xmax,
+                    ST_YMax(z.isochrone_geom)::DOUBLE PRECISION AS ymax
+                FROM journey_zones jz
+                JOIN zones z ON z.id = jz.zone_id
+                WHERE jz.journey_id = :journey_id
+                  AND z.fingerprint = :fp
+                LIMIT 1
                 """
             ),
-            {"fp": zone_fingerprint, "q": f"%{q}%"},
+            {"journey_id": journey_id, "fp": zone_fingerprint},
         )
-        suggestions = []
-        for row in rows.mappings():
-            suggestions.append(
-                SearchAddressSuggestion(
-                    label=row["label"] or "",
-                    normalized=row["normalized"] or "",
-                    location_type=row["location_type"],
-                    lat=float(row["lat"]) if row["lat"] else 0.0,
-                    lon=float(row["lon"]) if row["lon"] else 0.0,
-                )
-            )
-        return suggestions
+        zone = zone_result.mappings().first()
+
+    if zone is None or not zone["isochrone_geom"]:
+        raise HTTPException(status_code=404, detail="Zona nao encontrada para sugestao de enderecos")
+
+    settings = get_settings()
+    raw_suggestions = await get_zone_address_suggestions(
+        access_token=settings.mapbox_access_token,
+        zone_fingerprint=str(zone["fingerprint"]),
+        geometry=json.loads(zone["isochrone_geom"]),
+        bbox=(
+            float(zone["xmin"]),
+            float(zone["ymin"]),
+            float(zone["xmax"]),
+            float(zone["ymax"]),
+        ),
+        centroid=(float(zone["centroid_lon"]), float(zone["centroid_lat"])),
+        q=q,
+    )
+
+    return [
+        SearchAddressSuggestion(
+            label=item["label"],
+            normalized=item["normalized"],
+            location_type=item["location_type"],
+            lat=float(item["lat"]),
+            lon=float(item["lon"]),
+        )
+        for item in raw_suggestions
+    ]
 
 
 @router.get(
@@ -270,7 +298,10 @@ async def get_zone_listings(
     """
     M5.7 Step 6: Return cached listing cards for a zone, plus freshness info.
     """
-    registry = get_platform_registry()
+    try:
+        registry = get_platform_registry()
+    except PlatformRegistryError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
     raw_platforms = platforms or registry.default_free_platforms()
     try:
         canonical_platforms = registry.resolve_names(raw_platforms)

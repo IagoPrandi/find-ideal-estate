@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from modules.listings.scrapers.quintoandar import (  # noqa: E402
     _extract_from_quintoandar_dom_rows,
     _extract_from_quintoandar_payload,
+    _to_quintoandar_location_slug,
 )
 from modules.listings.scrapers.vivareal import (  # noqa: E402
     _extract_from_dom_rows,
@@ -180,6 +181,18 @@ class TestZapImoveisExtraction:
 # ---------------------------------------------------------------------------
 
 class TestQuintoAndarExtraction:
+    def test_location_slug_uses_neighborhood_for_street_search(self) -> None:
+        slug = _to_quintoandar_location_slug(
+            "Rua Guaipa, Vila Leopoldina, Sao Paulo, SP"
+        )
+
+        assert slug == "vila-leopoldina-sao-paulo-sp-brasil"
+
+    def test_location_slug_keeps_two_part_neighborhood_search(self) -> None:
+        slug = _to_quintoandar_location_slug("Vila Leopoldina, Sao Paulo-SP")
+
+        assert slug == "vila-leopoldina-sao-paulo-sp-brasil"
+
     def test_dom_fallback_yields_five_listings(self) -> None:
         rows = _make_quintoandar_dom_rows(8)
         results = _extract_from_quintoandar_dom_rows(rows)

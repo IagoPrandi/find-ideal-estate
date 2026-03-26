@@ -535,18 +535,32 @@ def _to_quintoandar_location_slug(search_address: str) -> str:
     if not parts:
         return "sao-paulo-sp-brasil"
 
-    # Legacy behavior starts from the city-level URL for Sao Paulo and expands from there.
-    joined = " ".join(parts).lower()
-    if "sao paulo" in joined:
-        return "sao-paulo-sp-brasil"
+    def _looks_like_street_part(text: str) -> bool:
+        slug = _slugify(text)
+        street_prefixes = (
+            "rua",
+            "r",
+            "avenida",
+            "av",
+            "alameda",
+            "travessa",
+            "tv",
+            "estrada",
+            "rodovia",
+            "rod",
+            "praca",
+            "largo",
+        )
+        return any(slug == prefix or slug.startswith(f"{prefix}-") for prefix in street_prefixes) or any(ch.isdigit() for ch in text)
 
     # Skip parts[0] (street name) — QuintoAndar does not have street-level slug pages.
     # Use neighborhood + city/state: e.g. "Vila Leopoldina", "Sao Paulo - SP" → vila-leopoldina-sao-paulo-sp-brasil.
-    if len(parts) >= 3:
-        selected = parts[1:3]  # neighborhood + city/state
+    if len(parts) >= 4:
+        selected = parts[1:4]  # neighborhood + city + state
+    elif len(parts) == 3:
+        selected = parts[1:3] if _looks_like_street_part(parts[0]) else parts[0:3]
     elif len(parts) == 2:
-        # Only street + city/state — use city/state only
-        selected = [parts[1]]
+        selected = [parts[1]] if _looks_like_street_part(parts[0]) else parts[0:2]
     else:
         single = parts[0]
         if "sao paulo" in single.lower():

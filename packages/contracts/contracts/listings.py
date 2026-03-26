@@ -98,6 +98,8 @@ class SearchAddressSuggestion(BaseModel):
     label: str
     normalized: str
     location_type: str  # 'neighborhood' | 'street' | 'address' | 'landmark'
+    lat: float
+    lon: float
 
 
 class PriceRollupRead(BaseModel):

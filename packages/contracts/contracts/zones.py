@@ -23,6 +23,7 @@ class ZoneRead(BaseModel):
     transport_point_id: UUID
     fingerprint: str
     state: str  # "pending", "generating", "enriching", "complete", "failed"
+    is_circle_fallback: bool = False
     travel_time_minutes: int | None = None
     walk_distance_meters: int | None = None
     isochrone_geom: dict[str, Any] | None = None  # GeoJSON

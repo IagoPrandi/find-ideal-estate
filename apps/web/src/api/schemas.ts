@@ -48,6 +48,7 @@ export const JourneyZoneReadSchema = z.object({
   transport_point_id: z.string().nullable().optional(),
   fingerprint: z.string(),
   state: z.string(),
+  is_circle_fallback: z.boolean().optional().default(false),
   travel_time_minutes: z.number().nullable().optional(),
   walk_distance_meters: z.number().nullable().optional(),
   isochrone_geom: z.any(),

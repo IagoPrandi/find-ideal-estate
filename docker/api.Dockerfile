@@ -15,6 +15,7 @@ COPY apps/api ./apps/api
 COPY packages/contracts ./packages/contracts
 COPY infra ./infra
 COPY alembic.ini ./alembic.ini
+COPY platforms.yaml ./platforms.yaml
 COPY docker/entrypoint.sh ./docker/entrypoint.sh
 
 RUN chmod +x ./docker/entrypoint.sh

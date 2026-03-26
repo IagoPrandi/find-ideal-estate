@@ -28,7 +28,7 @@ import {
   ListingsRequestResultBackendSchema
 } from "./schemas";
 
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
+export const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
 
 type RequestOptions = {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -391,6 +391,31 @@ export async function getJourneyTransportPoints(journeyId: string): Promise<Tran
   )) as TransportPointRead[];
 }
 
+export async function updateJourney(
+  journeyId: string,
+  payload: {
+    input_snapshot?: Record<string, unknown>;
+    selected_transport_point_id?: string | null;
+    selected_zone_id?: string | null;
+    selected_property_id?: string | null;
+    last_completed_step?: number | null;
+    secondary_reference_label?: string | null;
+    secondary_reference_point?: { lat: number; lon: number } | null;
+  }
+): Promise<JourneyRead> {
+  return (await requestJson(`/journeys/${journeyId}`, JourneyReadSchema, {
+    method: "PATCH",
+    body: payload
+  })) as JourneyRead;
+}
+
+export async function getJourneyZonesList(journeyId: string) {
+  return (await requestJson(
+    `/journeys/${journeyId}/zones`,
+    JourneyZonesListResponseSchema
+  )) as z.output<typeof JourneyZonesListResponseSchema>;
+}
+
 export async function createZoneGenerationJob(journeyId: string): Promise<JobRead> {
   return (await requestJson("/jobs", JobReadSchema, {
     method: "POST",
@@ -449,4 +474,3 @@ export async function getZoneListings(
   )) as ListingsRequestResult;
 }
 
-export { API_BASE };

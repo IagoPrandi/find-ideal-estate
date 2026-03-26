@@ -10,11 +10,13 @@ node_modules/
 coverage/
 *.log
 
+
 # Production
 dist/
 build/
 .next/
 out/
+apps/api/src/modules/listings/scrapers/runs/.browser_profiles
 
 # Environment
 .env

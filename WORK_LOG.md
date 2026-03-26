@@ -1,5 +1,631 @@
 # Work Log
 
+## 2026-03-26 - Desabilitar temporariamente CTA de plano Pro na etapa de scraping
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/develop-frontend/SKILL.md`.
+- Trigger: o usuario pediu para desabilitar temporariamente a solicitacao de plano Pro ao entrar na etapa de scraping/resultados.
+- Scope executed:
+  - `apps/web/src/components/panels/Step6Analysis.tsx`:
+    - removido o card fixo de upsell com CTA `Assinar Pro`;
+    - status exibido no topo agora traduz `no_cache` para `Scraping em andamento`;
+    - estado vazio da etapa 6 passou a informar que o scraping foi iniciado e que a tela atualiza automaticamente;
+    - adicionada atualizacao automatica (`refetchInterval`) enquanto a busca ainda nao tem cache/listagens prontas.
+- Validation:
+  - `npm run typecheck` em `apps/web` -> sucesso.
+  - sem erros de editor em `apps/web/src/components/panels/Step6Analysis.tsx`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-26 - Corrigir erro ao iniciar scraping de imoveis na etapa 5
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/develop-frontend/SKILL.md`.
+- Trigger: o usuario reportou erro ao avancar para a etapa de scraping de imoveis, com mensagem de falha de conexao no frontend.
+- Root cause:
+  - a rota `POST /journeys/{journey_id}/listings/search` quebrava no backend ao inicializar `PlatformRegistry`;
+  - o container `api` nao tinha acesso ao arquivo `platforms.yaml`, exigido em `/app/platforms.yaml`;
+  - isso gerava `PlatformRegistryError: platforms.yaml not found at: /app/platforms.yaml` e interrompia a etapa 5.
+- Scope executed:
+  - `docker-compose.yml`:
+    - adicionada montagem `./platforms.yaml:/app/platforms.yaml:ro` no servico `api`.
+  - `docker/api.Dockerfile`:
+    - adicionado `COPY platforms.yaml ./platforms.yaml` para garantir disponibilidade tambem na imagem buildada.
+  - `apps/api/src/api/routes/listings.py`:
+    - `listings_search` e `get_zone_listings` agora capturam `PlatformRegistryError` na inicializacao do registry e devolvem `HTTPException` JSON explicita, em vez de explodir com erro cru do ASGI.
+  - runtime:
+    - rebuild/restart da API com `docker compose up -d --build api`.
+- Validation:
+  - `GET /health` -> `200` apos rebuild.
+  - preflight `OPTIONS /journeys/{journey_id}/listings/search` com `Origin=http://localhost:5173` -> CORS OK (`allow-origin`, `allow-credentials`, `allow-methods`).
+  - replay do `POST /journeys/8889c389-646b-4d90-8894-b367bfa15186/listings/search` com zona real -> resposta valida:
+    - `{"source":"none","freshness_status":"queued_for_next_prewarm",...,"total_count":0}`.
+  - logs da API apos a correcao: sem nova ocorrencia de `platforms.yaml not found` durante o replay validado.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-26 - Ajustar busca de ruas da etapa 5 para abrir a lista da zona selecionada
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/develop-frontend/SKILL.md`.
+- Trigger: o usuario pediu que, ao clicar para procurar a rua, aparecam as ruas existentes dentro da zona selecionada, sem integrar com o codigo legado, e que o endereco siga o formato `Rua, Bairro, Cidade-Estado`.
+- Scope executed:
+  - `apps/api/src/modules/listings/address_suggestions.py`:
+    - mantida a pipeline atual de autocomplete por poligono da zona;
+    - ajustado o formato final para `Rua, Bairro, Cidade-UF` sem espacos ao redor do hifen (`Cidade-UF`);
+    - removido o corte artificial de 20 itens para permitir listar as ruas carregadas da zona quando o campo abre sem filtro.
+  - `apps/api/src/api/routes/listings.py`:
+    - `GET /journeys/{journey_id}/listings/address-suggest` agora aceita `q` vazio, permitindo abrir a lista de ruas ao focar/clicar no campo;
+    - comentarios da rota atualizados para refletir o contrato vigente, sem referencia a integracao com codigo legado.
+  - `apps/web/src/components/panels/Step5Address.tsx`:
+    - a etapa 5 agora abre o dropdown ao focar/clicar no campo, mesmo sem texto digitado;
+    - o placeholder e a mensagem auxiliar passaram a deixar claro que a lista vem das ruas da zona selecionada;
+    - o label foi associado semanticamente ao input (`htmlFor`/`id`) e o listbox recebeu `data-testid` para validacao focada.
+  - `apps/web/src/state/journey-store.ts`:
+    - trocar de zona agora limpa a rua selecionada e o texto do campo, evitando reaproveitar endereco de outra zona.
+  - Testes atualizados/criados:
+    - `apps/api/tests/test_phase5_address_suggestions.py` atualizado para o novo formato `Cidade-UF`;
+    - `apps/web/src/components/panels/Step5Address.test.tsx` criado para validar que o foco no campo carrega as ruas da zona;
+    - `apps/web/src/state/journey-store.test.ts` expandido para cobrir a limpeza do endereco ao trocar de zona.
+- Validation:
+  - `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase5_address_suggestions.py -q` -> `3 passed`.
+  - `npm run test:run -- src/components/panels/Step5Address.test.tsx src/state/journey-store.test.ts` em `apps/web` -> `3 passed`.
+  - `npm run typecheck` em `apps/web` -> sucesso.
+  - Observacao: o Vitest focado ainda emite warnings de `act(...)` para atualizacoes assicronas do debounce em `Step5Address`, mas os testes passaram e nao houve erro funcional detectado.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-26 - Diagnostico de erro persistente na etapa 3 com seed de onibus (mesma jornada)
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/best-practices/SKILL.md`.
+- Trigger: usuario reportou persistencia de `CandidateZoneGenerationError` em `bus-only` com entrada `(-23.521029733, -46.727156163)` e seed selecionado no primeiro item da lista.
+- Scope executed:
+  - validado o job com erro `ccfca413-0059-4e2c-9f6f-abdd6283ac4d` e confirmado seed efetivo `geosampa_bus_stop` (`R. GUAIPA, 502`) em `(-23.52090799999927, -46.72703699999996)`;
+  - executada a SQL final de candidatos de onibus com os parametros da jornada (`max_travel_minutes=25`) e retornados candidatos downstream normalmente;
+  - executado `ZoneService.ensure_zones_for_job()` no container para o mesmo `job_id`, com resultado `zones_total=13`;
+  - criado novo job de API para a mesma jornada (`ba72b9c1-0db3-42ef-82e0-b08e4949acb0`) e concluido com estado `completed`;
+  - confirmadas 13 associacoes em `journey_zones` para a jornada `8889c389-646b-4d90-8894-b367bfa15186`.
+- Validation:
+  - novo `zone_generation` via HTTP (`POST /jobs`) para a mesma jornada terminou em `completed` (100%, sem erro);
+  - contagem persistida: `journey_zones_count = 13`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-26 - Diferenciar falha de candidato vs indisponibilidade de base na etapa 3
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/best-practices/SKILL.md`.
+- Trigger: erro da etapa 3 reportado pelo usuario em `bus-only` (`No bus candidate zones could be generated...`) com suspeita de indisponibilidade de GTFS/GeoSampa na base.
+- Scope executed:
+  - `apps/api/src/modules/zones/candidate_generation.py`:
+    - adicionadas validacoes explicitas de disponibilidade/volume das tabelas GTFS usadas por `bus` (`gtfs_stops`, `gtfs_trips`, `gtfs_stop_times`) antes da expansao downstream;
+    - em `rail`, adicionada validacao de volume das tabelas GeoSampa de estacoes/linhas para distinguir base vazia de ausencia de reachability;
+    - em `rail-only`, ausencia de base agora falha com mensagem explicita de ingestao pendente; em `mixed`, a trilha de rail continua opcional.
+  - Sem fallback silencioso: quando a base obrigatoria nao existe/esta vazia, o modulo falha explicitamente com instrucoes para executar ingestao da fase 3.
+- Validation:
+  - `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase4_candidate_generation_helpers.py apps/api/tests/test_phase4_legacy_candidate_zone_generation.py -q` -> `8 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-26 - Alinhar pipeline modular de zonas ao comportamento explicito do legado para onibus
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/best-practices/SKILL.md`.
+- Trigger: o usuario pediu para replicar nos modulos o modo de funcionamento do `candidate_zones` legado porque a deteccao de pontos downstream de onibus estava inadequada e o fallback recente passou a mascarar a falha real.
+- Root cause:
+  - a implementacao modular de `bus` snapava o seed para um unico stop GTFS e expandia downstream apenas a partir dele;
+  - isso estreitava demais a area seed selecionada na etapa 2 e podia perder candidatos validos que saem de outros stops GTFS colados ao mesmo ponto fisico;
+  - alem disso, o fallback para zona unica em `bus-only` escondia a ausencia de candidatos reais, divergindo do comportamento explicito do legado.
+- Scope executed:
+  - `apps/api/src/modules/zones/candidate_generation.py`:
+    - `_BUS_DOWNSTREAM_SQL` passou a consolidar todos os `gtfs_stops` dentro do raio do seed (`nearby_origins`) antes da expansao downstream;
+    - a selecao das origens agora deduplica por `(origin_stop_id, trip_id)` com `DISTINCT ON`, espelhando a escolha da primeira passagem por trip do legado;
+    - candidatos que ainda pertencem a area seed foram excluidos do resultado final para manter apenas pontos posteriores ao seed;
+    - `generate_candidate_zones_for_seed()` voltou a falhar explicitamente em `bus-only` quando nao existem candidatos GTFS downstream, em vez de devolver uma seed-zone artificial.
+  - `apps/api/src/modules/zones/service.py`:
+    - removida a captura com fallback para `ensure_zone_for_job()` em `bus-only`;
+    - o servico agora propaga `CandidateZoneGenerationError` quando a pipeline dedicada nao encontra candidatos reais, alinhando o contrato do modulo ao comportamento legado.
+  - `apps/api/tests/test_phase4_candidate_generation_helpers.py`:
+    - regressao atualizada para validar a nova SQL de `bus` com `nearby_origins`;
+    - regressao de `bus-only` ajustada para exigir erro explicito sem fallback silencioso.
+  - `apps/api/tests/test_phase4_legacy_candidate_zone_generation.py`:
+    - regressao do service ajustada para garantir que a falha de candidatos `bus` e propagada e nao limpa/persiste zonas de forma indevida.
+- Validation:
+  - `pytest` focado via execucao Python no `.venv`:
+    - `apps/api/tests/test_phase4_candidate_generation_helpers.py`
+    - `apps/api/tests/test_phase4_legacy_candidate_zone_generation.py`
+    - resultado: `8 passed`.
+  - verificacao runtime local da pipeline modular:
+    - seed GTFS controlado `(-23.5501, -46.6301)` -> candidatos `[(S2, 10.0)]` preservados;
+    - seed real sem cobertura GTFS proxima `(-23.55052, -46.63331)` -> erro explicito `No bus candidate zones could be generated from GTFS/GeoSampa for the selected seed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-26 - Validacao final do fluxo bus-only apos restart da API
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/best-practices/SKILL.md`.
+- Trigger: mesmo com o fallback de `bus-only` ja implementado e testado, o fluxo HTTP de `zone_generation` ainda falhava com `CandidateZoneGenerationError`.
+- Root cause:
+  - o codigo novo estava presente no volume montado do container, mas o processo `uvicorn` em memoria ainda executava a versao anterior dos modulos de zonas;
+  - por isso, a reproducao HTTP continuava retornando a mensagem antiga mesmo quando uma execucao direta em um processo Python novo ja passava para o mesmo `job_id`.
+- Scope executed:
+  - runtime diagnostic:
+    - reproduzido o erro real por HTTP com `public_transport_mode=bus`, `selected_source=geosampa_bus_stop` e `zone_job_state=failed`;
+    - confirmada a configuracao efetiva `DRAMATIQ_BROKER=stub`, entao o job roda inline na propria API;
+    - executados `ZoneService.ensure_zones_for_job()` e `workers.handlers.zones._zone_generation_step()` manualmente dentro de um novo processo no container para o mesmo `job_id`, ambos com sucesso;
+    - concluido que a divergencia vinha do processo live stale, nao do codigo atual em disco.
+  - `docker-compose.yml`:
+    - o comando da API local agora usa `uvicorn --reload` com watch dirs em `/app/apps/api/src` e `/app/packages/contracts` para evitar repetir o problema durante desenvolvimento com volume mount.
+- Validation:
+  - `docker compose restart api` -> sucesso.
+  - reproducao HTTP apos restart da API local:
+    - `public_transport_mode=bus`;
+    - `transport_points=200`;
+    - `selected_source=geosampa_bus_stop`;
+    - `zone_job_state=completed`;
+    - `zones_total=1`;
+    - `zone_job_error=null`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-26 - Fallback explicito para geracao de zonas no modo onibus sem cobertura GTFS local
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/best-practices/SKILL.md`.
+- Trigger: a etapa 2 passou a listar pontos de onibus novamente, mas a etapa 3 ainda falhava em `public_transport_mode=bus` com `No bus candidate zones could be generated from GTFS/GeoSampa for the selected seed`.
+- Root cause:
+  - a geracao de candidatos do modo `bus` depende da malha GTFS para descobrir destinos downstream;
+  - no dataset atual, ha pontos urbanos GeoSampa no entorno, mas nao ha seeds GTFS de onibus proximos o bastante para alimentar o pipeline de candidatos;
+  - sem tratamento explicito, a etapa 3 abortava a jornada inteira mesmo com um seed urbano valido selecionado.
+- Scope executed:
+  - `apps/api/src/modules/zones/service.py`:
+    - `ensure_zones_for_job()` agora captura `CandidateZoneGenerationError` apenas para `public_transport_mode=bus`;
+    - nesse caso, o fluxo limpa as associacoes antigas da jornada e cai de forma explicita para `ensure_zone_for_job()`, gerando uma unica zona a partir do seed selecionado em vez de falhar toda a etapa;
+    - mantidos sem alteracao os comportamentos de `rail` e `mixed`, que continuam exigindo candidatos reais do pipeline dedicado.
+  - `apps/api/src/modules/zones/candidate_generation.py`:
+    - endurecida a garantia no nivel mais baixo do pipeline: quando `public_transport_mode=bus` nao encontra candidatos downstream na malha GTFS, o gerador retorna uma unica zona centrada no seed selecionado em vez de propagar erro terminal.
+  - `apps/api/tests/test_phase4_legacy_candidate_zone_generation.py`:
+    - adicionada regressao cobrindo a queda controlada para single-seed zone quando o pipeline de candidatos de onibus falha por ausencia de cobertura GTFS local.
+  - `apps/api/tests/test_phase4_candidate_generation_helpers.py`:
+    - adicionada regressao cobrindo a devolucao de uma seed-zone unica em `bus-only` quando a carga de candidatos retorna vazia.
+- Validation:
+  - pendente apos pytest focado e restart da API para carregar o backend atualizado.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-26 - Reverter ocultacao indevida dos pontos de onibus na etapa 2
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/best-practices/SKILL.md`.
+- Trigger: o modo `Ônibus` passou a esconder todos os pontos da etapa 2 mesmo com pontos urbanos visiveis no entorno.
+- Root cause:
+  - a restricao anterior forcava `bus-only` a listar apenas seeds `gtfs_stop`;
+  - no ambiente atual, a cobertura GTFS de paradas de onibus perto do ponto selecionado esta ausente ou muito distante, enquanto os pontos urbanos da GeoSampa existem e aparecem no mapa;
+  - a geracao da etapa 3 ja faz snap por coordenada para GTFS, entao ocultar os pontos urbanos na etapa 2 foi mais restritivo do que o proprio pipeline suporta.
+- Scope executed:
+  - `apps/api/src/modules/transport/points_service.py`:
+    - removida a restricao que escondia `geosampa_bus_stop` e `geosampa_bus_terminal` no modo `bus`;
+    - `bus-only` volta a listar todas as fontes de onibus no entorno, mantendo o filtro semantico por modal.
+  - `apps/api/src/modules/zones/service.py`:
+    - validacao de seed `bus-only` voltou a exigir compatibilidade modal (`bus`) sem bloquear pela origem da fonte.
+  - `apps/web/src/components/panels/Step2Transport.tsx`:
+    - aviso do modo `Ônibus` reescrito para explicar corretamente que os pontos urbanos seguem visiveis, mas a geracao de zonas ainda depende da cobertura GTFS perto do seed.
+  - `apps/api/tests/test_phase3_transport_points_service.py`:
+    - regressao ajustada para garantir que a SQL de `bus-only` continua incluindo GTFS e tambem as camadas urbanas de pontos/terminais de onibus.
+  - `apps/api/tests/test_phase4_legacy_candidate_zone_generation.py`:
+    - regressao de incompatibilidade voltou a cobrir seed de metrô em `bus-only`, que continua sendo rejeitado.
+- Validation:
+  - `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase3_transport_points_service.py apps/api/tests/test_phase4_legacy_candidate_zone_generation.py apps/api/tests/test_phase4_candidate_generation_helpers.py -q` -> `8 passed`.
+  - `apps/web/node_modules/.bin/tsc.cmd --noEmit -p apps/web/tsconfig.json` -> sucesso.
+  - restart confirmado do container `api` apos a reversao do filtro (`StartedAt=2026-03-26T16:54:55Z`).
+  - validacao runtime contra `http://localhost:8000` com `public_transport_mode=bus` -> job `transport_search` concluido com `transport_points_count=70` e lista retornando `geosampa_bus_stop` no entorno.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-26 - Corrigir erro de bus-only sem candidatos na etapa 3
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/best-practices/SKILL.md`.
+- Trigger: runtime retornando `CandidateZoneGenerationError: No bus candidate zones could be generated from GTFS/GeoSampa for the selected seed` apos ativar `public_transport_mode=bus`.
+- Root cause:
+  - a etapa 2 ainda oferecia seeds de onibus vindos de `geosampa_bus_stops` e `geosampa_bus_terminals`;
+  - a etapa 3 em modo `bus` gera candidatos a partir da malha GTFS, entao esses seeds urbanos podiam passar na validacao modal e falhar depois por nao serem seeds GTFS compativeis.
+- Scope executed:
+  - `apps/api/src/modules/transport/points_service.py`:
+    - a busca de transporte agora respeita `public_transport_mode` para derivar `source_tokens`;
+    - em `bus-only`, a SQL da etapa 2 passa a indexar apenas `gtfs_stop` como seed elegivel;
+    - a listagem da jornada tambem filtra rows antigas/incompativeis para `bus-only`, evitando que a UI exponha seeds nao suportados.
+  - `apps/api/src/modules/zones/service.py`:
+    - a validacao do seed em `bus-only` foi endurecida para exigir `source == gtfs_stop`, nao apenas `modal_types=['bus']`.
+  - `apps/web/src/components/panels/Step2Transport.tsx`:
+    - a selecao atual e limpa se o ponto escolhido nao existir mais na lista filtrada;
+    - adicionada mensagem curta explicando a restricao de seeds GTFS no modo `Ônibus`.
+  - `apps/api/tests/test_phase3_transport_points_service.py`:
+    - regressao nova para garantir filtro por `public_transport_mode` e SQL de `bus-only` sem fontes GeoSampa urbanas.
+  - `apps/api/tests/test_phase4_legacy_candidate_zone_generation.py`:
+    - regressao ajustada para garantir rejeicao explicita de seed `geosampa_bus_stop` em `bus-only`.
+- Validation:
+  - `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase3_transport_points_service.py apps/api/tests/test_phase4_legacy_candidate_zone_generation.py apps/api/tests/test_phase4_candidate_generation_helpers.py -q` -> `9 passed`.
+  - `npm run typecheck` em `apps/web` -> sucesso.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-26 - Corrigir reuso indevido de job ids ao criar nova jornada
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/best-practices/SKILL.md`.
+- Trigger: apos o ajuste dos filtros de transporte publico, nenhum modo retornava pontos na etapa 2.
+- Root cause:
+  - as jornadas novas estavam sendo criadas corretamente, mas sem nenhum `transport_search` job associado;
+  - o store do frontend mantinha `transportJobId` da jornada anterior, entao a etapa 2 reaproveitava esse job velho em vez de criar um job novo para a jornada atual;
+  - com isso, a tela consultava `/journeys/{nova_jornada}/transport-points` antes de qualquer busca real e recebia lista vazia.
+- Scope executed:
+  - `apps/web/src/state/journey-store.ts`:
+    - `setJourneyId()` agora limpa selecao de transporte, selecao de zona, endereco e job ids quando o id da jornada muda;
+    - isso garante que a etapa 2 sempre abra a nova jornada com estado runtime coerente e force a criacao de um novo `transport_search` job.
+  - `apps/web/src/state/journey-store.test.ts`:
+    - adicionada regressao cobrindo a troca de jornada e garantindo limpeza dos ids de jobs e selecoes stale.
+- Validation:
+  - `apps/web/node_modules/.bin/vitest.cmd run apps/web/src/state/journey-store.test.ts` -> `1 passed`.
+  - `apps/web/node_modules/.bin/tsc.cmd --noEmit -p apps/web/tsconfig.json` -> sucesso.
+  - validacao runtime contra a API local (`http://localhost:8000`):
+    - `public_transport_mode=mixed` -> job `transport_search` concluido com `transport_points_count=72`;
+    - `public_transport_mode=rail` -> job concluido com `transport_points_count=2`;
+    - `public_transport_mode=bus` -> job concluido com `transport_points_count=0` para a coordenada testada, confirmando que esse modo depende da disponibilidade de seeds GTFS no raio configurado.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-26 - Fazer submodo de transporte publico afetar a etapa 3
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `skills/best-practices/references/web2-backend.md`, `skills/best-practices/references/testing.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/best-practices/SKILL.md`.
+- Trigger: o usuario pediu que a selecao `Ônibus` / `Trem-Metrô` / `Ônibus+Trem-Metrô` da etapa 1 passasse a impactar a etapa 3 de geracao de zonas.
+- Scope executed:
+  - `apps/web/src/components/panels/Step3Zones.tsx`:
+    - o `input_snapshot` reenviado antes do job da etapa 3 agora preserva `public_transport_mode`;
+    - o snapshot foi alinhado com as chaves canonicas usadas pelo backend (`max_travel_minutes` e `zone_radius_meters`), mantendo aliases legados ja utilizados no fluxo.
+  - `apps/api/src/modules/zones/service.py`:
+    - leitura do `input_snapshot` ampliada para aceitar `transport_mode`, `max_travel_minutes` e `zone_radius_m` sem perder compatibilidade;
+    - adicionado parser de `public_transport_mode` na jornada;
+    - etapa 3 agora valida se o seed selecionado e compativel com o submodo pedido (`bus` ou `rail`) e falha explicitamente em caso de incompatibilidade, sem fallback silencioso.
+  - `apps/api/src/modules/zones/candidate_generation.py`:
+    - `generate_candidate_zones_for_seed()` passou a aceitar `public_transport_mode`;
+    - geracao de candidatos agora filtra entre `bus`, `rail` ou `mixed` antes de combinar resultados.
+  - `apps/api/tests/test_phase4_candidate_generation_helpers.py`:
+    - adicionada regressao para garantir que `public_transport_mode="rail"` nao aciona carregamento de candidatos de onibus.
+  - `apps/api/tests/test_phase4_legacy_candidate_zone_generation.py`:
+    - atualizado para garantir que o service propaga `public_transport_mode` para o helper;
+    - adicionada regressao cobrindo falha explicita quando o seed selecionado nao e compativel com o submodo exigido.
+- Validation:
+  - `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase4_candidate_generation_helpers.py apps/api/tests/test_phase4_legacy_candidate_zone_generation.py -q` -> `6 passed`.
+  - `npm run typecheck` em `apps/web` -> sucesso.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-26 - Expandir subtipos do modo publico na etapa 1
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/develop-frontend/SKILL.md`.
+- Trigger: ao selecionar o modo `Público` na etapa 1, o usuario pediu que surgissem abaixo os botoes horizontais `Ônibus`, `Trem/Metrô` e `Ônibus+Trem/Metrô`.
+- Scope executed:
+  - `apps/web/src/state/journey-store.ts`:
+    - adicionado `publicTransportMode` ao estado da configuracao da jornada;
+    - novo tipo: `bus | rail | mixed`;
+    - default inicial mantido como `mixed` para preservar o comportamento amplo anterior de `transit`.
+  - `apps/web/src/components/panels/Step1Config.tsx`:
+    - o botao `Público` agora revela uma segunda linha horizontal de opcoes quando ativo;
+    - adicionados botoes visuais e selecionaveis para `Ônibus`, `Trem/Metrô` e `Ônibus+Trem/Metrô`;
+    - a escolha passa a ser persistida no `input_snapshot` como `public_transport_mode` quando o modal principal e `transit`.
+- Validation:
+  - `npm run typecheck` em `apps/web` -> sucesso.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-26 - Garantir migrations Alembic no startup da API
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/best-practices/SKILL.md`.
+- Trigger: runtime falhando com `UndefinedColumnError: column "is_circle_fallback" of relation "zones" does not exist` apesar do codigo e da migration ja existirem.
+- Root cause:
+  - a API no Docker estava subindo direto com `uvicorn` sem executar `alembic upgrade head`;
+  - o banco permanecia parado em `20260321_0007`, deixando ausentes as migrations `20260322_0008` e `20260326_0009`.
+- Scope executed:
+  - `docker/entrypoint.sh`:
+    - adicionada execucao obrigatoria de `alembic upgrade head` antes do processo principal da API;
+    - mantido comportamento fail-closed: se a migration falhar, a API nao sobe com schema inconsistente.
+  - Ambiente validado no container rodando:
+    - `docker compose exec api alembic current` -> `20260326_0009 (head)`;
+    - `docker compose exec api alembic heads` -> `20260326_0009 (head)`.
+- Validation:
+  - rebuild da API com `docker compose up -d --build api`;
+  - revisao atual do Alembic igual ao `head` apos restart.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-26 - Fix tipagem de parametros SQL nas queries GeoSampa de candidate zones
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/best-practices/SKILL.md`.
+- Trigger: apos a correcao anterior de schema, o Postgres passou a falhar com `IndeterminateDatatypeError` porque `:prefix` e `:mode` eram enviados como parametros `unknown` em expressoes `CONCAT(...)` e selecoes literais.
+- Scope executed:
+  - `apps/api/src/modules/zones/candidate_generation.py`:
+    - `station_id` passou a concatenar com `CAST(:prefix AS text) || ...` em vez de `CONCAT(:prefix, ...)`;
+    - `mode` passou a ser projetado como `CAST(:mode AS text)` nas queries de estacoes, linhas de metro e linhas de trem;
+    - mantida a logica de schema corrigida anteriormente, alterando apenas a tipagem explicita necessaria para o asyncpg/Postgres inferirem os placeholders corretamente.
+  - `apps/api/tests/test_phase4_candidate_generation_helpers.py`:
+    - regressao atualizada para garantir que as templates SQL continuem com cast explicito de `prefix` e `mode`.
+- Validation:
+  - `pytest apps/api/tests/test_phase4_candidate_generation_helpers.py apps/api/tests/test_phase4_legacy_candidate_zone_generation.py apps/api/tests/test_phase4_zone_reuse.py -q` -> `7 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-26 - Fix runtime nas queries GeoSampa da geracao interna de candidate zones
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/references/agent-principles.md`, `skills/best-practices/references/web2-backend.md`, `skills/best-practices/references/testing.md`.
+- Skill used: `skills/best-practices/SKILL.md`.
+- Trigger: a nova implementacao interna de `candidate_generation` assumia colunas genericas (`id`, `nr_nome_linha`) nas tabelas `geosampa_metro_stations` e `geosampa_trem_stations`, causando `UndefinedColumnError` em runtime no Postgres real.
+- Scope executed:
+  - `apps/api/src/modules/zones/candidate_generation.py`:
+    - removida a suposicao de `id` nas tabelas de estacao;
+    - `station_id` passou a ser derivado de hash geometrico estavel (`md5(ST_AsEWKB(ST_PointOnSurface(geometry))::text)`), alinhado ao padrao ja usado no projeto;
+    - query de estacoes deixou de referenciar `nr_nome_linha`;
+    - queries de linhas passaram a ser separadas por tabela, respeitando o schema real de metro e trem materializado pelo pipeline GeoSampa.
+  - `apps/api/tests/test_phase4_candidate_generation_helpers.py`:
+    - adicionada regressao para garantir que as templates SQL nao voltem a assumir `id::text` nas estacoes nem `nr_nome_linha` nas linhas de trem.
+- Validation:
+  - `pytest tests/test_phase4_candidate_generation_helpers.py tests/test_phase4_legacy_candidate_zone_generation.py tests/test_phase4_zone_reuse.py -q` em `apps/api` -> `7 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-26 - Refatoracao das etapas 1-3 e migracao da geracao ativa para candidate_zones legado
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/develop-frontend/SKILL.md`.
+- Trigger: a etapa de transporte precisava virar apenas selecao de seed, a geracao de zonas precisava receber tempo/raio no proprio painel com execucao explicita, a etapa 5 precisava parecer de fato uma combobox suspensa, e o backend precisava trocar a geracao atual pelo fluxo legado `candidate_zones_from_cache`.
+- Scope executed:
+  - `apps/web/src/state/journey-store.ts`:
+    - adicionado `primaryReferenceLabel` ao store compartilhado para preservar a referencia principal quando a etapa 3 regrava `input_snapshot`.
+  - `apps/web/src/components/panels/Step1Config.tsx`:
+    - label da referencia principal passou a usar estado global;
+    - tempo maximo saiu da etapa 1;
+    - CTA ajustado para descoberta de pontos seed.
+  - `apps/web/src/components/panels/Step2Transport.tsx`:
+    - etapa mantida como selecao do seed apenas;
+    - CTA alterado para `Confirmar ponto seed`.
+  - `apps/web/src/components/panels/Step3Zones.tsx`:
+    - removida a autoexecucao em `useEffect`;
+    - adicionados controles de `tempo maximo de viagem` e `raio das zonas`;
+    - execucao passou a ocorrer apenas ao clicar em `Gerar zonas`;
+    - progresso de geracao/enriquecimento agora aparece dentro do proprio painel, sem virar uma etapa separada.
+  - `apps/web/src/components/panels/Step5Address.tsx`:
+    - dropdown convertido em painel absoluto suspenso com `z-index`, sombra e estados de loading/vazio dentro da lista;
+    - abertura/fechamento passou a responder a foco, blur, Escape e selecao.
+  - `apps/api/src/modules/zones/service.py`:
+    - `ensure_zones_for_job` agora usa o `selected_transport_point_id` como seed efetivo;
+    - associacoes antigas de `journey_zones` sao limpas antes da nova rodada;
+    - `journeys.selected_zone_id` e limpo ao regenerar;
+    - a geracao ativa foi refatorada para consumir um modulo interno do dominio (`apps/api/src/modules/zones/candidate_generation.py`), sem subprocesso e sem execucao crua do script legado;
+    - a logica interna agora usa as tabelas GTFS e GeoSampa ingeridas no banco para construir seeds, trajetos candidatos, buffers e deduplicacao espacial inspirados no legado;
+    - persistencia das zonas candidatas mantida no schema atual.
+  - `apps/api/src/modules/zones/candidate_generation.py`:
+    - novo modulo interno com a reconstrucao do fluxo `candidate_zones_from_cache` em padrao de servico do projeto;
+    - expansao de candidatos de onibus via GTFS no banco;
+    - expansao de candidatos de trilhos via grafo montado a partir das tabelas GeoSampa;
+    - bucketizacao, buffers e deduplicacao espacial implementados como helpers testaveis.
+  - `apps/api/src/workers/handlers/zones.py`:
+    - mensagem de evento ajustada para refletir a nova pipeline interna de candidate zones.
+  - `apps/api/tests/test_phase4_legacy_candidate_zone_generation.py`:
+    - novo teste focado cobrindo seed selecionado, limpeza de associacoes antigas, geracao/reuso de zonas e persistencia da zona candidata.
+  - `apps/api/tests/test_phase4_candidate_generation_helpers.py`:
+    - testes unitarios para bucketizacao, deduplicacao espacial e bufferizacao da nova implementacao interna.
+- Validation:
+  - `npm run typecheck` em `apps/web` -> sucesso.
+  - `pytest tests/test_phase4_candidate_generation_helpers.py tests/test_phase4_legacy_candidate_zone_generation.py tests/test_phase4_zone_reuse.py -q` em `apps/api` -> `6 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-26 - Migracao da etapa 5 para combobox com enderecos compativeis com scraper
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `skills/best-practices/references/agent-principles.md`.
+- Skill used: `skills/best-practices/SKILL.md`.
+- Trigger: a etapa 5 precisava deixar de sugerir apenas `gtfs_stops` e passar a operar como combobox real, usando a logica do `cods_ok/encontrarRuasRaio.py` para gerar enderecos dentro da zona em formato aceito pelos scrapers.
+- Scope:
+  - `apps/api/src/modules/listings/address_suggestions.py`:
+    - nova migracao da logica do `encontrarRuasRaio.py` para o backend principal;
+    - amostragem de pontos dentro do poligono da zona;
+    - Mapbox Tilequery para vias proximas;
+    - reverse geocode para contexto;
+    - retorno em formato scraper-ready: `Rua, Bairro, Cidade - UF`;
+    - cache em Redis por `zone_fingerprint` para evitar recomputacao a cada tecla.
+  - `apps/api/src/api/routes/listings.py`:
+    - `GET /journeys/{journey_id}/listings/address-suggest` deixou de consultar `gtfs_stops`;
+    - agora carrega a geometria da zona e delega ao novo servico de sugestoes.
+  - `packages/contracts/contracts/listings.py`:
+    - `SearchAddressSuggestion` agora inclui `lat` e `lon`, alinhando contrato com o payload real consumido no frontend.
+  - `apps/web/src/components/panels/Step5Address.tsx`:
+    - campo de endereco convertido para combobox acessivel (`role=combobox`, `listbox`, `option`);
+    - navegacao por teclado com setas, Enter e Escape;
+    - estado vazio para quando nao houver sugestoes dentro da zona.
+  - `apps/api/tests/test_phase5_address_suggestions.py`:
+    - testes do novo fluxo e do formato de label esperado pelo scraper.
+- Validation:
+  - `pytest tests/test_phase5_address_suggestions.py -q` -> `3 passed`.
+  - `npm run typecheck` -> sem erros.
+
+## 2026-03-26 - Correcao de falha de requisicao no Mapbox durante enrich de zonas
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`.
+- Skill used: `skills/best-practices/SKILL.md`.
+- Trigger: enrichment de POIs estava chamando `https://api.mapbox.com/search/searchbox/v1/suggest` com `bbox` e `proximity`, gerando `400 Bad Request` durante a etapa de zonas.
+- Root cause:
+  - uso incorreto do endpoint interativo `/suggest` para uma busca backend one-shot de POIs;
+  - ausência de `session_token` nesse endpoint;
+  - serializacao instavel de coordenadas/bbox via `str(float)`.
+- Scope:
+  - `apps/api/src/modules/zones/enrichment.py`:
+    - trocado `/search/searchbox/v1/suggest` por `/search/searchbox/v1/forward` para busca server-side de POIs;
+    - adicionados helpers `_format_mapbox_float`, `_format_bbox`, `_format_proximity`, `_mapbox_poi_params`;
+    - `bbox` e `proximity` agora sao enviados com 6 casas decimais e sem caracteres residuais;
+    - leitura da resposta ajustada de `suggestions` para `features`.
+  - `apps/api/tests/test_phase4_zone_poi_enrichment.py`:
+    - teste de regressao para formato de params;
+    - teste de regressao garantindo uso de `/forward` e contagem de `features`.
+- Validation:
+  - `pytest tests/test_phase4_zone_poi_enrichment.py -q` -> `2 passed`.
+
+## 2026-03-26 - Fallback Valhalla: rastreamento e aviso ao usuário
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`.
+- Skill used: `skills/develop-frontend/SKILL.md`.
+- Trigger: Backend logava `WARNING Valhalla unavailable, using circle fallback` durante geração de zonas; frontend não tinha visibilidade do modo degradado.
+- Scope:
+  - **Migration** `infra/migrations/versions/20260326_0009_zones_circle_fallback_flag.py` — adiciona coluna `is_circle_fallback BOOLEAN NOT NULL DEFAULT FALSE` na tabela `zones`.
+  - **Backend service** `apps/api/src/modules/zones/service.py` — `ensure_zones_for_job` agora define `is_circle_fallback=True` no INSERT quando Valhalla falha; legacy `ensure_zone_for_job` recebeu o mesmo tratamento (try/except + flag). **Também adicionado método `list_zones_for_journey`**, que estava ausente do serviço mas chamado no router.
+  - **Contract** `packages/contracts/contracts/zones.py` — `ZoneRead` agora inclui `is_circle_fallback: bool = False`.
+  - **Frontend schema** `apps/web/src/api/schemas.ts` — `JourneyZoneReadSchema` recebeu `is_circle_fallback: z.boolean().optional().default(false)`.
+  - **Frontend Step4** `apps/web/src/components/panels/Step4Compare.tsx` — exibe banner amarelo de aviso quando alguma zona é círculo aproximado; cada card de zona com `is_circle_fallback=True` recebe badge `~círculo`.
+- Validation: `npm run typecheck` → exit 0 (0 errors).
+
+## 2026-03-26 - Implementacao dos painéis do FRONTEND_GEMINI na UI atual
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/develop-frontend/SKILL.md`.
+- Scope executed:
+  - Migrada a experiencia principal de wizard do `FRONTEND_GEMINI.html` para `apps/web`, sem reintroduzir elementos legados de UI.
+  - Criados stores Zustand para estado de jornada e UI:
+    - `apps/web/src/state/ui-store.ts`
+    - `apps/web/src/state/journey-store.ts`
+  - Criados componentes compartilhados e estrutura de painéis:
+    - `apps/web/src/components/shared/Badge.tsx`
+    - `apps/web/src/components/panels/ProgressTracker.tsx`
+    - `apps/web/src/components/panels/WizardPanel.tsx`
+    - `apps/web/src/components/panels/Step1Config.tsx`
+    - `apps/web/src/components/panels/Step2Transport.tsx`
+    - `apps/web/src/components/panels/Step3Zones.tsx`
+    - `apps/web/src/components/panels/Step4Compare.tsx`
+    - `apps/web/src/components/panels/Step5Address.tsx`
+    - `apps/web/src/components/panels/Step6Analysis.tsx`
+  - Integracao com API real e contratos atuais:
+    - `createJourney` na etapa 1;
+    - `createTransportSearchJob` + `getJob` + `getJourneyTransportPoints` na etapa 2;
+    - `createZoneGenerationJob` + `createZoneEnrichmentJob` + polling na etapa 3;
+    - `GET /journeys/{id}/zones` na etapa 4;
+    - `GET /journeys/{id}/listings/address-suggest` + `POST /journeys/{id}/listings/search` na etapa 5;
+    - `GET /journeys/{id}/zones/{zone}/listings` + `GET /journeys/{id}/zones/{zone}/price-rollups` na etapa 6.
+  - `apps/web/src/features/app/FindIdealApp.tsx` atualizado para:
+    - renderizar o `WizardPanel` sobre o mapa MapLibre;
+    - capturar clique no mapa como ponto principal da etapa 1;
+    - exibir marcador do ponto selecionado sem recriar a instancia do mapa entre etapas;
+    - renderizar overlays reais de mapa para pontos de transporte elegiveis, zonas geradas com rotulo e imoveis na etapa 6.
+  - `apps/web/src/api/client.ts` ajustado para exportar `API_BASE`, expor `updateJourney` e `getJourneyZonesList`.
+  - `apps/web/src/components/layout/index.ts` corrigido para remover exports quebrados de componentes inexistentes.
+- Validation:
+  - `npm run typecheck` em `apps/web` -> sucesso.
+  - `npm run build` em `apps/web` -> sucesso.
+  - Observacao de build: bundle principal gerou warning de chunk grande do Vite; nao bloqueia a rodada atual, mas merece code-splitting posterior.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-26 - Ajuste de UX do popup de ônibus (abrir só no alvo e fechar fora)
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/develop-frontend/SKILL.md`.
+- Scope executed:
+  - Ajustado `apps/web/src/features/app/FindIdealApp.tsx` para comportamento estrito do popup de ônibus.
+  - Popup agora:
+    - abre apenas em clique nas camadas alvo (`bus-line-layer`, `bus-stop-layer`, `bus-terminal-layer`);
+    - fecha ao clicar fora do popup;
+    - nao fecha imediatamente por propagacao do mesmo clique que abriu.
+  - Implementacao tecnica:
+    - controle de instancia unica via `busPopupRef`;
+    - `closeOnClick: false` no popup;
+    - handler global de clique no mapa fechando popup somente quando o clique nao for em camada de ônibus e nao for dentro do elemento do popup.
+- Validation:
+  - VS Code diagnostics sem erros em `apps/web/src/features/app/FindIdealApp.tsx`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-26 - Fix sumico de linhas/pontos de transporte no mapa
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/develop-frontend/SKILL.md`.
+- Scope executed:
+  - Diagnostico dos logs da API mostrou falhas 500 nos endpoints de vector tile de `transport_lines` e `transport_stops`.
+  - Causa raiz identificada: consultas SQL com agregacoes pesadas introduzidas na rodada anterior, causando falha de recursos no banco (`DiskFullError` em shared memory) e indisponibilidade das tiles de transporte.
+  - Correcao aplicada em `apps/api/src/api/routes/transport.py`:
+    - simplificacao das colunas de popup para `bus_count`/`bus_list` com custo baixo;
+    - remocao do `LATERAL` com joins em `gtfs_stop_times` e agregacoes `DISTINCT` custosas.
+  - API reconstruida com `docker compose up -d --build api`.
+  - Validacao de endpoints apos correcao:
+    - `/transport/tiles/lines/...` -> 200
+    - `/transport/tiles/stops/...` -> 200
+    - `/transport/tiles/environment/green/...` -> 200
+    - `/transport/tiles/environment/flood/...` -> 200
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-26 - Fix erro "Falha ao carregar ícones de ônibus no mapa"
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/develop-frontend/SKILL.md`.
+- Scope executed:
+  - Diagnostico do erro em runtime no frontend ao carregar ícones via `map.loadImage(data:image/svg+xml,...)`.
+  - Correcao aplicada em `apps/web/src/features/app/FindIdealApp.tsx`:
+    - removido fluxo de `loadImage` por data URL;
+    - adicionada geracao de icone RGBA em memoria (`Uint8Array`) via helper `createBusIcon`;
+    - registro direto com `map.addImage(...)`, sem dependencias de fetch/decode externo.
+  - Resultado: removido ponto de falha que gerava tela de erro no mapa para os ícones de ônibus.
+- Validation:
+  - VS Code diagnostics sem erros em `apps/web/src/features/app/FindIdealApp.tsx`.
+  - UI reconstruida com sucesso via `docker compose up -d --build ui`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-26 - Popup de ônibus no mapa + setas de sentido + ícone de ônibus
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/develop-frontend/SKILL.md`.
+- Scope executed:
+  - Backend (`apps/api/src/api/routes/transport.py`): enriquecimento das vector tiles de linhas e pontos com metadados de ônibus para uso em popup.
+    - Linhas: adicionados `bus_count` e `bus_list` em `transport_lines`.
+    - Pontos: adicionados `bus_count` e `bus_list` em `transport_stops`.
+    - Para GTFS: lista com numero da linha + sentido (`trip_headsign`) agregada por linha/ponto.
+    - Para dados GeoSampa sem direção explícita: fallback com `sentido não informado`.
+  - Frontend (`apps/web/src/features/app/FindIdealApp.tsx`):
+    - Clique em linha de ônibus abre popup com quantidade e lista de ônibus (numero + sentido).
+    - Clique em ponto/terminal de ônibus abre popup equivalente.
+    - Adicionada camada `bus-line-direction-layer` com setas ao longo da geometria para indicar sentido.
+    - Substituídos círculos de ponto/terminal de ônibus por ícones de ônibus, mantendo as cores (roxo/laranja) e escala visual equivalente.
+    - Cursor `pointer` em hover de linhas e pontos de ônibus.
+- Validation:
+  - VS Code diagnostics sem erros em `apps/web/src/features/app/FindIdealApp.tsx`.
+  - VS Code diagnostics sem erros em `apps/api/src/api/routes/transport.py`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
 ## 2026-03-26 - Camadas de vegetacao e alagamento visiveis no mapa (vector tiles)
 
 - Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`.

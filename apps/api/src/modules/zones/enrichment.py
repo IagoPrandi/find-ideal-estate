@@ -17,6 +17,38 @@ _POI_CATEGORIES = ("school", "supermarket", "pharmacy", "park")
 _POI_CACHE_TTL_SECONDS = 1800
 
 
+def _format_mapbox_float(value: float) -> str:
+    return f"{float(value):.6f}"
+
+
+def _format_bbox(bbox: tuple[float, float, float, float]) -> str:
+    return ",".join(_format_mapbox_float(part) for part in bbox)
+
+
+def _format_proximity(lon: float, lat: float) -> str:
+    return f"{_format_mapbox_float(lon)},{_format_mapbox_float(lat)}"
+
+
+def _mapbox_poi_params(
+    *,
+    category: str,
+    access_token: str,
+    bbox: tuple[float, float, float, float],
+    lon: float,
+    lat: float,
+) -> dict[str, str | int]:
+    return {
+        "q": str(category).strip(),
+        "access_token": access_token,
+        "language": "pt",
+        "country": "BR",
+        "limit": 10,
+        "types": "poi",
+        "bbox": _format_bbox(bbox),
+        "proximity": _format_proximity(lon, lat),
+    }
+
+
 def _poi_cache_key(
     *,
     zone_fingerprint: str,
@@ -195,24 +227,24 @@ async def enrich_zone_pois(zone_id: UUID) -> dict[str, Any]:
     else:
         settings = get_settings()
         poi_counts: dict[str, int] = {k: 0 for k in _POI_CATEGORIES}
+        zone_lon = float(zone["lon"])
+        zone_lat = float(zone["lat"])
         async with httpx.AsyncClient(timeout=8.0) as client:
             for category in _POI_CATEGORIES:
                 try:
                     response = await client.get(
-                        "https://api.mapbox.com/search/searchbox/v1/suggest",
-                        params={
-                            "q": category,
-                            "access_token": settings.mapbox_access_token,
-                            "language": "pt",
-                            "country": "BR",
-                            "limit": 10,
-                            "bbox": f"{bbox[0]},{bbox[1]},{bbox[2]},{bbox[3]}",
-                            "proximity": f"{zone['lon']},{zone['lat']}",
-                        },
+                        "https://api.mapbox.com/search/searchbox/v1/forward",
+                        params=_mapbox_poi_params(
+                            category=category,
+                            access_token=settings.mapbox_access_token,
+                            bbox=bbox,
+                            lon=zone_lon,
+                            lat=zone_lat,
+                        ),
                     )
                     response.raise_for_status()
                     payload = response.json()
-                    poi_counts[category] = len(payload.get("suggestions", []))
+                    poi_counts[category] = len(payload.get("features", []))
                 except Exception:
                     poi_counts[category] = 0
 
