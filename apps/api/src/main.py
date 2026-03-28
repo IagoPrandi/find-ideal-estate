@@ -7,6 +7,7 @@ from api.routes.jobs import router as jobs_router
 from api.routes.journeys import router as journeys_router
 from api.routes.listings import router as listings_router
 from api.routes.transport import router as transport_router
+from api.routes.zones import router as zones_router
 from core.config import ConfigurationError, get_settings
 from core.container import AppContainer, reset_container, set_container
 from core.db import close_db, init_db
@@ -78,7 +79,7 @@ app.include_router(transport_router)
 app.include_router(journeys_router)
 app.include_router(jobs_router)
 app.include_router(listings_router)
-
+app.include_router(zones_router)
 
 if __name__ == "__main__":
     try:

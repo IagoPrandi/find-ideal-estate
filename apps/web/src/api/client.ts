@@ -227,6 +227,18 @@ export async function getZoneAddressSuggestions(
   );
 }
 
+export type ListingsScrapePlanResponse = z.output<typeof ListingsScrapePlanResponseSchema>;
+export async function getListingsScrapePlan(
+  journeyId: string,
+  searchType: string,
+  usageType: string = "residential"
+): Promise<ListingsScrapePlanResponse> {
+  return await requestJson(
+    `/journeys/${journeyId}/listings/scrape-plan?search_type=${encodeURIComponent(searchType)}&usage_type=${encodeURIComponent(usageType)}`,
+    ListingsScrapePlanResponseSchema
+  );
+}
+
 export type ListingCardRead = z.output<typeof ListingCardReadBackendSchema>;
 export type ListingsRequestResult = z.output<typeof ListingsRequestResultBackendSchema>;
 export async function searchZoneListings(
@@ -466,10 +478,11 @@ export async function getZoneListings(
   journeyId: string,
   zoneFingerprint: string,
   searchType: string,
-  usageType: string = "residential"
+  usageType: string = "residential",
+  spatialScope: "inside_zone" | "all" = "inside_zone"
 ): Promise<ListingsRequestResult> {
   return (await requestJson(
-    `/journeys/${encodeURIComponent(journeyId)}/zones/${encodeURIComponent(zoneFingerprint)}/listings?search_type=${encodeURIComponent(searchType)}&usage_type=${encodeURIComponent(usageType)}`,
+    `/journeys/${encodeURIComponent(journeyId)}/zones/${encodeURIComponent(zoneFingerprint)}/listings?search_type=${encodeURIComponent(searchType)}&usage_type=${encodeURIComponent(usageType)}&spatial_scope=${encodeURIComponent(spatialScope)}`,
     ListingsRequestResultBackendSchema
   )) as ListingsRequestResult;
 }

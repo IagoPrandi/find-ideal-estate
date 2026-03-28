@@ -726,12 +726,31 @@ def _extract_from_glue_payload(
 
         lat = _as_float(
             _get_by_path(listing, "address.point.lat")
+            or _get_by_path(listing, "address.point.approximateLat")
+            or _get_by_path(listing, "address.point.latitude")
             or _get_by_path(listing, "geoLocation.precision.lat")
+            or _get_by_path(listing, "geoLocation.location.lat")
         )
         lon = _as_float(
             _get_by_path(listing, "address.point.lon")
+            or _get_by_path(listing, "address.point.approximateLon")
+            or _get_by_path(listing, "address.point.lng")
+            or _get_by_path(listing, "address.point.longitude")
             or _get_by_path(listing, "geoLocation.precision.lon")
+            or _get_by_path(listing, "geoLocation.precision.lng")
+            or _get_by_path(listing, "geoLocation.location.lon")
+            or _get_by_path(listing, "geoLocation.location.lng")
         )
+
+        if lat is None or lon is None:
+            coordinates = _get_by_path(listing, "geoLocation.location.coordinates")
+            if isinstance(coordinates, (list, tuple)) and len(coordinates) >= 2:
+                maybe_lon = _as_float(coordinates[0])
+                maybe_lat = _as_float(coordinates[1])
+                if lat is None:
+                    lat = maybe_lat
+                if lon is None:
+                    lon = maybe_lon
 
         pricing_infos = _get_by_path(listing, "pricingInfos") or []
         price = None
@@ -777,6 +796,12 @@ def _extract_from_glue_payload(
                 "platform": platform,
                 "platform_listing_id": lid,
                 "url": link,
+                "image_url": (
+                    _get_by_path(listing, "medias.0.url")
+                    or _get_by_path(listing, "medias.0.imageUrl")
+                    or _get_by_path(listing, "images.0.url")
+                    or _get_by_path(listing, "images.0")
+                ),
                 "lat": lat,
                 "lon": lon,
                 "price_brl": price,
@@ -853,6 +878,7 @@ def _extract_from_dom_rows(rows: list[dict[str, Any]], platform: str) -> list[di
                 "platform": platform,
                 "platform_listing_id": lid,
                 "url": link,
+                "image_url": None,
                 "lat": None,
                 "lon": None,
                 "price_brl": _as_float(price_match.group(0)) if price_match else None,

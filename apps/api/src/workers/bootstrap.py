@@ -9,7 +9,7 @@ def init_workers(*, broker_kind: str, redis_url: str) -> None:
     configure_broker(normalized, redis_url)
 
     # Import handlers after broker setup so actors bind to the configured broker.
-    from workers.handlers import enrichment, transport, zones  # noqa: F401
+    from workers.handlers import enrichment, listings, transport, zones  # noqa: F401
 
     start_watchdog()
 

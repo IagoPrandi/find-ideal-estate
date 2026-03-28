@@ -64,6 +64,8 @@ async def get_price_rollups(
                 p75_price=row.get("p75_price"),
                 sample_count=int(row.get("sample_count") or 0),
                 computed_at=row["computed_at"],
+                lat=float(row.get("lat") or 0.0),
+                lon=float(row.get("lon") or 0.0),
             )
         )
     return results

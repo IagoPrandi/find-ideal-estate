@@ -45,6 +45,23 @@ async def sweep_stale_running_jobs() -> None:
             mark_finished=True,
             result_ref={"status": "cancelled_partial", "reason": "missing_heartbeat"},
         )
+        # Reset any zone_listing_caches that were left in 'scraping' state by the
+        # cancelled job so that the next retry can start fresh.
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    """
+                    UPDATE zone_listing_caches
+                    SET status = 'cancelled_partial'
+                    WHERE zone_fingerprint = (
+                        SELECT result_ref->>'zone_fingerprint'
+                        FROM jobs WHERE id = :job_id
+                    )
+                    AND status = 'scraping'
+                    """
+                ),
+                {"job_id": job_id},
+            )
         await publish_job_event(
             job_id,
             "job.failed",

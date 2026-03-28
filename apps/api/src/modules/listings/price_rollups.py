@@ -146,12 +146,23 @@ async def fetch_rollups_for_zone(
     rows = await conn.execute(
         text(
             """
-            SELECT id, date, zone_fingerprint, search_type,
-                   median_price, p25_price, p75_price, sample_count, computed_at
-            FROM   property_price_rollups
-            WHERE  zone_fingerprint = :zone_fp
-              AND  search_type      = :search_type
-              AND  date >= CURRENT_DATE - :days * INTERVAL '1 day'
+                        SELECT
+                                     pr.id,
+                                     pr.date,
+                                     pr.zone_fingerprint,
+                                     pr.search_type,
+                                     pr.median_price,
+                                     pr.p25_price,
+                                     pr.p75_price,
+                                     pr.sample_count,
+                                     pr.computed_at,
+                                     COALESCE(ST_Y(ST_PointOnSurface(z.isochrone_geom)), 0.0) AS lat,
+                                     COALESCE(ST_X(ST_PointOnSurface(z.isochrone_geom)), 0.0) AS lon
+                        FROM   property_price_rollups pr
+                        LEFT JOIN zones z ON z.fingerprint = pr.zone_fingerprint
+                        WHERE  pr.zone_fingerprint = :zone_fp
+                            AND  pr.search_type      = :search_type
+                            AND  pr.date >= CURRENT_DATE - :days * INTERVAL '1 day'
             ORDER  BY date DESC
             LIMIT  :days
             """

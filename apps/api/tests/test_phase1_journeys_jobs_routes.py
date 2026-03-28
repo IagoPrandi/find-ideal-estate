@@ -243,3 +243,56 @@ def test_get_journey_zones_returns_list_response(monkeypatch):
     assert len(body["zones"]) == 1
     assert body["zones"][0]["id"] == zone_id
     assert body["zones"][0]["badges"]["green_badge"]["tier"] == "excellent"
+
+
+def test_get_price_rollups_returns_lat_lon(monkeypatch):
+    journey_id = uuid4()
+
+    class _FakeConn:
+        pass
+
+    class _FakeConnectCtx:
+        async def __aenter__(self):
+            return _FakeConn()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class _FakeEngine:
+        def connect(self):
+            return _FakeConnectCtx()
+
+    async def _fake_fetch_rollups_for_zone(_conn, zone_fingerprint, search_type, days=30):
+        assert zone_fingerprint == "zone-fp-1"
+        assert search_type == "rent"
+        assert days == 30
+        return [
+            {
+                "id": uuid4(),
+                "date": datetime(2026, 3, 26, tzinfo=timezone.utc).date(),
+                "zone_fingerprint": "zone-fp-1",
+                "search_type": "rent",
+                "median_price": 3500,
+                "p25_price": 3000,
+                "p75_price": 4200,
+                "sample_count": 12,
+                "computed_at": datetime.now(tz=timezone.utc),
+                "lat": -23.55,
+                "lon": -46.63,
+            }
+        ]
+
+    monkeypatch.setattr("api.routes.zones._get_engine", lambda: _FakeEngine())
+    monkeypatch.setattr("api.routes.zones.fetch_rollups_for_zone", _fake_fetch_rollups_for_zone)
+
+    with TestClient(app) as client:
+        response = client.get(
+            f"/journeys/{journey_id}/zones/zone-fp-1/price-rollups?search_type=rent&days=30"
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["zone_fingerprint"] == "zone-fp-1"
+    assert body[0]["lat"] == -23.55
+    assert body[0]["lon"] == -46.63

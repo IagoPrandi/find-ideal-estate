@@ -184,11 +184,13 @@ async def fetch_listing_cards_for_zone(
     search_type: str,
     usage_type: str,
     platforms: list[str],
+    observed_since: Any | None = None,
+    spatial_scope: str = "inside_zone",
 ) -> list[dict[str, Any]]:
     """
     Return flattened listing cards for the given zone fingerprint.
-    Uses ST_Within to ensure properties are inside the zone polygon.
-    Computes current_best_price and second_best_price across active ads.
+    Supports either only listings inside the selected zone or the broader set
+    of scraped listings, including items without coordinates.
     """
     engine = get_engine()
     async with engine.connect() as conn:
@@ -203,6 +205,7 @@ async def fetch_listing_cards_for_zone(
                         la.url,
                         la.advertised_usage_type,
                         ls.price,
+                        ls.raw_payload->>'image_url' AS image_url,
                         ls.observed_at,
                         ROW_NUMBER() OVER (
                             PARTITION BY la.property_id
@@ -212,52 +215,80 @@ async def fetch_listing_cards_for_zone(
                     JOIN listing_snapshots ls ON ls.listing_ad_id = la.id
                     WHERE la.is_active = true
                       AND la.platform = ANY(:platforms)
+                      AND (la.advertised_usage_type = :search_type OR la.advertised_usage_type IS NULL)
                       AND (ls.availability_state = 'active' OR ls.availability_state IS NULL)
+                                            AND (
+                                                CAST(:observed_since AS TIMESTAMPTZ) IS NULL
+                                                OR ls.observed_at >= CAST(:observed_since AS TIMESTAMPTZ)
+                                            )
                 ),
                 zone_props AS (
-                    SELECT p.id AS property_id
+                    SELECT
+                        p.id AS property_id,
+                        p.address_normalized,
+                        p.location,
+                        p.area_m2,
+                        p.bedrooms,
+                        p.bathrooms,
+                        p.parking,
+                        p.usage_type,
+                        p.location IS NOT NULL AS has_coordinates,
+                        CASE
+                            WHEN p.location IS NULL THEN false
+                            ELSE ST_Within(p.location, z.isochrone_geom)
+                        END AS inside_zone
                     FROM properties p
                     JOIN zones z ON z.fingerprint = :zone_fp
-                    WHERE ST_Within(p.location, z.isochrone_geom)
-                      AND (p.usage_type = :usage_type OR :usage_type = 'all')
+                    WHERE (p.usage_type = :usage_type OR :usage_type = 'all')
                 )
                 SELECT
-                    p.id              AS property_id,
-                    p.address_normalized,
-                    p.area_m2,
-                    p.bedrooms,
-                    p.bathrooms,
-                    p.parking,
-                    p.usage_type,
+                    zp.property_id,
+                    zp.address_normalized,
+                    zp.has_coordinates,
+                    zp.inside_zone,
+                    ST_Y(zp.location) AS lat,
+                    ST_X(zp.location) AS lon,
+                    zp.area_m2,
+                    zp.bedrooms,
+                    zp.bathrooms,
+                    zp.parking,
+                    zp.usage_type,
                     bp.platform,
                     bp.platform_listing_id,
                     bp.url,
+                    bp.image_url,
                     bp.price          AS current_best_price,
                     bp.observed_at,
                     (
                         SELECT bp2.price
                         FROM best_prices bp2
-                        WHERE bp2.property_id = p.id
+                        WHERE bp2.property_id = zp.property_id
                           AND bp2.price_rank = 2
                         LIMIT 1
                     )                  AS second_best_price,
                     (
-                        SELECT COUNT(DISTINCT la2.platform)
-                        FROM listing_ads la2
-                        WHERE la2.property_id = p.id
-                          AND la2.is_active = true
-                          AND la2.platform = ANY(:platforms)
+                        SELECT COUNT(DISTINCT bp2.platform)
+                        FROM best_prices bp2
+                        WHERE bp2.property_id = zp.property_id
                     )                  AS platform_count
-                FROM properties p
-                JOIN zone_props zp ON zp.property_id = p.id
-                JOIN best_prices bp ON bp.property_id = p.id AND bp.price_rank = 1
-                ORDER BY bp.price ASC NULLS LAST
+                    ,(
+                        SELECT ARRAY_AGG(DISTINCT bp2.platform ORDER BY bp2.platform)
+                        FROM best_prices bp2
+                        WHERE bp2.property_id = zp.property_id
+                    )                  AS platforms_available
+                FROM zone_props zp
+                JOIN best_prices bp ON bp.property_id = zp.property_id AND bp.price_rank = 1
+                WHERE (:spatial_scope = 'all' OR zp.inside_zone = true)
+                ORDER BY zp.inside_zone DESC, zp.has_coordinates DESC, bp.price ASC NULLS LAST
                 """
             ),
             {
                 "zone_fp": zone_fingerprint,
                 "usage_type": usage_type,
                 "platforms": platforms,
+                "search_type": search_type,
+                "observed_since": observed_since,
+                "spatial_scope": spatial_scope,
             },
         )
 
@@ -275,6 +306,10 @@ async def fetch_listing_cards_for_zone(
                 {
                     "property_id": str(row["property_id"]),
                     "address_normalized": row["address_normalized"],
+                    "lat": float(row["lat"]) if row["lat"] is not None else None,
+                    "lon": float(row["lon"]) if row["lon"] is not None else None,
+                    "has_coordinates": bool(row["has_coordinates"]),
+                    "inside_zone": bool(row["inside_zone"]),
                     "area_m2": row["area_m2"],
                     "bedrooms": row["bedrooms"],
                     "bathrooms": row["bathrooms"],
@@ -283,6 +318,8 @@ async def fetch_listing_cards_for_zone(
                     "platform": row["platform"],
                     "platform_listing_id": row["platform_listing_id"],
                     "url": row["url"],
+                    "image_url": row["image_url"],
+                    "platforms_available": list(row["platforms_available"] or []),
                     "current_best_price": str(best_price) if best_price else None,
                     "second_best_price": str(second_price) if second_price else None,
                     "duplication_badge": dup_badge,

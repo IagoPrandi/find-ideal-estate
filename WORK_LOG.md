@@ -1,5 +1,584 @@
 # Work Log
 
+## 2026-03-28 - Corrigir Step 6 quando a lista de imóveis some por 500 no backend
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/develop-frontend/SKILL.md` para depurar o sintoma no painel e seguir a falha ate a rota real do Step 6.
+- Trigger: usuario reportou que a lista de imóveis nao apareceu e o painel exibiu erro generico de API mesmo com scraping concluido.
+- Root cause identified:
+  - a rota `GET /journeys/{id}/zones/{zone}/listings` estava falhando com `500` no backend;
+  - em `apps/api/src/modules/listings/dedup.py`, a SQL de `fetch_listing_cards_for_zone()` ainda referenciava o alias antigo `p.id` em subqueries, embora a consulta externa ja tivesse migrado para o alias `zp`;
+  - isso disparava `asyncpg.exceptions.UndefinedTableError: missing FROM-clause entry for table "p"`, e o frontend convertia a falha em banner generico de API.
+- Scope executed:
+  - `apps/api/src/modules/listings/dedup.py`:
+    - corrigidas as tres subqueries para usar `zp.property_id` em vez de `p.id`;
+    - mantido o comportamento de `spatial_scope=all` sem fallback que esconda erro real.
+  - `apps/api/tests/test_phase5_dedup.py`:
+    - adicionado teste com banco real para `fetch_listing_cards_for_zone(..., spatial_scope="all")`;
+    - teste insere zona temporaria + dois anuncios da mesma propriedade e valida card deduplicado com `platforms_available` e `second_best_price`.
+  - ambiente local:
+    - `api` reiniciado via `docker compose restart api` para garantir recarga limpa do codigo em execucao.
+- Validation:
+  - `pytest` focado: `apps/api/tests/test_phase5_dedup.py` -> `13 passed in 0.85s`.
+  - chamada HTTP de Step 6 contra o backend respondeu sem `500` apos a correcao; o retorno observado foi `source=no_cache` para a jornada consultada, sem repetir a excecao SQL.
+- Observations:
+  - o banner vermelho visto na UI era efeito secundario do `500`; nao era problema de CORS/rede.
+  - os testes anteriores de rota estavam com monkeypatch em `fetch_listing_cards_for_zone()` e por isso nao cobriam a SQL real.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-28 - Sincronizar o mapa com os mesmos filtros do painel de imóveis no Step 6
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/develop-frontend/SKILL.md` para alinhar o comportamento do mapa com o painel sem duplicar regras de filtro no frontend.
+- Trigger: usuario pediu que o mapa fosse um reflexo dos imóveis exibidos no painel do Step 6.
+- Scope executed:
+  - `apps/web/src/state/journey-store.ts`:
+    - adicionados filtros compartilhados de listings (`minPrice`, `maxPrice`, `usageType`, `spatialScope`, `minSize`, `maxSize`);
+    - filtros agora resetam ao trocar jornada ou zona.
+  - `apps/web/src/lib/listingFormat.ts`:
+    - extraido helper compartilhado `applyListingsPanelFilters()`;
+    - mapa e painel passaram a aplicar exatamente a mesma logica de filtro.
+  - `apps/web/src/components/panels/Step6Analysis.tsx`:
+    - filtros locais removidos em favor do store compartilhado;
+    - lista do painel continua usando `spatial_scope=all`, mas agora o recorte final sai do helper compartilhado.
+  - `apps/web/src/features/app/FindIdealApp.tsx`:
+    - camada de listings do mapa passou a consumir a mesma query/cache do Step 6 (`spatial_scope=all`);
+    - mapa aplica o mesmo helper de filtros do painel antes de montar a `FeatureCollection`;
+    - resultado: ao mudar filtro no painel, o mapa reflete o mesmo subconjunto de imóveis que possuem coordenadas.
+  - `apps/web/src/state/journey-store.test.ts`:
+    - cobertura adicional para reset dos filtros compartilhados ao trocar jornada ou zona.
+- Validation:
+  - `vitest` focado: `src/components/panels/Step6Analysis.test.tsx` e `src/state/journey-store.test.ts` -> `5 passed`.
+  - `npm run build` em `apps/web` -> build concluido com sucesso.
+- Observations:
+  - anuncios sem coordenadas continuam aparecendo no painel, mas nao podem ser plotados no mapa; portanto o mapa agora reflete o mesmo recorte filtrado do painel apenas para os itens que possuem `lat/lon`.
+  - warnings antigos de `act(...)` continuam na suite React, sem falha funcional nesta rodada.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-28 - Ampliar o painel de imóveis para incluir anúncios sem coordenadas e filtro de escopo espacial
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `skills/best-practices/references/web2-backend.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/best-practices/SKILL.md` para ajustar contrato backend/frontend sem quebrar consumidores existentes do endpoint de Step 6.
+- Trigger: usuario pediu que o painel de imóveis passasse a abranger imóveis com e sem coordenadas e que o painel de filtros permitisse alternar entre ver apenas imóveis dentro da zona ou todos os imóveis.
+- Scope executed:
+  - `apps/api/src/modules/listings/dedup.py`:
+    - `fetch_listing_cards_for_zone()` agora aceita `spatial_scope` (`inside_zone` | `all`);
+    - resposta passou a incluir `has_coordinates` e `inside_zone` por imóvel;
+    - modo `all` retorna também imóveis fora da zona e sem coordenadas, mantendo ordenação com matches dentro da zona primeiro.
+  - `apps/api/src/api/routes/listings.py`:
+    - `GET /journeys/{id}/zones/{zone}/listings` agora aceita `spatial_scope` com validação explícita;
+    - default mantido em `inside_zone` para preservar comportamento existente do mapa e demais consumidores.
+  - `packages/contracts/contracts/listings.py` e `apps/web/src/api/schemas.ts`:
+    - `ListingCardRead` estendido com `has_coordinates` e `inside_zone`.
+  - `apps/web/src/api/client.ts`:
+    - `getZoneListings()` passou a aceitar `spatialScope` opcional;
+    - chamadas do mapa foram deixadas explicitamente em `inside_zone`.
+  - `apps/web/src/components/panels/Step6Analysis.tsx`:
+    - Step 6 agora busca `spatial_scope=all`;
+    - novo filtro `Escopo espacial` com opções `Todos os imóveis` e `Apenas dentro da zona`;
+    - resumo no filtro com contagem de itens dentro da zona, fora da zona e sem coordenadas;
+    - cards exibem badge `Dentro da zona`, `Fora da zona` ou `Sem coordenadas`;
+    - estado vazio foi ajustado para distinguir ausência total de resultados de ausência de matches dentro da zona quando o usuário filtra pelo escopo espacial.
+  - `apps/api/tests/test_phase5_stale_revalidate.py`:
+    - novo teste cobrindo `spatial_scope=all` no endpoint.
+  - `apps/web/src/components/panels/Step6Analysis.test.tsx`:
+    - novo teste cobrindo a exibição de todos os imóveis por padrão e a filtragem para apenas itens dentro da zona;
+    - expectativa do estado vazio anterior foi atualizada para a nova cópia.
+- Validation:
+  - `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase5_stale_revalidate.py -q` -> `8 passed in 11.52s`.
+  - `vitest` focado: `src/components/panels/Step6Analysis.test.tsx` -> `3 passed`.
+  - `npm run build` em `apps/web` -> build concluido com sucesso.
+- Observations:
+  - o mapa continua consumindo apenas listings dentro da zona, por chamada explícita com `spatial_scope=inside_zone`.
+  - os warnings antigos de `act(...)` continuam aparecendo na suíte React, mas sem falha nesta rodada.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-28 - Explicar no Step 6 quando o scrape conclui mas zero imóveis ficam dentro da zona
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/develop-frontend/SKILL.md` para corrigir a apresentacao do estado vazio no Step 6 sem esconder a causa real.
+- Trigger: usuario trouxe evidencia de Step 6 com `source=cache`, `freshness_status=fresh`, `total_count=0`, mesmo com job de listings concluido com sucesso.
+- Diagnosis:
+  - job `6816ae50-d5a5-48b5-9139-d245bd8555e8` concluiu `completed` para a zona `6e906a2a9401b47342a2960fcfdf41b449a899140327e1d46539121d581dc904`;
+  - cache da zona ficou `complete` com `preliminary_count = 210` e `platforms_completed = {quintoandar,vivareal,zapimoveis}`;
+  - `GET /journeys/{id}/zones/{zone}/listings?search_type=rent&usage_type=residential` retornou `source=cache`, `freshness_status=fresh`, `listings=[]`, `total_count=0`;
+  - consulta SQL confirmou `196` anuncios persistidos com coordenadas para esse scrape, mas `0` deles dentro do poligono da zona (`inside_zone = 0`).
+  - conclusao: neste caso o frontend mostrou um vazio verdadeiro do endpoint, mas a UX estava enganosa porque parecia “nenhum imóvel ainda” em vez de “scrape concluido, sem matches espaciais na zona”.
+- Scope executed:
+  - `apps/web/src/components/panels/Step6Analysis.tsx`:
+    - `listingsJobId` deixa de ser limpo automaticamente ao finalizar o job, preservando o diagnostico final no painel;
+    - `freshnessLabel('fresh')` agora mostra `Resultado consolidado`;
+    - empty state diferenciado quando o job concluiu e `scrape_diagnostics.summary.total_scraped > 0`, informando que o scrape terminou mas nenhum imovel ficou dentro da zona apos o filtro espacial.
+  - `apps/web/src/components/panels/Step6Analysis.test.tsx`:
+    - novo caso cobrindo `job completed + cache fresh + total_count=0 + total_scraped>0`.
+- Validation:
+  - `vitest` focado: `src/components/panels/Step6Analysis.test.tsx` -> `2 passed`.
+  - `npm run build` em `apps/web` -> build concluido com sucesso.
+- Observations:
+  - continuam existindo warnings de `act(...)` nos testes React, mas sem falha funcional nesta rodada.
+  - a correcao nao relaxa o filtro espacial nem inventa cards fora da zona; apenas torna o estado vazio explicavel para o usuario.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-27 - Expor progresso de listings por plataforma na UI do Step 6
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/develop-frontend/SKILL.md` para integrar a telemetria do job de listings na UI sem quebrar o fluxo existente do wizard.
+- Trigger: usuario pediu para expor no Step 6 o progresso por plataforma que ja estava sendo persistido no worker `listings_scrape`.
+- Scope executed:
+  - `apps/web/src/state/journey-store.ts`:
+    - adicionado `listingsJobId` ao estado da jornada;
+    - reset do job de listings ao trocar jornada ou zona.
+  - `apps/web/src/components/panels/Step5Address.tsx`:
+    - resposta de `searchZoneListings()` agora persiste `job_id` no store antes de avancar para a etapa 6.
+  - `apps/web/src/api/schemas.ts`:
+    - adicionados tipos zod para `scrape_diagnostics` e diagnosticos por plataforma.
+  - `apps/web/src/components/panels/Step6Analysis.tsx`:
+    - polling de `GET /jobs/{job_id}` enquanto o scrape estiver ativo;
+    - bloco visual `Progresso por plataforma` com status por origem (`na fila`, `raspando`, `persistindo`, `concluida`, `falhou`), contagem processada e duracao;
+    - cabecalho agora mostra percentual do job e plataforma ativa;
+    - o polling de listings permanece ativo enquanto houver `listingsJobId` em andamento.
+  - testes:
+    - `apps/web/src/components/panels/Step5Address.test.tsx` atualizado para garantir persistencia de `listingsJobId`;
+    - novo `apps/web/src/components/panels/Step6Analysis.test.tsx` cobrindo a renderizacao do progresso por plataforma.
+- Validation:
+  - `vitest` focado: `src/components/panels/Step5Address.test.tsx` e `src/components/panels/Step6Analysis.test.tsx` -> sem falhas.
+  - `npm run build` em `apps/web` -> build concluido com sucesso.
+- Observations:
+  - o `vitest` ainda emite warnings antigos de `act(...)` nesses componentes, mas sem falha de execucao nesta rodada.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-28 - Instrumentar listings_scrape e confirmar replay frio de Rua Guaipá com 3 plataformas
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/best-practices/SKILL.md` para instrumentacao backend e replay observavel do fluxo.
+- Trigger: usuario pediu instrumentacao do worker `listings_scrape` para expor progresso/erro por plataforma, coleta detalhada de tempos por etapa e novo replay do cenario `Ônibus + Rua Guaipá`, aceitando timeout de ate ~5 min.
+- Scope executed:
+  - `apps/api/src/workers/handlers/listings.py`:
+    - adicionado `result_ref.scrape_diagnostics` persistido durante o job;
+    - estados por plataforma: `pending`, `scraping`, `persisting`, `completed`, `failed`;
+    - tempos por fase (`scrape_duration_ms`, `persist_duration_ms`, `total_duration_ms`), contagens persistidas e erro por fase/tipo/mensagem;
+    - eventos `listings.platform.started`, `listings.platform.scraped`, `listings.platform.persisted`, `listings.platform.failed`.
+  - `apps/api/src/api/routes/listings.py`:
+    - `POST /journeys/{id}/listings/search` agora retorna `job_id` em cache miss;
+    - `GET /journeys/{id}/zones/{zone}/listings` expoe `job_id` ativo quando ainda nao ha cache utilizavel.
+  - `apps/api/tests/test_phase5_scraping_lock.py` e `apps/api/tests/test_phase5_stale_revalidate.py`:
+    - cobertura para diagnosticos por plataforma e exposicao de `job_id`.
+  - `scripts/debug_step6_platforms_playwright.cjs`:
+    - polling de `GET /jobs/{job_id}` durante o replay;
+    - artefato final passou a incluir `listingsJobId`, `jobPolls` e `finalJobSnapshot`.
+- Validation:
+  - `python -m pytest apps/api/tests/test_phase5_scraping_lock.py apps/api/tests/test_phase5_stale_revalidate.py -q` -> `12 passed in 2.16s`.
+  - API reiniciada para garantir codigo recarregado antes do replay frio.
+  - cache da zona `45be770660184a1219fb4af6a850e47813ef7935603c1dec59cc1b38b78b2ae3` removido antes do replay.
+  - replay frio instrumentado concluido com:
+    - `selectedOptionText = Rua Guaipá, Vila Leopoldina, São Paulo, SP`;
+    - `listingsJobId = 935d7495-3930-49f3-aa91-73668c1cdb99`;
+    - `waitSummary.reachedListings = true` em ~`244.9s`;
+    - `acceptance.status = pass`, `actualTotalCount = 38`, `actualPlatforms = [quintoandar, vivareal, zapimoveis]`.
+- Diagnostico do worker instrumentado:
+  - job finalizou `completed` com `progressPercent = 100` e `scrapeDiagnostics.status = complete`;
+  - `summary.total_scraped = 227`;
+  - `platforms_completed = [quintoandar, vivareal, zapimoveis]` e `platforms_failed = []`;
+  - tempos por plataforma:
+    - `quintoandar`: `84` listings, ~`45.5s` total (`44.1s` scrape + `1.3s` persist);
+    - `vivareal`: `30` listings, ~`72.4s` total (`72.3s` scrape + `0.17s` persist);
+    - `zapimoveis`: `113` listings, ~`117.7s` total (`114.6s` scrape + `3.1s` persist).
+  - conclusao: neste replay o gargalo principal ficou em `zapimoveis`, mas o job nao travou; o tempo total observado foi consistente com a execucao sequencial das 3 plataformas.
+- Observations:
+  - o painel/lista final mostrou `38` cards apos deduplicacao, embora o worker tenha raspado `227` anuncios brutos antes do filtro espacial/dedup.
+  - a nova instrumentacao deixa visivel se um futuro problema ocorrer em `scrape`, `persist` ou transicao de cache, sem depender apenas do estado generico `running`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-27 - Revalidar fluxo onibus Rua Guaipa e corrigir runtime headed dos scrapers Glue
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/playwright/SKILL.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/playwright/SKILL.md` para reproducao fim-a-fim; ajustes backend mantidos minimos e focados no runtime dos scrapers.
+- Trigger: usuario pediu novo replay com o fluxo exato `-23.52149,-46.72752`, modo `Ônibus`, todos os enrichments desligados, primeiro ponto de transporte, primeira zona, sugestao `Rua Guaipá...`, aceitando apenas resultado com imoveis das `3` plataformas e `>30` imoveis.
+- Reproducao executada:
+  - `scripts/debug_step6_platforms_playwright.cjs` foi parametrizado para modo de transporte, regex do endereco e criterio de aceitacao (`expected platforms` + `expected min total`).
+  - Replay Playwright do cenario pedido:
+    - ponto seed selecionado: `R. Guaipá, 502`;
+    - zona selecionada: fingerprint `45be770660184a1219fb4af6a850e47813ef7935603c1dec59cc1b38b78b2ae3`;
+    - sugestao selecionada: `Rua Guaipá, Vila Leopoldina, São Paulo, SP`.
+  - Resultado antes da correcao do runtime headed:
+    - cache final `partial` com `platforms_completed=['quintoandar']`, `platforms_failed=['vivareal','zapimoveis']`;
+    - Step 6 retornou apenas `2` imoveis de `quintoandar` (`acceptance=fail`).
+- Root cause identificado:
+  - `vivareal` e `zapimoveis` falhavam no container `api` ao abrir Chromium headed com Playwright Python:
+    - erro bruto reproduzido dentro do container: `TargetClosedError` + `Missing X server or $DISPLAY`;
+    - o `entrypoint.sh` exportava `DISPLAY=:99`, mas isso nao garantia um X server valido para os scrapers executados inline no runtime atual.
+- Scope executado:
+  - `apps/api/src/modules/listings/scrapers/base.py`:
+    - adicionado bootstrap de `Xvfb` gerenciado pelos scrapers quando `prefer_headful=true` em Linux;
+    - escolhido display proprio (`SCRAPER_XVFB_DISPLAY` ou faixa `:98..:108`) sem confiar no `DISPLAY` do entrypoint;
+    - `env=os.environ` agora e passado explicitamente para o Chromium do Playwright.
+  - `apps/api/tests/test_phase5_scraper_health.py`:
+    - novos testes para o bootstrap de `Xvfb` gerenciado e erro explicito quando `Xvfb` nao esta disponivel.
+  - `scripts/debug_step6_platforms_playwright.cjs`:
+    - suporte ao cenario parametrizado do usuario e avaliacao automatica de `acceptance`.
+- Validation:
+  - `python -m pytest apps/api/tests/test_phase5_scraper_health.py -q` -> `5 passed`.
+  - Reproducao direta no container, apos a correcao do runtime headed:
+    - `vivareal` passou a abrir e retornar `count=1`;
+    - `zapimoveis` passou a abrir e retornar `count=1`.
+  - Replay Playwright frio final do cenario pedido:
+    - `selectedOptionText = Rua Guaipá, Vila Leopoldina, São Paulo, SP`;
+    - `waitSummary.reachedListings = false` apos ~`427s`;
+    - `latestZoneListings.total_count = 0`;
+    - `acceptance.status = fail`.
+  - Estado backend da ultima jornada `a48282af-6e7c-4c71-a59c-334bd6ee07c5`:
+    - job `listings_scrape` `1b9862ef-4b0f-4264-bf55-46f4da613d68` permaneceu `running`;
+    - cache da zona ficou `status='scraping'`, sem `platforms_completed` e sem `platforms_failed` durante o timeout do replay.
+- Status atual:
+  - o criterio pedido pelo usuario continua falhando neste cenario de `Ônibus + Rua Guaipá`;
+  - a falha original de runtime headed/X server foi parcialmente corrigida (as plataformas deixam de quebrar no launch), mas o replay fim-a-fim ainda nao entrega `3 plataformas` nem `>30` imoveis e segue bloqueado por scrape lento/incompleto no runtime containerizado.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-27 - Validar fluxo Step 6 via HTTP e Playwright no cenário frio e quente
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `skills/playwright/SKILL.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/best-practices/SKILL.md` com apoio de `skills/playwright/SKILL.md` para reproducao do browser.
+- Trigger: usuario pediu investigacao e correcao do trecho entre iniciar o scraping e obter a lista de imoveis, validando por HTTP e Playwright com o fluxo: ponto `-23.52149,-46.72752`, modo `Trem/Metrô`, todos os enrichments desmarcados, primeiro ponto de transporte, primeira zona, sugestao contendo `carlos`.
+- Scope executed:
+  - `scripts/debug_step6_platforms_playwright.cjs`:
+    - sincronizacao reforcada por etapa do wizard (`waitForStep` + stores Zustand), reduzindo fragilidade de waits apenas por heading;
+    - instrumentacao adicional de respostas para `journeys`, `jobs`, `transport-points`, `zones`, `address-suggest`, `listings/search` e `GET /zones/{zone}/listings`;
+    - captura do texto do primeiro ponto de transporte, primeira zona, sugestao selecionada e cauda do console/page errors.
+  - Validacao HTTP fim-a-fim:
+    - criada jornada real com os parametros do usuario;
+    - executados `transport_search`, `zone_generation` e `zone_enrichment`;
+    - selecionados o primeiro ponto (`DOMINGOS DE MORAIS`) e a primeira zona (`cf401a1f...`);
+    - `POST /listings/search` entrou em `source=none` e `GET /zones/{zone}/listings` convergiu para `source=cache`, `total_count=3` em cerca de `56s`.
+  - Validacao Playwright fim-a-fim:
+    - replay quente: a plataforma percorreu Step 1 -> 6 e recebeu `source=cache`, `total_count=3` para a sugestao `Rua Carlos Spera, Lapa, São Paulo, SP`;
+    - replay frio: removido cache apenas da zona `cf401a1f6265f1c5d60e0b1737ac023a56576e40aa7ede8c2eb567cd7b4e1558` (`DELETE 1` em `zone_listing_caches`) e rerodado o fluxo;
+    - no replay frio, a UI ficou varios polls em `source=none` / `freshness_status=no_cache` e depois transitou para `source=cache`, `freshness_status=fresh`, `total_count=3`, sem `pageErrors`.
+- Root cause status:
+  - nesta rodada, o bug relatado nao foi reproduzido no ambiente local atual;
+  - as provaveis causas levantadas anteriormente (cache parcial, worker/broker, polling do Step 6) nao se manifestaram neste replay especifico;
+  - o ambiente atual com broker `stub` e scrapers inline conseguiu completar tanto o fluxo HTTP quanto o fluxo da plataforma.
+- Validation:
+  - HTTP replay cold path: `3` listings apos cerca de `56s`.
+  - Playwright warm path: `3` listings exibidos para `Rua Carlos Spera, Lapa, São Paulo, SP`.
+  - Playwright cold path apos limpeza de cache da zona: varios ciclos `no_cache` seguidos de `cache/fresh` com `3` listings.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-27 - Corrigir Step 6 sem lista quando apenas cache parcial sobreposto existe
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/best-practices/SKILL.md`.
+- Trigger: usuario reportou que o scraping direto retornava muitos imoveis em poucos minutos, mas pela plataforma a etapa entre iniciar o scrape e obter a linha/lista de imoveis seguia vazia.
+- Root cause identified:
+  - `POST /journeys/{id}/listings/search` ja aceitava `cache_partial` vindo de zona sobreposta (`find_partial_hit_from_overlapping_zone`), mas `GET /journeys/{id}/zones/{zone}/listings` exigia apenas cache exato da zona atual;
+  - com isso, a etapa 5 conseguia iniciar/reaproveitar o processo, mas a etapa 6 permanecia em `source=none/no_cache` ate o re-scrape exato terminar, mesmo quando ja existia cache parcial utilizavel para preencher a lista.
+- Scope executed:
+  - `apps/api/src/api/routes/listings.py`:
+    - `get_zone_listings()` agora tenta `find_partial_hit_from_overlapping_zone()` quando o cache exato nao e utilizavel;
+    - se houver cache parcial sobreposto valido, o endpoint usa `platforms_completed` e `created_at` desse cache para montar a resposta da etapa 6, mantendo o filtro espacial na zona solicitada pelo frontend.
+  - `apps/api/tests/test_phase5_stale_revalidate.py`:
+    - novo teste de regressao cobrindo fallback do endpoint `GET /zones/{zone}/listings` para cache parcial sobreposto.
+- Validation:
+  - `docker compose exec api python -m pytest /app/apps/api/tests/test_phase5_stale_revalidate.py -q` -> `5 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-27 - Corrigir mapa sem imóveis, mistura rent/sale e sincronização de Step 6
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`.
+- Skill used: `skills/best-practices/SKILL.md`.
+- Trigger: usuário reportou que imóveis não apareciam no mapa, tipo de anúncio estava incorreto (ex.: preço de venda em fluxo de locação), contagem inconsistia e cards sem imagem.
+- Root causes identified:
+  1. `fetch_listing_cards_for_zone()` não filtrava por `search_type`; cards de `rent` e `sale` podiam misturar.
+  2. Mapa (Step 6) fazia um fetch único de listings; sem polling, a camada de pontos permanecia vazia quando o scrape concluía depois.
+  3. Contrato/listing card não expunha `image_url`; UI mostrava apenas placeholder.
+- Scope executed:
+  - `apps/api/src/modules/listings/dedup.py`:
+    - adicionado filtro por tipo de busca no CTE `best_prices`:
+      - `AND (la.advertised_usage_type = :search_type OR la.advertised_usage_type IS NULL)`;
+    - adicionada projeção de `image_url` via `ls.raw_payload->>'image_url'` para `ListingCardRead`;
+    - payload SQL agora recebe `search_type`.
+  - `packages/contracts/contracts/listings.py`:
+    - `ListingCardRead` passou a incluir `image_url: str | None`.
+  - `apps/web/src/api/schemas.ts`:
+    - schema frontend de listing card atualizado com `image_url`, `lat`, `lon` opcionais.
+  - `apps/web/src/components/panels/Step6Analysis.tsx`:
+    - cards passam a renderizar `<img>` quando `image_url` existir (fallback visual permanece).
+  - `apps/web/src/features/app/FindIdealApp.tsx`:
+    - sincronização da camada `journey-listings-layer` com polling a cada 5s no Step 6;
+    - polling é encerrado automaticamente quando já há dados (`source != none` e `total_count > 0`).
+  - Scrapers:
+    - `apps/api/src/modules/listings/scrapers/quintoandar.py`: saída normalizada passa a preencher `image_url` quando disponível.
+    - `apps/api/src/modules/listings/scrapers/vivareal.py` (também usado por Zap): tentativa de extração de `image_url` adicionada em payload normalizado.
+  - Limpeza direcionada de base:
+    - `DELETE FROM zone_listing_caches WHERE zone_fingerprint='5227d2cb6ae160e6c3feb49e3dfd34e6f2d4a72ac882d48bf361035ab42800d4';`
+    - objetivo: forçar ciclo limpo de scrape/cache para validação do fluxo.
+- Validation:
+  - Backend tests:
+    - `docker compose exec api python -m pytest /app/apps/api/tests/test_phase5_stale_revalidate.py /app/apps/api/tests/test_phase5_scraper_extraction.py -q` -> `21 passed`.
+    - `docker compose exec api python -m pytest /app/apps/api/tests/test_phase5_scraper_extraction.py -q` -> `17 passed`.
+  - Frontend build:
+    - `npm --prefix apps/web run build` -> `vite build` concluído com sucesso.
+  - Runtime replay:
+    - rebuild: `docker compose up -d --build api ui`.
+    - scrape job novo (`7feafe49-690b-454b-991b-36bb7fcb7cb8`) concluiu `completed`.
+    - `POST /journeys/{id}/listings/search` após scrape: `source=cache`, `freshness=fresh`, `total=9`, `with_coords=9`.
+    - preços no fluxo de locação voltaram para faixa de aluguel (não mais cards de venda de `R$ 150.000` no topo).
+- Observations:
+  - `image_url` ainda pode vir vazio para parte dos anúncios (principalmente Zap) porque o payload capturado atual não traz URL de mídia em todas as respostas interceptadas.
+  - Mesmo com isso, os cards continuam com fallback visual e o mapa agora sincroniza com os dados do painel.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluído nesta rodada (aguarda confirmação explícita do responsável).
+
+## 2026-03-27 - Corrigir cancelled_partial/missing_heartbeat e zone cache stuck
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`.
+- Skill used: `skills/best-practices/SKILL.md` (via resumo de sessao anterior).
+- Trigger: jobs de listings_scrape terminavam com `cancelled_partial/missing_heartbeat` antes de completar o scrape das 3 plataformas; runs subsequentes falhavam com `InvalidStateTransition: cannot transition scraping → scraping`.
+- Root causes identified:
+  1. **CancelledError nao tratada** — quando uvicorn/--reload cancela tasks asyncio, o `finally` de `run_job_with_retry` chamava `heartbeat.clear()`, removendo a chave de heartbeat; o watchdog no novo processo encontrava o job `running` sem heartbeat e o cancelava via `missing_heartbeat`.
+  2. **Listings handler nao registrado** — `bootstrap.py` importava `enrichment, transport, zones` mas nao `listings`; o actor nao era registrado ao usar Redis broker.
+  3. **Heartbeat TTL curto** — `ttl_seconds=120` era insuficiente para scraping multi-plataforma com Playwright.
+  4. **Watchdog nao resetava zone_listing_cache** — ao cancelar um job, o watchdog atualizava `jobs.state → cancelled_partial` mas deixava `zone_listing_caches.status = scraping`; tentativas de re-scrape falhavam com `InvalidStateTransition: scraping → scraping`.
+  5. **Estado terminal CANCELLED_PARTIAL/FAILED sem transicoes** — a state machine nao permitia iniciar novo scrape de um cache em estado `cancelled_partial` ou `failed`.
+- Scope executed:
+  - `apps/api/src/workers/runtime.py`:
+    - adicionado `except asyncio.CancelledError` em `run_job_with_retry`; define `_server_cancelled=True` e chama `mark_cancelled_partial` ANTES de re-raise; `finally` pula `heartbeat.clear()` se `_server_cancelled`;
+    - TTL do heartbeat aumentado de `120s` para `600s`.
+  - `apps/api/src/workers/bootstrap.py`:
+    - adicionado `listings` aos imports de handlers (`from workers.handlers import enrichment, listings, transport, zones`).
+  - `apps/api/src/workers/watchdog.py`:
+    - ao cancelar job por missing_heartbeat, executa UPDATE em `zone_listing_caches` resetando `status = 'cancelled_partial'` para todos os registros `scraping` do mesmo `zone_fingerprint` (via `jobs.result_ref->>'zone_fingerprint'`).
+  - `apps/api/src/modules/listings/models.py`:
+    - `FAILED: {SCRAPING}` e `CANCELLED_PARTIAL: {SCRAPING}` adicionados aos `_ALLOWED` da state machine (estados terminais agora permitem reinicio do scrape).
+- Validation:
+  - `pytest /app/apps/api/tests/test_phase5_*.py -q` (dentro do container): `25 passed`.
+  - Container rebuilded: `docker compose up -d --build api`.
+  - Job `e364e64d-c9ab-48f6-9dbc-97fb9c0e2736` criado e monitorado:
+    - watchdog executou 4x sem cancelar o job (heartbeat funcionando);
+    - job finalizou com `state=completed`;
+    - `zone_listing_caches.status=complete`, `platforms_completed={quintoandar,vivareal,zapimoveis}`, `preliminary_count=227`;
+  - POST `/journeys/{id}/listings/search` retornou `source=cache, total_count=9` com listings tendo `lat/lon` validos (`lat: -23.521715, lon: -46.722897`).
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+
+
+## 2026-03-27 - Corrigir trigger do Step 5 e revalidate stale com force_refresh
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`.
+- Skill used: `skills/best-practices/SKILL.md`.
+- Trigger: usuario reportou que ao selecionar endereco no passo 5 o scrape nao parecia ser chamado; logs mostravam apenas GET de listings.
+- Scope executed:
+  - frontend `Step5Address`:
+    - selecao de sugestao agora dispara automaticamente `searchZoneListings` e avanca para etapa 6;
+    - adicionado teste cobrindo disparo do POST ao selecionar sugestao.
+  - frontend `Step6Analysis`:
+    - polling continua quando `total_count=0` para nao interromper antes de o scrape assíncrono preencher cache.
+  - backend listings:
+    - payload de job agora recebe `force_refresh`;
+    - stale/partial revalidate enfileira `force_refresh=true`;
+    - state machine de cache permite `complete/partial -> scraping`;
+    - worker ignora early-return de cache usable quando `force_refresh=true`.
+- Validation:
+  - `pytest apps/api/tests/test_phase5_scraping_lock.py apps/api/tests/test_phase5_stale_revalidate.py apps/api/tests/test_phase5_scraper_extraction.py -q` -> `25 passed`.
+  - `npm run test:run -- src/components/panels/Step5Address.test.tsx` em `apps/web` -> `2 passed`.
+  - replay HTTP da jornada `737d26e9-7ddc-4900-8196-65217d3cf3c9`:
+    - `POST /journeys/{id}/listings/search` respondeu `200` (nao ficou mais sem efeito);
+    - jobs `listings_scrape` foram criados com `force_refresh=true` no banco (ex.: `530e8348-3d5f-4294-8ffc-f5ad2043e612`).
+- Observation:
+  - no momento do replay, o endpoint ainda retornava `source=none/no_cache` enquanto o job mais recente permanecia `running`; isso indica que o trigger/revalidate foi acionado, mas a finalizacao do scrape para esse caso ainda depende do runtime dos scrapers.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-27 - Validar HTTP etapa 5/6 e elevar cobertura de coordenadas VivaReal/Zap
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/best-practices/SKILL.md`.
+- Trigger: o usuario solicitou (1) validacao HTTP completa das etapas 5 e 6 com jornada real e (2) analise de payload bruto para elevar cobertura de coordenadas de VivaReal/Zap.
+- Scope executed:
+  - Validacao HTTP etapa 5/6 contra API no container (`localhost:8000`):
+    - ambiente confirmado (`onde_morar-api-1` healthy, porta `8000`);
+    - jornada real com zona usada nos testes: `960d0a51-197c-4cbd-a065-89eb879d39fe` / `5227d2cb6ae160e6c3feb49e3dfd34e6f2d4a72ac882d48bf361035ab42800d4`;
+    - validacao com plataformas explicitas (`quintoandar`,`zapimoveis`) retornou etapa 5 e etapa 6 com dados:
+      - `POST /journeys/{id}/listings/search` -> `200`, `source=cache`, `total_count=9`;
+      - `GET /journeys/{id}/zones/{zone}/listings?...&platforms=quintoandar&platforms=zapimoveis` -> `200`, `total_count=9`, `with_coords=9` (`100%`).
+  - Analise de payload bruto VivaReal/Zap:
+    - instrumentacao durante scrape real mostrou que parte dos anuncios sem `lat/lon` vinha com coordenadas em `address.point.approximateLat` / `address.point.approximateLon`;
+    - os extratores atuais consideravam `address.point.lat/lon` e `geoLocation.precision.lat/lon`, mas ignoravam os campos `approximate*`.
+  - Correcao aplicada:
+    - `apps/api/src/modules/listings/scrapers/vivareal.py`:
+      - expandida extracao de coordenadas para aceitar:
+        - `address.point.approximateLat` / `address.point.approximateLon`;
+        - aliases `address.point.latitude/longitude`, `address.point.lng`;
+        - `geoLocation.precision.lng`, `geoLocation.location.lat/lon/lng`;
+        - fallback `geoLocation.location.coordinates` (`[lon,lat]`).
+    - como ZapImoveis reusa `_extract_from_glue_payload` de VivaReal, a melhoria se aplica aos dois scrapers.
+  - Testes atualizados:
+    - `apps/api/tests/test_phase5_scraper_extraction.py`:
+      - novo teste para VivaReal com `address.point.approximateLat/approximateLon`;
+      - novo teste equivalente para ZapImoveis.
+- Validation:
+  - `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase5_scraper_extraction.py -q` -> `17 passed`.
+  - `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe scripts/verify_scraper_parity.py --address "Rua Guaipa, Vila Leopoldina, Sao Paulo - SP" --mode rent --out-json runs/parity_report_now.json` -> `PASS` com cobertura:
+    - `quintoandar`: `83/84` (`98.8%`) no run de paridade;
+    - `vivareal`: `30/30` (`100.0%`);
+    - `zapimoveis`: `113/113` (`100.0%`).
+  - scrape direto no mesmo endereco confirmou cobertura `100%` nas tres plataformas no run de verificacao direta.
+- Observations:
+  - em algumas jornadas/caches antigos, `GET /zones/{zone}/listings` sem plataformas explicitas ainda pode devolver `0` por configuracao de cache stale especifica da combinacao default; com cache compativel, o endpoint retorna lista e coordenadas normalmente.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-26 - Comparar scrape real vs verify_scraper_parity e corrigir coordenadas de listings
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/best-practices/SKILL.md`.
+- Trigger: o usuario pediu comparacao entre o scrape real e `scripts/verify_scraper_parity.py` para `Rua Guaipa, Vila Leopoldina, Sao Paulo - SP`, partindo da suspeita correta de que ausencia de `lat/lon` indica scrape incompleto e explica os imoveis nao aparecerem na lista/mapa.
+- Root cause:
+  - `verify_scraper_parity.py` validava apenas contagem minima por plataforma e podia reportar `PASS` mesmo quando a qualidade espacial dos resultados estava ruim;
+  - o QuintoAndar interceptava um payload separado de coordenadas (`/house-listing-search/.../coordinates`), mas o scraper descartava esse payload ao normalizar os listings;
+  - o contrato `ListingCardRead` e a query de `fetch_listing_cards_for_zone()` nao propagavam `lat/lon` para a UI, entao o mapa descartava features mesmo quando havia coordenadas persistidas no banco;
+  - o shim local `apps/api/contracts/__init__.py` estava sem export de `PriceRollupRead`, bloqueando a coleta de alguns testes de rota.
+- Scope executed:
+  - `apps/api/src/modules/listings/scrapers/quintoandar.py`:
+    - corrigido `_to_quintoandar_location_slug()` para preservar bairro/cidade/UF em buscas como `Rua Guaipa, Vila Leopoldina, Sao Paulo - SP` e nao reduzir tudo para `sao-paulo-sp-brasil`;
+    - adicionado merge de coordenadas via `_extract_quintoandar_coordinate_map()` usando o payload separado de `/coordinates`, enriquecendo os listings por `platform_listing_id`.
+  - `apps/api/src/modules/listings/dedup.py`:
+    - `fetch_listing_cards_for_zone()` agora seleciona `ST_Y(p.location)` / `ST_X(p.location)` e devolve `lat/lon` nos cards da API.
+  - `packages/contracts/contracts/listings.py`:
+    - `ListingCardRead` passou a expor `lat` e `lon` opcionais no contrato compartilhado.
+  - `scripts/verify_scraper_parity.py`:
+    - adicionados `api_coordinate_counts` e `api_coordinate_coverage` ao report, com resumo impresso por plataforma.
+  - `apps/api/contracts/__init__.py`:
+    - exportado `PriceRollupRead` para alinhar o shim local com `packages/contracts` e destravar testes.
+  - Testes atualizados:
+    - `apps/api/tests/test_phase5_scraper_extraction.py`: cobertura para slug do QuintoAndar e extração do payload de coordenadas;
+    - `apps/api/tests/test_phase5_stale_revalidate.py`: regressao garantindo preservacao de `lat/lon` na resposta da rota de listings.
+- Validation:
+  - scrape direto antes da correcao de coordenadas do QuintoAndar:
+    - `quintoandar`: `84` listings, `0` com coordenadas (`0.0%`);
+    - `vivareal`: `30` listings, `23` com coordenadas (`76.7%`);
+    - `zapimoveis`: `113` listings, `60` com coordenadas (`53.1%`).
+  - apos a correcao do merge do payload `/coordinates`:
+    - `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe scripts/verify_scraper_parity.py --address "Rua Guaipa, Vila Leopoldina, Sao Paulo - SP" --mode rent --out-json runs/parity_report_now.json`
+    - resultado:
+      - `quintoandar`: `84` listings, `84` com coordenadas (`100.0%`);
+      - `vivareal`: `30` listings, `23` com coordenadas (`76.7%`);
+      - `zapimoveis`: `113` listings, `60` com coordenadas (`53.1%`).
+  - testes focados:
+    - `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase5_scraper_extraction.py apps/api/tests/test_phase5_stale_revalidate.py -q` -> `19 passed`.
+  - integracao DB-backed:
+    - `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe scripts/verify_m5_5_dedup.py` -> `[OK] M5.5 verification passed`.
+- Residual risks observed:
+  - `vivareal` ainda perde `7/30` coordenadas neste endereco;
+  - `zapimoveis` ainda perde `53/113` coordenadas neste endereco;
+  - isso nao bloqueia mais o QuintoAndar, mas ainda pode reduzir cobertura final de itens plotaveis dependendo de qual plataforma conclui o cache vigente.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-26 - Corrigir ValidationError de lat/lon no endpoint de price rollups
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/best-practices/SKILL.md`.
+- Trigger: ao iniciar scraping/listings, o backend falhava em `GET /journeys/{journey_id}/zones/{zone_fingerprint}/price-rollups` com `ValidationError` de `PriceRollupRead` por campos obrigatorios ausentes (`lat`, `lon`).
+- Root cause:
+  - o contrato backend `PriceRollupRead` exige `lat` e `lon`;
+  - a rota `api/routes/zones.py` montava `PriceRollupRead` sem esses campos;
+  - a query de `fetch_rollups_for_zone()` tambem nao retornava coordenadas.
+- Scope executed:
+  - `apps/api/src/modules/listings/price_rollups.py`:
+    - `fetch_rollups_for_zone()` passou a fazer `LEFT JOIN zones` e retornar `lat/lon` via `ST_PointOnSurface(isochrone_geom)` com `COALESCE(..., 0.0)`.
+  - `apps/api/src/api/routes/zones.py`:
+    - `get_price_rollups()` agora preenche `lat` e `lon` ao construir `PriceRollupRead`.
+  - `apps/api/tests/test_phase1_journeys_jobs_routes.py`:
+    - adicionado teste `test_get_price_rollups_returns_lat_lon` para evitar regressao de contrato na rota.
+- Validation:
+  - `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase6_price_rollups.py -q` -> `15 passed`.
+  - Observacao: `pytest apps/api/tests/test_phase1_journeys_jobs_routes.py -q` no host local falha na coleta por `ImportError` preexistente de `contracts.PriceRollupRead` no ambiente local (bootstrap de imports), nao por erro de sintaxe no patch aplicado.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-26 - Respeitar selecao de itens no enriquecimento das zonas
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/best-practices/SKILL.md`.
+- Trigger: o usuario solicitou que itens desmarcados em "Analisar nas zonas" nao entrem no processamento de enriquecimento.
+- Root cause:
+  - o worker de enriquecimento executava sempre os 4 subjobs (`green`, `flood`, `safety`, `pois`) para cada zona, sem consultar os flags da jornada.
+- Scope executed:
+  - `apps/api/src/workers/handlers/enrichment.py`:
+    - adicionado parser robusto de flags de enriquecimento no `input_snapshot` (formato novo `enrichments` e formato legado `zone_detail_include_*`);
+    - implementada leitura dos flags por job (`jobs -> journeys.input_snapshot`);
+    - `dispatch_enrichment_subjobs` passou a disparar apenas os subjobs habilitados;
+    - quando um item esta desmarcado, o subjob correspondente nao e executado e o payload de resultado retorna `None` para a metrica.
+  - `apps/api/tests/test_phase4_enrichment_filters.py`:
+    - novo teste cobrindo parse de flags (novo + legado);
+    - novo teste garantindo que apenas os enrichments selecionados sao executados.
+- Validation:
+  - `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase4_enrichment_filters.py -q` -> `2 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-26 - Corrigir fase de scraping de imoveis para Rua Guaipa / Vila Leopoldina
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/best-practices/SKILL.md`.
+- Trigger: o usuario reportou que a fase de scraping de imoveis aparentava nao funcionar, sem resultados de QuintoAndar/VivaReal/ZapImoveis, e que os cards exibidos na etapa 6 pareciam mockados para o endereco `Rua Guaipa, Vila Leopoldina, Sao Paulo, SP`.
+- Root cause:
+  - o runtime default da busca de listings ainda iniciava apenas `quintoandar` + `zapimoveis`; `vivareal` ficava fora da fila porque `platforms.yaml` nao definia tiers e o fallback interno de `FREE_PLATFORMS` excluia VivaReal;
+  - o builder de URL do QuintoAndar caia para slug de cidade inteira sempre que o endereco continha `Sao Paulo`, o que descartava o recorte por bairro/logradouro e derrubava a relevancia da busca para `Rua Guaipa` / `Vila Leopoldina`;
+  - a etapa 6 lia `listing_ads` globais sem limitar pelo ciclo atual de cache, entao um scrape novo parcial podia marcar `zapimoveis`/`vivareal` como falhos e, mesmo assim, a UI continuava mostrando cards antigos do Zap como se fossem frescos.
+- Scope executed:
+  - `platforms.yaml`:
+    - adicionados `tier: free` para `quinto_andar`, `vivareal` e `zapimoveis`, fazendo o default runtime enfileirar as tres plataformas na etapa 5.
+  - `apps/api/src/modules/listings/scrapers/quintoandar.py`:
+    - corrigido `_to_quintoandar_location_slug()` para nao reduzir qualquer endereco com `Sao Paulo` a slug de cidade inteira;
+    - o helper agora preserva bairro/cidade/UF para entradas como `Rua Guaipa, Vila Leopoldina, Sao Paulo, SP` e continua evitando slug de rua pura quando o QuintoAndar nao suporta esse escopo.
+  - `apps/api/src/api/routes/listings.py`:
+    - `listings_search` e `get_zone_listings` agora usam apenas `platforms_completed` do cache atual para montar os cards retornados;
+    - os endpoints passaram a propagar `created_at` do cache como janela minima de observacao para a consulta de cards.
+  - `apps/api/src/modules/listings/dedup.py`:
+    - `fetch_listing_cards_for_zone()` agora filtra snapshots por `observed_at >= created_at` do cache corrente;
+    - o badge/plataform_count passou a ser calculado apenas sobre os snapshots visiveis do ciclo atual, evitando misturar anuncios antigos de plataformas marcadas como falhas no scrape vigente.
+  - Testes adicionados/atualizados:
+    - `apps/api/tests/test_platform_registry.py`: regressao cobrindo `default_free_platforms()` com VivaReal incluida;
+    - `apps/api/tests/test_phase5_scraper_extraction.py`: regressao cobrindo slug do QuintoAndar para `Rua Guaipa, Vila Leopoldina, Sao Paulo, SP` e para busca de bairro em dois segmentos;
+    - `apps/api/tests/test_phase5_stale_revalidate.py`: regressao cobrindo uso de `platforms_completed` + `observed_since` no POST/GET de listings.
+- Validation:
+  - `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_platform_registry.py apps/api/tests/test_phase5_scraper_extraction.py apps/api/tests/test_phase5_stale_revalidate.py -q` -> `23 passed`.
+  - runtime local apos restart da API:
+    - replay HTTP `POST /journeys/960d0a51-197c-4cbd-a065-89eb879d39fe/listings/search` para `Rua Guaipa, Vila Leopoldina, Sao Paulo, SP` -> `200` com `freshness_status=queued_for_next_prewarm`;
+    - job novo persistido `9a904e7c-4d57-4529-8921-47daa26fb055` com `result_ref.platforms = ["quintoandar", "vivareal", "zapimoveis"]`;
+    - cache novo `config_hash=c9950a0515283290` concluiu como `partial`, com `platforms_completed=quintoandar` e `platforms_failed=vivareal,zapimoveis`;
+    - `GET /journeys/960d0a51-197c-4cbd-a065-89eb879d39fe/zones/5227d2cb6ae160e6c3feb49e3dfd34e6f2d4a72ac882d48bf361035ab42800d4/listings?search_type=rent&usage_type=residential` passou a retornar `total_count=0` para esse cache atual, sem reciclar cards antigos do Zap como se fossem resultados frescos.
+  - Observacao de ambiente:
+    - o historico do projeto ja registra `VivaReal` bloqueada por `Cloudflare Attention Required` a partir deste runtime/container IP;
+    - no replay atual, `VivaReal` e `ZapImoveis` continuaram falhando no scrape vivo, mas a etapa 6 deixou de mascarar isso com dados antigos.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
 ## 2026-03-26 - Desabilitar temporariamente CTA de plano Pro na etapa de scraping
 
 - Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`.
@@ -174,6 +753,24 @@
     - `zone_job_state=completed`;
     - `zones_total=1`;
     - `zone_job_error=null`.
+
+## 2026-03-26 - Desduplicar pontos de transporte na etapa 2 e manter apenas itens com linhas > 0
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/develop-frontend/SKILL.md`.
+- Trigger: o usuario reportou lista de pontos de transporte duplicada e solicitou manter apenas entradas com quantidade de linhas maior que zero.
+- Scope executed:
+  - `apps/web/src/components/panels/Step2Transport.tsx`:
+    - adicionada funcao de sanitizacao para lista de transporte antes do render;
+    - aplicado filtro para remover itens com `route_count <= 0`;
+    - aplicada deduplicacao por chave estavel (`source + external_id` quando existir; fallback para `source + nome normalizado + coordenadas arredondadas`);
+    - quando houver duplicatas, priorizado o item com maior `route_count`; em empate, menor `walk_time_sec` e depois menor `walk_distance_m`;
+    - ajuste da selecao atual para limpar `selectedTransportId` caso o item selecionado seja removido pela sanitizacao.
+- Validation:
+  - `npm run typecheck` em `apps/web` -> sucesso.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
 - Progress Tracker:
   - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
 

@@ -90,6 +90,12 @@ export const ListingCardReadBackendSchema = z.object({
   platform: z.string().nullable().optional(),
   platform_listing_id: z.string().nullable().optional(),
   url: z.string().nullable().optional(),
+  image_url: z.string().nullable().optional(),
+  lat: z.number().nullable().optional(),
+  lon: z.number().nullable().optional(),
+  has_coordinates: z.boolean().optional().default(false),
+  inside_zone: z.boolean().optional().default(false),
+  platforms_available: z.array(z.string()).optional().default([]),
 
   // Preços atuais (o scraper pode retornar strings, ex: Decimal -> str)
   current_best_price: z.string().nullable().optional(),
@@ -110,6 +116,59 @@ export const ListingsRequestResultBackendSchema = z.object({
   listings: z.array(ListingCardReadBackendSchema).default([]),
   total_count: z.number(),
   cache_age_hours: z.number().nullable().optional()
+});
+
+export const ListingsScrapePlatformDiagnosticsSchema = z.object({
+  status: z.string().optional(),
+  sequence: z.number().nullable().optional(),
+  started_at: z.string().nullable().optional(),
+  finished_at: z.string().nullable().optional(),
+  scrape_started_at: z.string().nullable().optional(),
+  scrape_finished_at: z.string().nullable().optional(),
+  persist_started_at: z.string().nullable().optional(),
+  persist_finished_at: z.string().nullable().optional(),
+  scrape_duration_ms: z.number().nullable().optional(),
+  persist_duration_ms: z.number().nullable().optional(),
+  total_duration_ms: z.number().nullable().optional(),
+  scraped_count: z.number().nullable().optional(),
+  persisted_count: z.number().nullable().optional(),
+  error_phase: z.string().nullable().optional(),
+  error_type: z.string().nullable().optional(),
+  error_message: z.string().nullable().optional()
+});
+
+export const ListingsScrapeDiagnosticsSchema = z.object({
+  status: z.string().optional(),
+  started_at: z.string().nullable().optional(),
+  updated_at: z.string().nullable().optional(),
+  finished_at: z.string().nullable().optional(),
+  total_duration_ms: z.number().nullable().optional(),
+  active_platform: z.string().nullable().optional(),
+  search_address: z.string().nullable().optional(),
+  cache_status: z.string().nullable().optional(),
+  cache_status_before: z.string().nullable().optional(),
+  platform_order: z.array(z.string()).optional().default([]),
+  summary: z.object({
+    total_scraped: z.number().nullable().optional(),
+    platforms_completed: z.array(z.string()).optional().default([]),
+    platforms_failed: z.array(z.string()).optional().default([])
+  }).optional(),
+  platforms: z.record(ListingsScrapePlatformDiagnosticsSchema).optional().default({})
+});
+
+export type ListingsScrapePlatformDiagnostics = z.output<typeof ListingsScrapePlatformDiagnosticsSchema>;
+export type ListingsScrapeDiagnostics = z.output<typeof ListingsScrapeDiagnosticsSchema>;
+
+export const ListingsScrapePlanPlatformSchema = z.object({
+  platform: z.string(),
+  max_pages: z.number()
+});
+
+export const ListingsScrapePlanResponseSchema = z.object({
+  search_type: z.string(),
+  usage_type: z.string(),
+  total_pages: z.number(),
+  platforms: z.array(ListingsScrapePlanPlatformSchema)
 });
 
 export const ZoneDetailResponseSchema = z.object({
@@ -420,6 +479,9 @@ export type ListingsCollection = {
     properties: Record<string, unknown>;
   }>;
 };
+
+export type ListingsScrapePlanPlatform = z.output<typeof ListingsScrapePlanPlatformSchema>;
+export type ListingsScrapePlanResponse = z.output<typeof ListingsScrapePlanResponseSchema>;
 
 export type FinalListingsJson = Array<Record<string, unknown>>;
 

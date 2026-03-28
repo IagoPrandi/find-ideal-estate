@@ -33,9 +33,22 @@ export type SelectedAddress = {
   lon: number;
 };
 
+export type ListingsSpatialScope = "all" | "inside_zone";
+export type ListingsUsageFilter = "all" | "residential" | "commercial";
+
+export type ListingsPanelFilters = {
+  minPrice: string;
+  maxPrice: string;
+  usageType: ListingsUsageFilter;
+  spatialScope: ListingsSpatialScope;
+  minSize: string;
+  maxSize: string;
+};
+
 type JourneyState = {
   journeyId: string | null;
   config: JourneyConfig;
+  listingsFilters: ListingsPanelFilters;
   pickedCoord: PickedCoord | null;
   primaryReferenceLabel: string;
   selectedTransportId: string | null;
@@ -46,6 +59,7 @@ type JourneyState = {
   transportJobId: string | null;
   zoneGenerationJobId: string | null;
   zoneEnrichmentJobId: string | null;
+  listingsJobId: string | null;
   setJourneyId: (journeyId: string | null) => void;
   setConfig: (updater: Partial<JourneyConfig>) => void;
   setEnrichment: (key: keyof JourneyConfig["enrichments"], value: boolean) => void;
@@ -55,10 +69,13 @@ type JourneyState = {
   setSelectedZone: (zoneId: string | null, zoneFingerprint: string | null) => void;
   setSelectedAddress: (address: SelectedAddress | null) => void;
   setAddressQuery: (query: string) => void;
+  setListingsFilters: (updater: Partial<ListingsPanelFilters>) => void;
+  resetListingsFilters: () => void;
   setJobIds: (payload: {
     transportJobId?: string | null;
     zoneGenerationJobId?: string | null;
     zoneEnrichmentJobId?: string | null;
+    listingsJobId?: string | null;
   }) => void;
   resetJourney: () => void;
 };
@@ -78,9 +95,19 @@ const defaultConfig: JourneyConfig = {
   }
 };
 
+export const defaultListingsPanelFilters: ListingsPanelFilters = {
+  minPrice: "",
+  maxPrice: "",
+  usageType: "all",
+  spatialScope: "all",
+  minSize: "",
+  maxSize: ""
+};
+
 export const useJourneyStore = create<JourneyState>((set) => ({
   journeyId: null,
   config: defaultConfig,
+  listingsFilters: defaultListingsPanelFilters,
   pickedCoord: null,
   primaryReferenceLabel: "",
   selectedTransportId: null,
@@ -91,6 +118,7 @@ export const useJourneyStore = create<JourneyState>((set) => ({
   transportJobId: null,
   zoneGenerationJobId: null,
   zoneEnrichmentJobId: null,
+  listingsJobId: null,
   setJourneyId: (journeyId) =>
     set((state) => {
       if (state.journeyId === journeyId) {
@@ -99,6 +127,7 @@ export const useJourneyStore = create<JourneyState>((set) => ({
 
       return {
         journeyId,
+        listingsFilters: defaultListingsPanelFilters,
         selectedTransportId: null,
         selectedZoneId: null,
         selectedZoneFingerprint: null,
@@ -106,7 +135,8 @@ export const useJourneyStore = create<JourneyState>((set) => ({
         addressQuery: "",
         transportJobId: null,
         zoneGenerationJobId: null,
-        zoneEnrichmentJobId: null
+        zoneEnrichmentJobId: null,
+        listingsJobId: null
       };
     }),
   setConfig: (updater) => set((state) => ({ config: { ...state.config, ...updater } })),
@@ -135,17 +165,28 @@ export const useJourneyStore = create<JourneyState>((set) => ({
       return {
         selectedZoneId,
         selectedZoneFingerprint,
+        listingsFilters: defaultListingsPanelFilters,
         selectedAddress: null,
-        addressQuery: ""
+        addressQuery: "",
+        listingsJobId: null
       };
     }),
   setSelectedAddress: (selectedAddress) => set({ selectedAddress }),
   setAddressQuery: (addressQuery) => set({ addressQuery }),
+  setListingsFilters: (updater) =>
+    set((state) => ({
+      listingsFilters: {
+        ...state.listingsFilters,
+        ...updater
+      }
+    })),
+  resetListingsFilters: () => set({ listingsFilters: defaultListingsPanelFilters }),
   setJobIds: (payload) => set((state) => ({ ...state, ...payload })),
   resetJourney: () =>
     set({
       journeyId: null,
       config: defaultConfig,
+      listingsFilters: defaultListingsPanelFilters,
       pickedCoord: null,
       primaryReferenceLabel: "",
       selectedTransportId: null,
@@ -155,6 +196,7 @@ export const useJourneyStore = create<JourneyState>((set) => ({
       addressQuery: "",
       transportJobId: null,
       zoneGenerationJobId: null,
-      zoneEnrichmentJobId: null
+      zoneEnrichmentJobId: null,
+      listingsJobId: null
     })
 }));

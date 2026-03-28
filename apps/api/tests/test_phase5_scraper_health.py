@@ -4,10 +4,13 @@ import asyncio
 import sys
 from pathlib import Path
 
+import pytest
+
 API_ROOT = Path(__file__).resolve().parents[1]
 if str(API_ROOT) not in sys.path:
     sys.path.insert(0, str(API_ROOT))
 
+from src.modules.listings.scrapers import base as scraper_base  # noqa: E402
 from src.workers.handlers import listings as listings_handler  # noqa: E402
 
 
@@ -88,3 +91,42 @@ def test_record_success_rate_degradation_not_created_without_24h_data(monkeypatc
     asyncio.run(listings_handler._record_success_rate_degradation_if_needed("quintoandar"))
 
     assert calls["count"] == 0
+
+
+def test_ensure_headful_display_starts_xvfb_when_missing(monkeypatch) -> None:
+    state = {"available": False, "started": None}
+
+    class _Process:
+        def poll(self):
+            return None
+
+    def _fake_popen(args, stdout=None, stderr=None):
+        del stdout, stderr
+        state["started"] = args
+        state["available"] = True
+        return _Process()
+
+    monkeypatch.setattr(scraper_base.sys, "platform", "linux")
+    monkeypatch.setenv("SCRAPER_XVFB_DISPLAY", ":105")
+    monkeypatch.setattr(scraper_base.shutil, "which", lambda name: "/usr/bin/Xvfb" if name == "Xvfb" else None)
+    monkeypatch.setattr(scraper_base, "_is_x_server_available", lambda display: state["available"])
+    monkeypatch.setattr(scraper_base.subprocess, "Popen", _fake_popen)
+    monkeypatch.setattr(scraper_base.time, "sleep", lambda _: None)
+    monkeypatch.setattr(scraper_base, "_XVFB_PROCESS", None)
+    monkeypatch.setattr(scraper_base, "_XVFB_DISPLAY", None)
+
+    scraper_base._ensure_headful_display()
+
+    assert state["started"] == ["/usr/bin/Xvfb", ":105", "-screen", "0", "1280x800x24", "-ac"]
+    assert scraper_base._XVFB_DISPLAY == ":105"
+
+
+def test_ensure_headful_display_raises_when_xvfb_unavailable(monkeypatch) -> None:
+    monkeypatch.setattr(scraper_base.sys, "platform", "linux")
+    monkeypatch.setattr(scraper_base.shutil, "which", lambda name: None)
+    monkeypatch.setattr(scraper_base, "_is_x_server_available", lambda display: False)
+    monkeypatch.setattr(scraper_base, "_XVFB_PROCESS", None)
+    monkeypatch.setattr(scraper_base, "_XVFB_DISPLAY", None)
+
+    with pytest.raises(scraper_base.ScraperError, match="Xvfb is unavailable"):
+        scraper_base._ensure_headful_display()

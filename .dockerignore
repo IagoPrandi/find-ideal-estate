@@ -1,4 +1,7 @@
 runs/
+**/runs/
+**/.browser_profiles/
+apps/api/src/modules/listings/scrapers/runs/
 node_modules/
 **/node_modules/
 apps/web/node_modules/

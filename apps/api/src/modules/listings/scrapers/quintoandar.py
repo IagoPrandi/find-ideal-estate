@@ -359,6 +359,19 @@ class QuintoAndarScraper(ScraperBase):
             extracted = _extract_from_quintoandar_payload(payload, self.search_type)
             listings.extend(extracted)
 
+        coordinate_map: dict[str, tuple[float, float]] = {}
+        for payload in intercepted_payloads:
+            coordinate_map.update(_extract_quintoandar_coordinate_map(payload))
+
+        if coordinate_map:
+            for item in listings:
+                if item.get("lat") is not None and item.get("lon") is not None:
+                    continue
+                house_id = str(item.get("platform_listing_id") or "").strip()
+                if not house_id or house_id not in coordinate_map:
+                    continue
+                item["lat"], item["lon"] = coordinate_map[house_id]
+
         if not listings and isinstance(dom_rows, list):
             listings.extend(_extract_from_quintoandar_dom_rows(dom_rows))
 
@@ -480,6 +493,58 @@ def _extract_from_quintoandar_payload(
     return results
 
 
+def _extract_quintoandar_coordinate_map(payload: dict[str, Any]) -> dict[str, tuple[float, float]]:
+    coordinates: dict[str, tuple[float, float]] = {}
+
+    def _store(node: dict[str, Any], fallback_id: str | None = None) -> None:
+        house_id = str(node.get("id") or node.get("listingId") or fallback_id or "").strip()
+        if not house_id:
+            return
+        lat = _as_float(
+            node.get("lat")
+            or _get_by_path(node, "location.lat")
+            or _get_by_path(node, "address.point.lat")
+            or _get_by_path(node, "geoLocation.lat")
+        )
+        lon = _as_float(
+            node.get("lon")
+            or node.get("lng")
+            or _get_by_path(node, "location.lon")
+            or _get_by_path(node, "location.lng")
+            or _get_by_path(node, "address.point.lon")
+            or _get_by_path(node, "geoLocation.lon")
+        )
+        if lat is None or lon is None:
+            return
+        coordinates[house_id] = (lat, lon)
+
+    raw_hits = _get_by_path(payload, "hits.hits")
+    if not isinstance(raw_hits, list):
+        for wrapper in ("data", "result", "results", "response"):
+            candidate = payload.get(wrapper)
+            if not isinstance(candidate, dict):
+                continue
+            nested_hits = _get_by_path(candidate, "hits.hits")
+            if isinstance(nested_hits, list):
+                raw_hits = nested_hits
+                break
+    if isinstance(raw_hits, list):
+        for hit in raw_hits:
+            if not isinstance(hit, dict):
+                continue
+            source = hit.get("_source") if isinstance(hit.get("_source"), dict) else hit
+            if isinstance(source, dict):
+                _store(source, fallback_id=str(hit.get("_id") or ""))
+
+    houses = payload.get("houses")
+    if isinstance(houses, dict):
+        for fallback_id, raw in houses.items():
+            if isinstance(raw, dict):
+                _store(raw, fallback_id=str(fallback_id))
+
+    return coordinates
+
+
 def _extract_quintoandar_visible_ids(state: dict[str, Any]) -> list[str]:
     """Return visible listing ids from Next.js state (visibleHouses.pages), preserving order."""
     pages = (
@@ -535,32 +600,22 @@ def _to_quintoandar_location_slug(search_address: str) -> str:
     if not parts:
         return "sao-paulo-sp-brasil"
 
-    def _looks_like_street_part(text: str) -> bool:
-        slug = _slugify(text)
-        street_prefixes = (
-            "rua",
-            "r",
-            "avenida",
-            "av",
-            "alameda",
-            "travessa",
-            "tv",
-            "estrada",
-            "rodovia",
-            "rod",
-            "praca",
-            "largo",
+    def _looks_like_street(text: str) -> bool:
+        return bool(
+            re.match(
+                r"^(rua|r\.?|avenida|av\.?|alameda|travessa|tv\.?|praca|praça|largo|estrada|rodovia)\b",
+                text.strip().lower(),
+            )
         )
-        return any(slug == prefix or slug.startswith(f"{prefix}-") for prefix in street_prefixes) or any(ch.isdigit() for ch in text)
 
     # Skip parts[0] (street name) — QuintoAndar does not have street-level slug pages.
     # Use neighborhood + city/state: e.g. "Vila Leopoldina", "Sao Paulo - SP" → vila-leopoldina-sao-paulo-sp-brasil.
     if len(parts) >= 4:
-        selected = parts[1:4]  # neighborhood + city + state
+        selected = [parts[1], parts[2], parts[3]]
     elif len(parts) == 3:
-        selected = parts[1:3] if _looks_like_street_part(parts[0]) else parts[0:3]
+        selected = parts[1:3]
     elif len(parts) == 2:
-        selected = [parts[1]] if _looks_like_street_part(parts[0]) else parts[0:2]
+        selected = [parts[1]] if _looks_like_street(parts[0]) else parts
     else:
         single = parts[0]
         if "sao paulo" in single.lower():
@@ -641,6 +696,12 @@ def _parse_quintoandar_house(
         "platform": "quintoandar",
         "platform_listing_id": house_id,
         "url": url,
+        "image_url": (
+            _get_by_path(h, "coverImageUrl")
+            or _get_by_path(h, "coverImage.url")
+            or _get_by_path(h, "images.0.url")
+            or _get_by_path(h, "gallery.0.url")
+        ),
         "lat": lat,
         "lon": lon,
         "price_brl": price,
@@ -684,6 +745,7 @@ def _extract_from_quintoandar_dom_rows(rows: list[dict[str, Any]]) -> list[dict[
             "platform": "quintoandar",
             "platform_listing_id": lid,
             "url": link,
+            "image_url": None,
             "lat": None,
             "lon": None,
             "price_brl": _as_float(price_match.group(0)) if price_match else None,

@@ -16,7 +16,8 @@ class ZoneCacheStatus:
     Valid transitions:
         pending        → scraping
         scraping       → partial | complete | failed | cancelled_partial
-        partial        → complete | failed | cancelled_partial
+        partial        → scraping | complete | failed | cancelled_partial
+        complete       → scraping
     """
 
     PENDING           = "pending"
@@ -29,10 +30,10 @@ class ZoneCacheStatus:
     _ALLOWED: ClassVar[dict[str, set[str]]] = {
         PENDING:           {SCRAPING},
         SCRAPING:          {PARTIAL, COMPLETE, FAILED, CANCELLED_PARTIAL},
-        PARTIAL:           {COMPLETE, FAILED, CANCELLED_PARTIAL},
-        COMPLETE:          set(),
-        FAILED:            set(),
-        CANCELLED_PARTIAL: set(),
+        PARTIAL:           {SCRAPING, COMPLETE, FAILED, CANCELLED_PARTIAL},
+        COMPLETE:          {SCRAPING},
+        FAILED:            {SCRAPING},
+        CANCELLED_PARTIAL: {SCRAPING},
     }
 
     @classmethod

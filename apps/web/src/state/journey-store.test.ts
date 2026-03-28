@@ -5,6 +5,14 @@ describe("journey-store", () => {
   it("clears transport and zone runtime state when switching to a new journey", () => {
     useJourneyStore.setState({
       journeyId: "journey-old",
+      listingsFilters: {
+        minPrice: "1000",
+        maxPrice: "5000",
+        usageType: "residential",
+        spatialScope: "inside_zone",
+        minSize: "40",
+        maxSize: "120"
+      },
       selectedTransportId: "transport-old",
       selectedZoneId: "zone-old",
       selectedZoneFingerprint: "fp-old",
@@ -25,6 +33,14 @@ describe("journey-store", () => {
 
     const state = useJourneyStore.getState();
     expect(state.journeyId).toBe("journey-new");
+    expect(state.listingsFilters).toEqual({
+      minPrice: "",
+      maxPrice: "",
+      usageType: "all",
+      spatialScope: "all",
+      minSize: "",
+      maxSize: ""
+    });
     expect(state.selectedTransportId).toBeNull();
     expect(state.selectedZoneId).toBeNull();
     expect(state.selectedZoneFingerprint).toBeNull();
@@ -39,6 +55,14 @@ describe("journey-store", () => {
 
   it("clears the selected street when switching to a different zone", () => {
     useJourneyStore.setState({
+      listingsFilters: {
+        minPrice: "1500",
+        maxPrice: "4000",
+        usageType: "commercial",
+        spatialScope: "inside_zone",
+        minSize: "30",
+        maxSize: "90"
+      },
       selectedZoneId: "zone-old",
       selectedZoneFingerprint: "fp-old",
       selectedAddress: {
@@ -56,6 +80,14 @@ describe("journey-store", () => {
     const state = useJourneyStore.getState();
     expect(state.selectedZoneId).toBe("zone-new");
     expect(state.selectedZoneFingerprint).toBe("fp-new");
+    expect(state.listingsFilters).toEqual({
+      minPrice: "",
+      maxPrice: "",
+      usageType: "all",
+      spatialScope: "all",
+      minSize: "",
+      maxSize: ""
+    });
     expect(state.selectedAddress).toBeNull();
     expect(state.addressQuery).toBe("");
 

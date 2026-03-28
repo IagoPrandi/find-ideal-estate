@@ -1,7 +1,8 @@
 import { Info, MapPin, ArrowRight } from "lucide-react";
 import { useEffect, useState } from "react";
-import { apiActionHint, getZoneAddressSuggestions, searchZoneListings } from "../../api/client";
+import { apiActionHint, getListingsScrapePlan, getZoneAddressSuggestions, searchZoneListings } from "../../api/client";
 import type { SearchAddressSuggestion } from "../../api/client";
+import type { ListingsScrapePlanResponse } from "../../api/schemas";
 import { useJourneyStore, useUIStore } from "../../state";
 
 export function Step5Address() {
@@ -14,6 +15,7 @@ export function Step5Address() {
   const selectedAddress = useJourneyStore((state) => state.selectedAddress);
   const setAddressQuery = useJourneyStore((state) => state.setAddressQuery);
   const setSelectedAddress = useJourneyStore((state) => state.setSelectedAddress);
+  const setJobIds = useJourneyStore((state) => state.setJobIds);
   const goToStep = useUIStore((state) => state.goToStep);
   const setMaxStep = useUIStore((state) => state.setMaxStep);
   const [suggestions, setSuggestions] = useState<SearchAddressSuggestion[]>([]);
@@ -22,21 +24,82 @@ export function Step5Address() {
   const [error, setError] = useState<string | null>(null);
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [scrapePlan, setScrapePlan] = useState<ListingsScrapePlanResponse | null>(null);
+
+  async function submitAddressSelection(address: {
+    label: string;
+    normalized: string;
+    locationType: string;
+  }) {
+    if (!journeyId || !zoneFingerprint) {
+      return;
+    }
+
+    setSubmitting(true);
+    setError(null);
+    setJobIds({ listingsJobId: null });
+
+    try {
+      const result = await searchZoneListings(journeyId, zoneFingerprint, {
+        search_location_normalized: address.normalized,
+        search_location_label: address.label,
+        search_location_type: address.locationType,
+        search_type: config.type,
+        usage_type: "residential"
+      });
+      setJobIds({ listingsJobId: result.job_id || null });
+      setMaxStep(6);
+      goToStep(6);
+    } catch (caughtError) {
+      setJobIds({ listingsJobId: null });
+      setError(apiActionHint(caughtError));
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   function selectSuggestion(suggestion: SearchAddressSuggestion) {
-    setSelectedAddress({
+    const selected = {
       label: suggestion.label,
       normalized: suggestion.normalized,
       locationType: suggestion.location_type,
       lat: suggestion.lat,
       lon: suggestion.lon
-    });
+    };
+
+    setSelectedAddress(selected);
     setAddressQuery(suggestion.label);
     setSuggestions([]);
     setActiveSuggestionIndex(-1);
     setIsDropdownOpen(false);
     setError(null);
+
+    void submitAddressSelection(selected);
   }
+
+  useEffect(() => {
+    if (!journeyId || !zoneFingerprint) {
+      setScrapePlan(null);
+      return;
+    }
+
+    let cancelled = false;
+    void getListingsScrapePlan(journeyId, config.type, "residential")
+      .then((plan) => {
+        if (!cancelled) {
+          setScrapePlan(plan);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setScrapePlan(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [config.type, journeyId, zoneFingerprint]);
 
   useEffect(() => {
     if (!journeyId || !zoneFingerprint) {
@@ -75,25 +138,7 @@ export function Step5Address() {
     if (!journeyId || !zoneFingerprint || !selectedAddress) {
       return;
     }
-
-    setSubmitting(true);
-    setError(null);
-
-    try {
-      await searchZoneListings(journeyId, zoneFingerprint, {
-        search_location_normalized: selectedAddress.normalized,
-        search_location_label: selectedAddress.label,
-        search_location_type: selectedAddress.locationType,
-        search_type: config.type,
-        usage_type: "residential"
-      });
-      setMaxStep(6);
-      goToStep(6);
-    } catch (caughtError) {
-      setError(apiActionHint(caughtError));
-    } finally {
-      setSubmitting(false);
-    }
+    await submitAddressSelection(selectedAddress);
   }
 
   return (
@@ -108,6 +153,15 @@ export function Step5Address() {
           <Info className="mt-0.5 h-5 w-5 shrink-0 text-pastel-violet-500" />
           <p>Ao clicar no campo, a lista mostra as ruas encontradas dentro da zona selecionada. Se quiser, digite para filtrar essa lista.</p>
         </div>
+
+        {scrapePlan ? (
+          <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600 shadow-sm">
+            <p className="font-medium text-slate-800">Paginação prevista do webscraping: {scrapePlan.total_pages} páginas</p>
+            <p className="mt-1 text-xs text-slate-500">
+              {scrapePlan.platforms.map((item) => `${item.platform}: ${item.max_pages}`).join(" • ")}
+            </p>
+          </div>
+        ) : null}
 
         <div className="space-y-2">
           <label htmlFor={inputId} className="text-sm font-medium text-slate-700">Endereço alvo na zona</label>

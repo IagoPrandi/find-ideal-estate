@@ -1,9 +1,9 @@
-"""Dramatiq handler for LISTINGS_SCRAPE jobs (M5.3 / M5.4).
+﻿"""Dramatiq handler for LISTINGS_SCRAPE jobs (M5.3 / M5.4).
 
 Flow per execution:
     1. Load job context (zone_fingerprint, config_hash, platforms, search params).
-    2. Acquire Redis scraping lock — bail out (re-read cache) if another worker holds it.
-    3. Transition zone_listing_cache: pending → scraping.
+    2. Acquire Redis scraping lock and bail out (re-read cache) if another worker holds it.
+    3. Transition zone_listing_cache: pending -> scraping.
     4. For each platform: run Playwright scraper, upsert properties+ads+snapshots.
     5. Transition to partial/complete; emit SSE events.
     6. Release lock (via context manager finally).
@@ -21,6 +21,7 @@ import dramatiq
 from contracts import JobType
 from core.db import get_engine
 from modules.jobs.events import publish_job_event
+from modules.jobs.service import update_job_execution_state
 from modules.listings.cache import (
     compute_config_hash,
     create_cache_record,
@@ -63,6 +64,79 @@ async def _load_job_context(job_id: UUID) -> dict[str, Any]:
 
         result_ref: dict[str, Any] = job["result_ref"] or {}
         return result_ref
+
+
+def _utcnow() -> datetime:
+    return datetime.now(tz=timezone.utc)
+
+
+def _isoformat(value: datetime | None = None) -> str:
+    return (value or _utcnow()).isoformat()
+
+
+def _duration_ms(started_at: datetime | None, finished_at: datetime | None) -> int | None:
+    if started_at is None or finished_at is None:
+        return None
+    return int((finished_at - started_at).total_seconds() * 1000)
+
+
+def _ensure_scrape_diagnostics(
+    ctx: dict[str, Any],
+    *,
+    zone_fingerprint: str,
+    search_address: str,
+    search_type: str,
+    usage_type: str,
+    platforms: list[str],
+) -> dict[str, Any]:
+    diagnostics = ctx.get("scrape_diagnostics")
+    if not isinstance(diagnostics, dict):
+        diagnostics = {}
+        ctx["scrape_diagnostics"] = diagnostics
+
+    diagnostics.setdefault("started_at", _isoformat())
+    diagnostics["zone_fingerprint"] = zone_fingerprint
+    diagnostics["search_address"] = search_address
+    diagnostics["search_type"] = search_type
+    diagnostics["usage_type"] = usage_type
+    diagnostics["platform_order"] = list(platforms)
+    diagnostics.setdefault("status", "pending")
+    diagnostics.setdefault("active_platform", None)
+
+    lock_info = diagnostics.get("lock")
+    if not isinstance(lock_info, dict):
+        lock_info = {}
+        diagnostics["lock"] = lock_info
+
+    summary = diagnostics.get("summary")
+    if not isinstance(summary, dict):
+        summary = {}
+        diagnostics["summary"] = summary
+    summary.setdefault("total_scraped", 0)
+    summary.setdefault("platforms_completed", [])
+    summary.setdefault("platforms_failed", [])
+
+    platform_details = diagnostics.get("platforms")
+    if not isinstance(platform_details, dict):
+        platform_details = {}
+        diagnostics["platforms"] = platform_details
+
+    for index, platform in enumerate(platforms, start=1):
+        entry = platform_details.get(platform)
+        if not isinstance(entry, dict):
+            entry = {}
+            platform_details[platform] = entry
+        entry.setdefault("sequence", index)
+        entry.setdefault("status", "pending")
+
+    return diagnostics
+
+
+async def _persist_scrape_diagnostics(job_id: UUID, ctx: dict[str, Any]) -> None:
+    diagnostics = ctx.get("scrape_diagnostics")
+    if isinstance(diagnostics, dict):
+        diagnostics["updated_at"] = _isoformat()
+    await update_job_execution_state(job_id, result_ref=ctx)
 
 
 async def _record_degradation_event(
@@ -223,10 +297,21 @@ async def _listings_scrape_step(job_id: UUID) -> None:
     raw_platforms: list[str] = ctx.get("platforms") or registry.default_free_platforms()
     platforms = registry.resolve_names(raw_platforms)
     config_hash = compute_config_hash(search_type, usage_type, platforms)
+    diagnostics = _ensure_scrape_diagnostics(
+        ctx,
+        zone_fingerprint=zone_fingerprint,
+        search_address=search_address,
+        search_type=search_type,
+        usage_type=usage_type,
+        platforms=platforms,
+    )
 
     if not zone_fingerprint or not search_address:
         raise ValueError("Missing zone_fingerprint or search_address in job context")
 
+    force_refresh: bool = bool(ctx.get("force_refresh", False))
+    diagnostics["status"] = "waiting_for_lock"
+    await _persist_scrape_diagnostics(job_id, ctx)
     await check_cancellation(job_id)
     await emit_stage_progress(
         job_id, stage=stage, progress_percent=5,
@@ -235,12 +320,21 @@ async def _listings_scrape_step(job_id: UUID) -> None:
 
     async with scraping_lock(zone_fingerprint, config_hash) as acquired:
         if not acquired:
+            diagnostics["status"] = "lock_contention"
+            diagnostics["lock"] = {
+                "acquired": False,
+                "contention": True,
+                "checked_at": _isoformat(),
+            }
             # Another worker is already scraping; re-open cache before exiting.
             cache_after_wait = await get_cache_record(zone_fingerprint, config_hash)
             cache_status = (
                 cache_after_wait["status"] if cache_after_wait else ZoneCacheStatus.PENDING
             )
-            if ZoneCacheStatus.is_usable(cache_status):
+            if ZoneCacheStatus.is_usable(cache_status) and not force_refresh:
+                diagnostics["status"] = "cache_reopen"
+                diagnostics["cache_status"] = cache_status
+                await _persist_scrape_diagnostics(job_id, ctx)
                 await publish_job_event(
                     job_id,
                     "listings.preliminary.ready",
@@ -260,6 +354,7 @@ async def _listings_scrape_step(job_id: UUID) -> None:
                 )
                 return
 
+            await _persist_scrape_diagnostics(job_id, ctx)
             await emit_stage_progress(
                 job_id,
                 stage=stage,
@@ -272,11 +367,26 @@ async def _listings_scrape_step(job_id: UUID) -> None:
         cache_id = await create_cache_record(zone_fingerprint, config_hash)
         cache = await get_cache_record(zone_fingerprint, config_hash)
         current_status = cache["status"] if cache else ZoneCacheStatus.PENDING
+        diagnostics["lock"] = {
+            "acquired": True,
+            "contention": False,
+            "acquired_at": _isoformat(),
+        }
+        diagnostics["cache_status_before"] = current_status
+        diagnostics["status"] = "cache_ready"
+        await _persist_scrape_diagnostics(job_id, ctx)
 
-        if ZoneCacheStatus.is_usable(current_status):
+        if ZoneCacheStatus.is_usable(current_status) and not force_refresh:
+            diagnostics["status"] = "cache_hit"
+            diagnostics["finished_at"] = _isoformat()
+            diagnostics["total_duration_ms"] = _duration_ms(
+                datetime.fromisoformat(diagnostics["started_at"]),
+                _utcnow(),
+            )
+            await _persist_scrape_diagnostics(job_id, ctx)
             await emit_stage_progress(
                 job_id, stage=stage, progress_percent=100,
-                message="Cache hit \u2014 listings already available",
+                message="Cache hit - listings already available",
             )
             await publish_job_event(
                 job_id,
@@ -287,10 +397,42 @@ async def _listings_scrape_step(job_id: UUID) -> None:
             )
             return
 
+        if current_status == ZoneCacheStatus.SCRAPING:
+            diagnostics["status"] = "recovering_stale_scraping"
+            diagnostics["cache_status"] = ZoneCacheStatus.CANCELLED_PARTIAL
+            await _persist_scrape_diagnostics(job_id, ctx)
+            await publish_job_event(
+                job_id,
+                "listings.cache.recovered",
+                stage=stage,
+                message="Recovered stale scraping cache before restart",
+                payload_json={
+                    "zone_fingerprint": zone_fingerprint,
+                    "from_status": ZoneCacheStatus.SCRAPING,
+                    "to_status": ZoneCacheStatus.CANCELLED_PARTIAL,
+                },
+            )
+            await transition_cache_status(
+                cache_id,
+                ZoneCacheStatus.SCRAPING,
+                ZoneCacheStatus.CANCELLED_PARTIAL,
+            )
+            current_status = ZoneCacheStatus.CANCELLED_PARTIAL
+
         await transition_cache_status(cache_id, current_status, ZoneCacheStatus.SCRAPING)
+        diagnostics["status"] = "scraping"
+        diagnostics["cache_status"] = ZoneCacheStatus.SCRAPING
+        await _persist_scrape_diagnostics(job_id, ctx)
+        if ZoneCacheStatus.is_usable(current_status) and force_refresh:
+            await emit_stage_progress(
+                job_id,
+                stage=stage,
+                progress_percent=8,
+                message="Revalidating stale listings cache",
+            )
         await emit_stage_progress(
             job_id, stage=stage, progress_percent=10,
-            message="Scraping listings\u2026",
+            message="Scraping listings...",
         )
 
         platforms_completed: list[str] = []
@@ -300,28 +442,205 @@ async def _listings_scrape_step(job_id: UUID) -> None:
         for idx, platform in enumerate(platforms):
             await check_cancellation(job_id)
 
+            platform_details = diagnostics.get("platforms", {})
+            platform_entry = platform_details.get(platform, {}) if isinstance(platform_details, dict) else {}
+            platform_started_at = _utcnow()
+            platform_entry["status"] = "scraping"
+            platform_entry["started_at"] = platform_entry.get("started_at") or _isoformat(platform_started_at)
+            platform_entry["scrape_started_at"] = _isoformat(platform_started_at)
+            diagnostics["active_platform"] = platform
+            diagnostics["status"] = "scraping"
+            await _persist_scrape_diagnostics(job_id, ctx)
+            await publish_job_event(
+                job_id,
+                "listings.platform.started",
+                stage=stage,
+                message=f"Scraping started for {platform}",
+                payload_json={
+                    "platform": platform,
+                    "sequence": idx + 1,
+                    "total_platforms": len(platforms),
+                    "started_at": platform_entry["scrape_started_at"],
+                },
+            )
+
             pct = 10 + int((idx / len(platforms)) * 80)
             await emit_stage_progress(
                 job_id, stage=stage, progress_percent=pct,
-                message=f"Scraping {platform}…",
+                message=f"Scraping {platform}...",
             )
 
             try:
                 listings = await _run_scraper_for_platform(platform, search_address, search_type)
-                n = await _persist_listings(listings, platform, search_type)
-                total_scraped += n
-                platforms_completed.append(platform)
-
-            except ScraperDisallowedError:
+            except ScraperDisallowedError as exc:
                 platforms_failed.append(platform)
+                platform_finished_at = _utcnow()
+                platform_entry["status"] = "failed"
+                platform_entry["finished_at"] = _isoformat(platform_finished_at)
+                platform_entry["total_duration_ms"] = _duration_ms(platform_started_at, platform_finished_at)
+                platform_entry["error_phase"] = "scrape"
+                platform_entry["error_type"] = type(exc).__name__
+                platform_entry["error_message"] = str(exc)
+                diagnostics["summary"]["platforms_failed"] = list(platforms_failed)
+                diagnostics["summary"]["last_error"] = {
+                    "platform": platform,
+                    "phase": "scrape",
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc),
+                    "failed_at": platform_entry["finished_at"],
+                }
+                await _persist_scrape_diagnostics(job_id, ctx)
+                await publish_job_event(
+                    job_id,
+                    "listings.platform.failed",
+                    stage=stage,
+                    message=f"{platform} failed during scrape",
+                    payload_json={
+                        "platform": platform,
+                        "phase": "scrape",
+                        "error_type": type(exc).__name__,
+                        "error_message": str(exc),
+                        "failed_at": platform_entry["finished_at"],
+                    },
+                )
                 await _record_degradation_event(
                     platform, "degraded", "robots_disallowed", 1.0
                 )
-            except (ScraperError, Exception):  # noqa: BLE001
+                continue
+            except (ScraperError, Exception) as exc:  # noqa: BLE001
                 platforms_failed.append(platform)
+                platform_finished_at = _utcnow()
+                platform_entry["status"] = "failed"
+                platform_entry["finished_at"] = _isoformat(platform_finished_at)
+                platform_entry["total_duration_ms"] = _duration_ms(platform_started_at, platform_finished_at)
+                platform_entry["error_phase"] = "scrape"
+                platform_entry["error_type"] = type(exc).__name__
+                platform_entry["error_message"] = str(exc)
+                diagnostics["summary"]["platforms_failed"] = list(platforms_failed)
+                diagnostics["summary"]["last_error"] = {
+                    "platform": platform,
+                    "phase": "scrape",
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc),
+                    "failed_at": platform_entry["finished_at"],
+                }
+                await _persist_scrape_diagnostics(job_id, ctx)
+                await publish_job_event(
+                    job_id,
+                    "listings.platform.failed",
+                    stage=stage,
+                    message=f"{platform} failed during scrape",
+                    payload_json={
+                        "platform": platform,
+                        "phase": "scrape",
+                        "error_type": type(exc).__name__,
+                        "error_message": str(exc),
+                        "failed_at": platform_entry["finished_at"],
+                    },
+                )
                 await _record_degradation_event(
                     platform, "degraded", "scraping_error", 1.0
                 )
+                continue
+
+            scrape_finished_at = _utcnow()
+            platform_entry["scrape_finished_at"] = _isoformat(scrape_finished_at)
+            platform_entry["scraped_count"] = len(listings)
+            platform_entry["scrape_duration_ms"] = _duration_ms(platform_started_at, scrape_finished_at)
+            await publish_job_event(
+                job_id,
+                "listings.platform.scraped",
+                stage=stage,
+                message=f"{platform} scrape finished",
+                payload_json={
+                    "platform": platform,
+                    "scraped_count": len(listings),
+                    "scrape_duration_ms": platform_entry["scrape_duration_ms"],
+                    "scrape_finished_at": platform_entry["scrape_finished_at"],
+                },
+            )
+
+            persist_started_at = _utcnow()
+            platform_entry["status"] = "persisting"
+            platform_entry["persist_started_at"] = _isoformat(persist_started_at)
+            diagnostics["status"] = "persisting"
+            diagnostics["active_platform"] = platform
+            await _persist_scrape_diagnostics(job_id, ctx)
+            await emit_stage_progress(
+                job_id,
+                stage=stage,
+                progress_percent=min(95, pct + max(1, int(40 / max(len(platforms), 1)))),
+                message=f"Persisting {platform}...",
+            )
+
+            try:
+                n = await _persist_listings(listings, platform, search_type)
+            except Exception as exc:  # noqa: BLE001
+                platforms_failed.append(platform)
+                persist_finished_at = _utcnow()
+                platform_entry["status"] = "failed"
+                platform_entry["persist_finished_at"] = _isoformat(persist_finished_at)
+                platform_entry["finished_at"] = platform_entry["persist_finished_at"]
+                platform_entry["persist_duration_ms"] = _duration_ms(persist_started_at, persist_finished_at)
+                platform_entry["total_duration_ms"] = _duration_ms(platform_started_at, persist_finished_at)
+                platform_entry["error_phase"] = "persist"
+                platform_entry["error_type"] = type(exc).__name__
+                platform_entry["error_message"] = str(exc)
+                diagnostics["summary"]["platforms_failed"] = list(platforms_failed)
+                diagnostics["summary"]["last_error"] = {
+                    "platform": platform,
+                    "phase": "persist",
+                    "error_type": type(exc).__name__,
+                    "error_message": str(exc),
+                    "failed_at": platform_entry["finished_at"],
+                }
+                await _persist_scrape_diagnostics(job_id, ctx)
+                await publish_job_event(
+                    job_id,
+                    "listings.platform.failed",
+                    stage=stage,
+                    message=f"{platform} failed during persist",
+                    payload_json={
+                        "platform": platform,
+                        "phase": "persist",
+                        "error_type": type(exc).__name__,
+                        "error_message": str(exc),
+                        "failed_at": platform_entry["finished_at"],
+                    },
+                )
+                await _record_degradation_event(
+                    platform, "degraded", "persist_error", 1.0
+                )
+                continue
+
+            persist_finished_at = _utcnow()
+            total_scraped += n
+            platforms_completed.append(platform)
+            platform_entry["status"] = "completed"
+            platform_entry["persist_finished_at"] = _isoformat(persist_finished_at)
+            platform_entry["finished_at"] = platform_entry["persist_finished_at"]
+            platform_entry["persisted_count"] = n
+            platform_entry["persist_duration_ms"] = _duration_ms(persist_started_at, persist_finished_at)
+            platform_entry["total_duration_ms"] = _duration_ms(platform_started_at, persist_finished_at)
+            diagnostics["summary"]["total_scraped"] = total_scraped
+            diagnostics["summary"]["platforms_completed"] = list(platforms_completed)
+            diagnostics["summary"]["platforms_failed"] = list(platforms_failed)
+            diagnostics["active_platform"] = None
+            await _persist_scrape_diagnostics(job_id, ctx)
+            await publish_job_event(
+                job_id,
+                "listings.platform.persisted",
+                stage=stage,
+                message=f"{platform} persist finished",
+                payload_json={
+                    "platform": platform,
+                    "scraped_count": len(listings),
+                    "persisted_count": n,
+                    "persist_duration_ms": platform_entry["persist_duration_ms"],
+                    "total_duration_ms": platform_entry["total_duration_ms"],
+                    "finished_at": platform_entry["finished_at"],
+                },
+            )
 
         # Determine TTL for cache
         ttl_hours = (
@@ -332,6 +651,17 @@ async def _listings_scrape_step(job_id: UUID) -> None:
         expires_at = datetime.now(tz=timezone.utc) + timedelta(hours=ttl_hours)
 
         if platforms_failed and not platforms_completed:
+            diagnostics["status"] = "failed"
+            diagnostics["finished_at"] = _isoformat()
+            diagnostics["active_platform"] = None
+            diagnostics["cache_status"] = ZoneCacheStatus.FAILED
+            diagnostics["summary"]["platforms_completed"] = list(platforms_completed)
+            diagnostics["summary"]["platforms_failed"] = list(platforms_failed)
+            diagnostics["total_duration_ms"] = _duration_ms(
+                datetime.fromisoformat(diagnostics["started_at"]),
+                _utcnow(),
+            )
+            await _persist_scrape_diagnostics(job_id, ctx)
             await transition_cache_status(
                 cache_id,
                 ZoneCacheStatus.SCRAPING,
@@ -344,6 +674,18 @@ async def _listings_scrape_step(job_id: UUID) -> None:
         new_status = (
             ZoneCacheStatus.COMPLETE if not platforms_failed else ZoneCacheStatus.PARTIAL
         )
+        diagnostics["status"] = str(new_status)
+        diagnostics["finished_at"] = _isoformat()
+        diagnostics["active_platform"] = None
+        diagnostics["cache_status"] = str(new_status)
+        diagnostics["summary"]["platforms_completed"] = list(platforms_completed)
+        diagnostics["summary"]["platforms_failed"] = list(platforms_failed)
+        diagnostics["summary"]["total_scraped"] = total_scraped
+        diagnostics["total_duration_ms"] = _duration_ms(
+            datetime.fromisoformat(diagnostics["started_at"]),
+            _utcnow(),
+        )
+        await _persist_scrape_diagnostics(job_id, ctx)
         await transition_cache_status(
             cache_id,
             ZoneCacheStatus.SCRAPING,

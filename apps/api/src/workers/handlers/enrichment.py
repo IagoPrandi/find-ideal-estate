@@ -24,8 +24,69 @@ from workers.queue import QUEUE_ENRICHMENT
 from workers.runtime import run_job_with_retry
 
 
-async def dispatch_enrichment_subjobs(zone_id: UUID) -> dict[str, Any]:
-    """Start 4 enrichment subjobs concurrently for one zone."""
+def _parse_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"1", "true", "yes", "on"}:
+            return True
+        if normalized in {"0", "false", "no", "off"}:
+            return False
+    return default
+
+
+def _extract_enrichment_flags(input_snapshot: Any) -> dict[str, bool]:
+    defaults = {
+        "green": True,
+        "flood": True,
+        "safety": True,
+        "pois": True,
+    }
+    if not isinstance(input_snapshot, dict):
+        return defaults
+
+    enrichments = input_snapshot.get("enrichments")
+    if isinstance(enrichments, dict):
+        return {
+            "green": _parse_bool(enrichments.get("green"), True),
+            "flood": _parse_bool(enrichments.get("flood"), True),
+            "safety": _parse_bool(enrichments.get("safety"), True),
+            "pois": _parse_bool(enrichments.get("pois"), True),
+        }
+
+    return {
+        "green": _parse_bool(input_snapshot.get("zone_detail_include_green"), True),
+        "flood": _parse_bool(input_snapshot.get("zone_detail_include_flood"), True),
+        "safety": _parse_bool(input_snapshot.get("zone_detail_include_public_safety"), True),
+        "pois": _parse_bool(input_snapshot.get("zone_detail_include_pois"), True),
+    }
+
+
+async def _load_job_enrichment_flags(job_id: UUID) -> dict[str, bool]:
+    engine = get_engine()
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text(
+                """
+                SELECT j.input_snapshot
+                FROM jobs jb
+                JOIN journeys j ON j.id = jb.journey_id
+                WHERE jb.id = :job_id
+                """
+            ),
+            {"job_id": job_id},
+        )
+        row = result.mappings().first()
+
+    snapshot = row["input_snapshot"] if row else None
+    return _extract_enrichment_flags(snapshot)
+
+
+async def dispatch_enrichment_subjobs(zone_id: UUID, enrichments: dict[str, bool]) -> dict[str, Any]:
+    """Start enabled enrichment subjobs concurrently for one zone."""
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.execute(
@@ -39,17 +100,23 @@ async def dispatch_enrichment_subjobs(zone_id: UUID) -> dict[str, Any]:
             {"zone_id": zone_id},
         )
 
-    green_task = enrich_zone_green(zone_id)
-    flood_task = enrich_zone_flood(zone_id)
-    safety_task = enrich_zone_safety(zone_id)
-    pois_task = enrich_zone_pois(zone_id)
+    tasks: dict[str, asyncio.Future] = {}
+    if enrichments.get("green", True):
+        tasks["green"] = asyncio.create_task(enrich_zone_green(zone_id))
+    if enrichments.get("flood", True):
+        tasks["flood"] = asyncio.create_task(enrich_zone_flood(zone_id))
+    if enrichments.get("safety", True):
+        tasks["safety"] = asyncio.create_task(enrich_zone_safety(zone_id))
+    if enrichments.get("pois", True):
+        tasks["pois"] = asyncio.create_task(enrich_zone_pois(zone_id))
 
-    green, flood, safety, pois = await asyncio.gather(
-        green_task,
-        flood_task,
-        safety_task,
-        pois_task,
-    )
+    if tasks:
+        await asyncio.gather(*tasks.values())
+
+    green = tasks["green"].result() if "green" in tasks else {}
+    flood = tasks["flood"].result() if "flood" in tasks else {}
+    safety = tasks["safety"].result() if "safety" in tasks else {}
+    pois = tasks["pois"].result() if "pois" in tasks else {}
 
     async with engine.begin() as conn:
         await conn.execute(
@@ -74,6 +141,7 @@ async def dispatch_enrichment_subjobs(zone_id: UUID) -> dict[str, Any]:
 async def _zone_enrichment_step(job_id: UUID) -> None:
     stage = "zone_enrichment"
     await check_cancellation(job_id)
+    enrichment_flags = await _load_job_enrichment_flags(job_id)
     await emit_stage_progress(
         job_id,
         stage=stage,
@@ -110,7 +178,7 @@ async def _zone_enrichment_step(job_id: UUID) -> None:
 
     for idx, zone_id in enumerate(zones, 1):
         await check_cancellation(job_id)
-        results = await dispatch_enrichment_subjobs(zone_id)
+        results = await dispatch_enrichment_subjobs(zone_id, enrichment_flags)
 
         # Compute provisional badges after enrichment (based on zones completed so far)
         provisional_badges = await compute_zone_badges(

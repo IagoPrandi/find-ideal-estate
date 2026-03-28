@@ -4,6 +4,49 @@ import { apiActionHint, createTransportSearchJob, getJob, getJourneyTransportPoi
 import type { TransportPointRead } from "../../api/schemas";
 import { useJourneyStore, useUIStore } from "../../state";
 
+function isRailTransportPoint(point: TransportPointRead): boolean {
+  return point.modal_types.includes("metro") || point.modal_types.includes("train");
+}
+
+export function sanitizeTransportPoints(items: TransportPointRead[]): TransportPointRead[] {
+  const deduped = new Map<string, TransportPointRead>();
+
+  for (const point of items) {
+    if (point.route_count <= 0 && !isRailTransportPoint(point)) {
+      continue;
+    }
+
+    const normalizedName = (point.name ?? "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .trim()
+      .toLowerCase();
+    const externalId = point.external_id?.trim().toLowerCase();
+    const dedupKey = externalId
+      ? `${point.source}:${externalId}`
+      : `${point.source}:${normalizedName}:${point.lat.toFixed(5)}:${point.lon.toFixed(5)}`;
+
+    const current = deduped.get(dedupKey);
+    if (!current) {
+      deduped.set(dedupKey, point);
+      continue;
+    }
+
+    const shouldReplace =
+      point.route_count > current.route_count ||
+      (point.route_count === current.route_count && point.walk_time_sec < current.walk_time_sec) ||
+      (point.route_count === current.route_count &&
+        point.walk_time_sec === current.walk_time_sec &&
+        point.walk_distance_m < current.walk_distance_m);
+
+    if (shouldReplace) {
+      deduped.set(dedupKey, point);
+    }
+  }
+
+  return Array.from(deduped.values());
+}
+
 export function Step2Transport() {
   const journeyId = useJourneyStore((state) => state.journeyId);
   const config = useJourneyStore((state) => state.config);
@@ -31,14 +74,17 @@ export function Step2Transport() {
     async function loadPoints() {
       try {
         const items = await getJourneyTransportPoints(activeJourneyId);
+        const sanitizedItems = sanitizeTransportPoints(items);
         if (!cancelled) {
-          setPoints(items);
-          if (selectedTransportId && !items.some((item) => item.id === selectedTransportId)) {
+          setPoints(sanitizedItems);
+          if (selectedTransportId && !sanitizedItems.some((item) => item.id === selectedTransportId)) {
             setSelectedTransportId(null);
           }
           setIsLoading(false);
-          if (items.length === 0) {
+          if (sanitizedItems.length === 0) {
             setError("Nenhum ponto elegível retornou para a jornada atual.");
+          } else {
+            setError(null);
           }
         }
       } catch (caughtError) {
@@ -139,7 +185,7 @@ export function Step2Transport() {
         <div className="space-y-3">
           {points.map((point) => {
             const isSelected = selectedTransportId === point.id;
-            const isRail = point.modal_types.includes("metro") || point.modal_types.includes("train");
+            const isRail = isRailTransportPoint(point);
             return (
               <button
                 key={point.id}

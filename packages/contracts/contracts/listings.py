@@ -48,6 +48,10 @@ class ListingCardRead(BaseModel):
     """Flattened view for UI listing cards — property + best active ad price."""
     property_id: UUID
     address_normalized: str | None = None
+    lat: float | None = None
+    lon: float | None = None
+    has_coordinates: bool = False
+    inside_zone: bool = False
     area_m2: float | None = None
     bedrooms: int | None = None
     bathrooms: int | None = None
@@ -63,6 +67,8 @@ class ListingCardRead(BaseModel):
     platform: str
     platform_listing_id: str
     url: str | None = None
+    image_url: str | None = None
+    platforms_available: list[str] = []
     observed_at: datetime | None = None
 
 

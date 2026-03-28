@@ -41,10 +41,10 @@ def _format_street_address(street: str, neighborhood: str, city: str, state: str
         parts.append(neighborhood.strip())
     if city.strip():
         parts.append(city.strip())
-    label = ", ".join(part for part in parts if part)
     state_code = (state or "").strip().upper()
     if state_code:
-        return f"{label}-{state_code}"
+        parts.append(state_code)
+    label = ", ".join(part for part in parts if part)
     return label
 
 

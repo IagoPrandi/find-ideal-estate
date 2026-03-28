@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { API_BASE, getJourneyTransportPoints, getJourneyZonesList, getZoneListings } from "../../api/client";
 import { WizardPanel } from "../../components/panels";
-import { parseFiniteNumber } from "../../lib/listingFormat";
+import { applyListingsPanelFilters, parseFiniteNumber } from "../../lib/listingFormat";
 import { useJourneyStore, useUIStore } from "../../state";
 
 const MAPTILER_KEY =
@@ -185,6 +186,8 @@ export function FindIdealApp() {
   const journeyId = useJourneyStore((state) => state.journeyId);
   const selectedTransportId = useJourneyStore((state) => state.selectedTransportId);
   const selectedZoneFingerprint = useJourneyStore((state) => state.selectedZoneFingerprint);
+  const listingsJobId = useJourneyStore((state) => state.listingsJobId);
+  const listingsFilters = useJourneyStore((state) => state.listingsFilters);
   const config = useJourneyStore((state) => state.config);
   const setSelectedTransportId = useJourneyStore((state) => state.setSelectedTransportId);
   const setSelectedZone = useJourneyStore((state) => state.setSelectedZone);
@@ -201,6 +204,28 @@ export function FindIdealApp() {
   useEffect(() => {
     stepRef.current = step;
   }, [step]);
+
+  const listingsQuery = useQuery({
+    queryKey: ["zone-listings", journeyId, selectedZoneFingerprint, config.type, "all"],
+    queryFn: async () => getZoneListings(journeyId as string, selectedZoneFingerprint as string, config.type, "residential", "all"),
+    enabled: Boolean(journeyId && selectedZoneFingerprint && step >= 6),
+    refetchInterval: (query) => {
+      if (step < 6) {
+        return false;
+      }
+      const data = query.state.data;
+      if (!data) {
+        return 5000;
+      }
+      const emptyResults = (data.total_count || 0) === 0;
+      return data.source === "none" || data.freshness_status === "no_cache" || emptyResults || Boolean(listingsJobId) ? 5000 : false;
+    }
+  });
+
+  const filteredMapListings = useMemo(
+    () => applyListingsPanelFilters(listingsQuery.data?.listings || [], listingsFilters),
+    [listingsFilters, listingsQuery.data?.listings]
+  );
 
   useEffect(() => {
     if (!mapContainerRef.current) return;
@@ -700,36 +725,18 @@ export function FindIdealApp() {
     if (!map || !isMapReady) {
       return;
     }
-    const activeMap = map;
 
-    let cancelled = false;
-
-    async function syncListings() {
-      if (!journeyId || !selectedZoneFingerprint || step < 6) {
-        setGeoJsonSourceData(activeMap, LISTINGS_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
-        return;
-      }
-
-      const response = await getZoneListings(journeyId, selectedZoneFingerprint, config.type, "residential");
-      if (!cancelled) {
-        setGeoJsonSourceData(
-          activeMap,
-          LISTINGS_SOURCE_ID,
-          toListingsFeatureCollection(response.listings as Array<Record<string, unknown>>)
-        );
-      }
+    if (!journeyId || !selectedZoneFingerprint || step < 6 || listingsQuery.error) {
+      setGeoJsonSourceData(map, LISTINGS_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
+      return;
     }
 
-    void syncListings().catch(() => {
-      if (!cancelled) {
-        setGeoJsonSourceData(activeMap, LISTINGS_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
-      }
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [config.type, isMapReady, journeyId, selectedZoneFingerprint, step]);
+    setGeoJsonSourceData(
+      map,
+      LISTINGS_SOURCE_ID,
+      toListingsFeatureCollection(filteredMapListings as Array<Record<string, unknown>>)
+    );
+  }, [filteredMapListings, isMapReady, journeyId, listingsQuery.error, selectedZoneFingerprint, step]);
 
   useEffect(() => {
     const map = mapRef.current;

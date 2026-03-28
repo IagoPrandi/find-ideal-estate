@@ -18,6 +18,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 from modules.listings.scrapers.quintoandar import (  # noqa: E402
     _extract_from_quintoandar_dom_rows,
     _extract_from_quintoandar_payload,
+    _extract_quintoandar_coordinate_map,
     _to_quintoandar_location_slug,
 )
 from modules.listings.scrapers.vivareal import (  # noqa: E402
@@ -156,6 +157,45 @@ class TestVivaRealExtraction:
         assert r["area_m2"] == 75.0
         assert r["bedrooms"] == 2
 
+    def test_glue_payload_uses_approximate_point_coordinates(self) -> None:
+        payload = {
+            "search": {
+                "result": {
+                    "listings": [
+                        {
+                            "listing": {
+                                "id": "999001",
+                                "address": {
+                                    "point": {
+                                        "source": "GOOGLE",
+                                        "approximateLat": -23.521,
+                                        "approximateLon": -46.729,
+                                        "radius": 250,
+                                    },
+                                    "street": "Rua Guaipa",
+                                    "neighborhood": "Vila Leopoldina",
+                                    "city": "São Paulo",
+                                    "stateAcronym": "SP",
+                                },
+                                "pricingInfos": [
+                                    {
+                                        "businessType": "RENTAL",
+                                        "rentalTotalPrice": "3200",
+                                    }
+                                ],
+                            },
+                            "link": {"href": "https://www.vivareal.com.br/imovel/apto-id-999001/"},
+                        }
+                    ]
+                }
+            }
+        }
+
+        results = _extract_from_glue_payload(payload, "vivareal", "rent")
+        assert len(results) == 1
+        assert results[0]["lat"] == -23.521
+        assert results[0]["lon"] == -46.729
+
 
 # ---------------------------------------------------------------------------
 # ZapImoveis
@@ -175,6 +215,45 @@ class TestZapImoveisExtraction:
         results = _extract_from_dom_rows(rows, "zapimoveis")
         assert len(results) >= 5
 
+    def test_glue_payload_uses_approximate_point_coordinates(self) -> None:
+        payload = {
+            "search": {
+                "result": {
+                    "listings": [
+                        {
+                            "listing": {
+                                "id": "999002",
+                                "address": {
+                                    "point": {
+                                        "source": "GOOGLE",
+                                        "approximateLat": -23.522,
+                                        "approximateLon": -46.728,
+                                        "radius": 140,
+                                    },
+                                    "street": "Rua Guaipa",
+                                    "neighborhood": "Vila Leopoldina",
+                                    "city": "São Paulo",
+                                    "stateAcronym": "SP",
+                                },
+                                "pricingInfos": [
+                                    {
+                                        "businessType": "RENTAL",
+                                        "rentalTotalPrice": "3300",
+                                    }
+                                ],
+                            },
+                            "link": {"href": "https://www.zapimoveis.com.br/imovel/apto-id-999002/"},
+                        }
+                    ]
+                }
+            }
+        }
+
+        results = zap_extract_glue(payload, "zapimoveis", "rent")
+        assert len(results) == 1
+        assert results[0]["lat"] == -23.522
+        assert results[0]["lon"] == -46.728
+
 
 # ---------------------------------------------------------------------------
 # QuintoAndar
@@ -192,6 +271,11 @@ class TestQuintoAndarExtraction:
         slug = _to_quintoandar_location_slug("Vila Leopoldina, Sao Paulo-SP")
 
         assert slug == "vila-leopoldina-sao-paulo-sp-brasil"
+
+    def test_location_slug_uses_city_only_for_street_plus_city(self) -> None:
+        slug = _to_quintoandar_location_slug("Rua Guaipa, Sao Paulo-SP")
+
+        assert slug == "sao-paulo-sp-brasil"
 
     def test_dom_fallback_yields_five_listings(self) -> None:
         rows = _make_quintoandar_dom_rows(8)
@@ -264,3 +348,32 @@ class TestQuintoAndarExtraction:
 
         results = _extract_from_quintoandar_payload(payload, "rent")
         assert len(results) >= 5
+
+    def test_coordinate_payload_extraction_maps_ids_to_lat_lon(self) -> None:
+        payload = {
+            "hits": {
+                "hits": [
+                    {
+                        "_id": "qa-1",
+                        "_source": {
+                            "id": "qa-1",
+                            "location": {"lat": -23.52, "lon": -46.72},
+                        },
+                    },
+                    {
+                        "_id": "qa-2",
+                        "_source": {
+                            "id": "qa-2",
+                            "location": {"lat": -23.53, "lng": -46.73},
+                        },
+                    },
+                ]
+            }
+        }
+
+        result = _extract_quintoandar_coordinate_map(payload)
+
+        assert result == {
+            "qa-1": (-23.52, -46.72),
+            "qa-2": (-23.53, -46.73),
+        }

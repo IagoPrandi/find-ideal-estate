@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -48,6 +49,10 @@ window.chrome = {runtime: {}, loadTimes: function(){}, csi: function(){}};
 Object.defineProperty(navigator, 'plugins', {get: () => [1,2,3,4,5]});
 Object.defineProperty(navigator, 'languages', {get: () => ['pt-BR','pt','en-US','en']});
 """
+
+_XVFB_PROCESS: subprocess.Popen[Any] | None = None
+_XVFB_DISPLAY: str | None = None
+_XVFB_LOCK = threading.Lock()
 
 
 class ScraperError(RuntimeError):
@@ -189,6 +194,94 @@ def _browser_profile_dir(platform: str, anchor: Path) -> Path:
     return profile_dir
 
 
+def _display_socket_path(display: str) -> Path | None:
+    value = (display or "").strip()
+    if not value.startswith(":"):
+        return None
+    display_number = value[1:].split(".", 1)[0]
+    if not display_number.isdigit():
+        return None
+    return Path("/tmp/.X11-unix") / f"X{display_number}"
+
+
+def _is_x_server_available(display: str) -> bool:
+    socket_path = _display_socket_path(display)
+    return bool(socket_path and socket_path.exists())
+
+
+def _managed_xvfb_displays() -> list[str]:
+    candidates: list[str] = []
+    configured = (os.getenv("SCRAPER_XVFB_DISPLAY") or "").strip()
+    if configured:
+        candidates.append(configured)
+    candidates.extend(f":{display_number}" for display_number in range(98, 109))
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        deduped.append(candidate)
+    return deduped
+
+
+def _ensure_headful_display() -> None:
+    global _XVFB_PROCESS, _XVFB_DISPLAY
+
+    if not sys.platform.startswith("linux"):
+        return
+
+    xvfb_path = shutil.which("Xvfb")
+    if not xvfb_path:
+        raise ScraperError(
+            "Headful browser requested but Xvfb is unavailable"
+        )
+
+    with _XVFB_LOCK:
+        if (
+            _XVFB_PROCESS is not None
+            and _XVFB_PROCESS.poll() is None
+            and _XVFB_DISPLAY
+            and _is_x_server_available(_XVFB_DISPLAY)
+        ):
+            os.environ["DISPLAY"] = _XVFB_DISPLAY
+            return
+
+        for display in _managed_xvfb_displays():
+            socket_path = _display_socket_path(display)
+            if socket_path and socket_path.exists():
+                continue
+
+            process = subprocess.Popen(
+                [xvfb_path, display, "-screen", "0", "1280x800x24", "-ac"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+
+            deadline = time.time() + 5
+            while time.time() < deadline:
+                if _is_x_server_available(display):
+                    _XVFB_PROCESS = process
+                    _XVFB_DISPLAY = display
+                    os.environ["DISPLAY"] = display
+                    return
+                if process.poll() is not None:
+                    break
+                time.sleep(0.1)
+
+            if process.poll() is None:
+                process.terminate()
+                try:
+                    process.wait(timeout=2)
+                except Exception:
+                    process.kill()
+
+    raise ScraperError(
+        "Headful browser requested but managed Xvfb could not be started"
+    )
+
+
 class ScraperBase(ABC):
     platform: str
     base_url: str
@@ -238,11 +331,14 @@ class ScraperBase(ABC):
                 profile_dir.mkdir(parents=True, exist_ok=True)
             except Exception:
                 pass
+        if self._prefer_headful():
+            _ensure_headful_display()
         launch_kwargs = {
             "user_data_dir": str(profile_dir),
             "headless": not self._prefer_headful(),
             "args": PLAYWRIGHT_ANTIBOT_ARGS,
             "ignore_default_args": PLAYWRIGHT_IGNORE_DEFAULT_ARGS,
+            "env": dict(os.environ),
             "locale": "pt-BR",
             "timezone_id": "America/Sao_Paulo",
             "viewport": {"width": 1920, "height": 1080},

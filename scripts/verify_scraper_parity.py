@@ -34,6 +34,14 @@ DEFAULT_EXPECTED_COUNTS = {
 PLATFORMS = tuple(sorted(SCRAPERS.keys()))
 
 
+def _count_items_with_coordinates(listings: list[dict[str, Any]]) -> int:
+    return sum(
+        1
+        for item in listings
+        if isinstance(item.get("lat"), (int, float)) and isinstance(item.get("lon"), (int, float))
+    )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -87,20 +95,24 @@ async def _run_api_counts(address: str, mode: str) -> tuple[dict[str, int], dict
     search_type = "sale" if mode in {"buy", "sale"} else "rent"
     counts: dict[str, int] = {}
     errors: dict[str, str] = {}
+    coordinate_counts: dict[str, int] = {}
 
     for platform, scraper_cls in SCRAPERS.items():
         try:
             scraper = scraper_cls(search_address=address, search_type=search_type)
             listings = await scraper.scrape()
             counts[platform] = len(listings)
+            coordinate_counts[platform] = _count_items_with_coordinates(listings)
         except ScraperError as exc:
             errors[platform] = str(exc)
             counts[platform] = 0
+            coordinate_counts[platform] = 0
         except Exception as exc:  # noqa: BLE001
             errors[platform] = f"{type(exc).__name__}: {exc}"
             counts[platform] = 0
+            coordinate_counts[platform] = 0
 
-    return counts, errors
+    return counts, errors, coordinate_counts
 
 
 def _parse_expected_counts(raw: str) -> dict[str, int]:
@@ -154,7 +166,7 @@ async def main() -> int:
         expected_counts = _parse_expected_counts(args.expected)
 
     print(f"[parity] Running API scrapers for: {args.address!r}")
-    api_counts, api_errors = await _run_api_counts(args.address, args.mode)
+    api_counts, api_errors, api_coordinate_counts = await _run_api_counts(args.address, args.mode)
 
     expected_platforms = list(PLATFORMS)
     report: dict[str, Any] = {
@@ -164,6 +176,17 @@ async def main() -> int:
         "min_results": args.min_results,
         "expected_counts": {p: int(expected_counts.get(p, 0)) for p in expected_platforms},
         "api_counts": {p: int(api_counts.get(p, 0)) for p in expected_platforms},
+        "api_coordinate_counts": {
+            p: int(api_coordinate_counts.get(p, 0)) for p in expected_platforms
+        },
+        "api_coordinate_coverage": {
+            p: (
+                float(api_coordinate_counts.get(p, 0)) / float(api_counts.get(p, 0))
+                if int(api_counts.get(p, 0)) > 0
+                else 0.0
+            )
+            for p in expected_platforms
+        },
         "api_errors": api_errors,
         "expected_pass": {
             p: int(expected_counts.get(p, 0)) >= args.min_results for p in expected_platforms
@@ -191,11 +214,14 @@ async def main() -> int:
     for platform in expected_platforms:
         expected = report["expected_counts"][platform]
         api = report["api_counts"][platform]
+        api_coords = report["api_coordinate_counts"][platform]
+        api_coord_coverage = report["api_coordinate_coverage"][platform]
         expected_ok = report["expected_pass"][platform]
         api_ok = report["api_pass"][platform]
         strict_ok = report["strict_count_parity"][platform]
         print(
-            f"  - {platform}: expected={expected} api={api} "
+            f"  - {platform}: expected={expected} api={api} coords={api_coords} "
+            f"(coverage={api_coord_coverage:.1%}) "
             f"(pass expected={expected_ok} api={api_ok} strict={strict_ok})"
         )
 
