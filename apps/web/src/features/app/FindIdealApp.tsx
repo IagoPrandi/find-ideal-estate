@@ -4,7 +4,7 @@ import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { API_BASE, getJourneyTransportPoints, getJourneyZonesList, getZoneListings } from "../../api/client";
 import { WizardPanel } from "../../components/panels";
-import { applyListingsPanelFilters, parseFiniteNumber } from "../../lib/listingFormat";
+import { applyListingsPanelFilters, getListingDisplayPrice, getListingSelectionKey } from "../../lib/listingFormat";
 import { useJourneyStore, useUIStore } from "../../state";
 
 const MAPTILER_KEY =
@@ -68,21 +68,29 @@ const toZonesFeatureCollection = (
     }))
 });
 
-const toListingsFeatureCollection = (listings: Array<Record<string, unknown>>): GeoJSON.FeatureCollection => ({
+const toListingsFeatureCollection = (
+  listings: Array<Record<string, unknown>>,
+  selectedListingKey: string | null
+): GeoJSON.FeatureCollection => ({
   type: "FeatureCollection",
   features: listings
     .filter((listing) => typeof listing.lon === "number" && typeof listing.lat === "number")
-    .map((listing) => ({
-      type: "Feature",
-      geometry: {
-        type: "Point",
-        coordinates: [listing.lon as number, listing.lat as number]
-      },
-      properties: {
-        platform: String(listing.platform || "Plataforma"),
-        price: parseFiniteNumber(listing.current_best_price) || 0
-      }
-    }))
+    .map((listing) => {
+      const listingKey = getListingSelectionKey(listing as never);
+      return {
+        type: "Feature",
+        geometry: {
+          type: "Point",
+          coordinates: [listing.lon as number, listing.lat as number]
+        },
+        properties: {
+          listing_key: listingKey,
+          platform: String(listing.platform || "Plataforma"),
+          price: getListingDisplayPrice(listing as never) || 0,
+          selected: listingKey !== "" && listingKey === selectedListingKey
+        }
+      };
+    })
 });
 
 const hexToRgb = (hex: string): [number, number, number] => {
@@ -186,10 +194,12 @@ export function FindIdealApp() {
   const journeyId = useJourneyStore((state) => state.journeyId);
   const selectedTransportId = useJourneyStore((state) => state.selectedTransportId);
   const selectedZoneFingerprint = useJourneyStore((state) => state.selectedZoneFingerprint);
+  const selectedListingKey = useJourneyStore((state) => state.selectedListingKey);
   const listingsJobId = useJourneyStore((state) => state.listingsJobId);
   const listingsFilters = useJourneyStore((state) => state.listingsFilters);
   const config = useJourneyStore((state) => state.config);
   const setSelectedTransportId = useJourneyStore((state) => state.setSelectedTransportId);
+  const setSelectedListingKey = useJourneyStore((state) => state.setSelectedListingKey);
   const setSelectedZone = useJourneyStore((state) => state.setSelectedZone);
   const stepRef = useRef(step);
   const layerVisibility = {
@@ -496,10 +506,10 @@ export function FindIdealApp() {
         type: "circle",
         source: LISTINGS_SOURCE_ID,
         paint: {
-          "circle-radius": 5,
-          "circle-color": "#845ef7",
+          "circle-radius": ["case", ["boolean", ["get", "selected"], false], 8, 5],
+          "circle-color": ["case", ["boolean", ["get", "selected"], false], "#5b21b6", "#845ef7"],
           "circle-stroke-color": "#ffffff",
-          "circle-stroke-width": 1.5,
+          "circle-stroke-width": ["case", ["boolean", ["get", "selected"], false], 2.2, 1.5],
           "circle-opacity": 0.94,
         },
       });
@@ -562,6 +572,14 @@ export function FindIdealApp() {
         }
       });
 
+      map.on("click", "journey-listings-layer", (event) => {
+        const feature = event.features?.[0];
+        const listingKey = feature?.properties?.listing_key;
+        if (typeof listingKey === "string" && listingKey.trim()) {
+          setSelectedListingKey(listingKey);
+        }
+      });
+
       map.on("click", (event) => {
         if (stepRef.current === 1) {
           setPickedCoord({
@@ -596,7 +614,7 @@ export function FindIdealApp() {
         });
       }
 
-      for (const layerId of ["transport-candidate-layer", "zones-runtime-fill-layer"] as const) {
+      for (const layerId of ["transport-candidate-layer", "zones-runtime-fill-layer", "journey-listings-layer"] as const) {
         map.on("mouseenter", layerId, () => {
           map.getCanvas().style.cursor = "pointer";
         });
@@ -613,7 +631,7 @@ export function FindIdealApp() {
       busPopupRef.current = null;
       map.remove();
     };
-  }, [setPickedCoord, setSelectedTransportId, setSelectedZone]);
+  }, [setPickedCoord, setSelectedListingKey, setSelectedTransportId, setSelectedZone]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -726,6 +744,30 @@ export function FindIdealApp() {
       return;
     }
 
+    if (!selectedListingKey || step < 6) {
+      return;
+    }
+
+    const selectedListing = (listingsQuery.data?.listings || []).find((listing) => {
+      if (typeof listing.lat !== "number" || typeof listing.lon !== "number") {
+        return false;
+      }
+      return getListingSelectionKey(listing) === selectedListingKey;
+    });
+
+    if (!selectedListing || typeof selectedListing.lat !== "number" || typeof selectedListing.lon !== "number") {
+      return;
+    }
+
+    map.easeTo({ center: [selectedListing.lon, selectedListing.lat], duration: 600, zoom: Math.max(map.getZoom(), 14) });
+  }, [isMapReady, listingsQuery.data?.listings, selectedListingKey, step]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isMapReady) {
+      return;
+    }
+
     if (!journeyId || !selectedZoneFingerprint || step < 6 || listingsQuery.error) {
       setGeoJsonSourceData(map, LISTINGS_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
       return;
@@ -734,9 +776,9 @@ export function FindIdealApp() {
     setGeoJsonSourceData(
       map,
       LISTINGS_SOURCE_ID,
-      toListingsFeatureCollection(filteredMapListings as Array<Record<string, unknown>>)
+      toListingsFeatureCollection(filteredMapListings as Array<Record<string, unknown>>, selectedListingKey)
     );
-  }, [filteredMapListings, isMapReady, journeyId, listingsQuery.error, selectedZoneFingerprint, step]);
+  }, [filteredMapListings, isMapReady, journeyId, listingsQuery.error, selectedListingKey, selectedZoneFingerprint, step]);
 
   useEffect(() => {
     const map = mapRef.current;

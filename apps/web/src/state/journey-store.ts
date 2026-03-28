@@ -49,6 +49,7 @@ type JourneyState = {
   journeyId: string | null;
   config: JourneyConfig;
   listingsFilters: ListingsPanelFilters;
+  selectedListingKey: string | null;
   pickedCoord: PickedCoord | null;
   primaryReferenceLabel: string;
   selectedTransportId: string | null;
@@ -71,6 +72,7 @@ type JourneyState = {
   setAddressQuery: (query: string) => void;
   setListingsFilters: (updater: Partial<ListingsPanelFilters>) => void;
   resetListingsFilters: () => void;
+  setSelectedListingKey: (selectedListingKey: string | null) => void;
   setJobIds: (payload: {
     transportJobId?: string | null;
     zoneGenerationJobId?: string | null;
@@ -108,6 +110,7 @@ export const useJourneyStore = create<JourneyState>((set) => ({
   journeyId: null,
   config: defaultConfig,
   listingsFilters: defaultListingsPanelFilters,
+  selectedListingKey: null,
   pickedCoord: null,
   primaryReferenceLabel: "",
   selectedTransportId: null,
@@ -128,6 +131,7 @@ export const useJourneyStore = create<JourneyState>((set) => ({
       return {
         journeyId,
         listingsFilters: defaultListingsPanelFilters,
+        selectedListingKey: null,
         selectedTransportId: null,
         selectedZoneId: null,
         selectedZoneFingerprint: null,
@@ -166,6 +170,7 @@ export const useJourneyStore = create<JourneyState>((set) => ({
         selectedZoneId,
         selectedZoneFingerprint,
         listingsFilters: defaultListingsPanelFilters,
+        selectedListingKey: null,
         selectedAddress: null,
         addressQuery: "",
         listingsJobId: null
@@ -181,12 +186,14 @@ export const useJourneyStore = create<JourneyState>((set) => ({
       }
     })),
   resetListingsFilters: () => set({ listingsFilters: defaultListingsPanelFilters }),
+  setSelectedListingKey: (selectedListingKey) => set({ selectedListingKey }),
   setJobIds: (payload) => set((state) => ({ ...state, ...payload })),
   resetJourney: () =>
     set({
       journeyId: null,
       config: defaultConfig,
       listingsFilters: defaultListingsPanelFilters,
+      selectedListingKey: null,
       pickedCoord: null,
       primaryReferenceLabel: "",
       selectedTransportId: null,

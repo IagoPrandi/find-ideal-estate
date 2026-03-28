@@ -295,6 +295,8 @@ async def test_fetch_listing_cards_for_zone_supports_all_spatial_scope() -> None
         assert cards[0]["inside_zone"] is True
         assert cards[0]["has_coordinates"] is True
         assert cards[0]["platforms_available"] == ["quintoandar", "zapimoveis"]
+        assert str(cards[0]["condo_fee"]) == "450.00"
+        assert str(cards[0]["iptu"]) == "90.00"
         assert str(cards[0]["second_best_price"]) == "3500.00"
     finally:
         if schema_ready:

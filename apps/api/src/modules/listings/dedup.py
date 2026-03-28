@@ -205,6 +205,8 @@ async def fetch_listing_cards_for_zone(
                         la.url,
                         la.advertised_usage_type,
                         ls.price,
+                        ls.condo_fee,
+                        ls.iptu,
                         ls.raw_payload->>'image_url' AS image_url,
                         ls.observed_at,
                         ROW_NUMBER() OVER (
@@ -258,6 +260,8 @@ async def fetch_listing_cards_for_zone(
                     bp.url,
                     bp.image_url,
                     bp.price          AS current_best_price,
+                    bp.condo_fee,
+                    bp.iptu,
                     bp.observed_at,
                     (
                         SELECT bp2.price
@@ -320,8 +324,10 @@ async def fetch_listing_cards_for_zone(
                     "url": row["url"],
                     "image_url": row["image_url"],
                     "platforms_available": list(row["platforms_available"] or []),
-                    "current_best_price": str(best_price) if best_price else None,
-                    "second_best_price": str(second_price) if second_price else None,
+                    "current_best_price": str(best_price) if best_price is not None else None,
+                    "condo_fee": str(row["condo_fee"]) if row["condo_fee"] is not None else None,
+                    "iptu": str(row["iptu"]) if row["iptu"] is not None else None,
+                    "second_best_price": str(second_price) if second_price is not None else None,
                     "duplication_badge": dup_badge,
                     "observed_at": row["observed_at"].isoformat() if row["observed_at"] else None,
                 }

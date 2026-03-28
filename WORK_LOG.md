@@ -1,5 +1,138 @@
 # Work Log
 
+## 2026-03-28 - Reverter tentativa de captura extra de URL no scraper e limitar auto-scroll do Step 6
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/develop-frontend/SKILL.md` para ajustar o comportamento do painel mantendo a interacao card↔mapa.
+- Trigger: usuario pediu para desfazer as alteracoes que tentavam corrigir captura de URL no scraper e corrigir a lista de imoveis para que a navegacao manual nao seja interrompida por auto-scroll repetido para o item selecionado.
+- Scope executed:
+  - `apps/api/src/modules/listings/scrapers/base.py`:
+    - revertido o fallback recursivo adicionado para buscar URLs de imagem em payloads arbitrarios.
+  - `apps/api/src/modules/listings/scrapers/vivareal.py` e `apps/api/src/modules/listings/scrapers/quintoandar.py`:
+    - removido o uso do fallback recursivo; a extracao voltou aos caminhos explicitos anteriores.
+  - `apps/api/tests/test_phase5_scraper_extraction.py`:
+    - removidos os testes que cobriam o fallback recursivo revertido.
+  - `apps/web/src/components/panels/Step6Analysis.tsx`:
+    - mantida a selecao compartilhada de listing, mas o `scrollIntoView()` agora roda apenas quando a selecao muda de fato;
+    - atualizacoes normais da lista, polling e mudancas de filtro nao puxam mais o usuario de volta para o mesmo card ja selecionado.
+  - `apps/web/src/components/panels/Step6Analysis.test.tsx`:
+    - adicionada regressao para garantir que um rerender da lista nao dispara novo auto-scroll sem uma nova selecao.
+- Validation:
+  - backend focado: `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase5_scraper_extraction.py -q` -> `17 passed in 0.90s`.
+  - frontend focado: `npm run test -- --run src/components/panels/Step6Analysis.test.tsx src/features/app/FindIdealApp.test.tsx` -> `6 passed`; permaneceram apenas warnings conhecidos de `act(...)` nos testes React.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-28 - Sincronizar seleção card mapa no Step 6 e fortalecer captura de imagens dos anúncios
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/develop-frontend/SKILL.md` para corrigir a UX do Step 6 sem duplicar estado entre painel e mapa.
+- Trigger: usuario reportou que os cards estavam sem imagem do anuncio e pediu interacao bidirecional entre lista e mapa: clique no card deve centralizar o mapa quando houver coordenadas, e clique no ponto do mapa deve rolar a lista ate o imovel correspondente.
+- Root cause identified:
+  - o frontend ainda nao mantinha uma selecao compartilhada de listing entre painel e mapa, entao clique no card e clique no ponto eram eventos isolados;
+  - os markers do mapa nao carregavam identidade estavel do card, o que impedia localizar o item correspondente na lista;
+  - os snapshots persistidos atuais estavam com `image_url` vazio nas tres plataformas, entao os cards caiam sempre no placeholder; a extracao do scraper precisava de um fallback menos fragil para estruturas novas de payload.
+- Scope executed:
+  - `apps/web/src/state/journey-store.ts`:
+    - adicionado `selectedListingKey` compartilhado com reset automatico ao trocar jornada ou zona.
+  - `apps/web/src/lib/listingFormat.ts`:
+    - novo helper `getListingSelectionKey()` para gerar identidade estavel do listing usada tanto no painel quanto no mapa;
+    - novo helper `resolvePlatformImageUrl()` para normalizar URLs relativas e `//` em imagens de anuncio.
+  - `apps/web/src/components/panels/Step6Analysis.tsx`:
+    - cards agora escrevem `selectedListingKey` ao clique;
+    - card selecionado recebe destaque visual;
+    - quando a selecao muda pelo store, o painel usa `scrollIntoView()` para trazer o card correspondente para a viewport;
+    - imagens passam a usar URL resolvida por plataforma antes de renderizar.
+  - `apps/web/src/features/app/FindIdealApp.tsx`:
+    - a `FeatureCollection` de listings agora carrega `listing_key` e estado `selected`;
+    - clique em `journey-listings-layer` atualiza a mesma selecao compartilhada;
+    - o mapa centraliza no imovel selecionado quando o item possui `lat/lon`;
+    - marker selecionado ganha destaque visual.
+  - `apps/api/src/modules/listings/scrapers/base.py`:
+    - novo fallback recursivo `_find_first_image_url()` para localizar URLs de imagem em payloads mais variaveis, priorizando trilhas com chaves de midia/foto/imagem e penalizando logo/icon.
+  - `apps/api/src/modules/listings/scrapers/vivareal.py` e `apps/api/src/modules/listings/scrapers/quintoandar.py`:
+    - extracao de `image_url` agora tenta os caminhos antigos primeiro e cai no fallback recursivo quando a estrutura mudou.
+  - testes:
+    - `apps/api/tests/test_phase5_scraper_extraction.py` ganhou cobertura para fallback de imagem em payloads aninhados de VivaReal e QuintoAndar;
+    - `apps/web/src/components/panels/Step6Analysis.test.tsx` cobre URL relativa de imagem, clique no card e scroll ao selecionar via store;
+    - novo `apps/web/src/features/app/FindIdealApp.test.tsx` cobre card/store -> `easeTo()` e clique no ponto -> selecao no store;
+    - `apps/web/src/lib/listingFormat.test.ts` e `apps/web/src/state/journey-store.test.ts` atualizados para a nova identidade e reset da selecao.
+- Validation:
+  - backend focado: `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase5_scraper_extraction.py -q` -> `19 passed in 0.64s`.
+  - frontend focado: `npm run test -- --run src/lib/listingFormat.test.ts src/state/journey-store.test.ts src/components/panels/Step6Analysis.test.tsx src/features/app/FindIdealApp.test.tsx` -> `14 passed`.
+  - `npm run build` em `apps/web` -> build concluido com sucesso; permaneceu apenas o warning conhecido de chunk grande do Vite.
+- Observations:
+  - os caches ja persistidos continuam sem imagem ate que um novo scrape grave `image_url` preenchido; esta rodada corrige a captura para os proximos scrapes e prepara o frontend para exibi-las assim que existirem.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-28 - Exibir no Step 6 o valor total como preco + condominio + IPTU
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/best-practices/SKILL.md` para fazer a mudanca ponta a ponta sem quebrar o contrato do Step 6.
+- Trigger: usuario pediu que o valor mostrado no painel fosse a soma de preco, condominio e IPTU.
+- Root cause identified:
+  - o Step 6 recebia apenas `current_best_price`, sem `condo_fee` e `iptu` no card retornado pelo backend;
+  - com isso, o frontend nao tinha como compor o valor total exibido no painel.
+- Scope executed:
+  - `apps/api/src/modules/listings/dedup.py`:
+    - `fetch_listing_cards_for_zone()` passou a incluir `condo_fee` e `iptu` do snapshot vencedor em cada card retornado.
+  - `packages/contracts/contracts/listings.py` e `apps/web/src/api/schemas.ts`:
+    - `ListingCardRead`/schema frontend estendidos com `condo_fee` e `iptu`.
+  - `apps/web/src/lib/listingFormat.ts`:
+    - novo helper compartilhado `getListingDisplayPrice()` soma `current_best_price + condo_fee + iptu`;
+    - filtros do painel passaram a usar esse total em vez do preco base sozinho.
+  - `apps/web/src/components/panels/Step6Analysis.tsx`:
+    - valor principal do card e metricas agregadas do Step 6 agora usam o total composto.
+  - `apps/web/src/features/app/FindIdealApp.tsx`:
+    - a camada de listings do mapa passou a usar o mesmo total composto no campo `price`.
+  - testes:
+    - `apps/api/tests/test_phase5_dedup.py` agora valida que `condo_fee` e `iptu` chegam no card deduplicado;
+    - `apps/web/src/lib/listingFormat.test.ts` ganhou caso cobrindo `1000 + 826 + 165 = 1991`;
+    - `apps/web/src/components/panels/Step6Analysis.test.tsx` passou a verificar a exibicao do total somado no card.
+- Validation:
+  - backend focado: `apps/api/tests/test_phase5_dedup.py` -> `13 passed in 3.11s`.
+  - frontend focado: `src/lib/listingFormat.test.ts` + `src/components/panels/Step6Analysis.test.tsx` -> `7 passed`.
+  - `docker compose restart api ui` executado para recarregar os servicos.
+  - checagem HTTP da rota de Step 6 apos reload respondeu `200`; a jornada consultada estava com `source=no_cache`, entao sem cards naquele momento.
+- Observations:
+  - a mudanca preserva `current_best_price` como preco base retornado pelo backend e calcula o total no frontend para exibicao e filtros.
+  - warnings antigos de `act(...)` permaneceram apenas na suite React, sem falha funcional.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-28 - Corrigir preços inflados no painel de imóveis do Step 6
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/best-practices/SKILL.md` para seguir a cadeia completa de dados e corrigir o ponto de falha com diff minimo.
+- Trigger: usuario reportou que os preços do painel estavam incorretos; exemplo mostrado com card de locacao exibindo `R$ 100.000` enquanto o anuncio real no ZapImoveis mostrava `R$ 1.000/mes`.
+- Root cause identified:
+  - o backend entrega `current_best_price` e demais valores monetarios como string decimal simples (`"1000.00"`, `"826.00"`);
+  - o parser compartilhado do frontend em `apps/web/src/lib/listingFormat.ts` removia todos os pontos antes de converter a string, assumindo sempre formato brasileiro com ponto de milhar;
+  - efeito: `"1000.00"` era convertido em `100000`, inflando todos os cards, metricas e filtros que dependem de `parseFiniteNumber()`.
+- Scope executed:
+  - `apps/web/src/lib/listingFormat.ts`:
+    - `parseFiniteNumber()` passou a aceitar corretamente formatos mistos:
+      - decimal com ponto do backend (`1000.00`),
+      - moeda brasileira (`1.000,00`),
+      - inteiros com separador de milhar (`100.000`, `100,000`).
+  - `apps/web/src/lib/listingFormat.test.ts`:
+    - novo teste unitario cobrindo os formatos acima, incluindo o caso regressivo do backend (`1000.00 -> 1000`).
+  - ambiente local:
+    - `ui` reiniciado via `docker compose restart ui` para carregar a correcao na aplicacao em execucao.
+- Validation:
+  - `vitest` focado: `src/lib/listingFormat.test.ts` + `src/components/panels/Step6Analysis.test.tsx` -> `6 passed`.
+  - warnings antigos de `act(...)` permaneceram apenas na suite de `Step6Analysis`, sem falha funcional nesta rodada.
+- Observations:
+  - o bug afetava nao apenas os cards do painel, mas tambem filtros, resumo analitico e qualquer camada que reuse `parseFiniteNumber()`.
+  - a extracao do scraper Zap/VivaReal nao precisou ser alterada nesta rodada; o problema estava na interpretacao do valor no frontend.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
 ## 2026-03-28 - Corrigir Step 6 quando a lista de imóveis some por 500 no backend
 
 - Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`.

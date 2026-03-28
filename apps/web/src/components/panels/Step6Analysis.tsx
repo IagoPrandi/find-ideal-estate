@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -29,7 +29,7 @@ import {
 } from "recharts";
 import { apiActionHint, getJob, getJourneyZonesList, getPriceRollups, getZoneListings } from "../../api/client";
 import { ListingsScrapeDiagnosticsSchema, type ListingsScrapeDiagnostics, type ListingsScrapePlatformDiagnostics } from "../../api/schemas";
-import { applyListingsPanelFilters, parseFiniteNumber, formatCurrencyBr, resolvePlatformUrl } from "../../lib/listingFormat";
+import { applyListingsPanelFilters, formatCurrencyBr, getListingDisplayPrice, getListingSelectionKey, parseFiniteNumber, resolvePlatformImageUrl, resolvePlatformUrl } from "../../lib/listingFormat";
 import { useJourneyStore, useUIStore } from "../../state";
 
 function toDistribution(values: number[]) {
@@ -149,10 +149,14 @@ export function Step6Analysis() {
   const zoneFingerprint = useJourneyStore((state) => state.selectedZoneFingerprint);
   const listingsJobId = useJourneyStore((state) => state.listingsJobId);
   const listingsFilters = useJourneyStore((state) => state.listingsFilters);
+  const selectedListingKey = useJourneyStore((state) => state.selectedListingKey);
   const setListingsFilters = useJourneyStore((state) => state.setListingsFilters);
+  const setSelectedListingKey = useJourneyStore((state) => state.setSelectedListingKey);
   const config = useJourneyStore((state) => state.config);
   const activeTab = useUIStore((state) => state.activeTab);
   const setActiveTab = useUIStore((state) => state.setActiveTab);
+  const listingCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const lastScrolledListingKeyRef = useRef<string | null>(null);
 
   const persistedListingsJobId = listingsJobId;
 
@@ -200,11 +204,11 @@ export function Step6Analysis() {
   const listingsOutsideZone = rawListings.filter((listing) => listing.has_coordinates && !listing.inside_zone);
   const listingsWithoutCoordinates = rawListings.filter((listing) => !listing.has_coordinates);
   const listingPrices = rawListings
-    .map((listing) => parseFiniteNumber(listing.current_best_price))
+    .map((listing) => getListingDisplayPrice(listing))
     .filter((value): value is number => value !== null);
   const listingUnitPrices = rawListings
     .map((listing) => {
-      const price = parseFiniteNumber(listing.current_best_price);
+      const price = getListingDisplayPrice(listing);
       const area = typeof listing.area_m2 === "number" && listing.area_m2 > 0 ? listing.area_m2 : null;
       if (price === null || area === null) {
         return null;
@@ -253,6 +257,22 @@ export function Step6Analysis() {
     && listingsForScope.length === 0;
 
   const displayedListings = applyListingsPanelFilters(rawListings, listingsFilters);
+
+  useEffect(() => {
+    if (!selectedListingKey) {
+      lastScrolledListingKeyRef.current = null;
+      return;
+    }
+    if (lastScrolledListingKeyRef.current === selectedListingKey) {
+      return;
+    }
+    const selectedCard = listingCardRefs.current[selectedListingKey];
+    if (!selectedCard) {
+      return;
+    }
+    selectedCard.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    lastScrolledListingKeyRef.current = selectedListingKey;
+  }, [displayedListings, selectedListingKey]);
 
   return (
     <div className="flex h-full flex-col bg-slate-50 animate-[fadeInRight_0.5s_ease-out]">
@@ -449,8 +469,11 @@ export function Step6Analysis() {
               </div>
             ) : null}
             {displayedListings.map((listing, index) => {
-              const price = parseFiniteNumber(listing.current_best_price);
+              const listingKey = getListingSelectionKey(listing);
+              const price = getListingDisplayPrice(listing);
               const adUrl = resolvePlatformUrl(listing.url, listing.platform);
+              const imageUrl = resolvePlatformImageUrl(listing.image_url, listing.platform);
+              const isSelected = listingKey !== "" && listingKey === selectedListingKey;
               const spatialBadge = !listing.has_coordinates
                 ? {
                     className: "border-slate-200 bg-slate-50 text-slate-600",
@@ -466,11 +489,39 @@ export function Step6Analysis() {
                       label: "Fora da zona"
                     };
               return (
-                <div key={`${listing.platform_listing_id || index}-${listing.platform || "platform"}`} className="group flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white transition-shadow hover:shadow-lg sm:flex-row">
+                <div
+                  key={`${listing.platform_listing_id || index}-${listing.platform || "platform"}`}
+                  ref={(node) => {
+                    if (!listingKey) {
+                      return;
+                    }
+                    if (node) {
+                      listingCardRefs.current[listingKey] = node;
+                    } else {
+                      delete listingCardRefs.current[listingKey];
+                    }
+                  }}
+                  data-testid={listingKey ? `listing-card-${listingKey}` : undefined}
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={isSelected}
+                  onClick={() => {
+                    if (listingKey) {
+                      setSelectedListingKey(listingKey);
+                    }
+                  }}
+                  onKeyDown={(event) => {
+                    if ((event.key === "Enter" || event.key === " ") && listingKey) {
+                      event.preventDefault();
+                      setSelectedListingKey(listingKey);
+                    }
+                  }}
+                  className={`group flex cursor-pointer flex-col overflow-hidden rounded-2xl border bg-white text-left transition-all hover:shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-pastel-violet-300 sm:flex-row ${isSelected ? "border-pastel-violet-300 ring-2 ring-pastel-violet-100 shadow-lg" : "border-slate-200"}`}
+                >
                   <div className="relative h-40 shrink-0 bg-gradient-to-br from-pastel-violet-100 via-white to-slate-100 sm:h-auto sm:w-48">
-                    {listing.image_url ? (
+                    {imageUrl ? (
                       <img
-                        src={listing.image_url}
+                        src={imageUrl}
                         alt={listing.address_normalized || "Imagem do imóvel"}
                         className="absolute inset-0 h-full w-full object-cover"
                         loading="lazy"
@@ -513,15 +564,15 @@ export function Step6Analysis() {
                       </div>
                     ) : null}
                     <div className="mt-auto flex gap-2 border-t border-slate-100 pt-3">
-                      <button type="button" className="flex-1 rounded-lg bg-slate-50 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100">
+                      <button type="button" onClick={(event) => event.stopPropagation()} className="flex-1 rounded-lg bg-slate-50 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100">
                         Ver Acessibilidade
                       </button>
                       {adUrl ? (
-                        <a href={adUrl} target="_blank" rel="noreferrer" aria-label="Ver anúncio" className="flex w-10 items-center justify-center rounded-lg bg-pastel-violet-50 text-pastel-violet-500 transition-colors hover:bg-pastel-violet-100">
+                        <a href={adUrl} target="_blank" rel="noreferrer" aria-label="Ver anúncio" onClick={(event) => event.stopPropagation()} className="flex w-10 items-center justify-center rounded-lg bg-pastel-violet-50 text-pastel-violet-500 transition-colors hover:bg-pastel-violet-100">
                           <ExternalLink className="h-4 w-4" />
                         </a>
                       ) : (
-                        <button type="button" disabled aria-label="Anúncio indisponível" className="flex w-10 cursor-not-allowed items-center justify-center rounded-lg bg-slate-100 text-slate-300">
+                        <button type="button" disabled aria-label="Anúncio indisponível" onClick={(event) => event.stopPropagation()} className="flex w-10 cursor-not-allowed items-center justify-center rounded-lg bg-slate-100 text-slate-300">
                           <ExternalLink className="h-4 w-4" />
                         </button>
                       )}

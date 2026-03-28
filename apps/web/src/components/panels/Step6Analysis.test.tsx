@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Step6Analysis } from "./Step6Analysis";
 import { useJourneyStore, useUIStore } from "../../state";
@@ -12,6 +12,8 @@ vi.mock("../../api/client", () => ({
   getPriceRollups: vi.fn(),
   getZoneListings: vi.fn()
 }));
+
+const scrollIntoViewMock = vi.fn();
 
 function renderWithQueryClient() {
   const queryClient = new QueryClient({
@@ -32,6 +34,11 @@ function renderWithQueryClient() {
 
 describe("Step6Analysis", () => {
   beforeEach(() => {
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoViewMock
+    });
+
     useJourneyStore.getState().resetJourney();
     useUIStore.getState().resetUI();
     useJourneyStore.setState((state) => ({
@@ -102,6 +109,7 @@ describe("Step6Analysis", () => {
 
   afterEach(() => {
     vi.clearAllMocks();
+    scrollIntoViewMock.mockReset();
     useJourneyStore.getState().resetJourney();
     useUIStore.getState().resetUI();
   });
@@ -188,6 +196,8 @@ describe("Step6Analysis", () => {
           platform_listing_id: "qa-1",
           address_normalized: "Rua Dentro, 10",
           current_best_price: "3500",
+          condo_fee: "500",
+          iptu: "100",
           inside_zone: true,
           has_coordinates: true,
           lat: -23.5,
@@ -199,7 +209,10 @@ describe("Step6Analysis", () => {
           platform: "vivareal",
           platform_listing_id: "vr-1",
           address_normalized: "Rua Fora, 20",
+          image_url: "/listing-images/vr-1.webp",
           current_best_price: "4200",
+          condo_fee: "300",
+          iptu: "50",
           inside_zone: false,
           has_coordinates: true,
           lat: -23.49,
@@ -212,6 +225,8 @@ describe("Step6Analysis", () => {
           platform_listing_id: "zap-1",
           address_normalized: "Endereço sem coordenadas",
           current_best_price: "3900",
+          condo_fee: "250",
+          iptu: "25",
           inside_zone: false,
           has_coordinates: false,
           lat: null,
@@ -252,9 +267,14 @@ describe("Step6Analysis", () => {
     renderWithQueryClient();
 
     expect(await screen.findByText(/Rua Dentro, 10/i)).toBeInTheDocument();
+    expect(screen.getByText(/R\$\s*4\.100/i)).toBeInTheDocument();
     expect(screen.getByText(/Rua Fora, 20/i)).toBeInTheDocument();
     expect(screen.getByText(/Endereço sem coordenadas/i)).toBeInTheDocument();
     expect(screen.getByText(/1 dentro da zona · 1 fora da zona · 1 sem coordenadas/i)).toBeInTheDocument();
+    expect(screen.getByAltText(/Rua Fora, 20/i)).toHaveAttribute("src", "https://www.vivareal.com.br/listing-images/vr-1.webp");
+
+    fireEvent.click(screen.getByTestId("listing-card-property:prop-2"));
+    expect(useJourneyStore.getState().selectedListingKey).toBe("property:prop-2");
 
     fireEvent.change(screen.getByLabelText(/Escopo espacial/i), {
       target: { value: "inside_zone" }
@@ -263,5 +283,69 @@ describe("Step6Analysis", () => {
     expect(screen.getByText(/Rua Dentro, 10/i)).toBeInTheDocument();
     expect(screen.queryByText(/Rua Fora, 20/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Endereço sem coordenadas/i)).not.toBeInTheDocument();
+  });
+
+  it("scrolls the matching card into view when the map selects a listing", async () => {
+    vi.mocked(getZoneListings).mockResolvedValue({
+      source: "cache",
+      job_id: null,
+      freshness_status: "fresh",
+      listings: [
+        {
+          property_id: "prop-1",
+          platform: "quintoandar",
+          platform_listing_id: "qa-1",
+          address_normalized: "Rua Dentro, 10",
+          current_best_price: "3500",
+          condo_fee: "500",
+          iptu: "100",
+          inside_zone: true,
+          has_coordinates: true,
+          lat: -23.5,
+          lon: -46.7,
+          platforms_available: ["quintoandar"]
+        }
+      ],
+      total_count: 1,
+      cache_age_hours: 0.1
+    } as never);
+    vi.mocked(getJob).mockResolvedValue({
+      id: "listings-job-1",
+      journey_id: "journey-1",
+      job_type: "listings_scrape",
+      state: "completed",
+      progress_percent: 100,
+      current_stage: "listings_scrape",
+      cancel_requested_at: null,
+      started_at: "2026-03-27T10:00:00Z",
+      finished_at: "2026-03-27T10:03:00Z",
+      worker_id: "worker-1",
+      error_code: null,
+      error_message: null,
+      created_at: "2026-03-27T10:00:00Z",
+      result_ref: { scrape_diagnostics: { status: "complete", summary: { total_scraped: 1, platforms_completed: ["quintoandar"], platforms_failed: [] }, platforms: {} } }
+    } as never);
+
+    renderWithQueryClient();
+
+    await screen.findByText(/Rua Dentro, 10/i);
+
+    useJourneyStore.getState().setSelectedListingKey("property:prop-1");
+
+    await waitFor(() => {
+      expect(scrollIntoViewMock).toHaveBeenCalled();
+    });
+
+    scrollIntoViewMock.mockClear();
+
+    await act(async () => {
+      useJourneyStore.getState().setListingsFilters({ minPrice: "0" });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("0")).toBeInTheDocument();
+    });
+
+    expect(scrollIntoViewMock).not.toHaveBeenCalled();
   });
 });

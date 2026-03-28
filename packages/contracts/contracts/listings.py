@@ -60,6 +60,8 @@ class ListingCardRead(BaseModel):
 
     # best price across active listing_ads
     current_best_price: Decimal | None = None
+    condo_fee: Decimal | None = None
+    iptu: Decimal | None = None
     second_best_price: Decimal | None = None
     duplication_badge: str | None = None  # e.g. "Disponível em 2 plataformas · menor: R$ X"
 

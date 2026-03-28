@@ -99,6 +99,8 @@ export const ListingCardReadBackendSchema = z.object({
 
   // Preços atuais (o scraper pode retornar strings, ex: Decimal -> str)
   current_best_price: z.string().nullable().optional(),
+  condo_fee: z.string().nullable().optional(),
+  iptu: z.string().nullable().optional(),
   second_best_price: z.string().nullable().optional(),
   duplication_badge: z.string().nullable().optional(),
   observed_at: z.string().nullable().optional(),

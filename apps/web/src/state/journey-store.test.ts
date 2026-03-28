@@ -13,6 +13,7 @@ describe("journey-store", () => {
         minSize: "40",
         maxSize: "120"
       },
+      selectedListingKey: "property:prop-old",
       selectedTransportId: "transport-old",
       selectedZoneId: "zone-old",
       selectedZoneFingerprint: "fp-old",
@@ -41,6 +42,7 @@ describe("journey-store", () => {
       minSize: "",
       maxSize: ""
     });
+    expect(state.selectedListingKey).toBeNull();
     expect(state.selectedTransportId).toBeNull();
     expect(state.selectedZoneId).toBeNull();
     expect(state.selectedZoneFingerprint).toBeNull();
@@ -63,6 +65,7 @@ describe("journey-store", () => {
         minSize: "30",
         maxSize: "90"
       },
+      selectedListingKey: "property:prop-old",
       selectedZoneId: "zone-old",
       selectedZoneFingerprint: "fp-old",
       selectedAddress: {
@@ -88,6 +91,7 @@ describe("journey-store", () => {
       minSize: "",
       maxSize: ""
     });
+    expect(state.selectedListingKey).toBeNull();
     expect(state.selectedAddress).toBeNull();
     expect(state.addressQuery).toBe("");
 

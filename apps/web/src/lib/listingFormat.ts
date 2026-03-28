@@ -7,19 +7,28 @@ const PLATFORM_BASE_URLS: Record<string, string> = {
   quintoandar: "https://www.quintoandar.com.br",
 };
 
-/**
- * Ensures a listing URL is absolute. The Glue API (ZapImoveis/VivaReal) sometimes
- * returns relative paths like `/imovel/...`. Resolve them against the platform's
- * known base URL so clicking opens the real external ad page.
- */
-export function resolvePlatformUrl(url: string | null | undefined, platform: string | null | undefined): string | null {
+function resolvePlatformAbsoluteUrl(url: string | null | undefined, platform: string | null | undefined): string | null {
   if (!url) return null;
+  if (url.startsWith("//")) return `https:${url}`;
   if (url.startsWith("https://") || url.startsWith("http://")) return url;
   if (url.startsWith("/")) {
     const base = PLATFORM_BASE_URLS[(platform ?? "").toLowerCase()];
     if (base) return `${base}${url}`;
   }
   return null;
+}
+
+/**
+ * Ensures a listing URL is absolute. The Glue API (ZapImoveis/VivaReal) sometimes
+ * returns relative paths like `/imovel/...`. Resolve them against the platform's
+ * known base URL so clicking opens the real external ad page.
+ */
+export function resolvePlatformUrl(url: string | null | undefined, platform: string | null | undefined): string | null {
+  return resolvePlatformAbsoluteUrl(url, platform);
+}
+
+export function resolvePlatformImageUrl(url: string | null | undefined, platform: string | null | undefined): string | null {
+  return resolvePlatformAbsoluteUrl(url, platform);
 }
 
 export function formatCurrencyBr(value: unknown): string {
@@ -38,8 +47,30 @@ export function parseFiniteNumber(value: unknown): number | null {
     return Number.isFinite(value) ? value : null;
   }
   if (typeof value === "string") {
-    const sanitized = value.replace(/\./g, "").replace(",", ".").trim();
-    const parsed = Number(sanitized);
+    const sanitized = value.replace(/[^\d.,-]/g, "").trim();
+    if (!sanitized) {
+      return null;
+    }
+
+    let normalized = sanitized;
+    const hasDot = normalized.includes(".");
+    const hasComma = normalized.includes(",");
+
+    if (hasDot && hasComma) {
+      normalized = normalized.lastIndexOf(",") > normalized.lastIndexOf(".")
+        ? normalized.replace(/\./g, "").replace(",", ".")
+        : normalized.replace(/,/g, "");
+    } else if (hasComma) {
+      normalized = /^-?\d{1,3}(,\d{3})+$/.test(normalized)
+        ? normalized.replace(/,/g, "")
+        : normalized.replace(",", ".");
+    } else if (hasDot) {
+      normalized = /^-?\d{1,3}(\.\d{3})+$/.test(normalized)
+        ? normalized.replace(/\./g, "")
+        : normalized;
+    }
+
+    const parsed = Number(normalized);
     return Number.isFinite(parsed) ? parsed : null;
   }
   return null;
@@ -53,6 +84,37 @@ export function normalizeCategory(value: string): string {
     .toLowerCase();
 }
 
+export function getListingDisplayPrice(
+  listing: Pick<ListingCardRead, "current_best_price" | "condo_fee" | "iptu">
+): number | null {
+  const values = [
+    parseFiniteNumber(listing.current_best_price),
+    parseFiniteNumber(listing.condo_fee),
+    parseFiniteNumber(listing.iptu)
+  ].filter((value): value is number => value !== null);
+
+  if (values.length === 0) {
+    return null;
+  }
+
+  return values.reduce((sum, value) => sum + value, 0);
+}
+
+export function getListingSelectionKey(
+  listing: Pick<ListingCardRead, "property_id" | "platform" | "platform_listing_id">
+): string {
+  if (listing.property_id) {
+    return `property:${listing.property_id}`;
+  }
+  if (listing.platform && listing.platform_listing_id) {
+    return `platform:${listing.platform}:${listing.platform_listing_id}`;
+  }
+  if (listing.platform_listing_id) {
+    return `listing:${listing.platform_listing_id}`;
+  }
+  return "";
+}
+
 export function applyListingsPanelFilters(
   listings: ListingCardRead[],
   filters: ListingsPanelFilters
@@ -62,7 +124,7 @@ export function applyListingsPanelFilters(
     : listings;
 
   return scopedListings.filter((listing) => {
-    const price = parseFiniteNumber(listing.current_best_price);
+    const price = getListingDisplayPrice(listing);
     const area = typeof listing.area_m2 === "number" ? listing.area_m2 : null;
     const minPrice = filters.minPrice !== "" ? Number(filters.minPrice) : null;
     const maxPrice = filters.maxPrice !== "" ? Number(filters.maxPrice) : null;
