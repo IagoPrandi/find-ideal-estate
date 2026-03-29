@@ -26,6 +26,7 @@ from src.modules.zones.enrichment import (  # noqa: E402
     _format_proximity,
     _mapbox_poi_params,
     _poi_cache_key,
+    _POI_CATEGORIES,
     enrich_zone_pois,
 )
 
@@ -49,15 +50,11 @@ class _FakeResult:
 class _FakeConn:
     def __init__(self, *, zone_row=None):
         self.zone_row = zone_row
-        self.update_calls: list[dict[str, object]] = []
 
     async def execute(self, statement, params):
         sql = str(statement)
         if "SELECT" in sql and "FROM zones z" in sql:
             return _FakeResult(first_row=self.zone_row)
-        if "UPDATE zones" in sql and "SET poi_counts" in sql:
-            self.update_calls.append(dict(params))
-            return _FakeResult()
         raise AssertionError(f"Unexpected SQL executed: {sql}")
 
 
@@ -115,14 +112,19 @@ async def test_enrich_zone_pois_uses_forward_endpoint_and_counts_features() -> N
         "ymax": -23.51012826589938,
     }
     read_conn = _FakeConn(zone_row=zone_row)
-    write_conn = _FakeConn()
     redis_mock = AsyncMock()
     redis_mock.get = AsyncMock(return_value=None)
     redis_mock.set = AsyncMock(return_value=True)
+    persist_mock = AsyncMock(return_value=None)
+    project_mock = AsyncMock(return_value=None)
 
     with (
-        patch("src.modules.zones.enrichment.get_engine", return_value=_FakeEngine([read_conn, write_conn])),
+        patch("src.modules.zones.enrichment.get_engine", return_value=_FakeEngine([read_conn])),
         patch("src.modules.zones.enrichment.get_redis", return_value=redis_mock),
+        patch("src.modules.zones.enrichment.get_persisted_poi_cache_payload", AsyncMock(return_value=None)),
+        patch("src.modules.zones.enrichment.persist_poi_cache_payload", persist_mock),
+        patch("src.modules.zones.enrichment.project_poi_payload_to_zone", project_mock),
+        patch("src.modules.zones.enrichment.mark_poi_cache_failed", AsyncMock(return_value=None)),
         patch(
             "src.modules.zones.enrichment.get_settings",
             return_value=SimpleNamespace(mapbox_access_token="pk.testtoken123"),
@@ -181,19 +183,12 @@ async def test_enrich_zone_pois_uses_forward_endpoint_and_counts_features() -> N
     assert first_call.kwargs["params"]["types"] == "poi"
     assert first_call.kwargs["params"]["bbox"] == "-46.738794,-23.531688,-46.715280,-23.510128"
     assert first_call.kwargs["params"]["proximity"] == "-46.727037,-23.520908"
-    assert write_conn.update_calls == [
-        {
-            "zone_id": zone_id,
-            "poi_counts": json.dumps(
-                {"school": 3, "supermarket": 3, "pharmacy": 3, "park": 3, "restaurant": 3, "gym": 3},
-                ensure_ascii=True,
-            ),
-            "poi_points": json.dumps(
-                result["poi_points"],
-                ensure_ascii=True,
-            ),
-        }
-    ]
+    persist_kwargs = persist_mock.await_args.kwargs
+    assert persist_kwargs["zone_fingerprint"] == "zone-fp-123"
+    assert persist_kwargs["poi_counts"] == result["poi_counts"]
+    assert persist_kwargs["poi_points"] == result["poi_points"]
+    assert len(persist_kwargs["poi_entries"]) == 18
+    project_mock.assert_awaited_once_with(zone_id, poi_counts=result["poi_counts"], poi_points=result["poi_points"])
 
 
 @pytest.mark.anyio
@@ -211,39 +206,36 @@ async def test_enrich_zone_pois_reuses_canonical_zone_center_from_journey_scope(
         "ymax": -23.512520,
     }
     read_conn = _FakeConn(zone_row=zone_row)
-    write_conn = _FakeConn()
     redis_mock = AsyncMock()
     redis_mock.get = AsyncMock(return_value=None)
     redis_mock.set = AsyncMock(return_value=True)
+    project_mock = AsyncMock(return_value=None)
+    persisted_payload = {
+        "poi_counts": {category: 2 for category in _POI_CATEGORIES},
+        "poi_points": [
+            {
+                "kind": "poi",
+                "id": "poi-a",
+                "name": "POI A",
+                "category": "school",
+                "address": "Rua A, 10",
+                "lat": -23.516131,
+                "lon": -46.625161,
+            }
+        ],
+    }
 
     with (
-        patch("src.modules.zones.enrichment.get_engine", return_value=_FakeEngine([read_conn, write_conn])),
+        patch("src.modules.zones.enrichment.get_engine", return_value=_FakeEngine([read_conn])),
         patch("src.modules.zones.enrichment.get_redis", return_value=redis_mock),
         patch(
-            "src.modules.zones.enrichment.get_settings",
-            return_value=SimpleNamespace(mapbox_access_token="pk.testtoken123"),
-        ),
+            "src.modules.zones.enrichment.get_persisted_poi_cache_payload",
+            AsyncMock(return_value=persisted_payload),
+        ) as persisted_mock,
+        patch("src.modules.zones.enrichment.project_poi_payload_to_zone", project_mock),
+        patch("src.modules.zones.enrichment.persist_poi_cache_payload", AsyncMock(return_value=None)) as persist_mock,
         patch("httpx.AsyncClient") as mock_client_cls,
     ):
-        response_mock = MagicMock()
-        response_mock.raise_for_status = MagicMock()
-        response_mock.json = MagicMock(
-            return_value={
-                "features": [
-                    {
-                        "geometry": {"coordinates": [-46.625161, -23.516131]},
-                        "properties": {},
-                    },
-                    {
-                        "geometry": {"coordinates": [-46.625161, -23.516131]},
-                        "properties": {},
-                    },
-                ]
-            }
-        )
-        client_get = AsyncMock(return_value=response_mock)
-        mock_client_cls.return_value.__aenter__.return_value.get = client_get
-
         result = await enrich_zone_pois(zone_id, journey_id=journey_id)
 
     expected_cache_key = _poi_cache_key(
@@ -251,25 +243,19 @@ async def test_enrich_zone_pois_reuses_canonical_zone_center_from_journey_scope(
         categories=("school", "supermarket", "pharmacy", "park", "restaurant", "gym"),
         bbox=(-46.629078, -23.519743, -46.621245, -23.51252),
     )
-    assert redis_mock.get.await_args_list[0].args == (expected_cache_key,)
+    assert persisted_mock.await_args.args == ("zone-a", persisted_mock.await_args.args[1])
     assert result["zone_id"] == str(zone_id)
-    assert result["poi_counts"] == {
-        "school": 2,
-        "supermarket": 2,
-        "pharmacy": 2,
-        "park": 2,
-        "restaurant": 2,
-        "gym": 2,
-    }
-    assert len(result["poi_points"]) == 12
-    assert {point["category"] for point in result["poi_points"]} == {
-        "school",
-        "supermarket",
-        "pharmacy",
-        "park",
-        "restaurant",
-        "gym",
-    }
-    first_call = client_get.await_args_list[0]
-    assert first_call.kwargs["params"]["bbox"] == "-46.629078,-23.519743,-46.621245,-23.512520"
-    assert first_call.kwargs["params"]["proximity"] == "-46.625161,-23.516131"
+    assert result["poi_counts"] == persisted_payload["poi_counts"]
+    assert result["poi_points"] == persisted_payload["poi_points"]
+    redis_mock.set.assert_awaited_once_with(
+        expected_cache_key,
+        json.dumps(persisted_payload, ensure_ascii=True),
+        ex=1800,
+    )
+    project_mock.assert_awaited_once_with(
+        zone_id,
+        poi_counts=persisted_payload["poi_counts"],
+        poi_points=persisted_payload["poi_points"],
+    )
+    persist_mock.assert_not_awaited()
+    assert not mock_client_cls.called

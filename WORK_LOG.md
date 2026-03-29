@@ -1,5 +1,33 @@
 # Work Log
 
+## 2026-03-29 - Persistir e reutilizar POIs com cache canonico em Postgres
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `skills/best-practices/references/web2-backend.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para refatorar o enrichment de POIs com persistencia relacional, cache reutilizavel e falha explicita quando a coleta externa nao consegue produzir um payload valido.
+- Trigger: usuario pediu que os POIs fossem armazenados, atualizados e reutilizados como a lista de imoveis, em vez de depender apenas do JSON embutido em `zones` e do cache efemero em Redis.
+- Root cause identified:
+  - o backend persistia `poi_counts` e `poi_points` apenas como projecao denormalizada na tabela `zones`;
+  - o reuso operacional acontecia so em Redis, com TTL curto e sem trilha historica nem itens canonicos consultaveis no banco;
+  - o enrichment zerava categorias em caso de falha externa, o que ficaria ainda mais perigoso se fosse promovido a cache persistente.
+- Scope executed:
+  - `apps/api/src/modules/pois/storage.py` e `apps/api/src/modules/pois/__init__.py`:
+    - criado modulo dedicado para persistencia de POIs com fingerprint canonico, cache por `zone_fingerprint + config_hash`, snapshots raw e projecao de volta para `zones`;
+    - adicionados helpers para consultar cache persistido, gravar cache completo, marcar cache como `failed` e atualizar a projecao compatível consumida pela UI.
+  - `infra/migrations/versions/20260329_0012_poi_storage_cache.py`:
+    - adicionadas as tabelas `poi_places`, `poi_snapshots`, `zone_poi_caches` e `zone_poi_cache_items` com indices para busca espacial e reuso por zona canonica.
+  - `apps/api/src/modules/zones/enrichment.py`:
+    - enrichment de POIs passou a consultar primeiro o cache persistido em Postgres;
+    - Redis foi mantido apenas como hot cache, sincronizado a partir do payload persistido;
+    - zonas antigas com `poi_counts` e `poi_points` completos agora conseguem bootstrapar o cache novo sem nova chamada externa;
+    - falhas de fetch da Mapbox deixam de ser escondidas como contagem zero persistida e passam a marcar o cache como `failed` antes de propagar erro.
+  - `apps/api/tests/test_phase4_zone_poi_enrichment.py`:
+    - testes ajustados para validar persistencia do payload novo, reprojecao na zona e reuso do cache persistido sem nova chamada HTTP.
+- Validation:
+  - backend focado: `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase4_zone_poi_enrichment.py apps/api/tests/test_phase4_enrichment_filters.py -q --color=no` -> `5 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
 ## 2026-03-29 - Recolher progresso do scraping e filtros na etapa de imóveis
 
 - Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
