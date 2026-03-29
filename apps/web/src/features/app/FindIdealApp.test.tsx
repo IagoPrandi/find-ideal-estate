@@ -12,6 +12,8 @@ let lastPopupHtml = "";
 const mapLayerClickHandlers: Record<string, (event: any) => void> = {};
 const mapEventHandlers: Record<string, Array<(event?: any) => void>> = {};
 const loadedSourceIds = new Set<string>();
+const mapAddedLayers: Array<Record<string, any>> = [];
+const mapSourceData: Record<string, unknown> = {};
 
 function emitMapEvent(event: string, payload?: any) {
   for (const handler of mapEventHandlers[event] || []) {
@@ -97,8 +99,8 @@ vi.mock("maplibre-gl", () => {
     }
     addSource(name: string) {
       this.sources[name] = {
-        setData: () => {
-          return;
+        setData: (data: unknown) => {
+          mapSourceData[name] = data;
         }
       };
       return this;
@@ -106,8 +108,9 @@ vi.mock("maplibre-gl", () => {
     getSource(name: string) {
       return this.sources[name];
     }
-    addLayer(layer: { id: string }) {
+    addLayer(layer: Record<string, any>) {
       this.layers.add(layer.id);
+      mapAddedLayers.push(layer);
       return this;
     }
     getLayer(id: string) {
@@ -177,6 +180,8 @@ describe("FindIdealApp", () => {
     Object.keys(mapLayerClickHandlers).forEach((key) => delete mapLayerClickHandlers[key]);
     Object.keys(mapEventHandlers).forEach((key) => delete mapEventHandlers[key]);
     loadedSourceIds.clear();
+    mapAddedLayers.length = 0;
+    Object.keys(mapSourceData).forEach((key) => delete mapSourceData[key]);
 
     useJourneyStore.getState().resetJourney();
     useUIStore.getState().resetUI();
@@ -301,6 +306,52 @@ describe("FindIdealApp", () => {
     await waitFor(() => {
       expect(mapSetLayoutPropertyMock).toHaveBeenCalledWith("flood-layer", "visibility", "visible");
     });
+  });
+
+  it("keeps overlapping zones visually distinguishable on the map", async () => {
+    vi.mocked(getJourneyZonesList).mockResolvedValue({
+      zones: [
+        {
+          id: "zone-1",
+          journey_id: "journey-1",
+          fingerprint: "zone-fp-1",
+          state: "complete",
+          travel_time_minutes: 6,
+          isochrone_geom: {
+            type: "Polygon",
+            coordinates: [[[-46.633, -23.548], [-46.629, -23.548], [-46.629, -23.544], [-46.633, -23.544], [-46.633, -23.548]]]
+          }
+        },
+        {
+          id: "zone-2",
+          journey_id: "journey-1",
+          fingerprint: "zone-fp-2",
+          state: "complete",
+          travel_time_minutes: 8,
+          isochrone_geom: {
+            type: "Polygon",
+            coordinates: [[[-46.632, -23.547], [-46.628, -23.547], [-46.628, -23.543], [-46.632, -23.543], [-46.632, -23.547]]]
+          }
+        }
+      ],
+      total_count: 2,
+      completed_count: 2
+    } as never);
+
+    renderWithQueryClient();
+
+    await waitFor(() => {
+      const sourceData = mapSourceData["journey-zones-source-runtime"] as { features: Array<{ properties: Record<string, unknown> }> } | undefined;
+      expect(sourceData?.features).toHaveLength(2);
+      expect(sourceData?.features[0]?.properties.fill_color).toBeDefined();
+      expect(sourceData?.features[1]?.properties.fill_color).toBeDefined();
+      expect(sourceData?.features[0]?.properties.fill_color).not.toEqual(sourceData?.features[1]?.properties.fill_color);
+      expect(sourceData?.features[0]?.properties.label_color).toBeDefined();
+    });
+
+    const labelLayer = mapAddedLayers.find((layer) => layer.id === "zones-runtime-label-layer");
+    expect(labelLayer?.layout?.["text-allow-overlap"]).toBe(true);
+    expect(labelLayer?.layout?.["text-ignore-placement"]).toBe(true);
   });
 
   it("opens the layers panel, toggles layer visibility and closes on outside click", async () => {

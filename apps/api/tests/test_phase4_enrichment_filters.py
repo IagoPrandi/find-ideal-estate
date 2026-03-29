@@ -101,9 +101,12 @@ def test_dispatch_enrichment_subjobs_runs_only_selected(monkeypatch) -> None:
         calls.append("safety")
         return {"safety_incidents_count": 3}
 
-    async def _pois(_zone_id):
+    async def _pois(_zone_id, *, journey_id=None):
         calls.append("pois")
+        assert journey_id == fake_journey_id
         return {"poi_counts": {"school": 4}}
+
+    fake_journey_id = uuid4()
 
     monkeypatch.setattr("src.workers.handlers.enrichment.get_engine", lambda: _FakeEngine())
     monkeypatch.setattr("src.workers.handlers.enrichment.enrich_zone_green", _green)
@@ -120,6 +123,7 @@ def test_dispatch_enrichment_subjobs_runs_only_selected(monkeypatch) -> None:
                 "safety": False,
                 "pois": True,
             },
+            journey_id=fake_journey_id,
         )
     )
 

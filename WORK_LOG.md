@@ -1,5 +1,55 @@
 # Work Log
 
+## 2026-03-29 - Reusar POIs por centro canonico de zonas sobrepostas
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para corrigir o excesso de chamadas externas na causa raiz, sem fallback silencioso nem mudanca de contrato publico.
+- Trigger: usuario reportou que o endpoint estava gerando resultados observados por haver muitos centros de geracao de zonas; pediu que a busca de POIs passe a usar apenas centros canonicos de zonas nao cobertas por outra zona, reaproveitando o resultado da zona que cobre o centro da zona atual.
+- Root cause identified:
+  - `apps/api/src/modules/zones/enrichment.py` chamava a API da Mapbox para cada zona usando sempre o centroide e o bbox da propria zona, mesmo quando esse centro estava coberto por outra zona do mesmo conjunto da jornada;
+  - o worker de enrichment nao propagava contexto da jornada para permitir resolver um `source zone` canonico antes da chamada externa.
+- Scope executed:
+  - `apps/api/src/modules/zones/enrichment.py`:
+    - adicionada resolucao de contexto de POI por jornada, com cadeia recursiva entre zonas cujo centroide cai dentro de outra zona da mesma jornada;
+    - a chamada externa e a chave de cache Redis agora usam o `poi_source_fingerprint` e o bbox da zona canonica resolvida, em vez de sempre usar a zona atual;
+    - a zona solicitada continua recebendo seus `poi_counts` persistidos normalmente, mas sem disparar um centro redundante quando houver reaproveitamento.
+  - `apps/api/src/workers/handlers/enrichment.py`:
+    - `dispatch_enrichment_subjobs()` passou a receber `journey_id` e repassá-lo para `enrich_zone_pois()`.
+  - `apps/api/tests/test_phase4_zone_poi_enrichment.py`:
+    - ajustado o teste base para o novo contexto de leitura;
+    - adicionada regressao cobrindo reuso do centro canonico e da chave de cache da zona fonte.
+  - `apps/api/tests/test_phase4_enrichment_filters.py`:
+    - atualizado para validar que o worker propaga `journey_id` ao enrichment de POIs.
+- Validation:
+  - backend focado: `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase4_zone_poi_enrichment.py apps/api/tests/test_phase4_enrichment_filters.py -q` -> `5 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-29 - Tornar zonas sobrepostas visiveis no mapa
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para verificar se o problema era de persistencia ou de renderizacao e corrigir a camada do mapa na causa raiz.
+- Trigger: apos a mudanca de reuso de POIs, usuario reportou que as zonas cujo centro cai dentro de outra zona nao estavam aparecendo.
+- Root cause identified:
+  - o endpoint `/journeys/{id}/zones` nao esta filtrando essas zonas; a investigacao confirmou que jornadas historicas seguem persistindo muitas zonas com centro dentro de outra zona;
+  - no mapa, todas as zonas nao selecionadas usavam o mesmo fill e outline cinza, e os labels de zonas mantinham colisao padrao, entao zonas muito sobrepostas ou aninhadas ficavam visualmente confundidas e pareciam ausentes.
+- Scope executed:
+  - `apps/web/src/features/app/FindIdealApp.tsx`:
+    - adicionada paleta estavel por zona para `fill`, `outline` e `label`;
+    - layers de zona passaram a usar as cores da propria feature, mantendo destaque extra para a zona selecionada;
+    - labels de zonas agora permitem overlap e ignoram placement, para nao sumirem quando varios centroides ficam proximos.
+  - `apps/web/src/features/app/FindIdealApp.test.tsx`:
+    - mock do mapa passou a registrar `setData()` do source e as configuracoes de `addLayer()`;
+    - adicionada regressao garantindo que duas zonas sobrepostas seguem presentes no source com cores distintas e que a label layer usa overlap liberado.
+- Validation:
+  - frontend focado: `Set-Location apps/web; $env:CI='1'; .\\node_modules\\.bin\\vitest.cmd run --config vitest.config.ts src/features/app/FindIdealApp.test.tsx --reporter=basic --no-color` -> `1 passed`, `8 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
 ## 2026-03-29 - Corrigir artefatos retos nas linhas de transporte
 
 - Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.

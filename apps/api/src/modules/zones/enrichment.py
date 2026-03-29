@@ -16,6 +16,109 @@ from sqlalchemy import text
 _POI_CATEGORIES = ("school", "supermarket", "pharmacy", "park")
 _POI_CACHE_TTL_SECONDS = 1800
 
+_ZONE_POI_CONTEXT_SQL = text(
+    """
+    SELECT
+        z.fingerprint AS zone_fingerprint,
+        z.fingerprint AS poi_source_fingerprint,
+        ST_X(ST_Centroid(z.isochrone_geom)) AS lon,
+        ST_Y(ST_Centroid(z.isochrone_geom)) AS lat,
+        ST_XMin(z.isochrone_geom)::DOUBLE PRECISION AS xmin,
+        ST_YMin(z.isochrone_geom)::DOUBLE PRECISION AS ymin,
+        ST_XMax(z.isochrone_geom)::DOUBLE PRECISION AS xmax,
+        ST_YMax(z.isochrone_geom)::DOUBLE PRECISION AS ymax
+    FROM zones z
+    WHERE z.id = :zone_id
+    """
+)
+
+_JOURNEY_ZONE_POI_CONTEXT_SQL = text(
+    """
+    WITH RECURSIVE current_zone AS (
+        SELECT
+            z.id,
+            z.fingerprint,
+            z.isochrone_geom,
+            z.created_at,
+            ST_Centroid(z.isochrone_geom) AS center_geom,
+            ST_Area(z.isochrone_geom::geography) AS area_m2
+        FROM zones z
+        WHERE z.id = :zone_id
+    ),
+    journey_zone_scope AS (
+        SELECT
+            z.id,
+            z.fingerprint,
+            z.isochrone_geom,
+            z.created_at,
+            ST_Centroid(z.isochrone_geom) AS center_geom,
+            ST_Area(z.isochrone_geom::geography) AS area_m2
+        FROM journey_zones jz
+        JOIN zones z ON z.id = jz.zone_id
+        WHERE jz.journey_id = :journey_id
+    ),
+    parent_chain AS (
+        SELECT
+            cz.id,
+            cz.fingerprint,
+            cz.isochrone_geom,
+            cz.center_geom,
+            cz.created_at,
+            cz.area_m2,
+            0 AS depth,
+            ARRAY[cz.id]::uuid[] AS path
+        FROM current_zone cz
+
+        UNION ALL
+
+        SELECT
+            parent.id,
+            parent.fingerprint,
+            parent.isochrone_geom,
+            parent.center_geom,
+            parent.created_at,
+            parent.area_m2,
+            chain.depth + 1 AS depth,
+            chain.path || parent.id
+        FROM parent_chain chain
+        JOIN LATERAL (
+            SELECT
+                scope.id,
+                scope.fingerprint,
+                scope.isochrone_geom,
+                scope.center_geom,
+                scope.created_at,
+                scope.area_m2
+            FROM journey_zone_scope scope
+            WHERE scope.id <> ALL(chain.path)
+              AND chain.center_geom IS NOT NULL
+              AND scope.center_geom IS NOT NULL
+              AND ST_Within(chain.center_geom, scope.isochrone_geom)
+            ORDER BY scope.area_m2 ASC, scope.created_at ASC, scope.id ASC
+            LIMIT 1
+        ) parent ON TRUE
+        WHERE chain.depth < 32
+    ),
+    poi_source AS (
+        SELECT *
+        FROM parent_chain
+        ORDER BY depth DESC
+        LIMIT 1
+    )
+    SELECT
+        current_zone.fingerprint AS zone_fingerprint,
+        poi_source.fingerprint AS poi_source_fingerprint,
+        ST_X(poi_source.center_geom) AS lon,
+        ST_Y(poi_source.center_geom) AS lat,
+        ST_XMin(poi_source.isochrone_geom)::DOUBLE PRECISION AS xmin,
+        ST_YMin(poi_source.isochrone_geom)::DOUBLE PRECISION AS ymin,
+        ST_XMax(poi_source.isochrone_geom)::DOUBLE PRECISION AS xmax,
+        ST_YMax(poi_source.isochrone_geom)::DOUBLE PRECISION AS ymax
+    FROM current_zone
+    JOIN poi_source ON TRUE
+    """
+)
+
 
 def _format_mapbox_float(value: float) -> str:
     return f"{float(value):.6f}"
@@ -187,38 +290,37 @@ async def enrich_zone_safety(zone_id: UUID) -> dict[str, Any]:
     return {"zone_id": str(zone_id), "safety_incidents_count": count}
 
 
-async def enrich_zone_pois(zone_id: UUID) -> dict[str, Any]:
+async def _load_zone_poi_context(
+    zone_id: UUID,
+    *,
+    journey_id: UUID | None,
+) -> dict[str, Any] | None:
     engine = get_engine()
     async with engine.begin() as conn:
         zone_result = await conn.execute(
-            text(
-                """
-                SELECT
-                    z.fingerprint,
-                    ST_X(ST_Centroid(z.isochrone_geom)) AS lon,
-                    ST_Y(ST_Centroid(z.isochrone_geom)) AS lat,
-                    ST_XMin(z.isochrone_geom)::DOUBLE PRECISION AS xmin,
-                    ST_YMin(z.isochrone_geom)::DOUBLE PRECISION AS ymin,
-                    ST_XMax(z.isochrone_geom)::DOUBLE PRECISION AS xmax,
-                    ST_YMax(z.isochrone_geom)::DOUBLE PRECISION AS ymax
-                FROM zones z
-                WHERE z.id = :zone_id
-                """
-            ),
-            {"zone_id": zone_id},
+            _JOURNEY_ZONE_POI_CONTEXT_SQL if journey_id is not None else _ZONE_POI_CONTEXT_SQL,
+            {"zone_id": zone_id, "journey_id": journey_id},
         )
-        zone = zone_result.mappings().first()
+        return zone_result.mappings().first()
+
+
+async def enrich_zone_pois(
+    zone_id: UUID,
+    *,
+    journey_id: UUID | None = None,
+) -> dict[str, Any]:
+    zone = await _load_zone_poi_context(zone_id, journey_id=journey_id)
 
     if zone is None or zone["lon"] is None or zone["lat"] is None:
         return {"zone_id": str(zone_id), "poi_counts": {}}
 
     bbox = (float(zone["xmin"]), float(zone["ymin"]), float(zone["xmax"]), float(zone["ymax"]))
-    zone_fingerprint = str(zone["fingerprint"])
+    zone_fingerprint = str(zone["poi_source_fingerprint"] or zone["zone_fingerprint"])
     cache_key = _poi_cache_key(
-            zone_fingerprint=zone_fingerprint,
-            categories=_POI_CATEGORIES,
-            bbox=bbox,
-        )
+        zone_fingerprint=zone_fingerprint,
+        categories=_POI_CATEGORIES,
+        bbox=bbox,
+    )
 
     redis = get_redis()
     cached = await redis.get(cache_key)

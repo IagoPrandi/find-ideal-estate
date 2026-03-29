@@ -22,6 +22,17 @@ const ZONES_SOURCE_ID = "journey-zones-source-runtime";
 const LISTINGS_SOURCE_ID = "journey-listings-source-runtime";
 const LAYER_TOGGLE_BUTTON_CLASS = "pointer-events-auto flex h-8 w-8 items-center justify-center rounded-lg border border-slate-100 bg-white/95 text-slate-500 shadow-md backdrop-blur-md transition-colors hover:bg-pastel-violet-50 hover:text-pastel-violet-600";
 
+const ZONE_COLOR_PALETTE = [
+  { fill: "#bfdbfe", outline: "#2563eb", label: "#1d4ed8" },
+  { fill: "#bbf7d0", outline: "#16a34a", label: "#15803d" },
+  { fill: "#fde68a", outline: "#ca8a04", label: "#a16207" },
+  { fill: "#fecdd3", outline: "#db2777", label: "#be185d" },
+  { fill: "#ddd6fe", outline: "#7c3aed", label: "#6d28d9" },
+  { fill: "#fed7aa", outline: "#ea580c", label: "#c2410c" },
+  { fill: "#bae6fd", outline: "#0284c7", label: "#0369a1" },
+  { fill: "#e9d5ff", outline: "#9333ea", label: "#7e22ce" },
+] as const;
+
 type MapOverlayLayerKey =
   | "routes"
   | "metro"
@@ -139,6 +150,8 @@ const setGeoJsonSourceData = (map: maplibregl.Map, sourceId: string, data: GeoJS
   }
 };
 
+const getZonePalette = (index: number) => ZONE_COLOR_PALETTE[index % ZONE_COLOR_PALETTE.length];
+
 const toTransportCandidatesFeatureCollection = (
   points: Array<{ id: string; lon: number; lat: number; name?: string | null; route_count: number; source: string; external_id?: string | null }>,
   selectedTransportId: string | null
@@ -168,16 +181,24 @@ const toZonesFeatureCollection = (
   type: "FeatureCollection",
   features: zones
     .filter((zone) => Boolean(zone.isochrone_geom && typeof zone.isochrone_geom === "object"))
-    .map((zone, index) => ({
-      type: "Feature",
-      geometry: zone.isochrone_geom as GeoJSON.Geometry,
-      properties: {
-        id: zone.id,
-        fingerprint: zone.fingerprint,
-        label: zone.travel_time_minutes ? `${index + 1} · ${zone.travel_time_minutes}m` : String(index + 1),
-        selected: zone.fingerprint === selectedZoneFingerprint
-      }
-    }))
+    .map((zone, index) => {
+      const palette = getZonePalette(index);
+      const isSelected = zone.fingerprint === selectedZoneFingerprint;
+      return {
+        type: "Feature",
+        geometry: zone.isochrone_geom as GeoJSON.Geometry,
+        properties: {
+          id: zone.id,
+          fingerprint: zone.fingerprint,
+          label: zone.travel_time_minutes ? `${index + 1} · ${zone.travel_time_minutes}m` : String(index + 1),
+          selected: isSelected,
+          sequence: index + 1,
+          fill_color: palette.fill,
+          outline_color: palette.outline,
+          label_color: palette.label,
+        }
+      };
+    })
 });
 
 const toListingsFeatureCollection = (
@@ -658,8 +679,8 @@ export function FindIdealApp() {
         type: "fill",
         source: ZONES_SOURCE_ID,
         paint: {
-          "fill-color": ["case", ["boolean", ["get", "selected"], false], "#9775fa", "#94a3b8"],
-          "fill-opacity": ["case", ["boolean", ["get", "selected"], false], 0.28, 0.12],
+          "fill-color": ["case", ["boolean", ["get", "selected"], false], "#7c3aed", ["coalesce", ["get", "fill_color"], "#94a3b8"]],
+          "fill-opacity": ["case", ["boolean", ["get", "selected"], false], 0.3, 0.18],
         },
       });
 
@@ -668,8 +689,8 @@ export function FindIdealApp() {
         type: "line",
         source: ZONES_SOURCE_ID,
         paint: {
-          "line-color": ["case", ["boolean", ["get", "selected"], false], "#845ef7", "#94a3b8"],
-          "line-width": ["case", ["boolean", ["get", "selected"], false], 2.5, 1.4],
+          "line-color": ["case", ["boolean", ["get", "selected"], false], "#6d28d9", ["coalesce", ["get", "outline_color"], "#94a3b8"]],
+          "line-width": ["case", ["boolean", ["get", "selected"], false], 2.8, 1.8],
           "line-opacity": 0.9,
         },
       });
@@ -682,9 +703,11 @@ export function FindIdealApp() {
           "text-field": ["get", "label"],
           "text-size": 12,
           "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
+          "text-allow-overlap": true,
+          "text-ignore-placement": true,
         },
         paint: {
-          "text-color": "#0f172a",
+          "text-color": ["case", ["boolean", ["get", "selected"], false], "#581c87", ["coalesce", ["get", "label_color"], "#0f172a"]],
           "text-halo-color": "#ffffff",
           "text-halo-width": 1.2,
         },

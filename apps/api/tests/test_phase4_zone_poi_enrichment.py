@@ -25,6 +25,7 @@ from src.modules.zones.enrichment import (  # noqa: E402
     _format_bbox,
     _format_proximity,
     _mapbox_poi_params,
+    _poi_cache_key,
     enrich_zone_pois,
 )
 
@@ -104,7 +105,8 @@ def test_mapbox_poi_param_formatting_is_stable() -> None:
 async def test_enrich_zone_pois_uses_forward_endpoint_and_counts_features() -> None:
     zone_id = uuid4()
     zone_row = {
-        "fingerprint": "zone-fp-123",
+        "zone_fingerprint": "zone-fp-123",
+        "poi_source_fingerprint": "zone-fp-123",
         "lon": -46.727036999999946,
         "lat": -23.520907999999263,
         "xmin": -46.73879353133167,
@@ -159,3 +161,60 @@ async def test_enrich_zone_pois_uses_forward_endpoint_and_counts_features() -> N
             ),
         }
     ]
+
+
+@pytest.mark.anyio
+async def test_enrich_zone_pois_reuses_canonical_zone_center_from_journey_scope() -> None:
+    zone_id = uuid4()
+    journey_id = uuid4()
+    zone_row = {
+        "zone_fingerprint": "zone-c",
+        "poi_source_fingerprint": "zone-a",
+        "lon": -46.625161,
+        "lat": -23.516131,
+        "xmin": -46.629078,
+        "ymin": -23.519743,
+        "xmax": -46.621245,
+        "ymax": -23.512520,
+    }
+    read_conn = _FakeConn(zone_row=zone_row)
+    write_conn = _FakeConn()
+    redis_mock = AsyncMock()
+    redis_mock.get = AsyncMock(return_value=None)
+    redis_mock.set = AsyncMock(return_value=True)
+
+    with (
+        patch("src.modules.zones.enrichment.get_engine", return_value=_FakeEngine([read_conn, write_conn])),
+        patch("src.modules.zones.enrichment.get_redis", return_value=redis_mock),
+        patch(
+            "src.modules.zones.enrichment.get_settings",
+            return_value=SimpleNamespace(mapbox_access_token="pk.testtoken123"),
+        ),
+        patch("httpx.AsyncClient") as mock_client_cls,
+    ):
+        response_mock = MagicMock()
+        response_mock.raise_for_status = MagicMock()
+        response_mock.json = MagicMock(return_value={"features": [{}, {}]})
+        client_get = AsyncMock(return_value=response_mock)
+        mock_client_cls.return_value.__aenter__.return_value.get = client_get
+
+        result = await enrich_zone_pois(zone_id, journey_id=journey_id)
+
+    expected_cache_key = _poi_cache_key(
+        zone_fingerprint="zone-a",
+        categories=("school", "supermarket", "pharmacy", "park"),
+        bbox=(-46.629078, -23.519743, -46.621245, -23.51252),
+    )
+    assert redis_mock.get.await_args_list[0].args == (expected_cache_key,)
+    assert result == {
+        "zone_id": str(zone_id),
+        "poi_counts": {
+            "school": 2,
+            "supermarket": 2,
+            "pharmacy": 2,
+            "park": 2,
+        },
+    }
+    first_call = client_get.await_args_list[0]
+    assert first_call.kwargs["params"]["bbox"] == "-46.629078,-23.519743,-46.621245,-23.512520"
+    assert first_call.kwargs["params"]["proximity"] == "-46.625161,-23.516131"

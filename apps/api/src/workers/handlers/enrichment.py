@@ -85,7 +85,12 @@ async def _load_job_enrichment_flags(job_id: UUID) -> dict[str, bool]:
     return _extract_enrichment_flags(snapshot)
 
 
-async def dispatch_enrichment_subjobs(zone_id: UUID, enrichments: dict[str, bool]) -> dict[str, Any]:
+async def dispatch_enrichment_subjobs(
+    zone_id: UUID,
+    enrichments: dict[str, bool],
+    *,
+    journey_id: UUID | None = None,
+) -> dict[str, Any]:
     """Start enabled enrichment subjobs concurrently for one zone."""
     engine = get_engine()
     async with engine.begin() as conn:
@@ -108,7 +113,7 @@ async def dispatch_enrichment_subjobs(zone_id: UUID, enrichments: dict[str, bool
     if enrichments.get("safety", True):
         tasks["safety"] = asyncio.create_task(enrich_zone_safety(zone_id))
     if enrichments.get("pois", True):
-        tasks["pois"] = asyncio.create_task(enrich_zone_pois(zone_id))
+        tasks["pois"] = asyncio.create_task(enrich_zone_pois(zone_id, journey_id=journey_id))
 
     if tasks:
         await asyncio.gather(*tasks.values())
@@ -154,7 +159,7 @@ async def _zone_enrichment_step(job_id: UUID) -> None:
         zones_result = await conn.execute(
             text(
                 """
-                SELECT z.id
+                SELECT z.id, jz.journey_id
                 FROM journey_zones jz
                 JOIN jobs jb ON jb.journey_id = jz.journey_id
                 JOIN zones z ON z.id = jz.zone_id
@@ -164,7 +169,10 @@ async def _zone_enrichment_step(job_id: UUID) -> None:
             ),
             {"job_id": job_id},
         )
-        zones = [row[0] for row in zones_result.fetchall()]
+        zone_rows = zones_result.fetchall()
+
+    zones = [row[0] for row in zone_rows]
+    journey_id = zone_rows[0][1] if zone_rows else None
 
     total = len(zones)
     if total == 0:
@@ -178,7 +186,11 @@ async def _zone_enrichment_step(job_id: UUID) -> None:
 
     for idx, zone_id in enumerate(zones, 1):
         await check_cancellation(job_id)
-        results = await dispatch_enrichment_subjobs(zone_id, enrichment_flags)
+        results = await dispatch_enrichment_subjobs(
+            zone_id,
+            enrichment_flags,
+            journey_id=journey_id,
+        )
 
         # Compute provisional badges after enrichment (based on zones completed so far)
         provisional_badges = await compute_zone_badges(
