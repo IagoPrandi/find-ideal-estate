@@ -5,6 +5,7 @@ import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { API_BASE, getBusLineDetails, getBusStopDetails, getJourneyTransportPoints, getJourneyZonesList, getTransportStopDetails, getZoneListings } from "../../api/client";
 import { WizardPanel } from "../../components/panels";
+import { getPoiCategoryMeta, getZonePoiSelectionKey, sortPoiPoints, ZonePoiPointLike, zoneNeedsPoiBackfill } from "../../domain/poi";
 import { applyListingsPanelFilters, getListingDisplayPrice, getListingSelectionKey } from "../../lib/listingFormat";
 import { getIncludedGreenVegetationLevels, useJourneyStore, useUIStore } from "../../state";
 
@@ -19,7 +20,9 @@ const apiTileUrl = (path: string) => `${API_BASE}${path}`;
 const BUS_LAYER_LIST = ["bus-line-layer", "bus-stop-layer", "bus-terminal-layer"] as const;
 const TRANSPORT_CANDIDATES_SOURCE_ID = "transport-candidates-source-runtime";
 const ZONES_SOURCE_ID = "journey-zones-source-runtime";
+const ZONE_POIS_SOURCE_ID = "journey-zone-pois-source-runtime";
 const LISTINGS_SOURCE_ID = "journey-listings-source-runtime";
+const POPUP_PERSIST_LAYER_LIST = [...BUS_LAYER_LIST, "zone-pois-highlight-layer", "zone-pois-layer"] as const;
 const LAYER_TOGGLE_BUTTON_CLASS = "pointer-events-auto flex h-8 w-8 items-center justify-center rounded-lg border border-slate-100 bg-white/95 text-slate-500 shadow-md backdrop-blur-md transition-colors hover:bg-pastel-violet-50 hover:text-pastel-violet-600";
 
 const ZONE_COLOR_PALETTE = [
@@ -40,6 +43,7 @@ type MapOverlayLayerKey =
   | "busStops"
   | "transportCandidates"
   | "zones"
+  | "pois"
   | "listings"
   | "flood"
   | "green";
@@ -58,6 +62,7 @@ const DEFAULT_LAYER_VISIBILITY: Record<MapOverlayLayerKey, boolean> = {
   busStops: true,
   transportCandidates: true,
   zones: true,
+  pois: true,
   listings: true,
   flood: true,
   green: true,
@@ -70,6 +75,7 @@ const MAP_LAYER_MENU_ITEMS: Array<{ key: MapOverlayLayerKey; label: string }> = 
   { key: "busStops", label: "Paradas e terminais" },
   { key: "transportCandidates", label: "Pontos etapa 2" },
   { key: "zones", label: "Zonas" },
+  { key: "pois", label: "POIs da zona" },
   { key: "listings", label: "Imóveis" },
   { key: "flood", label: "Alagamento" },
   { key: "green", label: "Área verde" },
@@ -277,6 +283,119 @@ const createBusIcon = (fillHex: string) => {
   return { width, height, data };
 };
 
+const createPoiIcon = (fillHex: string, category: string) => {
+  const width = 26;
+  const height = 26;
+  const data = new Uint8Array(width * height * 4);
+  const [fr, fg, fb] = hexToRgb(fillHex);
+
+  const setPixel = (x: number, y: number, r: number, g: number, b: number, a: number) => {
+    if (x < 0 || y < 0 || x >= width || y >= height) return;
+    const idx = (y * width + x) * 4;
+    data[idx] = r;
+    data[idx + 1] = g;
+    data[idx + 2] = b;
+    data[idx + 3] = a;
+  };
+
+  const fillRect = (x0: number, y0: number, w: number, h: number, r: number, g: number, b: number, a: number) => {
+    for (let y = y0; y < y0 + h; y += 1) {
+      for (let x = x0; x < x0 + w; x += 1) {
+        setPixel(x, y, r, g, b, a);
+      }
+    }
+  };
+
+  const fillCircle = (cx: number, cy: number, radius: number, r: number, g: number, b: number, a: number) => {
+    const rr = radius * radius;
+    for (let y = cy - radius; y <= cy + radius; y += 1) {
+      for (let x = cx - radius; x <= cx + radius; x += 1) {
+        const dx = x - cx;
+        const dy = y - cy;
+        if (dx * dx + dy * dy <= rr) {
+          setPixel(x, y, r, g, b, a);
+        }
+      }
+    }
+  };
+
+  fillCircle(13, 13, 11, fr, fg, fb, 255);
+
+  switch (category) {
+    case "school":
+      fillRect(8, 9, 10, 7, 255, 255, 255, 240);
+      fillRect(10, 7, 6, 2, 255, 255, 255, 240);
+      fillRect(9, 16, 2, 3, 255, 255, 255, 240);
+      fillRect(15, 16, 2, 3, 255, 255, 255, 240);
+      break;
+    case "supermarket":
+      fillRect(8, 9, 9, 4, 255, 255, 255, 240);
+      fillRect(9, 13, 7, 2, 255, 255, 255, 240);
+      fillRect(7, 8, 2, 4, 255, 255, 255, 240);
+      fillCircle(10, 18, 1, 255, 255, 255, 240);
+      fillCircle(15, 18, 1, 255, 255, 255, 240);
+      break;
+    case "pharmacy":
+      fillRect(11, 7, 4, 12, 255, 255, 255, 240);
+      fillRect(7, 11, 12, 4, 255, 255, 255, 240);
+      break;
+    case "park":
+      fillCircle(10, 11, 3, 255, 255, 255, 240);
+      fillCircle(16, 11, 3, 255, 255, 255, 240);
+      fillCircle(13, 8, 4, 255, 255, 255, 240);
+      fillRect(12, 13, 2, 5, 255, 255, 255, 240);
+      break;
+    case "restaurant":
+      fillCircle(10, 10, 2, 255, 255, 255, 240);
+      fillRect(9, 12, 2, 6, 255, 255, 255, 240);
+      fillRect(14, 8, 2, 10, 255, 255, 255, 240);
+      fillRect(13, 8, 4, 2, 255, 255, 255, 240);
+      break;
+    case "gym":
+      fillRect(8, 11, 3, 4, 255, 255, 255, 240);
+      fillRect(15, 11, 3, 4, 255, 255, 255, 240);
+      fillRect(11, 12, 4, 2, 255, 255, 255, 240);
+      fillRect(7, 10, 1, 6, 255, 255, 255, 240);
+      fillRect(18, 10, 1, 6, 255, 255, 255, 240);
+      break;
+    default:
+      fillCircle(13, 13, 5, 255, 255, 255, 240);
+      break;
+  }
+
+  return { width, height, data };
+};
+
+const toZonePoisFeatureCollection = (
+  poiPoints: ZonePoiPointLike[],
+  zoneFingerprint: string | null,
+  activePoiCategory: string,
+  selectedPoiKey: string | null
+): GeoJSON.FeatureCollection => ({
+  type: "FeatureCollection",
+  features: sortPoiPoints(poiPoints)
+    .filter((point) => activePoiCategory === "all" || point.category === activePoiCategory)
+    .map((point, index) => {
+      const selectionKey = getZonePoiSelectionKey(point, zoneFingerprint, index);
+      return {
+        type: "Feature",
+        geometry: {
+          type: "Point",
+          coordinates: [point.lon, point.lat]
+        },
+        properties: {
+          id: point.id || selectionKey,
+          selection_key: selectionKey,
+          selected: selectionKey === selectedPoiKey,
+          zone_fingerprint: zoneFingerprint || "",
+          name: point.name || "POI sem nome",
+          address: point.address || "",
+          category: point.category || "other"
+        }
+      };
+    })
+});
+
 const escapeHtml = (value: string) =>
   value
     .replace(/&/g, "&amp;")
@@ -334,6 +453,14 @@ const popupLoadingContent = (title: string, name: string) => `
   </div>
 `;
 
+const poiPopupContent = (name: string, categoryLabel: string, address: string | null) => `
+  <div style="font-family: system-ui, -apple-system, Segoe UI, sans-serif; min-width: 220px;">
+    <p style="margin:0 0 4px; font-size:11px; letter-spacing:0.06em; text-transform:uppercase; color:#64748b;">${escapeHtml(categoryLabel)}</p>
+    <p style="margin:0 0 8px; font-size:13px; font-weight:700; color:#0f172a;">${escapeHtml(name)}</p>
+    ${address ? `<p style="margin:0; font-size:12px; color:#475569;">${escapeHtml(address)}</p>` : '<p style="margin:0; font-size:12px; color:#64748b;">Endereco indisponivel.</p>'}
+  </div>
+`;
+
 export function FindIdealApp() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -346,6 +473,10 @@ export function FindIdealApp() {
   const [isLayerMenuOpen, setIsLayerMenuOpen] = useState(false);
   const [layerVisibility, setLayerVisibility] = useState<Record<MapOverlayLayerKey, boolean>>(DEFAULT_LAYER_VISIBILITY);
   const [visibleSequentialLayerGroupIndex, setVisibleSequentialLayerGroupIndex] = useState(-1);
+  const [selectedZonePoiState, setSelectedZonePoiState] = useState<{ zoneFingerprint: string | null; poiPoints: ZonePoiPointLike[] }>({
+    zoneFingerprint: null,
+    poiPoints: []
+  });
   const step = useUIStore((state) => state.step);
   const pickedCoord = useJourneyStore((state) => state.pickedCoord);
   const setPickedCoord = useJourneyStore((state) => state.setPickedCoord);
@@ -353,11 +484,14 @@ export function FindIdealApp() {
   const selectedTransportId = useJourneyStore((state) => state.selectedTransportId);
   const selectedZoneFingerprint = useJourneyStore((state) => state.selectedZoneFingerprint);
   const selectedListingKey = useJourneyStore((state) => state.selectedListingKey);
+  const selectedPoiKey = useJourneyStore((state) => state.selectedPoiKey);
+  const activePoiCategory = useJourneyStore((state) => state.activePoiCategory);
   const listingsJobId = useJourneyStore((state) => state.listingsJobId);
   const listingsFilters = useJourneyStore((state) => state.listingsFilters);
   const config = useJourneyStore((state) => state.config);
   const setSelectedTransportId = useJourneyStore((state) => state.setSelectedTransportId);
   const setSelectedListingKey = useJourneyStore((state) => state.setSelectedListingKey);
+  const setSelectedPoiKey = useJourneyStore((state) => state.setSelectedPoiKey);
   const setSelectedZone = useJourneyStore((state) => state.setSelectedZone);
   const stepRef = useRef(step);
   const sequentialLayerSettingsRef = useRef<SequentialLayerSettings>({
@@ -473,6 +607,12 @@ export function FindIdealApp() {
       if (!map.hasImage("bus-terminal-icon")) {
         map.addImage("bus-terminal-icon", createBusIcon("#f97316"));
       }
+      for (const category of ["school", "supermarket", "pharmacy", "park", "restaurant", "gym", "default"] as const) {
+        const meta = getPoiCategoryMeta(category === "default" ? undefined : category);
+        if (!map.hasImage(meta.iconId)) {
+          map.addImage(meta.iconId, createPoiIcon(meta.color, category));
+        }
+      }
 
       map.addSource("transport-lines-source", {
         type: "vector",
@@ -512,6 +652,11 @@ export function FindIdealApp() {
       });
 
       map.addSource(ZONES_SOURCE_ID, {
+        type: "geojson",
+        data: EMPTY_FEATURE_COLLECTION,
+      });
+
+      map.addSource(ZONE_POIS_SOURCE_ID, {
         type: "geojson",
         data: EMPTY_FEATURE_COLLECTION,
       });
@@ -714,6 +859,47 @@ export function FindIdealApp() {
       });
 
       map.addLayer({
+        id: "zone-pois-highlight-layer",
+        type: "circle",
+        source: ZONE_POIS_SOURCE_ID,
+        filter: ["==", ["coalesce", ["get", "selected"], false], true],
+        paint: {
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 9, 9.35, 12, 11.9, 15, 13.6],
+          "circle-color": "#ffffff",
+          "circle-opacity": 0.5,
+          "circle-stroke-color": "#5b21b6",
+          "circle-stroke-width": 1.5
+        }
+      });
+
+      map.addLayer({
+        id: "zone-pois-layer",
+        type: "symbol",
+        source: ZONE_POIS_SOURCE_ID,
+        layout: {
+          "icon-image": [
+            "match",
+            ["get", "category"],
+            "school",
+            getPoiCategoryMeta("school").iconId,
+            "supermarket",
+            getPoiCategoryMeta("supermarket").iconId,
+            "pharmacy",
+            getPoiCategoryMeta("pharmacy").iconId,
+            "park",
+            getPoiCategoryMeta("park").iconId,
+            "restaurant",
+            getPoiCategoryMeta("restaurant").iconId,
+            "gym",
+            getPoiCategoryMeta("gym").iconId,
+            getPoiCategoryMeta(undefined).iconId
+          ],
+          "icon-size": ["interpolate", ["linear"], ["zoom"], 9, 0.62, 12, 0.76, 15, 0.9],
+          "icon-allow-overlap": true
+        }
+      });
+
+      map.addLayer({
         id: "journey-listings-layer",
         type: "circle",
         source: LISTINGS_SOURCE_ID,
@@ -857,6 +1043,34 @@ export function FindIdealApp() {
         }
       });
 
+      map.on("click", "zone-pois-layer", (event) => {
+        const feature = event.features?.[0];
+        const properties = feature?.properties as Record<string, unknown> | undefined;
+        if (!properties) {
+          return;
+        }
+        const selectionKey = typeof properties.selection_key === "string" && properties.selection_key.trim() ? properties.selection_key.trim() : null;
+        const name = typeof properties.name === "string" && properties.name.trim() ? properties.name.trim() : "POI sem nome";
+        const address = typeof properties.address === "string" && properties.address.trim() ? properties.address.trim() : null;
+        const categoryMeta = getPoiCategoryMeta(typeof properties.category === "string" ? properties.category : undefined);
+        if (selectionKey) {
+          setSelectedPoiKey(selectionKey);
+        }
+
+        busPopupRef.current?.remove();
+        const popup = new maplibregl.Popup({ closeButton: true, closeOnClick: false, maxWidth: "320px" })
+          .setLngLat(event.lngLat)
+          .setHTML(poiPopupContent(name, categoryMeta.singularLabel, address))
+          .addTo(map);
+
+        busPopupRef.current = popup;
+        popup.on("close", () => {
+          if (busPopupRef.current === popup) {
+            busPopupRef.current = null;
+          }
+        });
+      });
+
       map.on("click", "journey-listings-layer", (event) => {
         const feature = event.features?.[0];
         const listingKey = feature?.properties?.listing_key;
@@ -878,7 +1092,7 @@ export function FindIdealApp() {
         if (!activePopup) return;
 
         const clickedBusFeatures = map.queryRenderedFeatures(event.point, {
-          layers: [...BUS_LAYER_LIST],
+          layers: [...POPUP_PERSIST_LAYER_LIST],
         });
         if (clickedBusFeatures.length > 0) return;
 
@@ -899,7 +1113,7 @@ export function FindIdealApp() {
         });
       }
 
-      for (const layerId of ["transport-candidate-layer", "zones-runtime-fill-layer", "journey-listings-layer"] as const) {
+      for (const layerId of ["transport-candidate-layer", "zones-runtime-fill-layer", "zone-pois-highlight-layer", "zone-pois-layer", "journey-listings-layer"] as const) {
         map.on("mouseenter", layerId, () => {
           map.getCanvas().style.cursor = "pointer";
         });
@@ -932,7 +1146,7 @@ export function FindIdealApp() {
       busPopupRef.current = null;
       map.remove();
     };
-  }, [setPickedCoord, setSelectedListingKey, setSelectedTransportId, setSelectedZone]);
+  }, [setPickedCoord, setSelectedListingKey, setSelectedPoiKey, setSelectedTransportId, setSelectedZone]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1011,33 +1225,86 @@ export function FindIdealApp() {
     const activeMap = map;
 
     let cancelled = false;
+    let pollTimeout: number | undefined;
 
     async function syncZones() {
       if (!journeyId || step < 3) {
         setGeoJsonSourceData(activeMap, ZONES_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
+        setGeoJsonSourceData(activeMap, ZONE_POIS_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
+        setSelectedZonePoiState({ zoneFingerprint: null, poiPoints: [] });
         return;
       }
 
       const response = await getJourneyZonesList(journeyId);
       if (!cancelled) {
+        const selectedZone = response.zones.find((zone) => zone.fingerprint === selectedZoneFingerprint);
+        const hasLegacyPoiZones = response.zones.some((zone) => zoneNeedsPoiBackfill(zone));
+        const selectedPoiPoints = ((selectedZone?.poi_points || []) as ZonePoiPointLike[]);
         setGeoJsonSourceData(
           activeMap,
           ZONES_SOURCE_ID,
           toZonesFeatureCollection(response.zones, selectedZoneFingerprint)
         );
+        setSelectedZonePoiState({ zoneFingerprint: selectedZoneFingerprint || null, poiPoints: selectedPoiPoints });
+
+        if (hasLegacyPoiZones) {
+          pollTimeout = window.setTimeout(() => {
+            void syncZones().catch(() => {
+              if (!cancelled) {
+                setGeoJsonSourceData(activeMap, ZONES_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
+                setGeoJsonSourceData(activeMap, ZONE_POIS_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
+                setSelectedZonePoiState({ zoneFingerprint: null, poiPoints: [] });
+              }
+            });
+          }, 3000);
+        }
       }
     }
 
     void syncZones().catch(() => {
       if (!cancelled) {
         setGeoJsonSourceData(activeMap, ZONES_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
+        setGeoJsonSourceData(activeMap, ZONE_POIS_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
+        setSelectedZonePoiState({ zoneFingerprint: null, poiPoints: [] });
       }
     });
 
     return () => {
       cancelled = true;
+      if (pollTimeout) {
+        window.clearTimeout(pollTimeout);
+      }
     };
   }, [isMapReady, journeyId, selectedZoneFingerprint, step]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isMapReady) {
+      return;
+    }
+
+    const poiData = selectedZonePoiState.zoneFingerprint && step >= 4
+      ? toZonePoisFeatureCollection(selectedZonePoiState.poiPoints, selectedZonePoiState.zoneFingerprint, activePoiCategory, selectedPoiKey)
+      : EMPTY_FEATURE_COLLECTION;
+    setGeoJsonSourceData(map, ZONE_POIS_SOURCE_ID, poiData);
+
+    if (!selectedPoiKey) {
+      return;
+    }
+
+    const selectedPoint = sortPoiPoints(selectedZonePoiState.poiPoints).find(
+      (point, index) => getZonePoiSelectionKey(point, selectedZonePoiState.zoneFingerprint, index) === selectedPoiKey
+    );
+    if (!selectedPoint) {
+      return;
+    }
+
+    if (activePoiCategory !== "all" && selectedPoint.category !== activePoiCategory) {
+      return;
+    }
+
+    map.easeTo({ center: [selectedPoint.lon, selectedPoint.lat], duration: 600, zoom: Math.max(map.getZoom(), 15) });
+  }, [activePoiCategory, isMapReady, selectedPoiKey, selectedZonePoiState, step]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1106,6 +1373,8 @@ export function FindIdealApp() {
     map.setLayoutProperty("zones-runtime-fill-layer", "visibility", layerVisibility.zones ? "visible" : "none");
     map.setLayoutProperty("zones-runtime-outline-layer", "visibility", layerVisibility.zones ? "visible" : "none");
     map.setLayoutProperty("zones-runtime-label-layer", "visibility", layerVisibility.zones ? "visible" : "none");
+    map.setLayoutProperty("zone-pois-highlight-layer", "visibility", layerVisibility.pois ? "visible" : "none");
+    map.setLayoutProperty("zone-pois-layer", "visibility", layerVisibility.pois ? "visible" : "none");
     map.setLayoutProperty("journey-listings-layer", "visibility", layerVisibility.listings ? "visible" : "none");
     map.setLayoutProperty("flood-layer", "visibility", floodVisible ? "visible" : "none");
     map.setLayoutProperty("green-layer", "visibility", greenVisible ? "visible" : "none");

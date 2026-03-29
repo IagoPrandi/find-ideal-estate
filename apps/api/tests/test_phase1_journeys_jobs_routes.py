@@ -208,6 +208,7 @@ def test_get_journey_zones_returns_list_response(monkeypatch):
                     "transport_point_id": transport_point_id,
                     "fingerprint": "fp-1",
                     "state": "complete",
+                    "is_circle_fallback": False,
                     "travel_time_minutes": 24,
                     "walk_distance_meters": 210,
                     "isochrone_geom": {
@@ -218,6 +219,17 @@ def test_get_journey_zones_returns_list_response(monkeypatch):
                     "flood_area_m2": 50.0,
                     "safety_incidents_count": 3,
                     "poi_counts": {"school": 5},
+                    "poi_points": [
+                        {
+                            "kind": "poi",
+                            "id": "poi-1",
+                            "name": "Colegio Centro",
+                            "category": "school",
+                            "address": "Rua A, 10",
+                            "lat": -23.55,
+                            "lon": -46.63,
+                        }
+                    ],
                     "badges": {
                         "green_badge": {"value": 1200.0, "percentile": 80.0, "tier": "excellent"}
                     },
@@ -242,6 +254,7 @@ def test_get_journey_zones_returns_list_response(monkeypatch):
     assert body["completed_count"] == 1
     assert len(body["zones"]) == 1
     assert body["zones"][0]["id"] == zone_id
+    assert body["zones"][0]["poi_points"][0]["name"] == "Colegio Centro"
     assert body["zones"][0]["badges"]["green_badge"]["tier"] == "excellent"
 
 

@@ -69,6 +69,8 @@ type JourneyState = {
   config: JourneyConfig;
   listingsFilters: ListingsPanelFilters;
   selectedListingKey: string | null;
+  selectedPoiKey: string | null;
+  activePoiCategory: string;
   pickedCoord: PickedCoord | null;
   primaryReferenceLabel: string;
   selectedTransportId: string | null;
@@ -92,6 +94,8 @@ type JourneyState = {
   setListingsFilters: (updater: Partial<ListingsPanelFilters>) => void;
   resetListingsFilters: () => void;
   setSelectedListingKey: (selectedListingKey: string | null) => void;
+  setSelectedPoiKey: (selectedPoiKey: string | null) => void;
+  setActivePoiCategory: (activePoiCategory: string) => void;
   setJobIds: (payload: {
     transportJobId?: string | null;
     zoneGenerationJobId?: string | null;
@@ -131,6 +135,8 @@ export const useJourneyStore = create<JourneyState>((set) => ({
   config: defaultConfig,
   listingsFilters: defaultListingsPanelFilters,
   selectedListingKey: null,
+  selectedPoiKey: null,
+  activePoiCategory: "all",
   pickedCoord: null,
   primaryReferenceLabel: "",
   selectedTransportId: null,
@@ -152,6 +158,8 @@ export const useJourneyStore = create<JourneyState>((set) => ({
         journeyId,
         listingsFilters: defaultListingsPanelFilters,
         selectedListingKey: null,
+        selectedPoiKey: null,
+        activePoiCategory: "all",
         selectedTransportId: null,
         selectedZoneId: null,
         selectedZoneFingerprint: null,
@@ -191,6 +199,8 @@ export const useJourneyStore = create<JourneyState>((set) => ({
         selectedZoneFingerprint,
         listingsFilters: defaultListingsPanelFilters,
         selectedListingKey: null,
+        selectedPoiKey: null,
+        activePoiCategory: "all",
         selectedAddress: null,
         addressQuery: "",
         listingsJobId: null
@@ -207,6 +217,8 @@ export const useJourneyStore = create<JourneyState>((set) => ({
     })),
   resetListingsFilters: () => set({ listingsFilters: defaultListingsPanelFilters }),
   setSelectedListingKey: (selectedListingKey) => set({ selectedListingKey }),
+  setSelectedPoiKey: (selectedPoiKey) => set({ selectedPoiKey }),
+  setActivePoiCategory: (activePoiCategory) => set({ activePoiCategory }),
   setJobIds: (payload) => set((state) => ({ ...state, ...payload })),
   resetJourney: () =>
     set({
@@ -214,6 +226,8 @@ export const useJourneyStore = create<JourneyState>((set) => ({
       config: defaultConfig,
       listingsFilters: defaultListingsPanelFilters,
       selectedListingKey: null,
+      selectedPoiKey: null,
+      activePoiCategory: "all",
       pickedCoord: null,
       primaryReferenceLabel: "",
       selectedTransportId: null,

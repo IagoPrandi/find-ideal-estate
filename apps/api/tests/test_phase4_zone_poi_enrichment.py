@@ -131,22 +131,51 @@ async def test_enrich_zone_pois_uses_forward_endpoint_and_counts_features() -> N
     ):
         response_mock = MagicMock()
         response_mock.raise_for_status = MagicMock()
-        response_mock.json = MagicMock(return_value={"features": [{}, {}, {}]})
+        response_mock.json = MagicMock(
+            return_value={
+                "features": [
+                    {
+                        "id": "poi-1",
+                        "geometry": {"coordinates": [-46.727, -23.521]},
+                        "properties": {"name": "Colegio Centro", "full_address": "Rua A, 10"},
+                    },
+                    {
+                        "id": "poi-2",
+                        "geometry": {"coordinates": [-46.726, -23.522]},
+                        "properties": {"name": "Mercado Azul", "full_address": "Rua B, 20"},
+                    },
+                    {
+                        "id": "poi-3",
+                        "geometry": {"coordinates": [-46.725, -23.523]},
+                        "properties": {"name": "Parque Verde", "full_address": "Rua C, 30"},
+                    },
+                ]
+            }
+        )
         client_get = AsyncMock(return_value=response_mock)
         mock_client_cls.return_value.__aenter__.return_value.get = client_get
 
         result = await enrich_zone_pois(zone_id)
 
-    assert result == {
-        "zone_id": str(zone_id),
-        "poi_counts": {
-            "school": 3,
-            "supermarket": 3,
-            "pharmacy": 3,
-            "park": 3,
-        },
+    assert result["zone_id"] == str(zone_id)
+    assert result["poi_counts"] == {
+        "school": 3,
+        "supermarket": 3,
+        "pharmacy": 3,
+        "park": 3,
+        "restaurant": 3,
+        "gym": 3,
     }
-    assert len(client_get.await_args_list) == 4
+    assert len(result["poi_points"]) == 18
+    assert {point["category"] for point in result["poi_points"]} == {
+        "school",
+        "supermarket",
+        "pharmacy",
+        "park",
+        "restaurant",
+        "gym",
+    }
+    assert len(client_get.await_args_list) == 6
     first_call = client_get.await_args_list[0]
     assert first_call.args[0] == "https://api.mapbox.com/search/searchbox/v1/forward"
     assert first_call.kwargs["params"]["types"] == "poi"
@@ -156,7 +185,11 @@ async def test_enrich_zone_pois_uses_forward_endpoint_and_counts_features() -> N
         {
             "zone_id": zone_id,
             "poi_counts": json.dumps(
-                {"school": 3, "supermarket": 3, "pharmacy": 3, "park": 3},
+                {"school": 3, "supermarket": 3, "pharmacy": 3, "park": 3, "restaurant": 3, "gym": 3},
+                ensure_ascii=True,
+            ),
+            "poi_points": json.dumps(
+                result["poi_points"],
                 ensure_ascii=True,
             ),
         }
@@ -194,7 +227,20 @@ async def test_enrich_zone_pois_reuses_canonical_zone_center_from_journey_scope(
     ):
         response_mock = MagicMock()
         response_mock.raise_for_status = MagicMock()
-        response_mock.json = MagicMock(return_value={"features": [{}, {}]})
+        response_mock.json = MagicMock(
+            return_value={
+                "features": [
+                    {
+                        "geometry": {"coordinates": [-46.625161, -23.516131]},
+                        "properties": {},
+                    },
+                    {
+                        "geometry": {"coordinates": [-46.625161, -23.516131]},
+                        "properties": {},
+                    },
+                ]
+            }
+        )
         client_get = AsyncMock(return_value=response_mock)
         mock_client_cls.return_value.__aenter__.return_value.get = client_get
 
@@ -202,18 +248,27 @@ async def test_enrich_zone_pois_reuses_canonical_zone_center_from_journey_scope(
 
     expected_cache_key = _poi_cache_key(
         zone_fingerprint="zone-a",
-        categories=("school", "supermarket", "pharmacy", "park"),
+        categories=("school", "supermarket", "pharmacy", "park", "restaurant", "gym"),
         bbox=(-46.629078, -23.519743, -46.621245, -23.51252),
     )
     assert redis_mock.get.await_args_list[0].args == (expected_cache_key,)
-    assert result == {
-        "zone_id": str(zone_id),
-        "poi_counts": {
-            "school": 2,
-            "supermarket": 2,
-            "pharmacy": 2,
-            "park": 2,
-        },
+    assert result["zone_id"] == str(zone_id)
+    assert result["poi_counts"] == {
+        "school": 2,
+        "supermarket": 2,
+        "pharmacy": 2,
+        "park": 2,
+        "restaurant": 2,
+        "gym": 2,
+    }
+    assert len(result["poi_points"]) == 12
+    assert {point["category"] for point in result["poi_points"]} == {
+        "school",
+        "supermarket",
+        "pharmacy",
+        "park",
+        "restaurant",
+        "gym",
     }
     first_call = client_get.await_args_list[0]
     assert first_call.kwargs["params"]["bbox"] == "-46.629078,-23.519743,-46.621245,-23.512520"

@@ -354,6 +354,104 @@ describe("FindIdealApp", () => {
     expect(labelLayer?.layout?.["text-ignore-placement"]).toBe(true);
   });
 
+  it("renders selected zone POIs on the map with category metadata and popup", async () => {
+    vi.mocked(getJourneyZonesList).mockResolvedValue({
+      zones: [
+        {
+          id: "zone-1",
+          journey_id: "journey-1",
+          fingerprint: "zone-fp-1",
+          state: "complete",
+          travel_time_minutes: 8,
+          poi_counts: { school: 1, pharmacy: 1, restaurant: 1, gym: 1, supermarket: 0, park: 0 },
+          poi_points: [
+            {
+              kind: "poi",
+              id: "poi-1",
+              name: "Colegio Centro",
+              category: "school",
+              address: "Rua A, 10",
+              lat: -23.552,
+              lon: -46.632
+            },
+            {
+              kind: "poi",
+              id: "poi-2",
+              name: "Farmacia Vida",
+              category: "pharmacy",
+              address: "Rua B, 20",
+              lat: -23.551,
+              lon: -46.631
+            },
+            {
+              kind: "poi",
+              id: "poi-3",
+              name: "Restaurante Central",
+              category: "restaurant",
+              address: "Rua C, 30",
+              lat: -23.55,
+              lon: -46.63
+            },
+            {
+              kind: "poi",
+              id: "poi-4",
+              name: "Academia Movimento",
+              category: "gym",
+              address: "Rua D, 40",
+              lat: -23.549,
+              lon: -46.629
+            }
+          ],
+          isochrone_geom: {
+            type: "Polygon",
+            coordinates: [[[-46.633, -23.553], [-46.629, -23.553], [-46.629, -23.549], [-46.633, -23.549], [-46.633, -23.553]]]
+          }
+        }
+      ],
+      total_count: 1,
+      completed_count: 1
+    } as never);
+
+    renderWithQueryClient();
+
+    await waitFor(() => {
+      const sourceData = mapSourceData["journey-zone-pois-source-runtime"] as { features: Array<{ properties: Record<string, unknown> }> } | undefined;
+      expect(sourceData?.features).toHaveLength(4);
+      expect(sourceData?.features.map((feature) => feature.properties.category)).toEqual(["school", "pharmacy", "restaurant", "gym"]);
+    });
+
+    await act(async () => {
+      useJourneyStore.getState().setActivePoiCategory("restaurant");
+      useJourneyStore.getState().setSelectedPoiKey("zone-fp-1:restaurant:poi-3");
+    });
+
+    await waitFor(() => {
+      const sourceData = mapSourceData["journey-zone-pois-source-runtime"] as { features: Array<{ properties: Record<string, unknown> }> } | undefined;
+      expect(sourceData?.features).toHaveLength(1);
+      expect(sourceData?.features[0]?.properties.category).toBe("restaurant");
+      expect(sourceData?.features[0]?.properties.selected).toBe(true);
+    });
+
+    expect(mapAddedLayers.find((layer) => layer.id === "zone-pois-layer")).toBeDefined();
+    expect(mapAddedLayers.find((layer) => layer.id === "zone-pois-highlight-layer")).toBeDefined();
+
+    await act(async () => {
+      useJourneyStore.getState().setActivePoiCategory("all");
+    });
+
+    await act(async () => {
+      mapLayerClickHandlers["zone-pois-layer"]({
+        lngLat: { lng: -46.632, lat: -23.552 },
+        features: [{ properties: { name: "Colegio Centro", category: "school", address: "Rua A, 10", selection_key: "zone-fp-1:school:poi-1" } }]
+      });
+    });
+
+    expect(useJourneyStore.getState().selectedPoiKey).toBe("zone-fp-1:school:poi-1");
+    expect(lastPopupHtml).toContain("Escola");
+    expect(lastPopupHtml).toContain("Colegio Centro");
+    expect(lastPopupHtml).toContain("Rua A, 10");
+  });
+
   it("opens the layers panel, toggles layer visibility and closes on outside click", async () => {
     renderWithQueryClient();
 

@@ -327,10 +327,10 @@ export async function getZoneDetail(runId: string, zoneUid: string): Promise<Zon
     train_station_count: 0,
     lines_used_for_generation: [],
     transport_points: [],
-    poi_points: [],
+    poi_points: zone.poi_points || [],
     streets_count: 0,
     has_street_data: false,
-    has_poi_data: Boolean(zone.poi_counts && Object.keys(zone.poi_counts).length > 0),
+    has_poi_data: Boolean((zone.poi_points && zone.poi_points.length > 0) || (zone.poi_counts && Object.keys(zone.poi_counts).length > 0)),
     has_transport_data: false,
     public_safety: null
   };

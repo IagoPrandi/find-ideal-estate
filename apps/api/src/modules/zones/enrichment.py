@@ -13,7 +13,7 @@ from core.db import get_engine
 from core.redis import get_redis
 from sqlalchemy import text
 
-_POI_CATEGORIES = ("school", "supermarket", "pharmacy", "park")
+_POI_CATEGORIES = ("school", "supermarket", "pharmacy", "park", "restaurant", "gym")
 _POI_CACHE_TTL_SECONDS = 1800
 
 _ZONE_POI_CONTEXT_SQL = text(
@@ -152,6 +152,41 @@ def _mapbox_poi_params(
     }
 
 
+def _extract_poi_point(feature: dict[str, Any], *, category: str) -> dict[str, Any] | None:
+    geometry = feature.get("geometry") or {}
+    coordinates = geometry.get("coordinates")
+    if not isinstance(coordinates, list) or len(coordinates) < 2:
+        return None
+
+    lon = coordinates[0]
+    lat = coordinates[1]
+    if not isinstance(lon, (int, float)) or not isinstance(lat, (int, float)):
+        return None
+
+    properties = feature.get("properties") or {}
+    feature_name = properties.get("name")
+    if not isinstance(feature_name, str) or not feature_name.strip():
+        feature_name = feature.get("name")
+
+    feature_id = feature.get("id")
+    if not isinstance(feature_id, str) or not feature_id.strip():
+        feature_id = properties.get("mapbox_id")
+
+    address = properties.get("full_address")
+    if not isinstance(address, str) or not address.strip():
+        address = properties.get("place_formatted")
+
+    return {
+        "kind": "poi",
+        "id": feature_id.strip() if isinstance(feature_id, str) and feature_id.strip() else None,
+        "name": feature_name.strip() if isinstance(feature_name, str) and feature_name.strip() else None,
+        "category": category,
+        "address": address.strip() if isinstance(address, str) and address.strip() else None,
+        "lat": float(lat),
+        "lon": float(lon),
+    }
+
+
 def _poi_cache_key(
     *,
     zone_fingerprint: str,
@@ -171,7 +206,7 @@ def _poi_cache_key(
             separators=(",", ":"),
         ).encode("utf-8")
     ).hexdigest()[:20]
-    return f"zone_pois:v1:{digest}"
+    return f"zone_pois:v3:{digest}"
 
 
 async def enrich_zone_green(zone_id: UUID) -> dict[str, Any]:
@@ -325,10 +360,13 @@ async def enrich_zone_pois(
     redis = get_redis()
     cached = await redis.get(cache_key)
     if cached:
-        poi_counts = json.loads(cached)
+        cached_payload = json.loads(cached)
+        poi_counts = cached_payload.get("poi_counts") or {}
+        poi_points = cached_payload.get("poi_points") or []
     else:
         settings = get_settings()
         poi_counts: dict[str, int] = {k: 0 for k in _POI_CATEGORIES}
+        poi_points: list[dict[str, Any]] = []
         zone_lon = float(zone["lon"])
         zone_lat = float(zone["lat"])
         async with httpx.AsyncClient(timeout=8.0) as client:
@@ -346,13 +384,18 @@ async def enrich_zone_pois(
                     )
                     response.raise_for_status()
                     payload = response.json()
-                    poi_counts[category] = len(payload.get("features", []))
+                    features = payload.get("features", [])
+                    poi_counts[category] = len(features)
+                    for feature in features:
+                        point = _extract_poi_point(feature, category=category)
+                        if point is not None:
+                            poi_points.append(point)
                 except Exception:
                     poi_counts[category] = 0
 
             await redis.set(
                 cache_key,
-                json.dumps(poi_counts, ensure_ascii=True),
+                json.dumps({"poi_counts": poi_counts, "poi_points": poi_points}, ensure_ascii=True),
                 ex=_POI_CACHE_TTL_SECONDS,
             )
 
@@ -362,12 +405,18 @@ async def enrich_zone_pois(
             text(
                 """
                 UPDATE zones
-                SET poi_counts = CAST(:poi_counts AS JSONB), updated_at = now()
+                SET poi_counts = CAST(:poi_counts AS JSONB),
+                    poi_points = CAST(:poi_points AS JSONB),
+                    updated_at = now()
                 WHERE id = :zone_id
                 """
             ),
-            {"zone_id": zone_id, "poi_counts": json.dumps(poi_counts, ensure_ascii=True)},
+            {
+                "zone_id": zone_id,
+                "poi_counts": json.dumps(poi_counts, ensure_ascii=True),
+                "poi_points": json.dumps(poi_points, ensure_ascii=True),
+            },
         )
 
-    return {"zone_id": str(zone_id), "poi_counts": poi_counts}
+    return {"zone_id": str(zone_id), "poi_counts": poi_counts, "poi_points": poi_points}
 

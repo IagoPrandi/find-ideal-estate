@@ -58,6 +58,17 @@ export const JourneyZoneReadSchema = z.object({
   flood_area_m2: z.number().nullable().optional(),
   safety_incidents_count: z.number().nullable().optional(),
   poi_counts: z.record(z.number()).nullable().optional(),
+  poi_points: z.array(
+    z.object({
+      kind: z.string().optional().default("poi"),
+      id: z.string().nullable().optional(),
+      name: z.string().nullable().optional(),
+      category: z.string().nullable().optional(),
+      address: z.string().nullable().optional(),
+      lat: z.number(),
+      lon: z.number()
+    })
+  ).nullable().optional(),
   badges: z.any().nullable().optional(),
   badges_provisional: z.any().nullable().optional(),
   created_at: z.string().nullable().optional(),
@@ -433,6 +444,7 @@ export type ZoneDetailResponse = {
     id?: string | null;
     name?: string | null;
     category?: string | null;
+    address?: string | null;
     lat: number;
     lon: number;
   }>;

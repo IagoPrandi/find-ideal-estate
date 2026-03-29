@@ -1,5 +1,191 @@
 # Work Log
 
+## 2026-03-29 - Corrigir regressao de renderizacao dos POIs no mapa
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/develop-frontend/SKILL.md` para tratar a regressao no runtime do mapa sem desfazer a sincronizacao entre painel e mapa.
+- Trigger: apos a rodada de sincronizacao de POIs entre painel e mapa, usuario reportou que os pontos deixaram de aparecer no mapa.
+- Root cause identified:
+  - a configuracao nova da layer `zone-pois-layer` passou a usar uma expressao de `icon-size` mais complexa, combinando condicao por feature com interpolacao por zoom;
+  - esse formato nao ficou robusto no runtime do `MapLibre` em producao local e acabou comprometendo a renderizacao dos icones base dos POIs.
+- Scope executed:
+  - `apps/web/src/features/app/FindIdealApp.tsx`:
+    - `zone-pois-layer` voltou a usar `icon-size` simples por zoom, como antes da regressao;
+    - o destaque visual do POI selecionado foi mantido apenas na `zone-pois-highlight-layer`;
+    - o filtro da layer de highlight ficou mais defensivo com `coalesce` para `selected`.
+  - ambiente local:
+    - `docker compose up -d --build ui` executado para publicar a correcao na UI local.
+- Validation:
+  - frontend focado: `Set-Location apps/web; $env:CI='1'; .\node_modules\.bin\vitest.cmd run --config vitest.config.ts src/features/app/FindIdealApp.test.tsx --reporter=basic --no-color` -> `9 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-29 - Sincronizar filtro e seleção de POIs entre painel e mapa
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/develop-frontend/SKILL.md` para propagar estado compartilhado entre painel e mapa sem duplicar lógica local por componente.
+- Trigger: usuario pediu que a selecao do tipo de POIs no painel passasse a refletir a visualizacao no mapa, que o clique no POI do painel destacasse o item no mapa, e que o clique no POI do mapa fizesse o painel rolar ate o item correspondente.
+- Root cause identified:
+  - o filtro de categorias de POIs era local ao `ZonePoiList`, entao o mapa nao tinha como refletir essa selecao;
+  - nao existia chave compartilhada de selecao de POI entre mapa e painel, apenas popup no mapa;
+  - o painel nao mantinha refs por POI nem observava selecao externa para rolar ate o item correspondente.
+- Scope executed:
+  - `apps/web/src/state/journey-store.ts`:
+    - adicionados `selectedPoiKey` e `activePoiCategory` com setters e reset automatico ao trocar jornada/zona.
+  - `apps/web/src/domain/poi.ts`:
+    - adicionada chave estavel `getZonePoiSelectionKey()` para sincronizar o mesmo POI entre source do mapa e lista do painel.
+  - `apps/web/src/components/panels/Step4Compare.tsx`:
+    - filtro de categoria de POIs passou a usar o store compartilhado;
+    - clique em categoria ou item de POI garante a selecao da zona antes de sincronizar mapa;
+    - itens de POI agora sao clicaveis, mantem estado visual de selecao e fazem scroll automatico quando a selecao vem do mapa.
+  - `apps/web/src/features/app/FindIdealApp.tsx`:
+    - source de POIs da zona passou a respeitar `activePoiCategory`;
+    - adicionada a camada `zone-pois-highlight-layer` para destacar o POI selecionado no mapa;
+    - clique no POI do mapa agora atualiza `selectedPoiKey`, preservando popup e permitindo que o painel role ate o item;
+    - selecao de POI no painel agora recentra o mapa no item correspondente.
+  - `apps/web/src/components/panels/Step4Compare.test.tsx`, `apps/web/src/features/app/FindIdealApp.test.tsx` e `apps/web/src/state/journey-store.test.ts`:
+    - regressões adicionadas/atualizadas para filtro compartilhado, scroll do painel, destaque no mapa e reset do estado de POI ao trocar jornada/zona.
+- Validation:
+  - frontend focado: `Set-Location apps/web; $env:CI='1'; .\node_modules\.bin\vitest.cmd run --config vitest.config.ts src/components/panels/Step4Compare.test.tsx src/features/app/FindIdealApp.test.tsx src/state/journey-store.test.ts --reporter=basic --no-color` -> `16 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-29 - Ampliar taxonomia de POIs para restaurantes e academias
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/develop-frontend/SKILL.md` para propagar a nova taxonomia de POIs de forma consistente entre enrichment, mapa, card e regras de backfill, sem fallback silencioso.
+- Trigger: apos a correcao do fluxo canônico de zonas, usuario pediu explicitamente que os POIs passassem a incluir `restaurantes`, `mercados` e `academias`.
+- Root cause identified:
+  - `mercados` ja estavam contemplados pela categoria canônica `supermarket`, mas o enrichment e o frontend ainda operavam com apenas quatro categorias (`school`, `supermarket`, `pharmacy`, `park`);
+  - jornadas enriquecidas com a taxonomia antiga continuariam aparentando payload valido, embora nao contivessem as novas chaves `restaurant` e `gym` em `poi_counts`.
+- Scope executed:
+  - `apps/api/src/modules/zones/enrichment.py`:
+    - adicionadas as categorias `restaurant` e `gym` ao enrichment de POIs;
+    - cache Redis de POIs elevado para `v3` para invalidar payloads montados com a taxonomia antiga.
+  - `apps/web/src/domain/poi.ts`:
+    - ampliada a metadata compartilhada para `restaurant` e `gym`;
+    - adicionada a regra `zoneNeedsPoiBackfill()` para identificar zonas com `poi_points` ausente ou `poi_counts` incompleto frente ao conjunto atual de categorias.
+  - `apps/web/src/components/panels/Step4Compare.tsx`:
+    - backfill automatico passou a detectar tambem zonas enriquecidas com o conjunto antigo de categorias, nao apenas `poi_points` nulo.
+  - `apps/web/src/features/app/FindIdealApp.tsx`:
+    - adicionados icones de mapa para `restaurant` e `gym`;
+    - layer runtime `zone-pois-layer` passou a mapear as novas categorias;
+    - polling de zonas passou a reutilizar a mesma deteccao de backfill para payload desatualizado.
+  - `apps/api/tests/test_phase4_zone_poi_enrichment.py`:
+    - assertions atualizadas para validar as seis categorias e o novo cache key versionado.
+  - `apps/web/src/components/panels/Step4Compare.test.tsx` e `apps/web/src/features/app/FindIdealApp.test.tsx`:
+    - regressões atualizadas para cobrir `restaurant` e `gym` no card e no mapa;
+    - backfill automatico passou a ser validado tambem para zonas com `poi_points` presente, mas `poi_counts` ainda no formato antigo.
+- Validation:
+  - backend focado: `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase4_zone_poi_enrichment.py -q --color=no` -> `3 passed`.
+  - frontend focado: `Set-Location apps/web; $env:CI='1'; .\node_modules\.bin\vitest.cmd run --config vitest.config.ts src/components/panels/Step4Compare.test.tsx src/features/app/FindIdealApp.test.tsx --reporter=basic --no-color` -> `11 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-29 - Corrigir endpoint canônico `/journeys/{id}/zones` para incluir `poi_points`
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/develop-frontend/SKILL.md` para verificar o fluxo real consumido pela UI e corrigir a origem do payload, em vez de seguir depurando a renderizacao do mapa.
+- Trigger: mesmo apos os ajustes anteriores, usuario reportou que no fluxo real com referencia `-23.56944, -46.65945`, modo `onibus` e primeiro ponto retornado, nao havia POIs no mapa nem no painel.
+- Root cause identified:
+  - o frontend consome `GET /journeys/{journey_id}/zones` definido em `apps/api/src/api/routes/journeys.py`;
+  - esse endpoint ainda nao projetava `z.poi_points` na SQL nem no payload montado, embora o enrichment e o schema ja persistissem esse campo;
+  - eu havia atualizado outro caminho de zonas (`api/routes/zones.py` + `modules/zones/service.py`), mas nao o endpoint canônico usado pela UI.
+- Scope executed:
+  - `apps/api/src/api/routes/journeys.py`:
+    - adicionados `z.poi_points` e `z.is_circle_fallback` ao `SELECT` do endpoint `/journeys/{id}/zones`;
+    - payload retornado agora inclui `poi_points` e `is_circle_fallback` por zona.
+  - `apps/api/tests/test_phase1_journeys_jobs_routes.py`:
+    - teste da rota `/journeys/{id}/zones` atualizado para validar `poi_points` no JSON retornado.
+  - ambiente local:
+    - `docker compose up -d --build api` executado para publicar a correcao do endpoint na stack local.
+  - reproducao do fluxo solicitado:
+    - jornada criada com referencia `-23.56944, -46.65945`, `transport_mode=transit`, `public_transport_mode=bus`;
+    - `transport_search` concluido, primeiro ponto retornado selecionado, `zone_generation` e `zone_enrichment` executados;
+    - `GET /journeys/6a17ea0d-d3c4-4099-b90d-6bf2a13a4d8d/zones` retornou `15` zonas, e a primeira zona veio com `30` `poi_points`.
+- Validation:
+  - backend focado: `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase1_journeys_jobs_routes.py apps/api/tests/test_phase4_zone_poi_enrichment.py -q --color=no` -> `10 passed`.
+  - reproducao HTTP local do fluxo solicitado -> primeira zona com `first_zone_poi_points=30`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-29 - Reenriquecer jornadas legadas sem `poi_points`
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/develop-frontend/SKILL.md` para corrigir a regressao de UX causada por dados legados sem reintroduzir fallback silencioso no card ou no mapa.
+- Trigger: usuario reportou que nenhuma zona estava mostrando POIs; screenshot confirmava cards exibindo `POIs detalhados ainda nao foram carregados para esta zona.`.
+- Root cause identified:
+  - o banco continha varias jornadas antigas com `zones.poi_counts` preenchido, mas `zones.poi_points` nulo, pois essas zonas haviam sido enriquecidas antes da introducao do novo campo;
+  - a etapa 4 e o mapa liam corretamente `poi_points`, mas nao tinham mecanismo de backfill para jornadas legadas ja existentes.
+- Scope executed:
+  - `apps/web/src/components/panels/Step4Compare.tsx`:
+    - detecta zonas legadas (`poi_counts` presente e `poi_points` ausente);
+    - dispara automaticamente um novo `zone_enrichment` uma unica vez por jornada;
+    - faz polling do job e refetch das zonas ao concluir, exibindo banner enquanto a atualizacao roda.
+  - `apps/web/src/features/app/FindIdealApp.tsx`:
+    - passou a repoll `GET /journeys/{id}/zones` quando detectar zonas legadas, para o source de POIs do mapa atualizar assim que o re-enrichment concluir.
+  - `apps/web/src/components/panels/Step4Compare.test.tsx`:
+    - adicionada regressao cobrindo o backfill automatico para zonas sem `poi_points`.
+- Validation:
+  - diagnostico SQL local: `SELECT jz.journey_id, COUNT(*) AS legacy_zones ... WHERE z.poi_counts IS NOT NULL AND z.poi_points IS NULL ...` confirmou jornadas legadas com ate `151` zonas sem `poi_points`.
+  - frontend focado: `.\\node_modules\\.bin\\vitest.cmd run --config vitest.config.ts src/components/panels/Step4Compare.test.tsx src/features/app/FindIdealApp.test.tsx --reporter=basic --no-color` -> `11 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-29 - Mostrar POIs detalhados no mapa e no card das zonas
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/develop-frontend/SKILL.md` para estruturar a mudanca de dados e UI sem fallback visual enganoso, mantendo o mapa e o card apoiados no mesmo payload canônico.
+- Trigger: usuario pediu que os POIs aparecessem no mapa com icone relativo ao tipo de POI e que o card das zonas exibisse a lista de POIs com filtro por tipo.
+- Root cause identified:
+  - o enrichment de zonas persistia apenas `poi_counts`, entao o frontend nao recebia coordenadas, nomes nem categorias concretas para plotar no mapa ou listar no card;
+  - o mapa tinha toggle conceitual para POIs, mas nao existia source/layer runtime de POIs de zona;
+  - o card da etapa 4 mostrava apenas agregados de POIs, sem lista detalhada nem filtro por categoria.
+- Scope executed:
+  - `packages/contracts/contracts/zones.py`:
+    - adicionado `ZonePOIPointRead` e o campo `poi_points` em `ZoneRead`.
+  - `packages/contracts/contracts/__init__.py`:
+    - exportado `ZonePOIPointRead`.
+  - `infra/migrations/versions/20260329_0011_zone_poi_points.py`:
+    - nova migration adicionando a coluna `zones.poi_points`.
+  - `apps/api/src/modules/zones/enrichment.py`:
+    - enrichment de POIs passou a extrair e persistir itens detalhados com `id`, `name`, `category`, `address`, `lat` e `lon`;
+    - cache Redis de POIs passou para `v2`, armazenando `poi_counts` e `poi_points` juntos.
+  - `apps/api/src/modules/zones/service.py`:
+    - `list_zones_for_journey()` agora retorna `z.poi_points` junto com os demais campos da zona.
+  - `apps/api/tests/test_phase4_zone_poi_enrichment.py`:
+    - atualizado para validar `poi_points` no retorno e no payload persistido no banco.
+  - `apps/web/src/api/schemas.ts` e `apps/web/src/api/client.ts`:
+    - schema do frontend passou a aceitar `poi_points` no payload de zonas;
+    - compat layer `getZoneDetail()` agora reaproveita `zone.poi_points` em vez de devolver array vazio.
+  - `apps/web/src/domain/poi.ts`:
+    - adicionada metadata compartilhada das categorias de POI para labels, cores, ordenacao e ids de icone.
+  - `apps/web/src/features/app/FindIdealApp.tsx`:
+    - adicionada source runtime `journey-zone-pois-source-runtime` e layer `zone-pois-layer`;
+    - mapa passou a renderizar os POIs da zona selecionada com icones por categoria e popup com nome/endereco;
+    - toggle de camada passou a incluir `POIs da zona`.
+  - `apps/web/src/components/panels/Step4Compare.tsx`:
+    - card de cada zona agora contem a lista detalhada de POIs;
+    - adicionados filtros por categoria (`Todos`, `Escolas`, `Mercados`, `Farmacias`, `Parques`) dentro do card.
+  - `apps/web/src/features/app/FindIdealApp.test.tsx`:
+    - adicionada regressao garantindo que os POIs entram na source do mapa e que o popup mostra a categoria correta.
+  - `apps/web/src/components/panels/Step4Compare.test.tsx`:
+    - novo teste cobrindo filtro da lista de POIs por categoria.
+- Validation:
+  - backend focado: `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase4_zone_poi_enrichment.py apps/api/tests/test_phase4_enrichment_filters.py -q --color=no` -> `5 passed`.
+  - frontend focado: `Set-Location apps/web; $env:CI='1'; .\\node_modules\\.bin\\vitest.cmd run --config vitest.config.ts src/features/app/FindIdealApp.test.tsx src/components/panels/Step4Compare.test.tsx --reporter=basic --no-color` -> `10 passed`.
+  - ambiente local:
+    - `docker compose exec api alembic upgrade head` aplicado com sucesso para criar `zones.poi_points`;
+    - `docker compose up -d --build api ui` executado para recarregar a stack local com a migration e a UI novas.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
 ## 2026-03-29 - Reusar POIs por centro canonico de zonas sobrepostas
 
 - Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.

@@ -28,6 +28,8 @@ describe("journey-store", () => {
         maxSize: "120"
       },
       selectedListingKey: "property:prop-old",
+      selectedPoiKey: "fp-old:school:poi-1",
+      activePoiCategory: "school",
       selectedTransportId: "transport-old",
       selectedZoneId: "zone-old",
       selectedZoneFingerprint: "fp-old",
@@ -57,6 +59,8 @@ describe("journey-store", () => {
       maxSize: ""
     });
     expect(state.selectedListingKey).toBeNull();
+    expect(state.selectedPoiKey).toBeNull();
+    expect(state.activePoiCategory).toBe("all");
     expect(state.selectedTransportId).toBeNull();
     expect(state.selectedZoneId).toBeNull();
     expect(state.selectedZoneFingerprint).toBeNull();
@@ -80,6 +84,8 @@ describe("journey-store", () => {
         maxSize: "90"
       },
       selectedListingKey: "property:prop-old",
+      selectedPoiKey: "fp-old:school:poi-1",
+      activePoiCategory: "school",
       selectedZoneId: "zone-old",
       selectedZoneFingerprint: "fp-old",
       selectedAddress: {
@@ -106,6 +112,8 @@ describe("journey-store", () => {
       maxSize: ""
     });
     expect(state.selectedListingKey).toBeNull();
+    expect(state.selectedPoiKey).toBeNull();
+    expect(state.activePoiCategory).toBe("all");
     expect(state.selectedAddress).toBeNull();
     expect(state.addressQuery).toBe("");
 

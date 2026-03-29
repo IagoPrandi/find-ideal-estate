@@ -14,7 +14,7 @@ from .listings import (
     ZoneCacheStatusRead,
 )
 from .transport import TransportPointRead
-from .zones import ZoneBadgeRead, ZoneListResponse, ZoneRead
+from .zones import ZoneBadgeRead, ZoneListResponse, ZonePOIPointRead, ZoneRead
 
 __version__ = "0.1.0"
 
@@ -40,6 +40,7 @@ __all__ = [
     "TransportPointRead",
     "ZoneBadgeRead",
     "ZoneCacheStatusRead",
+    "ZonePOIPointRead",
     "ZoneRead",
     "ZoneListResponse",
 ]

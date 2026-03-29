@@ -624,6 +624,7 @@ class ZoneService:
                         z.flood_area_m2,
                         z.safety_incidents_count,
                         z.poi_counts,
+                        z.poi_points,
                         z.badges,
                         z.badges_provisional,
                         z.created_at,
