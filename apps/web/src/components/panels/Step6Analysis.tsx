@@ -29,7 +29,7 @@ import {
   XAxis,
   YAxis
 } from "recharts";
-import { apiActionHint, getJob, getJourneyZonesList, getPriceRollups, getZoneListings } from "../../api/client";
+import { apiActionHint, getJob, getJourneyZonesList, getPriceRollups, getZoneListings, type ListingPlatformVariantRead } from "../../api/client";
 import { ListingsScrapeDiagnosticsSchema, type ListingsScrapeDiagnostics, type ListingsScrapePlatformDiagnostics } from "../../api/schemas";
 import { applyListingsPanelFilters, formatCurrencyBr, getListingDisplayPrice, getListingSelectionKey, parseFiniteNumber, resolvePlatformImageUrl, resolvePlatformUrl } from "../../lib/listingFormat";
 import { useJourneyStore, useUIStore } from "../../state";
@@ -146,6 +146,13 @@ function extractListingsScrapeDiagnostics(resultRef: Record<string, unknown> | n
   return parsed.success ? parsed.data : null;
 }
 
+function formatPlatformVariantHint(variant: ListingPlatformVariantRead, primaryPlatform: string | null | undefined) {
+  if (variant.platform === primaryPlatform) {
+    return "Menor preço consolidado";
+  }
+  return "Também encontrado nesta plataforma";
+}
+
 export function Step6Analysis() {
   const journeyId = useJourneyStore((state) => state.journeyId);
   const zoneFingerprint = useJourneyStore((state) => state.selectedZoneFingerprint);
@@ -163,6 +170,7 @@ export function Step6Analysis() {
   const autoCollapsedProgressRunKeyRef = useRef<string | null>(null);
   const [isProgressCollapsed, setIsProgressCollapsed] = useState(false);
   const [isFiltersCollapsed, setIsFiltersCollapsed] = useState(false);
+  const [openAvailabilityPopoverKey, setOpenAvailabilityPopoverKey] = useState<string | null>(null);
 
   const persistedListingsJobId = listingsJobId;
 
@@ -311,6 +319,14 @@ export function Step6Analysis() {
     setIsProgressCollapsed(true);
     autoCollapsedProgressRunKeyRef.current = progressRunKey;
   }, [hasCompletedListingsGeneration, progressRunKey]);
+
+  function handleAvailabilityPopoverBlur(cardKey: string, event: React.FocusEvent<HTMLDivElement>) {
+    const nextFocused = event.relatedTarget;
+    if (nextFocused instanceof Node && event.currentTarget.contains(nextFocused)) {
+      return;
+    }
+    setOpenAvailabilityPopoverKey((current) => (current === cardKey ? null : current));
+  }
 
   return (
     <div className="flex h-full flex-col bg-slate-50 animate-[fadeInRight_0.5s_ease-out]">
@@ -538,9 +554,12 @@ export function Step6Analysis() {
             ) : null}
             {displayedListings.map((listing, index) => {
               const listingKey = getListingSelectionKey(listing);
+              const cardInstanceKey = listingKey || `${listing.platform || "platform"}:${listing.platform_listing_id || index}`;
               const price = getListingDisplayPrice(listing);
               const adUrl = resolvePlatformUrl(listing.url, listing.platform);
               const imageUrl = resolvePlatformImageUrl(listing.image_url, listing.platform);
+              const platformVariants = listing.platform_variants || [];
+              const hasAvailabilityPopover = Boolean(listing.duplication_badge && platformVariants.length > 1);
               const isSelected = listingKey !== "" && listingKey === selectedListingKey;
               const spatialBadge = !listing.has_coordinates
                 ? {
@@ -626,9 +645,67 @@ export function Step6Analysis() {
                       {spatialBadge.label}
                     </div>
                     {listing.duplication_badge ? (
-                      <div className="mb-3 inline-flex items-center gap-1.5 rounded-md border border-amber-100 bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700">
-                        <AlertTriangle className="h-3 w-3" />
-                        {listing.duplication_badge}
+                      <div
+                        className={`relative mb-3 w-full max-w-full ${openAvailabilityPopoverKey === cardInstanceKey ? "z-20" : ""}`}
+                        onMouseEnter={hasAvailabilityPopover ? () => setOpenAvailabilityPopoverKey(cardInstanceKey) : undefined}
+                        onMouseLeave={hasAvailabilityPopover ? () => setOpenAvailabilityPopoverKey((current) => (current === cardInstanceKey ? null : current)) : undefined}
+                        onFocusCapture={hasAvailabilityPopover ? () => setOpenAvailabilityPopoverKey(cardInstanceKey) : undefined}
+                        onBlurCapture={hasAvailabilityPopover ? (event) => handleAvailabilityPopoverBlur(cardInstanceKey, event) : undefined}
+                      >
+                        <button
+                          type="button"
+                          aria-haspopup={hasAvailabilityPopover ? "dialog" : undefined}
+                          aria-expanded={hasAvailabilityPopover ? openAvailabilityPopoverKey === cardInstanceKey : undefined}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            if (!hasAvailabilityPopover) {
+                              return;
+                            }
+                            setOpenAvailabilityPopoverKey((current) => (current === cardInstanceKey ? null : cardInstanceKey));
+                          }}
+                          onKeyDown={(event) => event.stopPropagation()}
+                          className="inline-flex w-full items-center gap-1.5 rounded-md border border-amber-100 bg-amber-50 px-2.5 py-1 text-left text-xs font-medium text-amber-700 transition-colors hover:bg-amber-100/80"
+                        >
+                          <AlertTriangle className="h-3 w-3 shrink-0" />
+                          <span className="min-w-0 truncate">{listing.duplication_badge}</span>
+                        </button>
+                        {hasAvailabilityPopover && openAvailabilityPopoverKey === cardInstanceKey ? (
+                          <div data-testid={`listing-platform-popover-${cardInstanceKey}`} className="mt-2 animate-[fadeIn_0.18s_ease-out] overflow-hidden rounded-xl border border-amber-200 bg-white shadow-lg">
+                            <div className="border-b border-amber-100 bg-amber-50/60 px-3 py-2">
+                              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-700">Preços por plataforma</p>
+                            </div>
+                            <div className="space-y-1.5 p-2.5">
+                              {platformVariants.map((variant) => {
+                                const variantPrice = getListingDisplayPrice(variant);
+                                const variantUrl = resolvePlatformUrl(variant.url, variant.platform);
+                                return (
+                                  <div key={`${variant.platform || "platform"}:${variant.platform_listing_id || "listing"}`} className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/80 px-2.5 py-2">
+                                    <div className="min-w-0">
+                                      <p className="truncate text-xs font-semibold text-slate-800">{platformLabel(variant.platform)}</p>
+                                      <p className="text-[11px] leading-snug text-slate-500">{formatPlatformVariantHint(variant, listing.platform)}</p>
+                                    </div>
+                                    <p className="text-xs font-semibold text-slate-700">{formatCurrencyBr(variantPrice)}</p>
+                                    {variantUrl ? (
+                                      <a
+                                        href={variantUrl}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        aria-label={`Abrir anúncio na ${platformLabel(variant.platform)}`}
+                                        onClick={(event) => event.stopPropagation()}
+                                        onKeyDown={(event) => event.stopPropagation()}
+                                        className="flex h-8 w-8 items-center justify-center rounded-lg bg-pastel-violet-50 text-pastel-violet-500 transition-colors hover:bg-pastel-violet-100"
+                                      >
+                                        <ExternalLink className="h-3.5 w-3.5" />
+                                      </a>
+                                    ) : (
+                                      <span className="rounded-lg bg-slate-200 px-2 py-1 text-[10px] font-medium text-slate-500">Sem link</span>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ) : null}
                       </div>
                     ) : null}
                     <div className="mt-auto flex gap-2 border-t border-slate-100 pt-3">

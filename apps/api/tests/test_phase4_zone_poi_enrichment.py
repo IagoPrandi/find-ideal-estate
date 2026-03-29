@@ -92,14 +92,13 @@ def test_mapbox_poi_param_formatting_is_stable() -> None:
         lat=-23.520907999999263,
     )
 
-    assert params["q"] == "school"
-    assert params["types"] == "poi"
+    assert params["canonical_category_id"] == "education"
     assert params["bbox"] == "-46.738794,-23.531688,-46.715280,-23.510128"
     assert params["proximity"] == "-46.727037,-23.520908"
 
 
 @pytest.mark.anyio
-async def test_enrich_zone_pois_uses_forward_endpoint_and_counts_features() -> None:
+async def test_enrich_zone_pois_uses_category_endpoint_and_counts_features() -> None:
     zone_id = uuid4()
     zone_row = {
         "zone_fingerprint": "zone-fp-123",
@@ -180,8 +179,8 @@ async def test_enrich_zone_pois_uses_forward_endpoint_and_counts_features() -> N
     }
     assert len(client_get.await_args_list) == 6
     first_call = client_get.await_args_list[0]
-    assert first_call.args[0] == "https://api.mapbox.com/search/searchbox/v1/forward"
-    assert first_call.kwargs["params"]["types"] == "poi"
+    assert first_call.args[0] == "https://api.mapbox.com/search/searchbox/v1/category/education"
+    assert "canonical_category_id" not in first_call.kwargs["params"]
     assert first_call.kwargs["params"]["bbox"] == "-46.736834,-23.529891,-46.717240,-23.511925"
     assert first_call.kwargs["params"]["proximity"] == "-46.727037,-23.520908"
     persist_kwargs = persist_mock.await_args.kwargs

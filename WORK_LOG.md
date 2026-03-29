@@ -1,5 +1,176 @@
 # Work Log
 
+## 2026-03-29 - Tornar `POST /jobs` idempotente para jobs canônicos por jornada
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `skills/best-practices/references/web2-backend.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para corrigir a causa raiz com idempotencia no backend, reforco no banco e teste concorrente focado.
+- Trigger: usuario pediu para tornar `POST /jobs` idempotente por `journey_id + job_type` ativo, eliminando duplicacao de `zone_enrichment` que acabava repetindo fetch de POI.
+- Root cause addressed:
+  - `create_job()` sempre inseria nova linha em `jobs`, sem reaproveitar um job ativo equivalente;
+  - em concorrencia, duas requisicoes quase simultaneas podiam passar antes de qualquer cache/estado posterior reduzir o efeito;
+  - a protecao nao podia ser global para toda a tabela `jobs`, porque `listings_scrape` admite varios jobs ativos por jornada, diferenciados por `zone_fingerprint`.
+- Scope executed:
+  - `apps/api/src/modules/jobs/service.py`:
+    - introduzido `CreateJobResult` com sinalizacao `created`;
+    - `create_job()` passou a reaproveitar job ativo (`pending|running|retrying`) para os tipos canônicos `transport_search`, `zone_generation` e `zone_enrichment`;
+    - em caso de corrida, `IntegrityError` agora reconsulta o job ativo existente e retorna o mesmo registro em vez de criar duplicata;
+    - `enqueue_job()` roda apenas quando o job realmente foi criado.
+  - `apps/api/src/api/routes/jobs.py`:
+    - `POST /jobs` agora responde `201` quando cria e `200` quando reaproveita job ativo existente.
+  - `infra/migrations/versions/20260329_0013_jobs_active_idempotency.py`:
+    - adicionada limpeza explícita de duplicatas ativas pré-existentes para os tipos canônicos;
+    - criado índice único parcial `uq_jobs_active_canonical_type_per_journey` sobre `(journey_id, job_type)` apenas para estados ativos e apenas para `transport_search`, `zone_generation` e `zone_enrichment`.
+  - `apps/api/tests/test_phase1_journeys_jobs_routes.py`:
+    - atualizado teste da rota para o novo contrato de criação;
+    - adicionada cobertura para retorno `200` quando um job ativo é reaproveitado;
+    - adicionada regressao concorrente com `asyncio.gather(...)`, validando que duas chamadas simultaneas para `zone_enrichment` retornam o mesmo job e persistem apenas um ativo.
+- Validation:
+  - `Set-Location "c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal"; $env:DATABASE_URL='postgresql://postgres:postgres@localhost:5432/find_ideal_estate'; C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m alembic upgrade head; C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase1_journeys_jobs_routes.py -q --color=no` -> `9 passed`.
+- Follow-up fix after runtime repro:
+  - o fluxo real no container ainda quebrava no segundo `POST /jobs` com `500`, porque a violacao do indice unico parcial abortava a transacao atual antes da leitura de reaproveitamento;
+  - `apps/api/src/modules/jobs/service.py` foi ajustado para fazer o `INSERT` dentro de `conn.begin_nested()` (savepoint), permitindo capturar `IntegrityError` e consultar o job ativo existente sem deixar a transacao externa inutilizavel.
+- Validation complement:
+  - `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase1_journeys_jobs_routes.py -q --color=no` -> `9 passed` apos o savepoint.
+  - reproducao HTTP real: dois `POST /jobs` seguidos para o mesmo `journey_id + transport_search` retornaram `first=201 second=200`, ambos com o mesmo `job.id`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-29 - Diagnosticar duplicidade aparente nas requisicoes de POI
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para investigacao backend/frontend com foco em causa raiz e baixo risco.
+- Trigger: usuario perguntou por que os logs mostram duas chamadas identicas da Mapbox Search Box Category API para POIs.
+- Root cause identified:
+  - os dois logs com `request_id` diferentes indicam duas execucoes independentes do enrichment, nao um retry interno do `httpx`;
+  - no ambiente local, `apps/api/src/core/config.py` usa `dramatiq_broker = "stub"` por padrao e o `docker-compose.yml` nao sobrescreve isso, entao `zone_enrichment` roda inline no processo HTTP da API e herda o contexto do request que criou o job;
+  - `apps/api/src/modules/jobs/service.py` cria sempre um novo `jobs` row para `zone_enrichment`, sem checar se ja existe outro `queued/running` para a mesma jornada;
+  - `apps/web/src/components/panels/Step4Compare.tsx` dispara `createZoneEnrichmentJob(journeyId)` automaticamente quando detecta zonas legadas com POI incompleto, e esse gatilho usa apenas um `useRef` local como guarda;
+  - `apps/web/src/main.tsx` monta a app em `React.StrictMode`, entao em dev o mount pode ser executado duas vezes e recriar o mesmo backfill antes de o estado local bloquear a segunda chamada;
+  - `apps/api/src/modules/zones/enrichment.py` consulta cache persistido/Redis antes de chamar a Mapbox, mas nao tem lock de inflight; se dois jobs iguais entram juntos, ambos passam pelo cache miss e ambos chamam a Mapbox antes de um deles persistir o resultado.
+- Scope executed:
+  - inspecao dirigida de `apps/api/src/modules/zones/enrichment.py`, `apps/api/src/modules/jobs/service.py`, `apps/api/src/core/config.py`, `apps/web/src/components/panels/Step4Compare.tsx`, `apps/web/src/main.tsx` e `docker-compose.yml`.
+- Validation:
+  - validacao por leitura de codigo e correlacao dos logs; nenhum teste ou alteracao de runtime foi executado nesta rodada.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-29 - Refinar aviso de plataformas para pop-up interno no card
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used:
+  - `skills/develop-frontend/SKILL.md` para ajustar densidade visual e comportamento de hover/click do detalhe de multiplas plataformas no Step 6.
+- Trigger: usuario pediu para reduzir a fonte, trocar de popover para pop-up, manter todo o conteudo dentro do card e impedir que o painel suma ao mover o cursor ate o pop-up para clicar nos links.
+- Scope executed:
+  - `apps/web/src/components/panels/Step6Analysis.tsx`:
+    - o detalhe de plataformas foi movido de um overlay acima do badge para um pop-up interno, abaixo do aviso amarelo e contido dentro do card;
+    - tipografia, espacamentos e botoes do painel foram reduzidos para caber melhor na area do card;
+    - o botao do aviso agora tambem alterna o painel por clique, alem do hover/focus, reduzindo perda de estado durante a interacao com links.
+- Validation:
+  - frontend focado: `Set-Location "c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/apps/web"; $env:CI='1'; .\node_modules\.bin\vitest.cmd run --config vitest.config.ts src/components/panels/Step6Analysis.test.tsx --reporter=dot --no-color` -> `5 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-29 - Mostrar popover de plataformas no aviso amarelo do card de imovel
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used:
+  - `skills/develop-frontend/SKILL.md` para implementar hover disclosure no card de Step 6 sem quebrar a hierarquia visual nem a navegacao.
+- Trigger: usuario pediu que, ao posicionar o cursor sobre o aviso amarelo de disponibilidade em multiplas plataformas, apareca um popover com preco por plataforma e link para o anuncio.
+- Scope executed:
+  - `packages/contracts/contracts/listings.py` e `packages/contracts/contracts/__init__.py`:
+    - adicionado contrato `ListingPlatformVariantRead` e campo `platform_variants` no card de listing.
+  - `apps/api/src/modules/listings/dedup.py`:
+    - query de deduplicacao passou a agregar a melhor variante por plataforma com URL e precos normalizados;
+    - payload de Step 6 agora inclui `platform_variants` ordenado por menor preco.
+  - `apps/web/src/api/schemas.ts` e `apps/web/src/api/client.ts`:
+    - schema/frontend atualizado para aceitar `platform_variants`.
+  - `apps/web/src/components/panels/Step6Analysis.tsx`:
+    - badge amarelo agora abre popover em hover/focus com preco por plataforma e link externo do anuncio;
+    - mantido stopPropagation para nao selecionar o card ao interagir com o popover.
+  - testes:
+    - `apps/api/tests/test_phase5_dedup.py` cobre o novo agregado `platform_variants`.
+    - `apps/web/src/components/panels/Step6Analysis.test.tsx` cobre o hover do badge e os links por plataforma.
+- Validation:
+  - frontend focado: `Set-Location "c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/apps/web"; $env:CI='1'; .\node_modules\.bin\vitest.cmd run --config vitest.config.ts src/components/panels/Step6Analysis.test.tsx --reporter=dot --no-color` -> `5 passed`.
+  - backend focado: `Set-Location "c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal"; C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase5_dedup.py -q --color=no` -> `13 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-29 - Remover cabecalho do bloco de vegetacao na Etapa 1
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used:
+  - `skills/develop-frontend/SKILL.md` para ajuste visual pequeno e localizado na UI do Step 1.
+- Trigger: usuario pediu para remover o titulo e a etiqueta ao lado do titulo no bloco de nivel de vegetacao.
+- Scope executed:
+  - `apps/web/src/components/panels/Step1Config.tsx`:
+    - removidos o titulo `Nível de vegetação` e a badge lateral com o label selecionado;
+    - mantida intacta a grade de botoes de selecao e o comportamento do popover.
+- Validation:
+  - validacao estatica local do arquivo sem erros apos a edicao.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-29 - Corrigir falha de POI que mascarava geracao bem-sucedida de isocrona
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `skills/best-practices/references/web2-backend.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para corrigir a integracao externa pela causa raiz, manter o diff pequeno e validar com pytest focado.
+- Trigger: usuario reportou erro recorrente no log da API (`POI fetch failed ... while loading category school`) e percepcao de que a isocrona nao estava sendo gerada.
+- Root cause identified:
+  - os logs confirmaram que o Valhalla respondeu `200 OK` para `/isochrone`, entao a isocrona era gerada;
+  - a falha real ocorria depois, no enrichment de POIs, com `400 Bad Request` da Mapbox para `GET /search/searchbox/v1/forward?q=school...`;
+  - o backend estava usando `Text Search` (`/forward`) com `q=school` e `types=poi`, enquanto o PRD e o script legado `cods_ok/pois_categoria_raio.py` usam `Category Search` (`/category/{canonical_category_id}`);
+  - a categoria interna `school` nao e um canonical category id valido para o endpoint de categoria e tampouco era uma query robusta para `/forward` nesse fluxo backend.
+- Scope executed:
+  - `apps/api/src/modules/zones/enrichment.py`:
+    - POIs passaram de `Text Search /forward` para `Category Search /category/{canonical_category_id}`;
+    - adicionado mapeamento explicito de categorias do produto para canonical ids Mapbox (`school -> education`, `gym -> fitness_centre`, etc.);
+    - params enviados a Mapbox foram ajustados para o contrato correto do endpoint de categoria;
+    - erro de integracao passou a incluir `mapbox_status`, canonical category e trecho do body para diagnostico futuro sem depender de stack trace bruto.
+  - `apps/api/tests/test_phase4_zone_poi_enrichment.py`:
+    - testes atualizados para validar canonical ids e uso do endpoint `/category/education` no caso de `school`.
+- Validation:
+  - backend focado: `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase4_zone_poi_enrichment.py apps/api/tests/test_phase5_address_suggestions.py -q --color=no` -> `9 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-29 - Unificar busca de enderecos por centro+raio em walk/car
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para aplicar uma mudanca comportamental pequena no backend, preservando o contrato da UI e cobrindo a regressao com pytest focado.
+- Trigger: usuario pediu para migrar a busca de enderecos dos modos `walk` e `car` para a mesma estrategia unificada por centro+raio, em vez da varredura por varios pontos internos da zona.
+- Root cause identified:
+  - o endpoint `GET /journeys/{id}/listings/address-suggest` usava o mesmo pipeline de amostragem espacial para todos os modais;
+  - mesmo quando a zona de `walking`/`car` ja tinha proxy circular equivalente (`centro + radius_m`), o backend ainda gerava grade interna de pontos e fazia fan-out de Tilequery + reverse geocode;
+  - o cache existente de sugestoes (`zone_address_suggestions:v2`) poderia reutilizar resultados antigos gerados pela estrategia de amostragem.
+- Scope executed:
+  - `apps/api/src/modules/listings/address_suggestions.py`:
+    - adicionada normalizacao de modal para distinguir modais diretos (`walking`, `car`);
+    - criado branch de estrategia radial unica para modais diretos, com uma unica chamada Tilequery no centroide da zona usando o raio equivalente e um unico reverse geocode para compor os labels;
+    - mantida a estrategia de amostragem espacial apenas para o fluxo de transporte publico;
+    - cache Redis de sugestoes elevado para `zone_address_suggestions:v3` para invalidar payloads da estrategia anterior.
+  - `apps/api/src/api/routes/listings.py`:
+    - a query da zona passou a expor `z.modal`;
+    - a rota agora repassa `modal` e `proxy_circle["radius_m"]` para o service de sugestoes.
+  - `apps/api/tests/test_phase5_address_suggestions.py`:
+    - branch legado de amostragem passou a ser validado explicitamente como `transit`;
+    - adicionadas regressões parametrizadas para `walking` e `car`, garantindo consulta radial unica, sem gerar grade interna de pontos.
+- Validation:
+  - backend focado: `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase5_address_suggestions.py -q --color=no` -> `6 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
 ## 2026-03-29 - Habilitar modo carro com isocrona unica e skip da etapa de transporte
 
 - Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
@@ -585,6 +756,82 @@
   - backend focado: `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase0_db.py apps/api/tests/test_transport_tile_metadata.py -q` -> `3 passed`.
   - smoke HTTP: `GET /health` -> `200`; `GET /transport/tiles/environment/flood/10/379/581.pbf` -> `200` com `application/vnd.mapbox-vector-tile`.
   - concorrencia: rajada paralela de `20` requests para o tile de flood retornou `200:20`, sem reproduzir a exaustao do pool.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-29 - Corrigir DiskFullError de shared memory nas vector tiles ambientais
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para diagnosticar o erro do terminal da API pela causa raiz e corrigir a infraestrutura local com diff minimo.
+- Trigger: usuario reportou varios erros no terminal da API; os logs do container mostraram `asyncpg.exceptions.DiskFullError: could not resize shared memory segment ... No space left on device` em requests de `/transport/tiles/environment/green/...`.
+- Root cause identified:
+  - o stack trace vinha da API, mas a falha real ocorria no Postgres ao executar queries PostGIS de vector tile;
+  - o container `postgres` do `docker-compose.yml` estava com `/dev/shm` no default do Docker (`64M`), insuficiente para picos de memoria compartilhada dessas queries concorrentes;
+  - a confirmacao foi feita dentro do container com `df -h /dev/shm`, retornando `size=65536k`.
+- Scope executed:
+  - `docker-compose.yml`:
+    - adicionado `shm_size: "1gb"` ao servico `postgres`, alinhando o banco com a carga local de vector tiles ambientais.
+- Validation:
+  - inspecao previa do container confirmou `postgres` ativo e `/dev/shm` limitado a `64M`;
+  - `docker compose up -d --force-recreate postgres api` aplicado com sucesso;
+  - validacao pos-recreate dentro do container: `df -h /dev/shm` retornou `1.0G` para o servico `postgres`;
+  - smoke concorrente: `12` requests para `/transport/tiles/environment/green/10/379/581.pbf` retornaram `200`; `8` requests para `/transport/tiles/environment/flood/10/379/581.pbf` retornaram `200`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-29 - Investigar warning do Valhalla 400 com fallback para circle
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para depuracao de integracao externa com diff minimo e validacao focada.
+- Trigger: usuario pediu para investigar o warning separado `Valhalla unavailable, using circle fallback` que aparecia junto de um `HTTP/1.1 400 Bad Request` no `/isochrone`.
+- Root cause identified:
+  - a chamada basica ao Valhalla local em `http://localhost:8002/isochrone` funciona para pontos em Sao Paulo com `costing=pedestrian` e `costing=auto`;
+  - a jornada mais recente associada ao warning (`0fef436b-af69-42f0-b86b-0798f0c30364`) estava com `modal=walk` e `reference_point` em Belo Horizonte (`lat=-19.919763..., lon=-43.953822...`), fora da cobertura do grafo local do Valhalla;
+  - reproduzindo a mesma chamada diretamente no Valhalla, o servidor retornou `400` com body `{"error":"No suitable edges near location"}`;
+  - o fallback para circulo estava correto; o problema operacional era o adapter esconder o motivo real e registrar apenas `Valhalla communication failed`.
+- Scope executed:
+  - `apps/api/src/modules/transport/valhalla_adapter.py`:
+    - tratamento de `httpx.HTTPStatusError` separado de outros erros HTTP;
+    - mensagens de erro agora preservam `status_code` e detalhe do body JSON/texto do Valhalla, por exemplo `Valhalla request failed with HTTP 400: No suitable edges near location`.
+  - `apps/api/tests/test_phase3_valhalla_adapter.py`:
+    - novo teste de regressao cobrindo `400` em `/isochrone` com preservacao do detalhe de erro.
+- Validation:
+  - reproducao direta no Valhalla local:
+    - ponto BH + `pedestrian` -> `400` com `No suitable edges near location`;
+    - ponto SP + `pedestrian` -> `200`;
+    - ponto SP + `auto` -> `200`.
+  - `pytest.main(['apps/api/tests/test_phase3_valhalla_adapter.py', '-q'])` -> `4 passed`.
+  - reproducao do adapter apos patch -> mensagem `Valhalla request failed with HTTP 400: No suitable edges near location`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-29 - Reduzir lentidao no recarregamento das camadas ambientais
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para diagnosticar a lentidao pela causa raiz e aplicar diff minimo em backend/compose.
+- Trigger: usuario reportou que as camadas voltaram a demorar para recarregar.
+- Root cause identified:
+  - medicao direta mostrou forte assimetria entre as layers ambientais: `/transport/tiles/environment/green/10/379/581.pbf` respondeu `200` em ~`75983 ms` com ~`14.4 MB`, enquanto o tile de flood equivalente voltou em ~`1098 ms` com ~`271 KB`;
+  - o `docker-compose.yml` tambem havia regredido o `postgres.shm_size` para `128mb`, reabrindo margem para degradacao/erros sob carga;
+  - a SQL do tile verde usava simplificacao fixa muito baixa (`0.00005`) mesmo em zoom baixo, produzindo tiles grandes e lentos demais para recarregamento interativo.
+- Scope executed:
+  - `apps/api/src/api/routes/transport.py`:
+    - adicionada funcao `_green_tile_simplify_tolerance(zoom)` com tolerancia mais agressiva em zooms baixos;
+    - tile verde passou a gerar SQL por zoom via `_build_green_tile_sql(z)`.
+    - adicionado corte de zoom minimo (`z < 12` retorna tile vazio) para evitar servir centenas de milhares de geometrias em zoom baixo.
+  - `apps/api/tests/test_phase3_transport_tile_perf.py`:
+    - novos testes cobrindo a escada de tolerancia da tile verde por zoom e o corte de `min zoom`.
+  - `docker-compose.yml`:
+    - restaurado `postgres.shm_size` para `1gb`.
+- Validation:
+  - medicao SQL antes do corte mostrou o gargalo estrutural: `z10` intersecta `313818` geometrias (~`31.6s`, `4.18 MB` mesmo com simplificacao mais forte), `z11` ainda ficou em ~`18.5s`, e `z12` caiu para ~`3.0s` com ~`380 KB`.
+  - decisao operacional: nao servir a layer verde abaixo de `z12`, onde a densidade atual do dataset inviabiliza recarga interativa.
 - Progress Tracker:
   - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
 

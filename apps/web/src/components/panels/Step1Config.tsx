@@ -306,12 +306,6 @@ export function Step1Config() {
                     </div>
                     <div className="col-span-2 -mt-px overflow-hidden rounded-[30px] rounded-tr-none border border-slate-200 bg-slate-100/95 shadow-2xl">
                       <div className="bg-white/95 px-6 py-6 backdrop-blur-sm">
-                        <div className="mb-4 flex items-center justify-between gap-3">
-                          <p className="text-[15px] font-medium text-slate-800">Nível de vegetação</p>
-                          <span className="rounded-full bg-pastel-violet-500 px-3 py-1 text-[11px] font-semibold text-white">
-                            {GREEN_VEGETATION_LABELS[config.greenVegetationLevel]}
-                          </span>
-                        </div>
                         <div className="grid grid-cols-3 gap-3 text-xs font-medium text-slate-500">
                           {GREEN_VEGETATION_LEVELS.map((level) => {
                             const active = config.greenVegetationLevel === level;

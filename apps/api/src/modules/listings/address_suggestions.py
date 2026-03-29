@@ -17,6 +17,7 @@ EARTH_RADIUS_M = 6_378_137.0
 _SUGGESTIONS_CACHE_TTL_SECONDS = 1_800
 _MAPBOX_TILEQUERY_URL = "https://api.mapbox.com/v4/mapbox.mapbox-streets-v8/tilequery/{lon:.6f},{lat:.6f}.json"
 _MAPBOX_REVERSE_URL = "https://api.mapbox.com/geocoding/v5/mapbox.places/{lon:.6f},{lat:.6f}.json"
+_DIRECT_ADDRESS_MODAL_STRATEGY = {"walking", "car"}
 
 
 def _meters_to_lat_deg(meters: float) -> float:
@@ -50,7 +51,16 @@ def _format_street_address(street: str, neighborhood: str, city: str, state: str
 
 def _cache_key(zone_fingerprint: str) -> str:
     digest = hashlib.sha256(zone_fingerprint.encode("utf-8")).hexdigest()[:20]
-    return f"zone_address_suggestions:v2:{digest}"
+    return f"zone_address_suggestions:v3:{digest}"
+
+
+def _normalize_modal(value: str | None) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"walk", "pedestrian"}:
+        return "walking"
+    if normalized in {"drive", "driving", "auto"}:
+        return "car"
+    return normalized
 
 
 def _point_on_segment(px: float, py: float, x1: float, y1: float, x2: float, y2: float) -> bool:
@@ -307,6 +317,62 @@ async def _build_zone_address_suggestions(
     return suggestions
 
 
+async def _build_direct_radius_address_suggestions(
+    *,
+    access_token: str,
+    centroid: tuple[float, float],
+    search_radius_m: float,
+    language_pref: str,
+) -> list[dict[str, Any]]:
+    if search_radius_m <= 0:
+        return []
+
+    center_lon = float(centroid[0])
+    center_lat = float(centroid[1])
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        street_names = await _tilequery_road_names(
+            client,
+            access_token=access_token,
+            lon=center_lon,
+            lat=center_lat,
+            radius_m=search_radius_m,
+            language_pref=language_pref,
+        )
+        if not street_names:
+            return []
+
+        neighborhood, city, state = await _reverse_geocode_context(
+            client,
+            access_token=access_token,
+            lon=center_lon,
+            lat=center_lat,
+            language_pref=language_pref,
+        )
+
+    city_name = city or "Sao Paulo"
+    state_code = state or "SP"
+    suggestions: list[dict[str, Any]] = []
+    seen_labels: set[str] = set()
+    for street_name in sorted(street_names, key=_normalize_text):
+        label = _format_street_address(street_name, neighborhood, city_name, state_code)
+        normalized = _normalize_text(label)
+        if normalized in seen_labels:
+            continue
+        seen_labels.add(normalized)
+        suggestions.append(
+            {
+                "label": label,
+                "normalized": normalized,
+                "location_type": "street",
+                "lat": center_lat,
+                "lon": center_lon,
+            }
+        )
+
+    return suggestions
+
+
 async def get_zone_address_suggestions(
     *,
     access_token: str,
@@ -315,6 +381,8 @@ async def get_zone_address_suggestions(
     bbox: tuple[float, float, float, float],
     centroid: tuple[float, float],
     q: str,
+    modal: str | None = None,
+    search_radius_m: float | None = None,
     step_m: float = 150.0,
     tilequery_radius_m: float = 120.0,
     max_concurrency: int = 8,
@@ -327,17 +395,26 @@ async def get_zone_address_suggestions(
     if cached:
         suggestions = json.loads(cached)
     else:
-        suggestions = await _build_zone_address_suggestions(
-            access_token=access_token,
-            zone_fingerprint=zone_fingerprint,
-            geometry=geometry,
-            bbox=bbox,
-            centroid=centroid,
-            step_m=step_m,
-            tilequery_radius_m=tilequery_radius_m,
-            max_concurrency=max_concurrency,
-            language_pref=language_pref,
-        )
+        normalized_modal = _normalize_modal(modal)
+        if normalized_modal in _DIRECT_ADDRESS_MODAL_STRATEGY and search_radius_m is not None:
+            suggestions = await _build_direct_radius_address_suggestions(
+                access_token=access_token,
+                centroid=centroid,
+                search_radius_m=float(search_radius_m),
+                language_pref=language_pref,
+            )
+        else:
+            suggestions = await _build_zone_address_suggestions(
+                access_token=access_token,
+                zone_fingerprint=zone_fingerprint,
+                geometry=geometry,
+                bbox=bbox,
+                centroid=centroid,
+                step_m=step_m,
+                tilequery_radius_m=tilequery_radius_m,
+                max_concurrency=max_concurrency,
+                language_pref=language_pref,
+            )
         await redis.set(
             cache_key,
             json.dumps(suggestions, ensure_ascii=False),

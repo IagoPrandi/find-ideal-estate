@@ -114,3 +114,28 @@ async def test_phase3_valhalla_isochrone_returns_geojson_payload() -> None:
 
     assert geojson["type"] == "FeatureCollection"
     assert len(geojson["features"]) == 1
+
+
+@pytest.mark.anyio
+async def test_phase3_valhalla_isochrone_http_400_preserves_error_detail() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/isochrone"
+        return httpx.Response(
+            status_code=400,
+            json={
+                "error_code": 171,
+                "error": "No suitable edges near location",
+                "status_code": 400,
+                "status": "Bad Request",
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(base_url="http://valhalla.test", transport=transport) as client:
+        adapter = ValhallaAdapter(base_url="http://valhalla.test", http_client=client)
+        with pytest.raises(ValhallaCommunicationError, match="HTTP 400: No suitable edges near location"):
+            await adapter.isochrone(
+                origin=GeoPoint(lat=-19.919763080281186, lon=-43.9538221025058),
+                costing="pedestrian",
+                contours_minutes=[30],
+            )

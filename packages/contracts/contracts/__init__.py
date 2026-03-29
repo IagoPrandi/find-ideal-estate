@@ -6,6 +6,7 @@ from .journeys import JourneyCreate, JourneyRead, JourneyReferencePoint, Journey
 from .listings import (
     ListingAdRead,
     ListingCardRead,
+    ListingPlatformVariantRead,
     ListingsRequestResult,
     ListingSnapshotRead,
     PriceRollupRead,
@@ -32,6 +33,7 @@ __all__ = [
     "JourneyUpdate",
     "ListingAdRead",
     "ListingCardRead",
+    "ListingPlatformVariantRead",
     "ListingsRequestResult",
     "ListingSnapshotRead",
     "PriceRollupRead",

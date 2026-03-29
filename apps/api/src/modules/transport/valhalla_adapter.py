@@ -100,12 +100,36 @@ class ValhallaAdapter:
             data = response.json()
         except httpx.TimeoutException as exc:
             raise ValhallaCommunicationError("Timed out while calling Valhalla") from exc
+        except httpx.HTTPStatusError as exc:
+            raise ValhallaCommunicationError(self._format_http_error(exc.response)) from exc
         except (httpx.HTTPError, ValueError) as exc:
             raise ValhallaCommunicationError("Valhalla communication failed") from exc
 
         if not isinstance(data, dict):
             raise ValhallaCommunicationError("Valhalla returned invalid JSON payload")
         return data
+
+    @staticmethod
+    def _format_http_error(response: httpx.Response) -> str:
+        detail: str | None = None
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = None
+
+        if isinstance(payload, dict):
+            raw_detail = payload.get("error") or payload.get("message") or payload.get("status")
+            if raw_detail is not None:
+                detail = str(raw_detail).strip()
+
+        if not detail:
+            body_text = response.text.strip()
+            if body_text:
+                detail = body_text[:200]
+
+        if detail:
+            return f"Valhalla request failed with HTTP {response.status_code}: {detail}"
+        return f"Valhalla request failed with HTTP {response.status_code}"
 
     async def _read_cache(self, key: str) -> dict[str, Any] | None:
         if self._redis is None:

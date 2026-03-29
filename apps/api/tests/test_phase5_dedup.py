@@ -295,6 +295,17 @@ async def test_fetch_listing_cards_for_zone_supports_all_spatial_scope() -> None
         assert cards[0]["inside_zone"] is True
         assert cards[0]["has_coordinates"] is True
         assert cards[0]["platforms_available"] == ["quintoandar", "zapimoveis"]
+        assert [variant["platform"] for variant in cards[0]["platform_variants"]] == ["zapimoveis", "quintoandar"]
+        assert cards[0]["platform_variants"][0]["platform_listing_id"] == platform_listing_ids[1]
+        assert cards[0]["platform_variants"][0]["url"] == "https://example.org/zap/dedup"
+        assert cards[0]["platform_variants"][0]["current_best_price"] == "3300.00"
+        assert cards[0]["platform_variants"][0]["condo_fee"] == "450.00"
+        assert cards[0]["platform_variants"][0]["iptu"] == "90.00"
+        assert cards[0]["platform_variants"][1]["platform_listing_id"] == platform_listing_ids[0]
+        assert cards[0]["platform_variants"][1]["url"] == "https://example.org/quintoandar/dedup"
+        assert cards[0]["platform_variants"][1]["current_best_price"] == "3500.00"
+        assert cards[0]["platform_variants"][1]["condo_fee"] == "500.00"
+        assert cards[0]["platform_variants"][1]["iptu"] == "100.00"
         assert str(cards[0]["condo_fee"]) == "450.00"
         assert str(cards[0]["iptu"]) == "90.00"
         assert str(cards[0]["second_best_price"]) == "3500.00"

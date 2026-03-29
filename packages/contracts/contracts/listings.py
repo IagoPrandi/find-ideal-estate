@@ -44,6 +44,16 @@ class ListingSnapshotRead(BaseModel):
     availability_state: str | None = None
 
 
+class ListingPlatformVariantRead(BaseModel):
+    platform: str
+    platform_listing_id: str
+    url: str | None = None
+    current_best_price: Decimal | None = None
+    condo_fee: Decimal | None = None
+    iptu: Decimal | None = None
+    observed_at: datetime | None = None
+
+
 class ListingCardRead(BaseModel):
     """Flattened view for UI listing cards — property + best active ad price."""
     property_id: UUID
@@ -71,6 +81,7 @@ class ListingCardRead(BaseModel):
     url: str | None = None
     image_url: str | None = None
     platforms_available: list[str] = []
+    platform_variants: list[ListingPlatformVariantRead] = []
     observed_at: datetime | None = None
 
 

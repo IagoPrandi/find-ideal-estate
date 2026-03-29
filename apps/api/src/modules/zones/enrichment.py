@@ -25,6 +25,14 @@ from modules.zones.isochrone_proxy import (
 from sqlalchemy import text
 
 _POI_CATEGORIES = ("school", "supermarket", "pharmacy", "park", "restaurant", "gym")
+_POI_CATEGORY_CANONICAL_IDS = {
+    "school": "education",
+    "supermarket": "supermarket",
+    "pharmacy": "pharmacy",
+    "park": "park",
+    "restaurant": "restaurant",
+    "gym": "fitness_centre",
+}
 _POI_CACHE_TTL_SECONDS = 1800
 _POI_FETCH_LIMIT = 15
 
@@ -168,16 +176,21 @@ def _mapbox_poi_params(
     lon: float,
     lat: float,
 ) -> dict[str, str | int]:
+    canonical_category_id = _POI_CATEGORY_CANONICAL_IDS[category]
     return {
-        "q": str(category).strip(),
         "access_token": access_token,
         "language": "pt",
         "country": "BR",
-        "limit": _POI_FETCH_LIMIT,
-        "types": "poi",
+        "limit": min(25, _POI_FETCH_LIMIT),
         "bbox": _format_bbox(bbox),
         "proximity": _format_proximity(lon, lat),
+        "canonical_category_id": canonical_category_id,
     }
+
+
+def _mapbox_poi_url(*, category: str) -> str:
+    canonical_category_id = _POI_CATEGORY_CANONICAL_IDS[category]
+    return f"https://api.mapbox.com/search/searchbox/v1/category/{canonical_category_id}"
 
 
 def _extract_poi_point(feature: dict[str, Any], *, category: str) -> dict[str, Any] | None:
@@ -496,15 +509,17 @@ async def enrich_zone_pois(
                     async with httpx.AsyncClient(timeout=8.0) as client:
                         for category in _POI_CATEGORIES:
                             current_category = category
+                            request_params = _mapbox_poi_params(
+                                category=category,
+                                access_token=settings.mapbox_access_token,
+                                bbox=bbox,
+                                lon=zone_lon,
+                                lat=zone_lat,
+                            )
+                            canonical_category_id = str(request_params.pop("canonical_category_id"))
                             response = await client.get(
-                                "https://api.mapbox.com/search/searchbox/v1/forward",
-                                params=_mapbox_poi_params(
-                                    category=category,
-                                    access_token=settings.mapbox_access_token,
-                                    bbox=bbox,
-                                    lon=zone_lon,
-                                    lat=zone_lat,
-                                ),
+                                _mapbox_poi_url(category=category),
+                                params=request_params,
                             )
                             response.raise_for_status()
                             payload = response.json()
@@ -517,8 +532,16 @@ async def enrich_zone_pois(
                                     poi_entries.append({"point": point, "raw_payload": feature})
                 except Exception as exc:
                     await mark_poi_cache_failed(zone_fingerprint, config_hash)
+                    details = ""
+                    if isinstance(exc, httpx.HTTPStatusError):
+                        body = exc.response.text[:500].replace("\n", " ").strip()
+                        details = (
+                            f" [mapbox_status={exc.response.status_code} canonical_category="
+                            f"{_POI_CATEGORY_CANONICAL_IDS.get(current_category or '', current_category or '')}"
+                            f" body={body}]"
+                        )
                     raise RuntimeError(
-                        f"POI fetch failed for zone {zone_id} while loading category {current_category}"
+                        f"POI fetch failed for zone {zone_id} while loading category {current_category}{details}"
                     ) from exc
 
                 await persist_poi_cache_payload(

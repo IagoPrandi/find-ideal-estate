@@ -91,6 +91,16 @@ export const SearchAddressSuggestionBackendSchema = z.object({
 });
 
 // Backend: POST /journeys/{journey_id}/listings/search
+export const ListingPlatformVariantBackendSchema = z.object({
+  platform: z.string().nullable().optional(),
+  platform_listing_id: z.string().nullable().optional(),
+  url: z.string().nullable().optional(),
+  current_best_price: z.string().nullable().optional(),
+  condo_fee: z.string().nullable().optional(),
+  iptu: z.string().nullable().optional(),
+  observed_at: z.string().nullable().optional()
+}).passthrough();
+
 export const ListingCardReadBackendSchema = z.object({
   // Campos principais retornados pelo listing scraper
   property_id: z.string().nullable().optional(),
@@ -109,6 +119,7 @@ export const ListingCardReadBackendSchema = z.object({
   has_coordinates: z.boolean().optional().default(false),
   inside_zone: z.boolean().optional().default(false),
   platforms_available: z.array(z.string()).optional().default([]),
+  platform_variants: z.array(ListingPlatformVariantBackendSchema).optional().default([]),
 
   // Preços atuais (o scraper pode retornar strings, ex: Decimal -> str)
   current_best_price: z.string().nullable().optional(),

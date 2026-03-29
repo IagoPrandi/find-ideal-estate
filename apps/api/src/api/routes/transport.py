@@ -18,10 +18,21 @@ _METERS_PER_DEGREE = 111_320.0
 _GTFS_STOP_TILE_BUFFER_METERS = 250.0
 _GEOSAMPA_BUS_STOP_MATCH_METERS = 45.0
 _GEOSAMPA_BUS_TERMINAL_MATCH_METERS = 180.0
+_GREEN_TILE_MIN_ZOOM = 12
 
 
 def _meters_to_degree_buffer(meters: float) -> float:
     return meters / _METERS_PER_DEGREE
+
+
+def _green_tile_simplify_tolerance(zoom: int) -> float:
+    if zoom <= 10:
+        return 0.0015
+    if zoom <= 12:
+        return 0.0006
+    if zoom <= 14:
+        return 0.0002
+    return 0.00005
 
 _BUS_DESCRIPTOR_SQL = (
     "COALESCE(NULLIF(gr.route_short_name, ''), gr.route_id)"
@@ -424,7 +435,9 @@ async def _query_transport_stop_detail_rows(conn, stop_id: str, source_kind: str
     return (await conn.execute(text(sql), {"stop_id": stop_id})).mappings().all()
 
 
-_GREEN_TILE_SQL = """
+def _build_green_tile_sql(zoom: int) -> str:
+    simplify_tolerance = _green_tile_simplify_tolerance(zoom)
+    return """
 WITH bounds AS (
     SELECT
         ST_TileEnvelope(:z, :x, :y) AS env_3857,
@@ -435,7 +448,7 @@ WITH bounds AS (
         COALESCE(NULLIF(g.ves_categ, ''), NULLIF(g.ves_bairro, ''), 'Área verde') AS source_name,
         {green_case_sql} AS vegetation_level,
         ST_AsMVTGeom(
-            ST_Transform(ST_SimplifyPreserveTopology(g.geometry, 0.00005), 3857),
+            ST_Transform(ST_SimplifyPreserveTopology(g.geometry, {simplify_tolerance}), 3857),
             env_3857,
             4096,
             256,
@@ -449,7 +462,10 @@ WITH bounds AS (
 SELECT ST_AsMVT(layer_rows, 'green_areas', 4096, 'geom')
 FROM layer_rows
 WHERE geom IS NOT NULL
-""".format(green_case_sql=green_vegetation_case_sql("g.ves_categ"))
+""".format(
+        green_case_sql=green_vegetation_case_sql("g.ves_categ"),
+        simplify_tolerance=simplify_tolerance,
+    )
 
 
 _FLOOD_TILE_SQL = """
@@ -507,8 +523,11 @@ async def get_green_areas_tile(
     x: int = Path(..., ge=0),
     y: int = Path(..., ge=0),
 ) -> Response:
+    if z < _GREEN_TILE_MIN_ZOOM:
+        return Response(content=b"", media_type=MVT_MEDIA_TYPE)
+
     engine = get_engine()
-    tile = await _query_vector_tile(engine, _GREEN_TILE_SQL, {"z": z, "x": x, "y": y}, layer_name="green_areas")
+    tile = await _query_vector_tile(engine, _build_green_tile_sql(z), {"z": z, "x": x, "y": y}, layer_name="green_areas")
     return Response(content=tile, media_type=MVT_MEDIA_TYPE)
 
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from contracts import JobCancelAccepted, JobCreate, JobRead
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
 from modules.jobs.events import job_events_stream
 from modules.jobs.service import create_job, get_job, request_job_cancellation
@@ -12,8 +12,11 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 
 @router.post("", response_model=JobRead, status_code=status.HTTP_201_CREATED)
-async def create_job_endpoint(payload: JobCreate) -> JobRead:
-    return await create_job(payload)
+async def create_job_endpoint(payload: JobCreate, response: Response) -> JobRead:
+    result = await create_job(payload)
+    if not result.created:
+        response.status_code = status.HTTP_200_OK
+    return result.job
 
 
 @router.get("/{job_id}", response_model=JobRead)

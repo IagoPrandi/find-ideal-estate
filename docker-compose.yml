@@ -41,6 +41,7 @@ services:
 
   postgres:
     image: postgis/postgis:16-3.4
+    shm_size: "1gb"
     environment:
       POSTGRES_DB: find_ideal_estate
       POSTGRES_USER: postgres

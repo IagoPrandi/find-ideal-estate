@@ -321,9 +321,8 @@ async def address_suggest(
         M5.7: Combobox suggestions for streets inside the selected zone.
 
         Current pipeline:
-            - sample points inside zone geometry
-            - query Mapbox Tilequery for nearby roads
-            - reverse geocode representative points
+            - `walking`/`car`: single radial Tilequery + reverse geocode on zone centroid
+            - `transit`: sample points inside zone geometry, then Tilequery + reverse geocode
             - return scraper-ready labels in the form:
                 "Rua, Bairro, Cidade-UF"
     """
@@ -334,6 +333,7 @@ async def address_suggest(
                 """
                 SELECT
                     z.fingerprint,
+                    z.modal,
                     ST_AsGeoJSON(z.isochrone_geom) AS isochrone_geom,
                     ST_X(ST_Centroid(z.isochrone_geom)) AS centroid_lon,
                     ST_Y(ST_Centroid(z.isochrone_geom)) AS centroid_lat,
@@ -375,6 +375,8 @@ async def address_suggest(
         geometry=proxy_circle["geometry"],
         bbox=proxy_circle["bbox"],
         centroid=(float(zone["centroid_lon"]), float(zone["centroid_lat"])),
+        modal=str(zone["modal"] or ""),
+        search_radius_m=float(proxy_circle["radius_m"]),
         q=q,
     )
 

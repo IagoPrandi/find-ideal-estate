@@ -88,6 +88,8 @@ async def test_get_zone_address_suggestions_formats_labels_from_tilequery_flow()
             geometry=geometry,
             bbox=(-46.73, -23.525, -46.72, -23.515),
             centroid=(-46.727037, -23.520908),
+            modal="transit",
+            search_radius_m=900.0,
             q="schi",
         )
 
@@ -103,6 +105,78 @@ async def test_get_zone_address_suggestions_formats_labels_from_tilequery_flow()
     redis_mock.get.assert_awaited_once_with(_cache_key("zone-fp-123"))
     redis_mock.set.assert_awaited_once()
     assert redis_mock.set.await_args.args[0] == _cache_key("zone-fp-123")
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("modal", ["walking", "car"])
+async def test_get_zone_address_suggestions_uses_single_radial_lookup_for_direct_modes(modal: str) -> None:
+    redis_mock = AsyncMock()
+    redis_mock.get = AsyncMock(return_value=None)
+    redis_mock.set = AsyncMock(return_value=True)
+    geometry = {
+        "type": "Polygon",
+        "coordinates": [[
+            [-46.730000, -23.525000],
+            [-46.720000, -23.525000],
+            [-46.720000, -23.515000],
+            [-46.730000, -23.515000],
+            [-46.730000, -23.525000],
+        ]],
+    }
+    generate_points_mock = MagicMock(return_value=[(-46.727037, -23.520908)])
+    tilequery_mock = AsyncMock(return_value={"Rua Augusta", "Rua Frei Caneca"})
+    reverse_mock = AsyncMock(return_value=("Consolacao", "Sao Paulo", "SP"))
+
+    with (
+        patch("src.modules.listings.address_suggestions.get_redis", return_value=redis_mock),
+        patch(
+            "src.modules.listings.address_suggestions._generate_points_within_geometry",
+            generate_points_mock,
+        ),
+        patch(
+            "src.modules.listings.address_suggestions._tilequery_road_names",
+            new=tilequery_mock,
+        ),
+        patch(
+            "src.modules.listings.address_suggestions._reverse_geocode_context",
+            new=reverse_mock,
+        ),
+        patch("httpx.AsyncClient") as mock_client_cls,
+    ):
+        mock_client_cls.return_value.__aenter__.return_value = MagicMock()
+        suggestions = await get_zone_address_suggestions(
+            access_token="pk.testtoken123",
+            zone_fingerprint=f"zone-fp-{modal}",
+            geometry=geometry,
+            bbox=(-46.73, -23.525, -46.72, -23.515),
+            centroid=(-46.727037, -23.520908),
+            modal=modal,
+            search_radius_m=1200.0,
+            q="",
+        )
+
+    assert suggestions == [
+        {
+            "label": "Rua Augusta, Consolacao, Sao Paulo, SP",
+            "normalized": "rua augusta, consolacao, sao paulo, sp",
+            "location_type": "street",
+            "lat": -23.520908,
+            "lon": -46.727037,
+        },
+        {
+            "label": "Rua Frei Caneca, Consolacao, Sao Paulo, SP",
+            "normalized": "rua frei caneca, consolacao, sao paulo, sp",
+            "location_type": "street",
+            "lat": -23.520908,
+            "lon": -46.727037,
+        },
+    ]
+    generate_points_mock.assert_not_called()
+    tilequery_mock.assert_awaited_once()
+    assert tilequery_mock.await_args.kwargs["radius_m"] == 1200.0
+    reverse_mock.assert_awaited_once()
+    assert reverse_mock.await_args.kwargs["lon"] == -46.727037
+    assert reverse_mock.await_args.kwargs["lat"] == -23.520908
 
 
 @pytest.mark.anyio
@@ -137,6 +211,8 @@ async def test_get_zone_address_suggestions_filters_cached_combobox_options() ->
             geometry={"type": "Polygon", "coordinates": []},
             bbox=(-46.73, -23.525, -46.72, -23.515),
             centroid=(-46.727037, -23.520908),
+            modal="walking",
+            search_radius_m=1200.0,
             q="carlos",
         )
 

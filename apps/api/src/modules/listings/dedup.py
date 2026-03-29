@@ -193,11 +193,35 @@ async def fetch_listing_cards_for_zone(
     of scraped listings, including items without coordinates.
     """
     engine = get_engine()
+
+    def _serialize_money(raw_value: Any) -> str | None:
+        if raw_value is None:
+            return None
+        decimal_value = raw_value if isinstance(raw_value, Decimal) else Decimal(str(raw_value))
+        return format(decimal_value.quantize(Decimal("0.01")), "f")
+
+    def _serialize_platform_variant(raw_variant: dict[str, Any]) -> dict[str, Any]:
+        observed_at = raw_variant.get("observed_at")
+        if hasattr(observed_at, "isoformat"):
+            observed_at_value = observed_at.isoformat()
+        else:
+            observed_at_value = observed_at
+
+        return {
+            "platform": raw_variant.get("platform"),
+            "platform_listing_id": raw_variant.get("platform_listing_id"),
+            "url": raw_variant.get("url"),
+            "current_best_price": _serialize_money(raw_variant.get("current_best_price")),
+            "condo_fee": _serialize_money(raw_variant.get("condo_fee")),
+            "iptu": _serialize_money(raw_variant.get("iptu")),
+            "observed_at": observed_at_value,
+        }
+
     async with engine.connect() as conn:
         rows = await conn.execute(
             text(
                 """
-                WITH best_prices AS (
+                WITH ranked_prices AS (
                     SELECT
                         la.property_id,
                         la.platform,
@@ -212,7 +236,11 @@ async def fetch_listing_cards_for_zone(
                         ROW_NUMBER() OVER (
                             PARTITION BY la.property_id
                             ORDER BY ls.price ASC NULLS LAST, ls.observed_at DESC
-                        ) AS price_rank
+                        ) AS price_rank,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY la.property_id, la.platform
+                            ORDER BY ls.price ASC NULLS LAST, ls.observed_at DESC
+                        ) AS platform_rank
                     FROM listing_ads la
                     JOIN listing_snapshots ls ON ls.listing_ad_id = la.id
                     WHERE la.is_active = true
@@ -265,23 +293,42 @@ async def fetch_listing_cards_for_zone(
                     bp.observed_at,
                     (
                         SELECT bp2.price
-                        FROM best_prices bp2
+                        FROM ranked_prices bp2
                         WHERE bp2.property_id = zp.property_id
                           AND bp2.price_rank = 2
                         LIMIT 1
                     )                  AS second_best_price,
                     (
-                        SELECT COUNT(DISTINCT bp2.platform)
-                        FROM best_prices bp2
+                        SELECT COUNT(*)
+                        FROM ranked_prices bp2
                         WHERE bp2.property_id = zp.property_id
+                          AND bp2.platform_rank = 1
                     )                  AS platform_count
                     ,(
-                        SELECT ARRAY_AGG(DISTINCT bp2.platform ORDER BY bp2.platform)
-                        FROM best_prices bp2
+                        SELECT ARRAY_AGG(bp2.platform ORDER BY bp2.platform)
+                        FROM ranked_prices bp2
                         WHERE bp2.property_id = zp.property_id
+                          AND bp2.platform_rank = 1
                     )                  AS platforms_available
+                    ,(
+                        SELECT JSONB_AGG(
+                            JSONB_BUILD_OBJECT(
+                                'platform', bp2.platform,
+                                'platform_listing_id', bp2.platform_listing_id,
+                                'url', bp2.url,
+                                'current_best_price', bp2.price,
+                                'condo_fee', bp2.condo_fee,
+                                'iptu', bp2.iptu,
+                                'observed_at', bp2.observed_at
+                            )
+                            ORDER BY bp2.price ASC NULLS LAST, bp2.observed_at DESC, bp2.platform
+                        )
+                        FROM ranked_prices bp2
+                        WHERE bp2.property_id = zp.property_id
+                          AND bp2.platform_rank = 1
+                    )                  AS platform_variants
                 FROM zone_props zp
-                JOIN best_prices bp ON bp.property_id = zp.property_id AND bp.price_rank = 1
+                JOIN ranked_prices bp ON bp.property_id = zp.property_id AND bp.price_rank = 1
                 WHERE (:spatial_scope = 'all' OR zp.inside_zone = true)
                 ORDER BY zp.inside_zone DESC, zp.has_coordinates DESC, bp.price ASC NULLS LAST
                 """
@@ -324,6 +371,10 @@ async def fetch_listing_cards_for_zone(
                     "url": row["url"],
                     "image_url": row["image_url"],
                     "platforms_available": list(row["platforms_available"] or []),
+                    "platform_variants": [
+                        _serialize_platform_variant(variant)
+                        for variant in (row["platform_variants"] or [])
+                    ],
                     "current_best_price": str(best_price) if best_price is not None else None,
                     "condo_fee": str(row["condo_fee"]) if row["condo_fee"] is not None else None,
                     "iptu": str(row["iptu"]) if row["iptu"] is not None else None,

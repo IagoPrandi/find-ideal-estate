@@ -1,7 +1,9 @@
 import os
 import sys
+import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import uuid4
 
 API_ROOT = Path(__file__).resolve().parents[1]
@@ -27,7 +29,11 @@ from contracts import (  # noqa: E402
     JourneyUpdate,
 )
 from fastapi.testclient import TestClient  # noqa: E402
+import pytest  # noqa: E402
+from core.db import get_engine, init_db  # noqa: E402
 from src.main import app  # noqa: E402
+from modules.jobs.service import create_job  # noqa: E402
+from sqlalchemy import text  # noqa: E402
 
 
 def _sample_transport_point(journey_id):
@@ -126,9 +132,12 @@ def test_patch_journey_returns_updated_payload(monkeypatch):
 def test_create_job_returns_pending_job(monkeypatch):
     sample = _sample_job()
 
-    async def _create(payload: JobCreate) -> JobRead:
+    async def _create(payload: JobCreate):
         assert payload.job_type == JobType.TRANSPORT_SEARCH
-        return sample.model_copy(update={"job_type": JobType.TRANSPORT_SEARCH})
+        return SimpleNamespace(
+            job=sample.model_copy(update={"job_type": JobType.TRANSPORT_SEARCH}),
+            created=True,
+        )
 
     monkeypatch.setattr("api.routes.jobs.create_job", _create)
 
@@ -140,6 +149,29 @@ def test_create_job_returns_pending_job(monkeypatch):
 
     assert response.status_code == 201
     assert response.json()["job_type"] == JobType.TRANSPORT_SEARCH.value
+
+
+def test_create_job_returns_existing_active_job_with_200(monkeypatch):
+    sample = _sample_job()
+
+    async def _create(payload: JobCreate):
+        assert payload.job_type == JobType.ZONE_ENRICHMENT
+        return SimpleNamespace(
+            job=sample.model_copy(update={"job_type": JobType.ZONE_ENRICHMENT}),
+            created=False,
+        )
+
+    monkeypatch.setattr("api.routes.jobs.create_job", _create)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/jobs",
+            json={"journey_id": str(sample.journey_id), "job_type": JobType.ZONE_ENRICHMENT.value},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["id"] == str(sample.id)
+    assert response.json()["job_type"] == JobType.ZONE_ENRICHMENT.value
 
 
 def test_cancel_job_returns_accepted(monkeypatch):
@@ -309,3 +341,48 @@ def test_get_price_rollups_returns_lat_lon(monkeypatch):
     assert body[0]["zone_fingerprint"] == "zone-fp-1"
     assert body[0]["lat"] == -23.55
     assert body[0]["lon"] == -46.63
+
+
+@pytest.mark.anyio
+async def test_create_job_reuses_existing_active_job_for_same_journey_and_type(monkeypatch):
+    init_db(os.environ["DATABASE_URL"])
+    engine = get_engine()
+    journey_id = uuid4()
+    enqueued: list[str] = []
+
+    async def _fake_enqueue(job: JobRead) -> None:
+        enqueued.append(str(job.id))
+
+    monkeypatch.setattr("modules.jobs.service.enqueue_job", _fake_enqueue)
+
+    async with engine.begin() as conn:
+        await conn.execute(text("DELETE FROM jobs WHERE journey_id = :journey_id"), {"journey_id": journey_id})
+        await conn.execute(text("DELETE FROM journeys WHERE id = :journey_id"), {"journey_id": journey_id})
+        await conn.execute(text("INSERT INTO journeys (id) VALUES (:journey_id)"), {"journey_id": journey_id})
+
+    try:
+        payload = JobCreate(journey_id=journey_id, job_type=JobType.ZONE_ENRICHMENT)
+        first, second = await asyncio.gather(create_job(payload), create_job(payload))
+
+        assert sorted([first.created, second.created]) == [False, True]
+        assert first.job.id == second.job.id
+        assert enqueued == [str(first.job.id)] or enqueued == [str(second.job.id)]
+
+        async with engine.connect() as conn:
+            count_result = await conn.execute(
+                text(
+                    """
+                    SELECT count(*)
+                    FROM jobs
+                    WHERE journey_id = :journey_id
+                      AND job_type = 'zone_enrichment'
+                      AND state IN ('pending', 'running', 'retrying')
+                    """
+                ),
+                {"journey_id": journey_id},
+            )
+            assert int(count_result.scalar_one()) == 1
+    finally:
+        async with engine.begin() as conn:
+            await conn.execute(text("DELETE FROM jobs WHERE journey_id = :journey_id"), {"journey_id": journey_id})
+            await conn.execute(text("DELETE FROM journeys WHERE id = :journey_id"), {"journey_id": journey_id})

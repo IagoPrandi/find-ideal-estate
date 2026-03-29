@@ -306,6 +306,95 @@ describe("Step6Analysis", () => {
     expect(screen.queryByText(/Endereço sem coordenadas/i)).not.toBeInTheDocument();
   });
 
+  it("shows per-platform prices and ad links when hovering the duplicated availability badge", async () => {
+    vi.mocked(getZoneListings).mockResolvedValue({
+      source: "cache",
+      job_id: null,
+      freshness_status: "fresh",
+      listings: [
+        {
+          property_id: "prop-1",
+          platform: "zapimoveis",
+          platform_listing_id: "zap-1",
+          address_normalized: "Avenida Ana Costa, 100",
+          current_best_price: "4500",
+          condo_fee: null,
+          iptu: null,
+          duplication_badge: "Disponível em 2 plataformas · menor: R$ 4.500",
+          inside_zone: true,
+          has_coordinates: true,
+          lat: -23.967,
+          lon: -46.332,
+          platforms_available: ["quintoandar", "zapimoveis"],
+          platform_variants: [
+            {
+              platform: "zapimoveis",
+              platform_listing_id: "zap-1",
+              url: "/imovel/aluguel-santos-sp-gonzaga/zap-1/",
+              current_best_price: "4500",
+              condo_fee: null,
+              iptu: null,
+              observed_at: "2026-03-29T12:00:00Z"
+            },
+            {
+              platform: "quintoandar",
+              platform_listing_id: "qa-1",
+              url: "https://www.quintoandar.com.br/imovel/qa-1",
+              current_best_price: "4700",
+              condo_fee: "300",
+              iptu: null,
+              observed_at: "2026-03-29T12:05:00Z"
+            }
+          ]
+        }
+      ],
+      total_count: 1,
+      cache_age_hours: 0.1
+    } as never);
+    vi.mocked(getJob).mockResolvedValue({
+      id: "listings-job-1",
+      journey_id: "journey-1",
+      job_type: "listings_scrape",
+      state: "completed",
+      progress_percent: 100,
+      current_stage: "listings_scrape",
+      cancel_requested_at: null,
+      started_at: "2026-03-27T10:00:00Z",
+      finished_at: "2026-03-27T10:03:00Z",
+      worker_id: "worker-1",
+      error_code: null,
+      error_message: null,
+      created_at: "2026-03-27T10:00:00Z",
+      result_ref: {
+        scrape_diagnostics: {
+          status: "complete",
+          summary: {
+            total_scraped: 1,
+            platforms_completed: ["quintoandar", "zapimoveis"],
+            platforms_failed: []
+          },
+          platforms: {}
+        }
+      }
+    } as never);
+
+    renderWithQueryClient();
+
+    const badgeText = await screen.findByText(/Disponível em 2 plataformas/i);
+    const badge = badgeText.closest("button") as HTMLButtonElement | null;
+    expect(badge).not.toBeNull();
+    fireEvent.mouseEnter(badge as HTMLButtonElement);
+
+    const popover = await screen.findByTestId("listing-platform-popover-property:prop-1");
+    expect(within(popover).getByText(/Preços por plataforma/i)).toBeInTheDocument();
+    expect(within(popover).getByText(/^ZapImóveis$/i)).toBeInTheDocument();
+    expect(within(popover).getByText(/^QuintoAndar$/i)).toBeInTheDocument();
+    expect(within(popover).getByText(/R\$\s*4\.500/i)).toBeInTheDocument();
+    expect(within(popover).getByText(/R\$\s*5\.000/i)).toBeInTheDocument();
+    expect(within(popover).getByRole("link", { name: /Abrir anúncio na ZapImóveis/i })).toHaveAttribute("href", "https://www.zapimoveis.com.br/imovel/aluguel-santos-sp-gonzaga/zap-1/");
+    expect(within(popover).getByRole("link", { name: /Abrir anúncio na QuintoAndar/i })).toHaveAttribute("href", "https://www.quintoandar.com.br/imovel/qa-1");
+  });
+
   it("scrolls the matching card into view when the map selects a listing", async () => {
     vi.mocked(getZoneListings).mockResolvedValue({
       source: "cache",

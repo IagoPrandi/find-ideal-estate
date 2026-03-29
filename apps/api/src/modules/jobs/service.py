@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
@@ -12,8 +13,9 @@ from core.db import get_engine
 from dramatiq.brokers.stub import StubBroker
 from sqlalchemy import text
 from sqlalchemy.engine import RowMapping
+from sqlalchemy.exc import IntegrityError
 
-_JOB_SELECT = """
+_JOB_SELECT_COLUMNS = """
 SELECT
     id,
     journey_id,
@@ -29,9 +31,37 @@ SELECT
     error_code,
     error_message,
     created_at
+"""
+
+_JOB_SELECT = f"""
+{_JOB_SELECT_COLUMNS}
 FROM jobs
 WHERE id = :job_id
 """
+
+_ACTIVE_JOB_SELECT = f"""
+{_JOB_SELECT_COLUMNS}
+FROM jobs
+WHERE journey_id = :journey_id
+  AND job_type = :job_type
+  AND state IN ('pending', 'running', 'retrying')
+ORDER BY created_at DESC, id DESC
+LIMIT 1
+"""
+
+_IDEMPOTENT_ACTIVE_JOB_TYPES = frozenset(
+    {
+        JobType.TRANSPORT_SEARCH.value,
+        JobType.ZONE_GENERATION.value,
+        JobType.ZONE_ENRICHMENT.value,
+    }
+)
+
+
+@dataclass(frozen=True)
+class CreateJobResult:
+    job: JobRead
+    created: bool
 
 
 def _row_to_job(row: RowMapping) -> JobRead:
@@ -53,6 +83,11 @@ def _row_to_job(row: RowMapping) -> JobRead:
     )
 
 
+def _supports_active_job_idempotency(job_type: JobType | str) -> bool:
+    value = job_type.value if hasattr(job_type, "value") else str(job_type)
+    return value in _IDEMPOTENT_ACTIVE_JOB_TYPES
+
+
 async def get_job(job_id: UUID) -> JobRead | None:
     engine = get_engine()
     async with engine.connect() as conn:
@@ -63,30 +98,62 @@ async def get_job(job_id: UUID) -> JobRead | None:
     return _row_to_job(row)
 
 
-async def create_job(payload: JobCreate) -> JobRead:
+async def create_job(payload: JobCreate) -> CreateJobResult:
     engine = get_engine()
+    job_type = payload.job_type.value
+    created = False
+    job_row: RowMapping | None = None
+
     async with engine.begin() as conn:
-        result = await conn.execute(
-            text(
-                """
-                INSERT INTO jobs (journey_id, job_type, current_stage, result_ref)
-                VALUES (:journey_id, :job_type, :current_stage, CAST(:result_ref AS JSONB))
-                RETURNING id
-                """
-            ),
-            {
-                "journey_id": payload.journey_id,
-                "job_type": payload.job_type.value,
-                "current_stage": payload.current_stage,
-                "result_ref": json.dumps({}),
-            },
-        )
-        job_id = result.scalar_one()
-    job = await get_job(job_id)
-    if job is None:
+        if _supports_active_job_idempotency(job_type):
+            existing = await conn.execute(
+                text(_ACTIVE_JOB_SELECT),
+                {"journey_id": payload.journey_id, "job_type": job_type},
+            )
+            job_row = existing.mappings().first()
+
+        if job_row is None:
+            try:
+                async with conn.begin_nested():
+                    result = await conn.execute(
+                        text(
+                            """
+                            INSERT INTO jobs (journey_id, job_type, current_stage, result_ref)
+                            VALUES (:journey_id, :job_type, :current_stage, CAST(:result_ref AS JSONB))
+                            RETURNING id
+                            """
+                        ),
+                        {
+                            "journey_id": payload.journey_id,
+                            "job_type": job_type,
+                            "current_stage": payload.current_stage,
+                            "result_ref": json.dumps({}),
+                        },
+                    )
+                    job_id = result.scalar_one()
+                created = True
+            except IntegrityError:
+                if not _supports_active_job_idempotency(job_type):
+                    raise
+                existing = await conn.execute(
+                    text(_ACTIVE_JOB_SELECT),
+                    {"journey_id": payload.journey_id, "job_type": job_type},
+                )
+                job_row = existing.mappings().first()
+                if job_row is None:
+                    raise
+
+        if created:
+            inserted = await conn.execute(text(_JOB_SELECT), {"job_id": job_id})
+            job_row = inserted.mappings().first()
+
+    if job_row is None:
         raise RuntimeError("Job creation did not persist")
-    await enqueue_job(job)
-    return job
+
+    job = _row_to_job(job_row)
+    if created:
+        await enqueue_job(job)
+    return CreateJobResult(job=job, created=created)
 
 
 def _uses_stub_broker() -> bool:

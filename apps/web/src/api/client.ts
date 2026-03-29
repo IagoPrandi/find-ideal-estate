@@ -26,6 +26,7 @@ import {
   ZonesCollectionSchema,
   JourneyZonesListResponseSchema,
   SearchAddressSuggestionBackendSchema,
+  ListingPlatformVariantBackendSchema,
   ListingCardReadBackendSchema,
   ListingsRequestResultBackendSchema
 } from "./schemas";
@@ -230,6 +231,7 @@ export async function getZoneAddressSuggestions(
 }
 
 export type ListingsScrapePlanResponse = z.output<typeof ListingsScrapePlanResponseSchema>;
+export type ListingPlatformVariantRead = z.output<typeof ListingPlatformVariantBackendSchema>;
 export async function getListingsScrapePlan(
   journeyId: string,
   searchType: string,
