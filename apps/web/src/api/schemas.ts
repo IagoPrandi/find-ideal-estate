@@ -53,6 +53,8 @@ export const JourneyZoneReadSchema = z.object({
   walk_distance_meters: z.number().nullable().optional(),
   isochrone_geom: z.any(),
   green_area_m2: z.number().nullable().optional(),
+  green_vegetation_level: z.string().nullable().optional(),
+  green_vegetation_label: z.string().nullable().optional(),
   flood_area_m2: z.number().nullable().optional(),
   safety_incidents_count: z.number().nullable().optional(),
   poi_counts: z.record(z.number()).nullable().optional(),
@@ -301,6 +303,12 @@ export const TransportPointReadSchema = z.object({
   created_at: z.string()
 });
 
+export const TransportBusDetailResponseSchema = z.object({
+  count: z.number(),
+  buses: z.array(z.string()).default([]),
+  source: z.string()
+});
+
 export const JourneyReadSchema = z.object({
   id: z.string(),
   user_id: z.string().nullish(),
@@ -493,6 +501,12 @@ export type TransportLayersResponse = {
 };
 
 export type TransportStopsResponse = GeoJSON.FeatureCollection;
+
+export type TransportBusDetailResponse = {
+  count: number;
+  buses: string[];
+  source: string;
+};
 
 export type TransportPointRead = {
   id: string;

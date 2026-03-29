@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { Layers } from "lucide-react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { API_BASE, getJourneyTransportPoints, getJourneyZonesList, getZoneListings } from "../../api/client";
+import { API_BASE, getBusLineDetails, getBusStopDetails, getJourneyTransportPoints, getJourneyZonesList, getTransportStopDetails, getZoneListings } from "../../api/client";
 import { WizardPanel } from "../../components/panels";
 import { applyListingsPanelFilters, getListingDisplayPrice, getListingSelectionKey } from "../../lib/listingFormat";
-import { useJourneyStore, useUIStore } from "../../state";
+import { getIncludedGreenVegetationLevels, useJourneyStore, useUIStore } from "../../state";
 
 const MAPTILER_KEY =
   import.meta.env.VITE_MAPTILER_API_KEY || (import.meta.env.MODE === "test" ? "test-maptiler-key" : "");
@@ -19,6 +20,112 @@ const BUS_LAYER_LIST = ["bus-line-layer", "bus-stop-layer", "bus-terminal-layer"
 const TRANSPORT_CANDIDATES_SOURCE_ID = "transport-candidates-source-runtime";
 const ZONES_SOURCE_ID = "journey-zones-source-runtime";
 const LISTINGS_SOURCE_ID = "journey-listings-source-runtime";
+const LAYER_TOGGLE_BUTTON_CLASS = "pointer-events-auto flex h-8 w-8 items-center justify-center rounded-lg border border-slate-100 bg-white/95 text-slate-500 shadow-md backdrop-blur-md transition-colors hover:bg-pastel-violet-50 hover:text-pastel-violet-600";
+
+type MapOverlayLayerKey =
+  | "routes"
+  | "metro"
+  | "train"
+  | "busStops"
+  | "transportCandidates"
+  | "zones"
+  | "listings"
+  | "flood"
+  | "green";
+
+type SequentialLayerGroupKey = "transportPoints" | "transportLines" | "green" | "flood";
+
+type SequentialLayerSettings = {
+  layerVisibility: Record<MapOverlayLayerKey, boolean>;
+  greenEnabled: boolean;
+};
+
+const DEFAULT_LAYER_VISIBILITY: Record<MapOverlayLayerKey, boolean> = {
+  routes: true,
+  metro: true,
+  train: true,
+  busStops: true,
+  transportCandidates: true,
+  zones: true,
+  listings: true,
+  flood: true,
+  green: true,
+};
+
+const MAP_LAYER_MENU_ITEMS: Array<{ key: MapOverlayLayerKey; label: string }> = [
+  { key: "routes", label: "Rotas de ônibus" },
+  { key: "metro", label: "Linhas de metrô" },
+  { key: "train", label: "Linhas de trem" },
+  { key: "busStops", label: "Paradas e terminais" },
+  { key: "transportCandidates", label: "Pontos etapa 2" },
+  { key: "zones", label: "Zonas" },
+  { key: "listings", label: "Imóveis" },
+  { key: "flood", label: "Alagamento" },
+  { key: "green", label: "Área verde" },
+];
+
+const SEQUENTIAL_LAYER_GROUPS: Array<{ key: SequentialLayerGroupKey; sourceId: string }> = [
+  { key: "transportPoints", sourceId: "transport-stops-source" },
+  { key: "transportLines", sourceId: "transport-lines-source" },
+  { key: "green", sourceId: "green-areas-source" },
+  { key: "flood", sourceId: "flood-areas-source" },
+];
+
+const getSequentialLayerGroupEnabled = (groupKey: SequentialLayerGroupKey, settings: SequentialLayerSettings) => {
+  switch (groupKey) {
+    case "transportPoints":
+      return settings.layerVisibility.busStops || settings.layerVisibility.metro || settings.layerVisibility.train;
+    case "transportLines":
+      return settings.layerVisibility.routes || settings.layerVisibility.metro || settings.layerVisibility.train;
+    case "green":
+      return settings.layerVisibility.green && settings.greenEnabled;
+    case "flood":
+      return settings.layerVisibility.flood;
+  }
+};
+
+const getFirstEnabledSequentialLayerGroupIndex = (settings: SequentialLayerSettings) => {
+  return SEQUENTIAL_LAYER_GROUPS.findIndex((group) => getSequentialLayerGroupEnabled(group.key, settings));
+};
+
+const getNextEnabledSequentialLayerGroupIndex = (settings: SequentialLayerSettings, startIndex: number) => {
+  for (let index = startIndex; index < SEQUENTIAL_LAYER_GROUPS.length; index += 1) {
+    if (getSequentialLayerGroupEnabled(SEQUENTIAL_LAYER_GROUPS[index].key, settings)) {
+      return index;
+    }
+  }
+  return -1;
+};
+
+const resolveVisibleSequentialLayerGroupIndex = (map: maplibregl.Map, settings: SequentialLayerSettings) => {
+  let currentIndex = getFirstEnabledSequentialLayerGroupIndex(settings);
+  if (currentIndex === -1) {
+    return -1;
+  }
+
+  while (currentIndex !== -1) {
+    const currentGroup = SEQUENTIAL_LAYER_GROUPS[currentIndex];
+    if (!map.isSourceLoaded(currentGroup.sourceId)) {
+      return currentIndex;
+    }
+
+    const nextIndex = getNextEnabledSequentialLayerGroupIndex(settings, currentIndex + 1);
+    if (nextIndex === -1) {
+      return currentIndex;
+    }
+    currentIndex = nextIndex;
+  }
+
+  return -1;
+};
+
+const isSequentialLayerGroupVisible = (groupKey: SequentialLayerGroupKey, visibleGroupIndex: number, settings: SequentialLayerSettings) => {
+  const groupIndex = SEQUENTIAL_LAYER_GROUPS.findIndex((group) => group.key === groupKey);
+  if (groupIndex === -1) {
+    return false;
+  }
+  return getSequentialLayerGroupEnabled(groupKey, settings) && visibleGroupIndex >= groupIndex;
+};
 
 const EMPTY_FEATURE_COLLECTION: GeoJSON.FeatureCollection<GeoJSON.Geometry> = {
   type: "FeatureCollection",
@@ -32,7 +139,10 @@ const setGeoJsonSourceData = (map: maplibregl.Map, sourceId: string, data: GeoJS
   }
 };
 
-const toTransportCandidatesFeatureCollection = (points: Array<{ id: string; lon: number; lat: number; name?: string | null; route_count: number }>, selectedTransportId: string | null): GeoJSON.FeatureCollection => ({
+const toTransportCandidatesFeatureCollection = (
+  points: Array<{ id: string; lon: number; lat: number; name?: string | null; route_count: number; source: string; external_id?: string | null }>,
+  selectedTransportId: string | null
+): GeoJSON.FeatureCollection => ({
   type: "FeatureCollection",
   features: points.map((point) => ({
     type: "Feature",
@@ -44,6 +154,8 @@ const toTransportCandidatesFeatureCollection = (points: Array<{ id: string; lon:
       id: point.id,
       name: point.name || "Ponto de transporte",
       route_count: point.route_count,
+      source: point.source,
+      external_id: point.external_id || "",
       selected: point.id === selectedTransportId
     }
   }))
@@ -163,12 +275,24 @@ const parseBusList = (rawValue: unknown) => {
   return items;
 };
 
+const hasInlineBusDetails = (properties: Record<string, unknown> | undefined) => {
+  if (!properties) {
+    return false;
+  }
+  const buses = parseBusList(properties.bus_list);
+  if (buses.length > 0) {
+    return true;
+  }
+  const reportedCount = Number(properties.bus_count);
+  return Number.isFinite(reportedCount) && reportedCount > 0;
+};
+
 const popupContent = (title: string, name: string, busCountLabel: string, buses: string[]) => {
   const listItems = buses.map((bus) => `<li style="margin-bottom:4px;">${escapeHtml(bus)}</li>`).join("");
   const listSection =
     buses.length > 0
       ? `<ul style="margin:0; padding-left:16px; max-height:140px; overflow:auto; font-size:12px; color:#334155;">${listItems}</ul>`
-      : '<p style="margin:0; font-size:12px; color:#64748b;">Dados de linhas e sentido indisponíveis para esta feição.</p>';
+      : '<p style="margin:0; font-size:12px; color:#64748b;">Dados de linhas indisponíveis para esta feição.</p>';
   return `
     <div style="font-family: system-ui, -apple-system, Segoe UI, sans-serif; min-width: 220px;">
       <p style="margin:0 0 4px; font-size:11px; letter-spacing:0.06em; text-transform:uppercase; color:#64748b;">${escapeHtml(title)}</p>
@@ -181,13 +305,26 @@ const popupContent = (title: string, name: string, busCountLabel: string, buses:
   `;
 };
 
+const popupLoadingContent = (title: string, name: string) => `
+  <div style="font-family: system-ui, -apple-system, Segoe UI, sans-serif; min-width: 220px;">
+    <p style="margin:0 0 4px; font-size:11px; letter-spacing:0.06em; text-transform:uppercase; color:#64748b;">${escapeHtml(title)}</p>
+    <p style="margin:0 0 10px; font-size:13px; font-weight:700; color:#0f172a;">${escapeHtml(name)}</p>
+    <p style="margin:0; font-size:12px; color:#64748b;">Carregando linhas identificadas...</p>
+  </div>
+`;
+
 export function FindIdealApp() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
+  const layerMenuRef = useRef<HTMLDivElement | null>(null);
+  const layerMenuButtonRef = useRef<HTMLButtonElement | null>(null);
   const busPopupRef = useRef<maplibregl.Popup | null>(null);
   const pickedMarkerRef = useRef<maplibregl.Marker | null>(null);
   const [isMapReady, setIsMapReady] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
+  const [isLayerMenuOpen, setIsLayerMenuOpen] = useState(false);
+  const [layerVisibility, setLayerVisibility] = useState<Record<MapOverlayLayerKey, boolean>>(DEFAULT_LAYER_VISIBILITY);
+  const [visibleSequentialLayerGroupIndex, setVisibleSequentialLayerGroupIndex] = useState(-1);
   const step = useUIStore((state) => state.step);
   const pickedCoord = useJourneyStore((state) => state.pickedCoord);
   const setPickedCoord = useJourneyStore((state) => state.setPickedCoord);
@@ -202,18 +339,66 @@ export function FindIdealApp() {
   const setSelectedListingKey = useJourneyStore((state) => state.setSelectedListingKey);
   const setSelectedZone = useJourneyStore((state) => state.setSelectedZone);
   const stepRef = useRef(step);
-  const layerVisibility = {
-    routes: true,
-    metro: true,
-    train: true,
-    busStops: true,
-    flood: true,
-    green: true,
-  };
+  const sequentialLayerSettingsRef = useRef<SequentialLayerSettings>({
+    layerVisibility: DEFAULT_LAYER_VISIBILITY,
+    greenEnabled: config.enrichments.green,
+  });
+
+  function toggleLayerVisibility(key: MapOverlayLayerKey) {
+    setLayerVisibility((current) => ({
+      ...current,
+      [key]: !current[key]
+    }));
+  }
 
   useEffect(() => {
     stepRef.current = step;
   }, [step]);
+
+  useEffect(() => {
+    sequentialLayerSettingsRef.current = {
+      layerVisibility,
+      greenEnabled: config.enrichments.green,
+    };
+
+    const map = mapRef.current;
+    if (!map || !isMapReady) {
+      return;
+    }
+
+    setVisibleSequentialLayerGroupIndex(resolveVisibleSequentialLayerGroupIndex(map, sequentialLayerSettingsRef.current));
+  }, [config.enrichments.green, isMapReady, layerVisibility]);
+
+  useEffect(() => {
+    if (!isLayerMenuOpen) {
+      return;
+    }
+
+    function handlePointerDown(event: MouseEvent) {
+      const target = event.target as Node | null;
+      if (!target) {
+        setIsLayerMenuOpen(false);
+        return;
+      }
+      if (layerMenuRef.current?.contains(target) || layerMenuButtonRef.current?.contains(target)) {
+        return;
+      }
+      setIsLayerMenuOpen(false);
+    }
+
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setIsLayerMenuOpen(false);
+      }
+    }
+
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleEscape);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleEscape);
+    };
+  }, [isLayerMenuOpen]);
 
   const listingsQuery = useQuery({
     queryKey: ["zone-listings", journeyId, selectedZoneFingerprint, config.type, "all"],
@@ -257,6 +442,10 @@ export function FindIdealApp() {
     mapRef.current = map;
 
     map.on("load", () => {
+      const syncSequentialLayerLoadSequence = () => {
+        setVisibleSequentialLayerGroupIndex(resolveVisibleSequentialLayerGroupIndex(map, sequentialLayerSettingsRef.current));
+      };
+
       if (!map.hasImage("bus-stop-icon")) {
         map.addImage("bus-stop-icon", createBusIcon("#845ef7"));
       }
@@ -514,25 +703,31 @@ export function FindIdealApp() {
         },
       });
 
-      const openBusPopup = (
+      const openBusPopup = async (
         title: string,
         event: maplibregl.MapLayerMouseEvent,
-        fallbackName: string
+        fallbackName: string,
+        options?: {
+          fallbackCount?: number;
+          detailLoader?: () => Promise<{ count: number; buses: string[] }>;
+        }
       ) => {
         const feature = event.features?.[0];
         if (!feature?.properties) return;
         const props = feature.properties as Record<string, unknown>;
         const featureName = typeof props.name === "string" && props.name.trim() ? props.name.trim() : fallbackName;
-        const buses = parseBusList(props.bus_list);
+        let buses = parseBusList(props.bus_list);
         const reportedCount = Number(props.bus_count);
-        const busCount = Number.isFinite(reportedCount) && reportedCount > 0 ? reportedCount : buses.length;
-        const busCountLabel = busCount > 0 ? String(busCount) : "n/d";
+        let busCount = Number.isFinite(reportedCount) && reportedCount > 0 ? reportedCount : buses.length;
+        if (typeof options?.fallbackCount === "number" && options.fallbackCount > 0) {
+          busCount = Math.max(busCount, options.fallbackCount);
+        }
 
         busPopupRef.current?.remove();
 
         const popup = new maplibregl.Popup({ closeButton: true, closeOnClick: false, maxWidth: "340px" })
           .setLngLat(event.lngLat)
-          .setHTML(popupContent(title, featureName, busCountLabel, buses))
+          .setHTML(options?.detailLoader ? popupLoadingContent(title, featureName) : popupContent(title, featureName, busCount > 0 ? String(busCount) : "n/d", buses))
           .addTo(map);
 
         busPopupRef.current = popup;
@@ -541,18 +736,74 @@ export function FindIdealApp() {
             busPopupRef.current = null;
           }
         });
+
+        if (!options?.detailLoader) {
+          return;
+        }
+
+        try {
+          const details = await options.detailLoader();
+          buses = details.buses;
+          if (details.count > 0) {
+            busCount = details.count;
+          } else if (buses.length > 0) {
+            busCount = buses.length;
+          }
+        } catch {
+          // Keep the tile fallback when details are unavailable.
+        }
+
+        if (busPopupRef.current !== popup) {
+          return;
+        }
+
+        popup.setHTML(popupContent(title, featureName, busCount > 0 ? String(busCount) : "n/d", buses));
       };
 
       map.on("click", "bus-line-layer", (event) => {
-        openBusPopup("Linha de ônibus", event, "Linha de ônibus");
+        const properties = event.features?.[0]?.properties as Record<string, unknown> | undefined;
+        const lineId = properties?.id;
+        const sourceKind = properties?.source_kind;
+        void openBusPopup("Linha de ônibus", event, "Linha de ônibus", {
+          detailLoader:
+            !hasInlineBusDetails(properties) &&
+            typeof sourceKind === "string" &&
+            sourceKind === "gtfs_shape" &&
+            typeof lineId === "string" &&
+            lineId.trim()
+              ? () => getBusLineDetails(lineId)
+              : undefined
+        });
       });
 
       map.on("click", "bus-stop-layer", (event) => {
-        openBusPopup("Ponto de ônibus", event, "Ponto de ônibus");
+        const properties = event.features?.[0]?.properties as Record<string, unknown> | undefined;
+        const stopId = properties?.id;
+        const sourceKind = properties?.source_kind;
+        void openBusPopup("Ponto de ônibus", event, "Ponto de ônibus", {
+          detailLoader:
+            !hasInlineBusDetails(properties) &&
+            typeof sourceKind === "string" &&
+            typeof stopId === "string" &&
+            stopId.trim()
+              ? () => getTransportStopDetails(stopId, sourceKind)
+              : undefined
+        });
       });
 
       map.on("click", "bus-terminal-layer", (event) => {
-        openBusPopup("Terminal de ônibus", event, "Terminal de ônibus");
+        const properties = event.features?.[0]?.properties as Record<string, unknown> | undefined;
+        const stopId = properties?.id;
+        const sourceKind = properties?.source_kind;
+        void openBusPopup("Terminal de ônibus", event, "Terminal de ônibus", {
+          detailLoader:
+            !hasInlineBusDetails(properties) &&
+            typeof sourceKind === "string" &&
+            typeof stopId === "string" &&
+            stopId.trim()
+              ? () => getTransportStopDetails(stopId, sourceKind)
+              : undefined
+        });
       });
 
       map.on("click", "transport-candidate-layer", (event) => {
@@ -560,6 +811,17 @@ export function FindIdealApp() {
         const transportId = feature?.properties?.id;
         if (typeof transportId === "string") {
           setSelectedTransportId(transportId);
+        }
+
+        const props = feature?.properties as Record<string, unknown> | undefined;
+        const externalId = props?.external_id;
+        const source = props?.source;
+        const routeCount = Number(props?.route_count);
+        if (typeof source === "string" && source === "gtfs_stop" && typeof externalId === "string" && externalId.trim()) {
+          void openBusPopup("Ponto de ônibus", event, "Ponto de ônibus", {
+            fallbackCount: Number.isFinite(routeCount) ? routeCount : undefined,
+            detailLoader: () => getBusStopDetails(externalId)
+          });
         }
       });
 
@@ -622,6 +884,22 @@ export function FindIdealApp() {
           map.getCanvas().style.cursor = stepRef.current === 1 ? "crosshair" : "";
         });
       }
+
+      map.on("moveend", syncSequentialLayerLoadSequence);
+      map.on("sourcedata", (event) => {
+        if (event.dataType !== "source" || typeof event.sourceId !== "string") {
+          return;
+        }
+
+        const isSequentialSource = SEQUENTIAL_LAYER_GROUPS.some((group) => group.sourceId === event.sourceId);
+        if (!isSequentialSource || !map.isSourceLoaded(event.sourceId)) {
+          return;
+        }
+
+        syncSequentialLayerLoadSequence();
+      });
+
+      syncSequentialLayerLoadSequence();
 
       setIsMapReady(true);
     });
@@ -784,17 +1062,32 @@ export function FindIdealApp() {
     const map = mapRef.current;
     if (!map || !isMapReady) return;
 
-    map.setLayoutProperty("bus-line-layer", "visibility", layerVisibility.routes ? "visible" : "none");
-    map.setLayoutProperty("bus-line-direction-layer", "visibility", layerVisibility.routes ? "visible" : "none");
-    map.setLayoutProperty("metro-line-layer", "visibility", layerVisibility.metro ? "visible" : "none");
-    map.setLayoutProperty("train-line-layer", "visibility", layerVisibility.train ? "visible" : "none");
-    map.setLayoutProperty("bus-stop-layer", "visibility", layerVisibility.busStops ? "visible" : "none");
-    map.setLayoutProperty("bus-terminal-layer", "visibility", layerVisibility.busStops ? "visible" : "none");
-    map.setLayoutProperty("metro-station-layer", "visibility", layerVisibility.metro ? "visible" : "none");
-    map.setLayoutProperty("train-station-layer", "visibility", layerVisibility.train ? "visible" : "none");
-    map.setLayoutProperty("flood-layer", "visibility", layerVisibility.flood ? "visible" : "none");
-    map.setLayoutProperty("green-layer", "visibility", layerVisibility.green ? "visible" : "none");
-  }, [isMapReady, layerVisibility]);
+    const sequentialLayerSettings: SequentialLayerSettings = {
+      layerVisibility,
+      greenEnabled: config.enrichments.green,
+    };
+    const transportPointsVisible = isSequentialLayerGroupVisible("transportPoints", visibleSequentialLayerGroupIndex, sequentialLayerSettings);
+    const transportLinesVisible = isSequentialLayerGroupVisible("transportLines", visibleSequentialLayerGroupIndex, sequentialLayerSettings);
+    const greenVisible = isSequentialLayerGroupVisible("green", visibleSequentialLayerGroupIndex, sequentialLayerSettings);
+    const floodVisible = isSequentialLayerGroupVisible("flood", visibleSequentialLayerGroupIndex, sequentialLayerSettings);
+
+    map.setLayoutProperty("bus-line-layer", "visibility", transportLinesVisible && layerVisibility.routes ? "visible" : "none");
+    map.setLayoutProperty("bus-line-direction-layer", "visibility", transportLinesVisible && layerVisibility.routes ? "visible" : "none");
+    map.setLayoutProperty("metro-line-layer", "visibility", transportLinesVisible && layerVisibility.metro ? "visible" : "none");
+    map.setLayoutProperty("train-line-layer", "visibility", transportLinesVisible && layerVisibility.train ? "visible" : "none");
+    map.setLayoutProperty("bus-stop-layer", "visibility", transportPointsVisible && layerVisibility.busStops ? "visible" : "none");
+    map.setLayoutProperty("bus-terminal-layer", "visibility", transportPointsVisible && layerVisibility.busStops ? "visible" : "none");
+    map.setLayoutProperty("metro-station-layer", "visibility", transportPointsVisible && layerVisibility.metro ? "visible" : "none");
+    map.setLayoutProperty("train-station-layer", "visibility", transportPointsVisible && layerVisibility.train ? "visible" : "none");
+    map.setLayoutProperty("transport-candidate-layer", "visibility", layerVisibility.transportCandidates ? "visible" : "none");
+    map.setLayoutProperty("zones-runtime-fill-layer", "visibility", layerVisibility.zones ? "visible" : "none");
+    map.setLayoutProperty("zones-runtime-outline-layer", "visibility", layerVisibility.zones ? "visible" : "none");
+    map.setLayoutProperty("zones-runtime-label-layer", "visibility", layerVisibility.zones ? "visible" : "none");
+    map.setLayoutProperty("journey-listings-layer", "visibility", layerVisibility.listings ? "visible" : "none");
+    map.setLayoutProperty("flood-layer", "visibility", floodVisible ? "visible" : "none");
+    map.setLayoutProperty("green-layer", "visibility", greenVisible ? "visible" : "none");
+    map.setFilter("green-layer", ["in", "vegetation_level", ...getIncludedGreenVegetationLevels(config.greenVegetationLevel)] as never);
+  }, [config, isMapReady, layerVisibility, visibleSequentialLayerGroupIndex]);
 
   if (mapError) {
     return (
@@ -807,6 +1100,38 @@ export function FindIdealApp() {
   return (
     <main className="relative h-screen w-full overflow-hidden">
       <div ref={mapContainerRef} className="h-full w-full" aria-label="Mapa principal" />
+      <div className="pointer-events-none absolute bottom-14 right-4 z-40 flex flex-col items-end gap-2">
+        {isLayerMenuOpen ? (
+          <div
+            ref={layerMenuRef}
+            className="pointer-events-auto w-56 rounded-xl border border-slate-200 bg-white/95 p-3 shadow-lg backdrop-blur-md"
+          >
+            <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Camadas do mapa</p>
+            <div className="space-y-2">
+              {MAP_LAYER_MENU_ITEMS.map((item) => (
+                <label key={item.key} className="flex cursor-pointer items-center gap-2.5 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={layerVisibility[item.key]}
+                    onChange={() => toggleLayerVisibility(item.key)}
+                    className="h-4 w-4 rounded accent-pastel-violet-500"
+                  />
+                  <span>{item.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+        ) : null}
+        <button
+          ref={layerMenuButtonRef}
+          type="button"
+          aria-label="Camadas"
+          onClick={() => setIsLayerMenuOpen((current) => !current)}
+          className={`${LAYER_TOGGLE_BUTTON_CLASS} ${isLayerMenuOpen ? "border-pastel-violet-300 text-pastel-violet-600" : ""}`}
+        >
+          <Layers className="h-4 w-4" />
+        </button>
+      </div>
       <WizardPanel />
     </main>
   );

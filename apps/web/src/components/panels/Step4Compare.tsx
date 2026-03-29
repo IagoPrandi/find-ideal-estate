@@ -79,6 +79,7 @@ export function Step4Compare() {
           {query.data?.zones.map((zone) => {
             const isSelected = selectedZoneFingerprint === zone.fingerprint;
             const badges = (zone.badges || {}) as Record<string, BackendBadge>;
+            const showGreen = zone.green_vegetation_label !== null && zone.green_vegetation_label !== undefined;
             return (
               <div
                 key={zone.id}
@@ -97,7 +98,7 @@ export function Step4Compare() {
 
                 <div className="mb-3 flex flex-wrap gap-2">
                   <Badge type="safety" value={getBadgeValue(badges.safety_badge)} />
-                  <Badge type="green" value={getBadgeValue(badges.green_badge)} />
+                  {showGreen ? <Badge type="green" value={getBadgeValue(badges.green_badge)} /> : null}
                   <Badge type="flood" value={getBadgeValue(badges.flood_badge)} />
                   <Badge type="pois" value={getBadgeValue(badges.poi_badge)} />
                 </div>
@@ -105,6 +106,7 @@ export function Step4Compare() {
                 <div className="flex flex-wrap gap-3 text-xs text-slate-500">
                   <span>{zone.walk_distance_meters ? `${Math.round(zone.walk_distance_meters)} m até o seed` : "Sem distância consolidada"}</span>
                   <span>{zone.poi_counts ? `${Object.keys(zone.poi_counts).length} grupos de POIs` : "POIs pendentes"}</span>
+                  {showGreen ? <span>{zone.green_vegetation_label}</span> : null}
                 </div>
 
                 {isSelected ? (

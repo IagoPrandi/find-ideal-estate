@@ -13,6 +13,8 @@ import {
   RunCreateResponse,
   RunStatusResponse,
   SimpleMessageResponse,
+  TransportBusDetailResponse,
+  TransportBusDetailResponseSchema,
   TransportLayersResponse,
   TransportLayersResponseSchema,
   TransportPointRead,
@@ -401,6 +403,27 @@ export async function getJourneyTransportPoints(journeyId: string): Promise<Tran
     `/journeys/${journeyId}/transport-points`,
     z.array(TransportPointReadSchema)
   )) as TransportPointRead[];
+}
+
+export async function getBusStopDetails(stopId: string): Promise<TransportBusDetailResponse> {
+  return (await requestJson(
+    `/transport/details/bus-stop?stop_id=${encodeURIComponent(stopId)}`,
+    TransportBusDetailResponseSchema
+  )) as TransportBusDetailResponse;
+}
+
+export async function getTransportStopDetails(stopId: string, sourceKind: string): Promise<TransportBusDetailResponse> {
+  return (await requestJson(
+    `/transport/details/transport-stop?stop_id=${encodeURIComponent(stopId)}&source_kind=${encodeURIComponent(sourceKind)}`,
+    TransportBusDetailResponseSchema
+  )) as TransportBusDetailResponse;
+}
+
+export async function getBusLineDetails(lineId: string): Promise<TransportBusDetailResponse> {
+  return (await requestJson(
+    `/transport/details/bus-line?line_id=${encodeURIComponent(lineId)}`,
+    TransportBusDetailResponseSchema
+  )) as TransportBusDetailResponse;
 }
 
 export async function updateJourney(

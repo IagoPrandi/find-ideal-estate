@@ -15,9 +15,21 @@ def _normalize_database_url(database_url: str) -> str:
     return database_url
 
 
-def init_db(database_url: str) -> None:
+def init_db(
+    database_url: str,
+    *,
+    pool_size: int = 20,
+    max_overflow: int = 20,
+    pool_timeout_seconds: int = 60,
+) -> None:
     global _engine, _sessionmaker
-    _engine = create_async_engine(_normalize_database_url(database_url), pool_pre_ping=True)
+    _engine = create_async_engine(
+        _normalize_database_url(database_url),
+        pool_pre_ping=True,
+        pool_size=pool_size,
+        max_overflow=max_overflow,
+        pool_timeout=pool_timeout_seconds,
+    )
     _sessionmaker = async_sessionmaker(_engine, expire_on_commit=False)
 
 

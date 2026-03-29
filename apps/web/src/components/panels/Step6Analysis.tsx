@@ -199,6 +199,7 @@ export function Step6Analysis() {
   });
 
   const selectedZone = zonesQuery.data?.zones.find((zone) => zone.fingerprint === zoneFingerprint);
+  const showGreenMetric = selectedZone?.green_vegetation_label !== null && selectedZone?.green_vegetation_label !== undefined;
   const rawListings = listingsQuery.data?.listings || [];
   const listingsInZone = rawListings.filter((listing) => listing.inside_zone);
   const listingsOutsideZone = rawListings.filter((listing) => listing.has_coordinates && !listing.inside_zone);
@@ -644,13 +645,15 @@ export function Step6Analysis() {
                   <p className="text-sm font-semibold text-slate-800">{selectedZone?.safety_incidents_count ?? 0} ocorrências</p>
                 </div>
               </div>
-              <div className="flex items-center gap-3 rounded-lg border border-slate-100 bg-white p-3">
-                <div className="rounded-lg bg-emerald-50 p-2 text-emerald-600"><Trees className="h-4 w-4" /></div>
-                <div>
-                  <p className="text-xs font-medium text-slate-500">Área Verde</p>
-                  <p className="text-sm font-semibold text-slate-800">{Math.round(selectedZone?.green_area_m2 || 0)} m²</p>
+              {showGreenMetric ? (
+                <div className="flex items-center gap-3 rounded-lg border border-slate-100 bg-white p-3">
+                  <div className="rounded-lg bg-emerald-50 p-2 text-emerald-600"><Trees className="h-4 w-4" /></div>
+                  <div>
+                    <p className="text-xs font-medium text-slate-500">{selectedZone?.green_vegetation_label}</p>
+                    <p className="text-sm font-semibold text-slate-800">{Math.round(selectedZone?.green_area_m2 || 0)} m²</p>
+                  </div>
                 </div>
-              </div>
+              ) : null}
               <div className="flex items-center gap-3 rounded-lg border border-slate-100 bg-white p-3">
                 <div className="rounded-lg bg-emerald-50 p-2 text-emerald-600"><Droplets className="h-4 w-4" /></div>
                 <div>

@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     database_url: str
+    db_pool_size: int = 20
+    db_max_overflow: int = 20
+    db_pool_timeout_seconds: int = 60
     redis_url: str
     mapbox_access_token: str
     maptiler_api_key: str

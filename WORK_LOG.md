@@ -1,5 +1,305 @@
 # Work Log
 
+## 2026-03-29 - Separar plotagem rapida dos pontos de transporte da associacao de linhas
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para restaurar responsividade do mapa pela causa raiz, mantendo a associacao de linhas correta sem voltar a esconder inconsistencias.
+- Trigger: usuario reportou que, depois da rodada para corrigir a contagem de onibus por ponto, os pontos passaram a demorar demais para aparecer e o mapa ficava preso so nas requisicoes de `/transport/tiles/stops/...`; pediu explicitamente para separar a etapa de plotar os pontos da etapa de associar o numero de linhas a cada ponto.
+- Root cause identified:
+  - a tile `transport_stops` ainda fazia enriquecimento inline demais para paradas GTFS e GeoSampa, o que voltou a deixar o primeiro paint dos pontos mais pesado do que o necessario;
+  - no frontend, a sequencia de carregamento podia voltar para o primeiro grupo no `moveend`, o que deixava as requisicoes seguintes de linhas/verde/alagamento sem progresso perceptivel.
+- Scope executed:
+  - `apps/api/src/api/routes/transport.py`:
+    - `transport_stops` voltou a ser leve para plotagem, sem agregar `bus_count` / `bus_list` inline nas feicoes de parada/terminal;
+    - adicionada a rota `/transport/details/transport-stop`, com lookup sob demanda para `gtfs_stop`, `geosampa_bus_stop` e `geosampa_bus_terminal`;
+    - o endpoint legado `/transport/details/bus-stop` passou a reutilizar o mesmo helper de detalhe por parada.
+  - `apps/web/src/api/client.ts`:
+    - adicionado `getTransportStopDetails(stopId, sourceKind)` para o popup carregar linhas sob demanda por tipo real da feicao.
+  - `apps/web/src/features/app/FindIdealApp.tsx`:
+    - popup de `bus-stop-layer` e `bus-terminal-layer` passou a consultar o novo endpoint generico de detalhe quando a tile nao vier enriquecida;
+    - clique em candidato GTFS da Etapa 2 continua usando detalhe sob demanda, mas sem reintroduzir custo inline na tile de pontos;
+    - o `moveend` deixou de resetar a sequencia para o primeiro grupo e agora apenas sincroniza a progressao real das sources carregadas.
+  - `apps/api/tests/test_transport_tile_metadata.py`:
+    - atualizado para garantir que a row query de `transport_stops` permanece leve (`bus_count=0`, `bus_list=''`) enquanto a row query de linhas continua com metadata inline;
+    - adicionada regressao cobrindo lookup sob demanda das linhas para parada GTFS e parada GeoSampa.
+  - `apps/web/src/features/app/FindIdealApp.test.tsx`:
+    - mocks ajustados para `getTransportStopDetails()`;
+    - regressao do popup GTFS atualizada para o endpoint generico;
+    - regressao da sequencia mantida para confirmar pontos -> linhas -> verde -> alagamento.
+  - ambiente local:
+    - `docker compose restart api` e `docker compose restart ui` executados para ativar a nova separacao entre tile leve e detalhe sob demanda.
+- Validation:
+  - frontend focado: `npm run test -- --run src/features/app/FindIdealApp.test.tsx` -> `7 passed`.
+  - backend focado: `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_transport_tile_metadata.py -q` -> `2 passed`.
+  - diagnostico editor: sem erros em `transport.py`, `test_transport_tile_metadata.py`, `client.ts`, `FindIdealApp.tsx`, `FindIdealApp.test.tsx` e `WORK_LOG.md`.
+  - smoke HTTP local apos restart:
+    - `/transport/tiles/stops/10/380/581.pbf` -> `200` em ~`229 ms`;
+    - `/transport/details/transport-stop?stop_id=S_TILE_META&source_kind=gtfs_stop` -> `200` em ~`30 ms`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-28 - Sequenciar o carregamento das camadas do mapa
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para aplicar uma mudanca pequena e verificavel no frontend do mapa, reduzindo concorrencia de tiles sem esconder erros de dados.
+- Trigger: usuario pediu explicitamente para nao carregar todas as camadas de uma vez; a ordem desejada passou a ser: primeiro pontos de transporte, depois linhas e figuras relacionadas, depois áreas verdes e por fim áreas de alagamento.
+- Root cause identified:
+  - mesmo apos a otimizacao das queries e dos indices no backend, o frontend ainda deixava varias vector sources visiveis ao mesmo tempo, entao o MapLibre continuava requisitando grupos pesados de tiles em paralelo no primeiro paint e em mudancas de viewport.
+- Scope executed:
+  - `apps/web/src/features/app/FindIdealApp.tsx`:
+    - introduzidos grupos sequenciais de carregamento por source: `transport-stops-source` -> `transport-lines-source` -> `green-areas-source` -> `flood-areas-source`;
+    - a visibilidade das layers agora considera tanto o toggle manual quanto a etapa atual da sequencia;
+    - em cada `moveend`, a sequencia reinicia pelo primeiro grupo habilitado;
+    - a progressao para o grupo seguinte acontece via evento `sourcedata`, somente quando a source atual ja terminou de carregar.
+  - `apps/web/src/features/app/FindIdealApp.test.tsx`:
+    - expandido o mock de `MapLibre` para simular `sourcedata`, `moveend` e `isSourceLoaded()`;
+    - nova regressao cobrindo a ordem: pontos -> linhas -> verde -> alagamento.
+- Validation:
+  - frontend focado: `npm run test -- --run src/features/app/FindIdealApp.test.tsx` -> `7 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-28 - Reduzir latência das camadas de transporte no mapa
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para tratar a lentidao pela causa raiz, medir com `EXPLAIN ANALYZE`, corrigir a query/indice e validar com benchmark real.
+- Trigger: usuario reportou que as camadas do mapa ainda levavam muito tempo para carregar; logs da API mostravam as tiles de `stops` e `lines` retornando bem depois das demais, mesmo apos o ajuste anterior do pool de conexoes.
+- Root cause identified:
+  - `apps/api/src/api/routes/transport.py` fazia `ST_DWithin(...::geography...)` diretamente sobre `gtfs_stops`, o que derrubava o uso do indice GiST de `location` e gerava `Seq Scan` sobre ~22k paradas;
+  - a camada de `lines` fazia `Seq Scan` sobre ~1.13M pontos de `gtfs_shapes` porque o schema GTFS nao tinha indice GiST em `gtfs_shapes.location`;
+  - o JIT do Postgres estava custando dezenas/centenas de ms nas queries de tile, sem compensar nesse perfil de consulta interativa.
+- Scope executed:
+  - `apps/api/src/api/routes/transport.py`:
+    - adicionado helper `_meters_to_degree_buffer()` e constantes de buffer metrico usadas nas joins espaciais;
+    - `_query_vector_tile()` passou a executar `SET LOCAL jit = off` dentro da transacao da tile;
+    - `candidate_gtfs_stops` agora faz pre-filtro geometrico com `location && ST_Expand(env_4326, buffer_em_graus)` antes do `ST_DWithin` exato em geography;
+    - joins de enriquecimento GeoSampa (`geosampa_bus_stop_bus_meta` e `geosampa_bus_terminal_bus_meta`) agora tambem usam pre-filtro bbox antes do `ST_DWithin` exato.
+  - `infra/migrations/versions/20260328_0010_transport_tile_perf_indexes.py`:
+    - nova migration criando `ix_gtfs_shapes_location` via GiST.
+  - `apps/api/tests/test_phase3_transport_tile_perf.py`:
+    - novo teste unitario cobrindo a conversao estavel de metros para buffer em graus usada na SQL.
+  - ambiente local:
+    - `docker compose exec api alembic upgrade head` para aplicar o novo indice;
+    - `docker compose restart api` para carregar o SQL atualizado na API.
+- Validation:
+  - backend focado: `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase0_db.py apps/api/tests/test_phase3_transport_tile_perf.py apps/api/tests/test_transport_tile_metadata.py -q` -> `4 passed`.
+  - benchmark SQL com `EXPLAIN (ANALYZE, BUFFERS)` no tile `10/380/581`:
+    - `stops`: de ~`614.955 ms` para ~`129.102 ms`;
+    - `lines`: de ~`912.505 ms` para ~`72.693 ms`;
+    - `flood`: permaneceu ~`0.083 ms`.
+  - benchmark HTTP local apos restart:
+    - `/transport/tiles/stops/10/380/581.pbf` -> `415 ms` no primeiro hit e depois `138 ms` / `123 ms`;
+    - `/transport/tiles/lines/10/380/581.pbf` -> `224 ms` no primeiro hit e depois `100 ms` / `98 ms`;
+    - `/transport/tiles/environment/flood/10/380/581.pbf` -> `143 ms` no primeiro hit e depois `11 ms` / `7 ms`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-29 - Ajustar pool do banco para carga concorrente de vector tiles
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para diagnosticar a falha pela causa raiz e corrigir a configuracao compartilhada do backend com validacao focada.
+- Trigger: apos as correcoes de popup/tiles de transporte, usuario reportou uma stack trace do FastAPI terminando em `request_id_middleware`; a coleta de logs do container mostrou o erro real `sqlalchemy.exc.TimeoutError: QueuePool limit of size 5 overflow 10 reached`, recorrente em requests concorrentes de `/transport/tiles/environment/flood/...`.
+- Root cause identified:
+  - o backend usava o pool padrao do SQLAlchemy async (`pool_size=5`, `max_overflow=10`, `pool_timeout=30`), que ficou pequeno para a carga concorrente de tiles do mapa com varias camadas ativas;
+  - nao foi encontrado uso solto de `AsyncSession` nem padrao claro de vazamento de conexao; as rotas relevantes usam `async with engine.connect()` corretamente;
+  - o erro passou a emergir no endpoint de flood porque varias requisicoes de tile eram abertas em paralelo e as queries PostGIS nao devolviam rapido o bastante para o pool padrao.
+- Scope executed:
+  - `apps/api/src/core/config.py`:
+    - adicionadas configuracoes `db_pool_size`, `db_max_overflow` e `db_pool_timeout_seconds`, com defaults voltados ao uso interativo do mapa.
+  - `apps/api/src/core/db.py`:
+    - `init_db()` passou a aceitar parametros explicitos de pool;
+    - `create_async_engine()` agora inicializa o engine com `pool_size`, `max_overflow` e `pool_timeout` configuraveis, mantendo `pool_pre_ping=True`.
+  - `apps/api/src/main.py`:
+    - a inicializacao do banco passou a propagar os novos limites vindos de settings.
+  - `docker-compose.yml`:
+    - expostas variaveis `DB_POOL_SIZE`, `DB_MAX_OVERFLOW` e `DB_POOL_TIMEOUT_SECONDS` no servico `api`, com defaults `20`, `20` e `60`.
+  - `apps/api/tests/test_phase0_db.py`:
+    - novo teste unitario cobrindo defaults do pool e overrides enviados para `create_async_engine()`.
+  - ambiente local:
+    - `docker compose restart api` executado para aplicar a nova configuracao do engine.
+- Validation:
+  - backend focado: `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase0_db.py apps/api/tests/test_transport_tile_metadata.py -q` -> `3 passed`.
+  - smoke HTTP: `GET /health` -> `200`; `GET /transport/tiles/environment/flood/10/379/581.pbf` -> `200` com `application/vnd.mapbox-vector-tile`.
+  - concorrencia: rajada paralela de `20` requests para o tile de flood retornou `200:20`, sem reproduzir a exaustao do pool.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-28 - Corrigir popup `n/d` para pontos GeoSampa de ônibus
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para corrigir a query da tile na origem com foco em integridade dos dados.
+  - `skills/develop-frontend/SKILL.md` como apoio para endurecer o fallback do popup por `source_kind`.
+- Trigger: usuario reportou que, mesmo apos a rodada anterior, o popup continuava exibindo `Ônibus identificados: n/d`; screenshot mostrou um ponto `R. JOSÉ DO PATROCÍNIO, 386`, indicando caso de camada GeoSampa em vez de `gtfs_stop`.
+- Root cause identified:
+  - a rodada anterior havia enriquecido apenas `gtfs_stop`; feicoes `geosampa_bus_stop` e `geosampa_bus_terminal` ainda saiam das vector tiles com `bus_count=0` e `bus_list=''`;
+  - o frontend tambem ainda podia tentar consultar o endpoint GTFS de detalhe para feicoes nao-GTFS, produzindo fallback enganoso quando a tile vinha sem metadata inline.
+- Scope executed:
+  - `apps/api/src/api/routes/transport.py`:
+    - `candidate_gtfs_stops` passou a considerar um buffer geografico para suportar associacao com feicoes GeoSampa proximas da borda da tile;
+    - adicionados `geosampa_bus_stop_points` + `geosampa_bus_stop_bus_meta`, agregando linhas de onibus de paradas GTFS proximas (45 m);
+    - adicionados `geosampa_bus_terminal_points` + `geosampa_bus_terminal_bus_meta`, agregando linhas de GTFS proximas a terminais (180 m);
+    - resultado: `geosampa_bus_stop` e `geosampa_bus_terminal` agora tambem preenchem `bus_count` e `bus_list` inline nas vector tiles.
+  - `apps/api/tests/test_transport_tile_metadata.py`:
+    - ampliado para inserir uma parada GeoSampa sintetica sobre a fixture GTFS e validar que a row query da tile retorna `bus_count=2` e `bus_list=175T-10||875A-10` tambem para `source_kind=geosampa_bus_stop`.
+  - `apps/web/src/features/app/FindIdealApp.tsx`:
+    - o popup passou a chamar os endpoints GTFS de detalhe apenas quando `source_kind` e `gtfs_shape` / `gtfs_stop`;
+    - para feicoes GeoSampa, a UI agora depende somente da metadata inline da tile, evitando fallback incorreto por ID incompatível.
+  - `apps/web/src/features/app/FindIdealApp.test.tsx`:
+    - fixtures de `gtfs_stop` ajustadas para incluir `source_kind`, preservando a regressao do popup GTFS;
+    - mantido o teste que garante ausencia de fetch extra quando a tile ja chega com metadata inline.
+  - ambiente local:
+    - `docker compose restart api` e `docker compose restart ui` executados para ativar a nova query de tile e o ajuste do popup na instancia em execucao.
+- Validation:
+  - backend focado: `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_transport_tile_metadata.py -q --color=no` -> `1 passed`.
+  - frontend focado: `npm run test -- --run src/features/app/FindIdealApp.test.tsx` -> `6 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-28 - Preencher `bus_count` e `bus_list` nas vector tiles de transporte
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para corrigir a origem dos dados no backend com teste de banco real.
+  - `skills/develop-frontend/SKILL.md` como apoio para remover o fetch desnecessario do popup quando a tile ja chega enriquecida.
+- Trigger: apos a correcao inicial do popup/card da Etapa 2, usuario pediu para ir alem e preencher as propriedades diretamente nas vector tiles, para que o popup abra com a contagem/lista correta sem depender do endpoint de detalhe.
+- Root cause identified:
+  - as SQLs `_TRANSPORT_LINES_TILE_SQL` e `_TRANSPORT_STOPS_TILE_SQL` preenchiam `bus_count = 0` e `bus_list = ''` para feicoes GTFS, entao a tile nunca carregava a metadata real consumida pelo popup;
+  - o endpoint de detalhe tambem estava inconsistente com o schema real, porque tentava ler `gtfs_trips.trip_headsign`, coluna inexistente no banco atual;
+  - o dado canônico usado pela Etapa 2 ja era por linha (`route_count` / `route_ids`), nao por sentido, entao a correcao precisava alinhar tudo a contagem/listagem de linhas.
+- Scope executed:
+  - `apps/api/src/api/routes/transport.py`:
+    - extraidas queries reutilizaveis `_TRANSPORT_LINES_TILE_ROWS_SQL` e `_TRANSPORT_STOPS_TILE_ROWS_SQL` para facilitar teste direto das linhas base da tile;
+    - feicoes GTFS de `transport_lines` agora agregam `bus_count` e `bus_list` com base em `route_short_name`/`route_id` distintos;
+    - feicoes GTFS de `transport_stops` agora agregam a mesma metadata por `stop_id`;
+    - endpoints `/transport/details/bus-line` e `/transport/details/bus-stop` foram alinhados ao schema real e agora retornam linhas distintas, sem depender de `trip_headsign`.
+  - `apps/api/tests/test_transport_tile_metadata.py`:
+    - novo teste com banco real insere GTFS sintetico isolado perto de `0,0` e valida que as row queries das tiles retornam `bus_count=2` e `bus_list=175T-10||875A-10` tanto para a parada quanto para a linha.
+  - `apps/web/src/features/app/FindIdealApp.tsx`:
+    - novo helper `hasInlineBusDetails()` evita chamar `getBusStopDetails()`/`getBusLineDetails()` quando a tile ja traz `bus_count` ou `bus_list` preenchidos.
+  - `apps/web/src/features/app/FindIdealApp.test.tsx`:
+    - adicionada regressao para garantir que popup de parada usa metadata inline sem disparar fetch extra.
+  - `apps/web/src/components/panels/Step2Transport.test.tsx`:
+    - mocks ajustados para refletir a lista canonica de linhas, sem texto de sentido.
+- Validation:
+  - backend focado: `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_transport_tile_metadata.py -q` -> `1 passed`.
+  - frontend focado: `npm run test -- --run src/components/panels/Step2Transport.test.tsx src/features/app/FindIdealApp.test.tsx` -> `8 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-28 - Corrigir popup de transporte e exibir linhas no card selecionado da Etapa 2
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/develop-frontend/SKILL.md` para corrigir a inconsistência entre card e popup sem introduzir fallback que esconda erro de dados.
+- Trigger: usuario reportou que o card da Etapa 2 mostrava `7 linhas`, mas o popup do mapa para o mesmo ponto exibia `Ônibus identificados: n/d`; tambem pediu para o painel listar as linhas de onibus quando o card estivesse selecionado.
+- Root cause identified:
+  - o popup do mapa lia `bus_count` e `bus_list` diretamente das vector tiles de `transport_stops`, mas essa tile hoje grava `0` e string vazia para paradas/terminais;
+  - o card da Etapa 2 usava outra fonte de dados, `route_count` do endpoint `/journeys/{id}/transport-points`, por isso painel e popup divergiam;
+  - o card selecionado nao consultava os endpoints de detalhe existentes para expor as linhas da parada.
+- Scope executed:
+  - `apps/web/src/api/schemas.ts`:
+    - adicionado schema/tipo para resposta dos detalhes de linha/parada de onibus.
+  - `apps/web/src/api/client.ts`:
+    - novos helpers `getBusStopDetails()` e `getBusLineDetails()` consumindo os endpoints reais de detalhe do backend.
+  - `apps/web/src/components/panels/Step2Transport.tsx`:
+    - ao selecionar um card GTFS de onibus, o painel passa a buscar os detalhes da parada e mostrar as linhas identificadas abaixo do resumo;
+    - o card mostra imediatamente as linhas conhecidas e enriquece o texto quando o detalhe retorna.
+  - `apps/web/src/features/app/FindIdealApp.tsx`:
+    - o popup das camadas `bus-stop-layer` e `bus-line-layer` agora busca detalhes reais antes de renderizar a contagem/lista final;
+    - o clique em `transport-candidate-layer` tambem abre popup com a contagem correta do seed GTFS selecionado, reaproveitando o mesmo endpoint de detalhe;
+    - a feature runtime dos candidatos de transporte agora carrega `source` e `external_id` para viabilizar esse lookup.
+  - testes:
+    - `apps/web/src/components/panels/Step2Transport.test.tsx` cobre exibicao das linhas no card selecionado;
+    - `apps/web/src/features/app/FindIdealApp.test.tsx` cobre o popup da parada com contagem correta em vez de `n/d`.
+- Validation:
+  - `npm run test -- --run src/components/panels/Step2Transport.test.tsx src/features/app/FindIdealApp.test.tsx` -> `7 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-28 - Reintroduzir áreas verdes por nível com painel expansível baseado no protótipo
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `VEGETACAO.md`, `WORK_LOG.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/develop-frontend/SKILL.md` para reconstruir a UX da Etapa 1 e propagar a preferência de vegetação até mapa e análises no estado atual do código.
+- Trigger: usuário pediu novamente que `Áreas verdes` ficasse desmarcado por padrão, com um campo deslizante para `Pouca`, `Média` e `Muita vegetação`, inspirado no comportamento do protótipo enviado. Também exigiu que a seleção afete visualizações e análises e que a classificação siga `VEGETACAO.md`.
+- Scope executed:
+  - `apps/web/src/state/journey-store.ts`:
+    - `green` passou a iniciar como `false`;
+    - adicionados `greenVegetationLevel`, labels compartilhados e helper cumulativo (`medium = low+medium`, `high = all`).
+  - `apps/web/src/components/panels/Step1Config.tsx`:
+    - a seção `Analisar nas zonas` foi reestruturada para manter `Segurança` e `Áreas verdes` na linha superior;
+    - ao marcar `Áreas verdes`, surge um painel expansível abaixo, em largura total, com slider e estados `Pouca`, `Média`, `Muita`;
+    - o painel deixa explícito que `Média` contempla pouca+média e `Muita` contempla todas;
+    - refinado depois para aproximar ainda mais de `BOTOES_ANALISE_ZONAS_DETALHES.html`, com cabeçalho ativo em forma mais próxima do “L” e o rótulo do nível em fonte menor abaixo de `Áreas verdes` no card superior;
+    - refinado novamente para remover o bloco-resumo superior do painel expandido e substituir o slider por seleção apenas via botões, com fonte interna menor;
+    - refinado de novo para remover o wrapper rolável interno dessa etapa e reorganizar o seletor de transporte público em duas linhas, com o último botão centralizado quando fica sozinho;
+    - ajustado em seguida para restaurar a rolagem vertical do painel com um novo container `flex-1 overflow-y-auto`, sem voltar para o wrapper antigo removido;
+    - refinado por fim para remover também o texto explicativo inferior do painel de vegetação;
+    - refinado depois para tornar a seleção do nível de vegetação um popover flutuante por hover/foco, sem deslocar os elementos abaixo; escolher um nível também ativa automaticamente `Áreas verdes`, e o subtítulo pequeno do card superior foi removido;
+    - refinado novamente para que o fundo cinza pertença apenas ao estado aberto do componente em `L` e para devolver ao botão de `Áreas verdes` a mesma altura-base dos demais cards;
+    - reestruturado mais uma vez para que o estado aberto de `Áreas verdes` seja um único wrapper visual em `L`, em vez de peças cinzas e popover separados;
+    - refinado por fim para que esse wrapper aberto preserve o formato em `L` com célula superior esquerda vazia, sem formar um bloco cinza contínuo sobre a coluna da esquerda;
+    - a jornada agora envia `green_vegetation_level` junto de `enrichments`.
+  - `apps/web/src/components/panels/WizardPanel.tsx`:
+    - removido o selo flutuante `Find Ideal Estate 2.0` do canto superior direito.
+    - o shell expandido deixou de renderizar o conteúdo como uma linha flex e passou a envolver o step ativo em `w-full min-w-0`, evitando sobra branca na lateral direita no mobile.
+  - `apps/web/src/components/panels/Step1Config.tsx`:
+    - o root da etapa agora força `w-full min-w-0` para ocupar toda a largura útil do painel em telas estreitas.
+  - `apps/api/src/modules/zones/vegetation.py`:
+    - novo helper de classificação base da vegetação e de inclusão cumulativa por seleção.
+  - `apps/api/src/api/routes/journeys.py`:
+    - `GET /journeys/{id}/zones` passou a recalcular `green_area_m2` dinamicamente conforme o nível selecionado;
+    - o payload inclui `green_vegetation_level` e `green_vegetation_label`;
+    - `green_badge` é recalculado por jornada com base no recorte escolhido.
+  - `apps/api/src/api/routes/transport.py`:
+    - vector tiles de áreas verdes agora expõem `vegetation_level` para permitir filtro correto no mapa.
+  - `apps/web/src/features/app/FindIdealApp.tsx`:
+    - a camada verde do mapa só aparece quando `green` está ativo;
+    - o filtro de `green-layer` passou a respeitar a seleção cumulativa de vegetação.
+  - `apps/web/src/components/panels/Step4Compare.tsx` e `apps/web/src/components/panels/Step6Analysis.tsx`:
+    - badges/indicadores verdes agora respeitam a seleção atual e usam o rótulo do nível escolhido.
+  - testes:
+    - `apps/api/tests/test_phase4_badges.py` ganhou cobertura do helper de badge reutilizável;
+    - novo `apps/api/tests/test_phase4_vegetation.py` cobre aliases, extração de preferência, SQL e inclusão cumulativa;
+    - novo `apps/web/src/components/panels/Step1Config.test.tsx` cobre default desligado, expansão do slider e payload;
+    - `apps/web/src/state/journey-store.test.ts` cobre defaults e inclusão cumulativa;
+    - `apps/web/src/features/app/FindIdealApp.test.tsx` cobre filtro cumulativo da camada verde.
+- Validation:
+  - backend focado: `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase4_badges.py apps/api/tests/test_phase4_vegetation.py -q`.
+  - frontend focado: `npm run test -- --run src/state/journey-store.test.ts src/components/panels/Step1Config.test.tsx src/features/app/FindIdealApp.test.tsx`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluído nesta rodada (aguarda confirmação explícita do responsável).
+
+## 2026-03-28 - Adicionar menu flutuante de camadas no canto inferior direito do mapa
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used: `skills/develop-frontend/SKILL.md` para introduzir um controle flutuante de camadas consistente com os controles visuais existentes do mapa/painel.
+- Trigger: usuario pediu um botao com icone de `layers` no canto inferior direito, acima do toggle de attribution, com o mesmo tamanho visual dos botoes do painel de progresso; ao clicar, deve abrir um painel pequeno com checkboxes de camadas, esconder/mostrar camadas no mapa e fechar ao clicar fora.
+- Scope executed:
+  - `apps/web/src/features/app/FindIdealApp.tsx`:
+    - adicionado botao flutuante `Camadas` no canto inferior direito com dimensoes `h-8 w-8`, seguindo o tamanho do botao de recolher do tracker;
+    - implementado painel pequeno com checklist das camadas realmente disponiveis no mapa atual: rotas de onibus, linhas de metro, linhas de trem, paradas/terminais, pontos da etapa 2, zonas, imoveis, alagamento e area verde;
+    - a visibilidade dessas camadas passou de constante fixa para estado real do componente;
+    - clique fora do painel e tecla `Escape` agora fecham o menu.
+  - `apps/web/src/features/app/FindIdealApp.test.tsx`:
+    - novo teste cobrindo abertura do painel, toggle de `Área verde` para `visibility=none` e fechamento por clique fora.
+- Validation:
+  - frontend focado: `npm run test -- --run src/features/app/FindIdealApp.test.tsx` -> `3 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
 ## 2026-03-28 - Reverter tentativa de captura extra de URL no scraper e limitar auto-scroll do Step 6
 
 - Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.

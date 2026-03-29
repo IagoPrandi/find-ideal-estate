@@ -1,6 +1,6 @@
 import { Bus, Clock3, Route, Train, MapIcon } from "lucide-react";
-import { useEffect, useState } from "react";
-import { apiActionHint, createTransportSearchJob, getJob, getJourneyTransportPoints, updateJourney } from "../../api/client";
+import { useEffect, useMemo, useState } from "react";
+import { apiActionHint, createTransportSearchJob, getBusStopDetails, getJob, getJourneyTransportPoints, updateJourney } from "../../api/client";
 import type { TransportPointRead } from "../../api/schemas";
 import { useJourneyStore, useUIStore } from "../../state";
 
@@ -47,6 +47,17 @@ export function sanitizeTransportPoints(items: TransportPointRead[]): TransportP
   return Array.from(deduped.values());
 }
 
+function canLoadBusStopLines(point: TransportPointRead | null | undefined): point is TransportPointRead {
+  return Boolean(point && point.source === "gtfs_stop" && point.external_id && point.route_count > 0);
+}
+
+function getTransportPointLines(point: TransportPointRead, detailLines: string[] | undefined): string[] {
+  if (detailLines && detailLines.length > 0) {
+    return detailLines;
+  }
+  return point.route_ids;
+}
+
 export function Step2Transport() {
   const journeyId = useJourneyStore((state) => state.journeyId);
   const config = useJourneyStore((state) => state.config);
@@ -59,6 +70,13 @@ export function Step2Transport() {
   const [points, setPoints] = useState<TransportPointRead[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [busLinesByPointId, setBusLinesByPointId] = useState<Record<string, string[]>>({});
+  const [loadingBusLinesPointId, setLoadingBusLinesPointId] = useState<string | null>(null);
+
+  const selectedPoint = useMemo(
+    () => points.find((point) => point.id === selectedTransportId) ?? null,
+    [points, selectedTransportId]
+  );
 
   useEffect(() => {
     if (!journeyId) {
@@ -155,6 +173,49 @@ export function Step2Transport() {
     };
   }, [journeyId, selectedTransportId, setJobIds, setSelectedTransportId, transportJobId]);
 
+  useEffect(() => {
+    if (!canLoadBusStopLines(selectedPoint)) {
+      setLoadingBusLinesPointId((current) => (current === selectedPoint?.id ? null : current));
+      return;
+    }
+
+    if (busLinesByPointId[selectedPoint.id]) {
+      return;
+    }
+
+    let cancelled = false;
+    setLoadingBusLinesPointId(selectedPoint.id);
+
+    void getBusStopDetails(selectedPoint.external_id)
+      .then((details) => {
+        if (cancelled) {
+          return;
+        }
+        setBusLinesByPointId((current) => ({
+          ...current,
+          [selectedPoint.id]: details.buses
+        }));
+      })
+      .catch(() => {
+        if (cancelled) {
+          return;
+        }
+        setBusLinesByPointId((current) => ({
+          ...current,
+          [selectedPoint.id]: []
+        }));
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoadingBusLinesPointId((current) => (current === selectedPoint.id ? null : current));
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [busLinesByPointId, selectedPoint]);
+
   async function handleAdvance() {
     if (!journeyId || !selectedTransportId) {
       return;
@@ -186,6 +247,8 @@ export function Step2Transport() {
           {points.map((point) => {
             const isSelected = selectedTransportId === point.id;
             const isRail = isRailTransportPoint(point);
+            const pointLines = getTransportPointLines(point, busLinesByPointId[point.id]);
+            const isLoadingPointLines = loadingBusLinesPointId === point.id;
             return (
               <button
                 key={point.id}
@@ -205,6 +268,22 @@ export function Step2Transport() {
                         <span className="inline-flex items-center gap-1"><Clock3 className="h-3.5 w-3.5" /> {Math.max(1, Math.round(point.walk_time_sec / 60))} min a pé</span>
                         <span>{point.route_count} linhas</span>
                       </div>
+                      {isSelected && point.route_count > 0 ? (
+                        <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">Linhas identificadas</p>
+                          {pointLines.length > 0 ? (
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {pointLines.map((line) => (
+                                <span key={line} className="rounded-full border border-pastel-violet-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-700">
+                                  {line}
+                                </span>
+                              ))}
+                            </div>
+                          ) : null}
+                          {isLoadingPointLines ? <p className="mt-2 text-xs text-slate-500">Carregando detalhes das linhas...</p> : null}
+                          {!isLoadingPointLines && pointLines.length === 0 ? <p className="mt-2 text-xs text-slate-500">Linhas indisponíveis para este ponto.</p> : null}
+                        </div>
+                      ) : null}
                     </div>
                   </div>
                   <div className="flex h-5 w-5 items-center justify-center rounded-full border border-slate-300">

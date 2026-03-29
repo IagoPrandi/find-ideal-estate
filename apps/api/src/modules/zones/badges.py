@@ -58,6 +58,24 @@ def _percentile_to_tier(percentile: float) -> str:
     return "poor"
 
 
+def build_metric_badge(
+    value: float | int,
+    peer_values: list[float | int],
+    *,
+    invert: bool = False,
+) -> dict[str, Any]:
+    """Build the compact badge payload used by journey zone responses."""
+    percentile = _compute_rank_percentile(value, peer_values)
+    if invert:
+        percentile = 100 - percentile
+
+    return {
+        "value": value,
+        "percentile": percentile,
+        "tier": _percentile_to_tier(percentile),
+    }
+
+
 async def compute_zone_badges(
     zone_id: UUID, provisional: bool = True, based_on_count: int | None = None
 ) -> dict[str, Any]:

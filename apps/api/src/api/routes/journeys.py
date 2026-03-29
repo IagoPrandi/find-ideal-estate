@@ -21,6 +21,13 @@ from modules.journeys.service import (
     get_journey,
     update_journey,
 )
+from modules.zones.badges import build_metric_badge
+from modules.zones.vegetation import (
+    extract_green_preferences,
+    get_green_vegetation_label,
+    green_vegetation_case_sql,
+    green_vegetation_inclusion_sql,
+)
 from sqlalchemy import text
 
 router = APIRouter(prefix="/journeys", tags=["journeys"])
@@ -71,9 +78,47 @@ async def list_transport_points_for_journey(journey_id: UUID) -> list[TransportP
 async def list_zones_for_journey(journey_id: UUID) -> ZoneListResponse:
     engine = get_engine()
     async with engine.connect() as conn:
-        result = await conn.execute(
+        snapshot_result = await conn.execute(
             text(
                 """
+                SELECT input_snapshot
+                FROM journeys
+                WHERE id = :journey_id
+                """
+            ),
+            {"journey_id": journey_id},
+        )
+        snapshot_row = snapshot_result.mappings().first()
+
+        green_enabled, green_vegetation_level = extract_green_preferences(
+            snapshot_row["input_snapshot"] if snapshot_row else None
+        )
+        green_vegetation_label = (
+            get_green_vegetation_label(green_vegetation_level) if green_enabled else None
+        )
+        green_area_sql = "NULL::DOUBLE PRECISION"
+        if green_enabled and green_vegetation_level:
+            classification_sql = green_vegetation_case_sql("gv.ves_categ")
+            green_area_sql = f"""
+                COALESCE((
+                    SELECT
+                        SUM(
+                            ST_Area(
+                                ST_Intersection(z.isochrone_geom, gv.geometry)::geography
+                            )
+                        )
+                    FROM geosampa_vegetacao_significativa gv
+                    WHERE z.isochrone_geom IS NOT NULL
+                      AND ST_Intersects(z.isochrone_geom, gv.geometry)
+                      AND {green_vegetation_inclusion_sql(classification_sql, green_vegetation_level)}
+                ), 0)::DOUBLE PRECISION
+            """
+        elif green_enabled:
+            green_area_sql = "z.green_area_m2::DOUBLE PRECISION"
+
+        result = await conn.execute(
+            text(
+                f"""
                 SELECT
                     z.id,
                     jz.journey_id,
@@ -83,7 +128,7 @@ async def list_zones_for_journey(journey_id: UUID) -> ZoneListResponse:
                     z.max_time_minutes AS travel_time_minutes,
                     tp.walk_distance_m AS walk_distance_meters,
                     ST_AsGeoJSON(z.isochrone_geom)::JSONB AS isochrone_geom,
-                    z.green_area_m2,
+                    {green_area_sql} AS green_area_m2,
                     z.flood_area_m2,
                     z.safety_incidents_count,
                     z.poi_counts,
@@ -104,10 +149,17 @@ async def list_zones_for_journey(journey_id: UUID) -> ZoneListResponse:
 
     zones = []
     completed_count = 0
+    green_peers = [float(row["green_area_m2"] or 0.0) for row in rows if row["green_area_m2"] is not None]
     for row in rows:
         state = str(row["state"])
         if state == "complete":
             completed_count += 1
+
+        badges = _normalize_badges_payload(row["badges"]) or {}
+        if green_enabled and row["green_area_m2"] is not None:
+            badges["green_badge"] = build_metric_badge(float(row["green_area_m2"] or 0.0), green_peers)
+        else:
+            badges.pop("green_badge", None)
 
         zones.append(
             {
@@ -120,10 +172,12 @@ async def list_zones_for_journey(journey_id: UUID) -> ZoneListResponse:
                 "walk_distance_meters": row["walk_distance_meters"],
                 "isochrone_geom": row["isochrone_geom"],
                 "green_area_m2": row["green_area_m2"],
+                "green_vegetation_level": green_vegetation_level if green_enabled else None,
+                "green_vegetation_label": green_vegetation_label,
                 "flood_area_m2": row["flood_area_m2"],
                 "safety_incidents_count": row["safety_incidents_count"],
                 "poi_counts": row["poi_counts"],
-                "badges": _normalize_badges_payload(row["badges"]),
+                "badges": badges or None,
                 "badges_provisional": bool(row["badges_provisional"]),
                 "created_at": row["created_at"],
                 "updated_at": row["updated_at"],

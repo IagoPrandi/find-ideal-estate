@@ -6,6 +6,7 @@ from modules.zones.badges import (
     ZoneBadgeValue,
     _compute_rank_percentile,
     _percentile_to_tier,
+    build_metric_badge,
 )
 
 
@@ -147,3 +148,12 @@ class TestBadgeInversion:
 
         assert abs(inverted_percentile - 66.67) < 1.0
         assert _percentile_to_tier(inverted_percentile) in ("good", "excellent")
+
+
+class TestBuildMetricBadge:
+    def test_build_metric_badge_uses_peer_values(self):
+        badge = build_metric_badge(30.0, [10.0, 20.0, 30.0])
+
+        assert badge["value"] == 30.0
+        assert badge["percentile"] == 100.0
+        assert badge["tier"] == "excellent"

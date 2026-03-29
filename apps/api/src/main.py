@@ -25,7 +25,12 @@ logger = logging.getLogger(__name__)
 async def lifespan(_: FastAPI):
     configure_logging()
     settings = get_settings()
-    init_db(settings.database_url)
+    init_db(
+        settings.database_url,
+        pool_size=settings.db_pool_size,
+        max_overflow=settings.db_max_overflow,
+        pool_timeout_seconds=settings.db_pool_timeout_seconds,
+    )
     init_redis(settings.redis_url)
 
     container = AppContainer()

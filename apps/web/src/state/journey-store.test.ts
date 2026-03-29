@@ -1,7 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { useJourneyStore } from "./journey-store";
+import { getIncludedGreenVegetationLevels, useJourneyStore } from "./journey-store";
 
 describe("journey-store", () => {
+  it("defaults green analysis to disabled with medium vegetation selected", () => {
+    useJourneyStore.getState().resetJourney();
+
+    const state = useJourneyStore.getState();
+    expect(state.config.enrichments.green).toBe(false);
+    expect(state.config.greenVegetationLevel).toBe("medium");
+  });
+
+  it("expands medium and high vegetation selections cumulatively", () => {
+    expect(getIncludedGreenVegetationLevels("low")).toEqual(["low"]);
+    expect(getIncludedGreenVegetationLevels("medium")).toEqual(["low", "medium"]);
+    expect(getIncludedGreenVegetationLevels("high")).toEqual(["low", "medium", "high"]);
+  });
+
   it("clears transport and zone runtime state when switching to a new journey", () => {
     useJourneyStore.setState({
       journeyId: "journey-old",

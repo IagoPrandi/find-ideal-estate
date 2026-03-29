@@ -3,6 +3,24 @@ import { create } from "zustand";
 export type SearchType = "rent" | "sale";
 export type TravelMode = "transit" | "walk" | "car";
 export type PublicTransportMode = "bus" | "rail" | "mixed";
+export const GREEN_VEGETATION_LEVELS = ["low", "medium", "high"] as const;
+export type GreenVegetationLevel = (typeof GREEN_VEGETATION_LEVELS)[number];
+
+export const GREEN_VEGETATION_LABELS: Record<GreenVegetationLevel, string> = {
+  low: "Pouca vegetação",
+  medium: "Média vegetação",
+  high: "Muita vegetação"
+};
+
+export const INCLUDED_GREEN_VEGETATION_LEVELS: Record<GreenVegetationLevel, GreenVegetationLevel[]> = {
+  low: ["low"],
+  medium: ["low", "medium"],
+  high: ["low", "medium", "high"]
+};
+
+export function getIncludedGreenVegetationLevels(level: GreenVegetationLevel): GreenVegetationLevel[] {
+  return INCLUDED_GREEN_VEGETATION_LEVELS[level];
+}
 
 export type JourneyConfig = {
   type: SearchType;
@@ -11,6 +29,7 @@ export type JourneyConfig = {
   time: number;
   zoneRadiusMeters: number;
   transportSearchRadiusMeters: number;
+  greenVegetationLevel: GreenVegetationLevel;
   enrichments: {
     safety: boolean;
     green: boolean;
@@ -89,9 +108,10 @@ const defaultConfig: JourneyConfig = {
   time: 30,
   zoneRadiusMeters: 1200,
   transportSearchRadiusMeters: 1200,
+  greenVegetationLevel: "medium",
   enrichments: {
     safety: true,
-    green: true,
+    green: false,
     flood: true,
     pois: true
   }

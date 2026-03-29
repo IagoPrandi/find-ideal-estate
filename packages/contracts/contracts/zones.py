@@ -28,6 +28,8 @@ class ZoneRead(BaseModel):
     walk_distance_meters: int | None = None
     isochrone_geom: dict[str, Any] | None = None  # GeoJSON
     green_area_m2: float | None = None
+    green_vegetation_level: str | None = None
+    green_vegetation_label: str | None = None
     flood_area_m2: float | None = None
     safety_incidents_count: int | None = None
     poi_counts: dict[str, int] | None = None  # {"supermarket": 5, "pharmacy": 3, ...}

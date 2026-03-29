@@ -6,6 +6,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Path, Query, Response
 from core.db import get_engine
+from modules.zones.vegetation import green_vegetation_case_sql
 from sqlalchemy import text
 from sqlalchemy.exc import ProgrammingError
 
@@ -13,11 +14,24 @@ router = APIRouter(prefix="/transport", tags=["transport"])
 logger = logging.getLogger(__name__)
 
 MVT_MEDIA_TYPE = "application/vnd.mapbox-vector-tile"
+_METERS_PER_DEGREE = 111_320.0
+_GTFS_STOP_TILE_BUFFER_METERS = 250.0
+_GEOSAMPA_BUS_STOP_MATCH_METERS = 45.0
+_GEOSAMPA_BUS_TERMINAL_MATCH_METERS = 180.0
+
+
+def _meters_to_degree_buffer(meters: float) -> float:
+    return meters / _METERS_PER_DEGREE
+
+_BUS_DESCRIPTOR_SQL = (
+    "COALESCE(NULLIF(gr.route_short_name, ''), gr.route_id)"
+)
 
 
 async def _query_vector_tile(engine, sql: str, params: dict, *, layer_name: str) -> bytes:
     try:
-        async with engine.connect() as conn:
+        async with engine.begin() as conn:
+            await conn.execute(text("SET LOCAL jit = off"))
             result = await conn.execute(text(sql), params)
             tile = result.scalar()
         return bytes(tile or b"")
@@ -26,7 +40,7 @@ async def _query_vector_tile(engine, sql: str, params: dict, *, layer_name: str)
         raise HTTPException(status_code=500, detail=f"Falha ao gerar vector tile de {layer_name}.") from exc
 
 
-_TRANSPORT_LINES_TILE_SQL = """
+_TRANSPORT_LINES_TILE_ROWS_SQL = f"""
 WITH bounds AS (
     SELECT
         ST_TileEnvelope(:z, :x, :y) AS env_3857,
@@ -44,6 +58,11 @@ WITH bounds AS (
             MIN(NULLIF(gr.route_short_name, '')),
             gt.shape_id::text
         ) AS name,
+        COUNT(DISTINCT {_BUS_DESCRIPTOR_SQL}) FILTER (WHERE gr.route_type = 3) AS bus_count,
+        COALESCE(
+            STRING_AGG(DISTINCT {_BUS_DESCRIPTOR_SQL}, '||' ORDER BY {_BUS_DESCRIPTOR_SQL}) FILTER (WHERE gr.route_type = 3),
+            ''::text
+        ) AS bus_list,
         CASE
             WHEN MIN(gr.route_type) = 1 THEN 'metro'
             WHEN MIN(gr.route_type) = 2 THEN 'train'
@@ -59,15 +78,15 @@ WITH bounds AS (
         COALESCE(glm.name, cgs.shape_id) AS name,
         COALESCE(glm.mode, 'bus') AS mode,
         'gtfs_shape'::text AS source_kind,
-        0::int AS bus_count,
-        ''::text AS bus_list,
+        COALESCE(glm.bus_count, 0)::bigint AS bus_count,
+        COALESCE(glm.bus_list, ''::text) AS bus_list,
         ST_MakeLine(gs.location ORDER BY gs.shape_pt_sequence) AS geom_4326
     FROM gtfs_shapes gs
     JOIN candidate_gtfs_shapes cgs ON cgs.shape_id = gs.shape_id::text
     LEFT JOIN gtfs_line_meta glm ON glm.shape_id = cgs.shape_id
     CROSS JOIN bounds b
     WHERE gs.location && b.env_4326
-    GROUP BY cgs.shape_id, glm.name, glm.mode
+    GROUP BY cgs.shape_id, glm.name, glm.mode, glm.bus_count, glm.bus_list
 ), corridor_lines AS (
     SELECT
         md5(ST_AsEWKB(g.geometry)::text) AS id,
@@ -136,15 +155,45 @@ WITH bounds AS (
         source_kind,
         COALESCE(bus_count, 0)::int AS bus_count,
         COALESCE(bus_list, '') AS bus_list,
+        geom_4326,
+        env_3857,
+        128 AS mvt_buffer
+    FROM merged
+    CROSS JOIN bounds
+)
+SELECT
+    id,
+    name,
+    mode,
+    source_kind,
+    bus_count,
+    bus_list,
+    geom_4326,
+    env_3857,
+    mvt_buffer
+FROM mvtgeom
+"""
+
+
+_TRANSPORT_LINES_TILE_SQL = f"""
+WITH layer_rows AS (
+    {_TRANSPORT_LINES_TILE_ROWS_SQL}
+), mvtgeom AS (
+    SELECT
+        id,
+        name,
+        mode,
+        source_kind,
+        bus_count,
+        bus_list,
         ST_AsMVTGeom(
             ST_Transform(geom_4326, 3857),
             env_3857,
             4096,
-            128,
+            mvt_buffer,
             true
         ) AS geom
-    FROM merged
-    CROSS JOIN bounds
+    FROM layer_rows
 )
 SELECT ST_AsMVT(mvtgeom, 'transport_lines', 4096, 'geom')
 FROM mvtgeom
@@ -152,7 +201,7 @@ WHERE geom IS NOT NULL
 """
 
 
-_TRANSPORT_STOPS_TILE_SQL = """
+_TRANSPORT_STOPS_TILE_ROWS_SQL = f"""
 WITH bounds AS (
     SELECT
         ST_TileEnvelope(:z, :x, :y) AS env_3857,
@@ -164,7 +213,24 @@ WITH bounds AS (
         s.location AS geom_4326
     FROM gtfs_stops s
     CROSS JOIN bounds b
-    WHERE s.location && b.env_4326
+        WHERE s.location && ST_Expand(b.env_4326, {_meters_to_degree_buffer(_GTFS_STOP_TILE_BUFFER_METERS)})
+            AND ST_DWithin(s.location::geography, b.env_4326::geography, {_GTFS_STOP_TILE_BUFFER_METERS})
+), geosampa_bus_stop_points AS (
+    SELECT
+        md5(ST_AsEWKB(g.geometry)::text) AS id,
+        COALESCE(NULLIF(g.nm_ponto_onibus, ''), 'Ponto de ônibus') AS name,
+        ST_PointOnSurface(g.geometry) AS geom_4326
+    FROM geosampa_bus_stops g
+    CROSS JOIN bounds b
+    WHERE g.geometry && b.env_4326
+), geosampa_bus_terminal_points AS (
+    SELECT
+        md5(ST_AsEWKB(g.geometry)::text) AS id,
+        COALESCE(NULLIF(g.nm_terminal, ''), 'Terminal de ônibus') AS name,
+        ST_PointOnSurface(g.geometry) AS geom_4326
+    FROM geosampa_bus_terminals g
+    CROSS JOIN bounds b
+    WHERE g.geometry && b.env_4326
 ), stop_points AS (
     SELECT
         cgs.stop_id AS id,
@@ -201,28 +267,56 @@ WITH bounds AS (
     WHERE g.geometry && b.env_4326
     UNION ALL
     SELECT
-        md5(ST_AsEWKB(g.geometry)::text) AS id,
-        COALESCE(NULLIF(g.nm_ponto_onibus, ''), 'Ponto de ônibus') AS name,
+        gbsp.id AS id,
+        gbsp.name AS name,
         'bus_stop'::text AS kind,
         'geosampa_bus_stop'::text AS source_kind,
         0::int AS bus_count,
         ''::text AS bus_list,
-        ST_PointOnSurface(g.geometry) AS geom_4326
-    FROM geosampa_bus_stops g
-    CROSS JOIN bounds b
-    WHERE g.geometry && b.env_4326
+        gbsp.geom_4326
+    FROM geosampa_bus_stop_points gbsp
     UNION ALL
     SELECT
-        md5(ST_AsEWKB(g.geometry)::text) AS id,
-        COALESCE(NULLIF(g.nm_terminal, ''), 'Terminal de ônibus') AS name,
+        gbtp.id AS id,
+        gbtp.name AS name,
         'bus_terminal'::text AS kind,
         'geosampa_bus_terminal'::text AS source_kind,
         0::int AS bus_count,
         ''::text AS bus_list,
-        ST_PointOnSurface(g.geometry) AS geom_4326
-    FROM geosampa_bus_terminals g
-    CROSS JOIN bounds b
-    WHERE g.geometry && b.env_4326
+        gbtp.geom_4326
+    FROM geosampa_bus_terminal_points gbtp
+), mvtgeom AS (
+    SELECT
+        id,
+        name,
+        kind,
+        source_kind,
+        bus_count,
+        bus_list,
+        geom_4326,
+        env_3857,
+        64 AS mvt_buffer
+    FROM stop_points
+    CROSS JOIN bounds
+    WHERE geom_4326 IS NOT NULL AND ST_Intersects(geom_4326, env_4326)
+)
+SELECT
+    id,
+    name,
+    kind,
+    source_kind,
+    bus_count,
+    bus_list,
+    geom_4326,
+    env_3857,
+    mvt_buffer
+FROM mvtgeom
+"""
+
+
+_TRANSPORT_STOPS_TILE_SQL = f"""
+WITH layer_rows AS (
+    {_TRANSPORT_STOPS_TILE_ROWS_SQL}
 ), mvtgeom AS (
     SELECT
         id,
@@ -235,12 +329,10 @@ WITH bounds AS (
             ST_Transform(geom_4326, 3857),
             env_3857,
             4096,
-            64,
+            mvt_buffer,
             true
         ) AS geom
-    FROM stop_points
-    CROSS JOIN bounds
-    WHERE geom_4326 IS NOT NULL AND ST_Intersects(geom_4326, env_4326)
+    FROM layer_rows
 )
 SELECT ST_AsMVT(mvtgeom, 'transport_stops', 4096, 'geom')
 FROM mvtgeom
@@ -250,29 +342,88 @@ WHERE geom IS NOT NULL
 
 _BUS_LINE_DETAIL_SQL = """
 SELECT
-        COALESCE(NULLIF(gr.route_short_name, ''), gr.route_id) AS route_number,
-        COALESCE(NULLIF(gt.trip_headsign, ''), 'sentido não informado') AS direction
+    COALESCE(NULLIF(gr.route_short_name, ''), gr.route_id) AS route_number
 FROM gtfs_trips gt
 JOIN gtfs_routes gr ON gr.route_id = gt.route_id
 WHERE gt.shape_id::text = :line_id
     AND gr.route_type = 3
-GROUP BY route_number, direction
-ORDER BY route_number, direction
+GROUP BY route_number
+ORDER BY route_number
 """
 
 
 _BUS_STOP_DETAIL_SQL = """
 SELECT
-        COALESCE(NULLIF(gr.route_short_name, ''), gr.route_id) AS route_number,
-        COALESCE(NULLIF(gt.trip_headsign, ''), 'sentido não informado') AS direction
+    COALESCE(NULLIF(gr.route_short_name, ''), gr.route_id) AS route_number
 FROM gtfs_stop_times gst
 JOIN gtfs_trips gt ON gt.trip_id = gst.trip_id
 JOIN gtfs_routes gr ON gr.route_id = gt.route_id
 WHERE gst.stop_id::text = :stop_id
     AND gr.route_type = 3
-GROUP BY route_number, direction
-ORDER BY route_number, direction
+GROUP BY route_number
+ORDER BY route_number
 """
+
+
+_GEOSAMPA_BUS_STOP_DETAIL_SQL = f"""
+WITH target AS (
+    SELECT ST_PointOnSurface(g.geometry) AS geom_4326
+    FROM geosampa_bus_stops g
+    WHERE md5(ST_AsEWKB(g.geometry)::text) = :stop_id
+), nearby_gtfs_stops AS (
+    SELECT s.stop_id::text AS stop_id
+    FROM gtfs_stops s
+    JOIN target t
+      ON s.location && ST_Expand(t.geom_4326, {_meters_to_degree_buffer(_GEOSAMPA_BUS_STOP_MATCH_METERS)})
+     AND ST_DWithin(s.location::geography, t.geom_4326::geography, {_GEOSAMPA_BUS_STOP_MATCH_METERS})
+)
+SELECT
+    COALESCE(NULLIF(gr.route_short_name, ''), gr.route_id) AS route_number
+FROM nearby_gtfs_stops ngs
+JOIN gtfs_stop_times gst ON gst.stop_id::text = ngs.stop_id
+JOIN gtfs_trips gt ON gt.trip_id = gst.trip_id
+JOIN gtfs_routes gr ON gr.route_id = gt.route_id
+WHERE gr.route_type = 3
+GROUP BY route_number
+ORDER BY route_number
+"""
+
+
+_GEOSAMPA_BUS_TERMINAL_DETAIL_SQL = f"""
+WITH target AS (
+    SELECT ST_PointOnSurface(g.geometry) AS geom_4326
+    FROM geosampa_bus_terminals g
+    WHERE md5(ST_AsEWKB(g.geometry)::text) = :stop_id
+), nearby_gtfs_stops AS (
+    SELECT s.stop_id::text AS stop_id
+    FROM gtfs_stops s
+    JOIN target t
+      ON s.location && ST_Expand(t.geom_4326, {_meters_to_degree_buffer(_GEOSAMPA_BUS_TERMINAL_MATCH_METERS)})
+     AND ST_DWithin(s.location::geography, t.geom_4326::geography, {_GEOSAMPA_BUS_TERMINAL_MATCH_METERS})
+)
+SELECT
+    COALESCE(NULLIF(gr.route_short_name, ''), gr.route_id) AS route_number
+FROM nearby_gtfs_stops ngs
+JOIN gtfs_stop_times gst ON gst.stop_id::text = ngs.stop_id
+JOIN gtfs_trips gt ON gt.trip_id = gst.trip_id
+JOIN gtfs_routes gr ON gr.route_id = gt.route_id
+WHERE gr.route_type = 3
+GROUP BY route_number
+ORDER BY route_number
+"""
+
+
+async def _query_transport_stop_detail_rows(conn, stop_id: str, source_kind: str) -> list[dict]:
+    sql_by_source_kind = {
+        "gtfs_stop": _BUS_STOP_DETAIL_SQL,
+        "geosampa_bus_stop": _GEOSAMPA_BUS_STOP_DETAIL_SQL,
+        "geosampa_bus_terminal": _GEOSAMPA_BUS_TERMINAL_DETAIL_SQL,
+    }
+    sql = sql_by_source_kind.get(source_kind)
+    if sql is None:
+        raise HTTPException(status_code=400, detail="source_kind de parada não suportado")
+
+    return (await conn.execute(text(sql), {"stop_id": stop_id})).mappings().all()
 
 
 _GREEN_TILE_SQL = """
@@ -284,6 +435,7 @@ WITH bounds AS (
     SELECT
         md5(ST_AsEWKB(g.geometry)::text) AS id,
         COALESCE(NULLIF(g.ves_categ, ''), NULLIF(g.ves_bairro, ''), 'Área verde') AS source_name,
+        {green_case_sql} AS vegetation_level,
         ST_AsMVTGeom(
             ST_Transform(ST_SimplifyPreserveTopology(g.geometry, 0.00005), 3857),
             env_3857,
@@ -299,7 +451,7 @@ WITH bounds AS (
 SELECT ST_AsMVT(layer_rows, 'green_areas', 4096, 'geom')
 FROM layer_rows
 WHERE geom IS NOT NULL
-"""
+""".format(green_case_sql=green_vegetation_case_sql("g.ves_categ"))
 
 
 _FLOOD_TILE_SQL = """
@@ -381,7 +533,7 @@ async def get_bus_line_details(
     async with engine.connect() as conn:
         rows = (await conn.execute(text(_BUS_LINE_DETAIL_SQL), {"line_id": line_id})).mappings().all()
 
-    buses = [f"{row['route_number']} sentido {row['direction']}" for row in rows]
+    buses = [str(row["route_number"]) for row in rows]
     return {
         "count": len(buses),
         "buses": buses,
@@ -395,13 +547,30 @@ async def get_bus_stop_details(
 ) -> dict:
     engine = get_engine()
     async with engine.connect() as conn:
-        rows = (await conn.execute(text(_BUS_STOP_DETAIL_SQL), {"stop_id": stop_id})).mappings().all()
+        rows = await _query_transport_stop_detail_rows(conn, stop_id, "gtfs_stop")
 
-    buses = [f"{row['route_number']} sentido {row['direction']}" for row in rows]
+    buses = [str(row["route_number"]) for row in rows]
     return {
         "count": len(buses),
         "buses": buses,
         "source": "gtfs",
+    }
+
+
+@router.get("/details/transport-stop")
+async def get_transport_stop_details(
+    stop_id: str = Query(..., min_length=1),
+    source_kind: str = Query(..., min_length=1),
+) -> dict:
+    engine = get_engine()
+    async with engine.connect() as conn:
+        rows = await _query_transport_stop_detail_rows(conn, stop_id, source_kind)
+
+    buses = [str(row["route_number"]) for row in rows]
+    return {
+        "count": len(buses),
+        "buses": buses,
+        "source": source_kind,
     }
 
 

@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Grelha Interativa</title>
+  
+  <!-- Importação do Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Estilos customizados para animação -->
+  <style>
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    .animate-fade-in {
+      animation: fadeIn 0.2s ease-out forwards;
+    }
+  </style>
+</head>
+<body class="min-h-screen bg-[#f5f5f5] flex items-center justify-center p-8 font-sans">
+  
+  <!-- Contêiner Principal -->
+  <div class="w-full max-w-4xl flex flex-col relative">
+    
+    <!-- ================= LINHA 1 ================= -->
+    <div class="flex gap-6 h-[160px]">
+      
+      <!-- Cartão 1: Superior Esquerdo (Estático) -->
+      <div class="flex-1 bg-[#eaeaea] border-[2px] border-[#222] rounded-[24px]"></div>
+
+      <!-- Cartão 2: Superior Direito (Interativo) -->
+      <div class="flex-1 relative">
+        
+        <!-- ESTADO INATIVO: Apenas o bloco roxo -->
+        <button
+          id="btn-inactive"
+          class="w-full h-full bg-[#e0ddff] border-[2px] border-[#222] rounded-[24px] cursor-pointer hover:bg-[#d4d0f5] transition-colors duration-200 block"
+          aria-label="Abrir configurações"
+        ></button>
+        
+        <!-- ESTADO ATIVO: O bloco se transforma na parte superior da forma em "L" (Oculto por defeito) -->
+        <div id="active-state" class="hidden w-full h-full relative animate-fade-in">
+          
+          <!-- O TRUQUE DA FORMA EM L: 
+            Esta div cinza absoluta desenha as bordas esquerda, superior e direita.
+            Ela não tem borda inferior e a sua altura desce 26px extras (24px do gap + 2px da borda) 
+            para cobrir a borda superior da linha de baixo, fundindo as duas formas perfeitamente.
+          -->
+          <div
+            class="absolute top-0 left-0 w-full bg-[#eaeaea] border-[2px] border-[#222] border-b-0 rounded-t-[24px] rounded-b-none pointer-events-none"
+            style="height: calc(100% + 24px + 2px); z-index: 10;"
+          ></div>
+
+          <!-- O bloco roxo interno (agora menor devido ao padding) -->
+          <div class="absolute top-0 left-0 w-full h-full p-4" style="z-index: 20;">
+            <button
+              id="btn-active"
+              class="w-full h-full bg-[#e0ddff] border-[2px] border-[#222] rounded-[16px] cursor-pointer hover:bg-[#d4d0f5] transition-colors duration-200 block"
+              aria-label="Fechar configurações"
+            ></button>
+          </div>
+
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= ÁREA EXPANDIDA (CAMPO DESLIZANTE) ================= -->
+    <!-- Começa oculto com max-h-0, opacity-0 e mt-0 -->
+    <div 
+      id="expanded-area"
+      class="w-full overflow-hidden transition-all duration-300 ease-in-out max-h-0 opacity-0 mt-0"
+    >
+      <!-- Contêiner da linha inferior (A base da forma em "L") -->
+      <div 
+        class="w-full bg-[#eaeaea] border-[2px] border-[#222] rounded-[24px] rounded-tr-none h-[180px] flex items-center justify-center px-16 relative"
+        style="z-index: 5;"
+      >
+        <!-- Design do Slider Customizado -->
+        <div class="w-full h-[6px] bg-[#333] rounded-full relative flex items-center">
+          <!-- Ponto Esquerdo -->
+          <div class="absolute left-0 w-6 h-6 bg-[#eaeaea] border-[2px] border-[#333] rounded-full -translate-x-1/2 cursor-grab active:cursor-grabbing hover:scale-110 transition-transform"></div>
+          <!-- Ponto Direito -->
+          <div class="absolute right-0 w-6 h-6 bg-[#eaeaea] border-[2px] border-[#333] rounded-full translate-x-1/2 cursor-grab active:cursor-grabbing hover:scale-110 transition-transform"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ================= LINHA 3 ================= -->
+    <div class="flex gap-6 transition-all duration-300 mt-6">
+      <div class="flex-1 bg-[#eaeaea] border-[2px] border-[#222] rounded-[24px] h-[160px]"></div>
+      <div class="flex-1 bg-[#eaeaea] border-[2px] border-[#222] rounded-[24px] h-[160px]"></div>
+    </div>
+
+  </div>
+
+  <!-- Lógica JavaScript -->
+  <script>
+    document.addEventListener('DOMContentLoaded', () => {
+      // Obter referências aos elementos do DOM
+      const btnInactive = document.getElementById('btn-inactive');
+      const activeState = document.getElementById('active-state');
+      const btnActive = document.getElementById('btn-active');
+      const expandedArea = document.getElementById('expanded-area');
+
+      // Função para alternar o estado da zona
+      function toggleZone() {
+        // Alternar a visibilidade dos botões
+        btnInactive.classList.toggle('hidden');
+        activeState.classList.toggle('hidden');
+
+        // Alternar as classes de altura, opacidade e margem para animar a área expandida
+        if (expandedArea.classList.contains('max-h-0')) {
+          // Abrir
+          expandedArea.classList.remove('max-h-0', 'opacity-0', 'mt-0');
+          expandedArea.classList.add('max-h-[300px]', 'opacity-100', 'mt-6');
+        } else {
+          // Fechar
+          expandedArea.classList.add('max-h-0', 'opacity-0', 'mt-0');
+          expandedArea.classList.remove('max-h-[300px]', 'opacity-100', 'mt-6');
+        }
+      }
+
+      // Adicionar os eventos de clique aos dois botões
+      btnInactive.addEventListener('click', toggleZone);
+      btnActive.addEventListener('click', toggleZone);
+    });
+  </script>
+</body>
+</html>
