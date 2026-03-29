@@ -84,8 +84,6 @@ WITH bounds AS (
     FROM gtfs_shapes gs
     JOIN candidate_gtfs_shapes cgs ON cgs.shape_id = gs.shape_id::text
     LEFT JOIN gtfs_line_meta glm ON glm.shape_id = cgs.shape_id
-    CROSS JOIN bounds b
-    WHERE gs.location && b.env_4326
     GROUP BY cgs.shape_id, glm.name, glm.mode, glm.bus_count, glm.bus_list
 ), corridor_lines AS (
     SELECT
@@ -776,17 +774,21 @@ async def get_transport_layers(
         """
         WITH viewport AS (
             SELECT ST_MakeEnvelope(:x1, :y1, :x2, :y2, 4326) AS env
+        ), candidate_gtfs_shapes AS (
+            SELECT DISTINCT gs.shape_id::text AS shape_id
+            FROM gtfs_shapes gs
+            CROSS JOIN viewport v
+            WHERE ST_Intersects(gs.location, v.env)
         ), lines AS (
             SELECT
-                gs.shape_id::text AS id,
+                cgs.shape_id AS id,
                 MIN(gr.route_long_name)::text AS name,
                 CASE WHEN MIN(gr.route_type) = 2 THEN 'train' ELSE 'bus' END AS mode,
                 ST_AsGeoJSON(ST_MakeLine(gs.location ORDER BY gs.shape_pt_sequence))::JSONB AS geometry
             FROM gtfs_shapes gs
+            JOIN candidate_gtfs_shapes cgs ON cgs.shape_id = gs.shape_id::text
             JOIN gtfs_trips gt ON gt.shape_id = gs.shape_id
             JOIN gtfs_routes gr ON gr.route_id = gt.route_id
-            CROSS JOIN viewport v
-            WHERE ST_Intersects(gs.location, v.env)
             GROUP BY gs.shape_id
         )
         SELECT id, name, mode, geometry

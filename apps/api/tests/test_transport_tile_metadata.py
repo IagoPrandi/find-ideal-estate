@@ -27,8 +27,11 @@ from core.db import close_db, get_engine, init_db  # noqa: E402
 
 SAMPLE_STOP_ID = "S_TILE_META"
 SAMPLE_SHAPE_ID = "SH_TILE_META"
+SAMPLE_ARTIFACT_SHAPE_ID = "SH_TILE_META_ARTIFACT"
 SAMPLE_ROUTE_IDS = ("R_TILE_META_1", "R_TILE_META_2")
+SAMPLE_ARTIFACT_ROUTE_ID = "R_TILE_META_ARTIFACT"
 SAMPLE_TRIP_IDS = ("T_TILE_META_1", "T_TILE_META_2")
+SAMPLE_ARTIFACT_TRIP_ID = "T_TILE_META_ARTIFACT"
 SAMPLE_LAT = 0.01
 SAMPLE_LON = 0.01
 SAMPLE_GEOSAMPA_STOP_NAME = "GeoSampa Tile Stop"
@@ -60,6 +63,9 @@ async def _cleanup_sample_rows() -> None:
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.execute(text("DELETE FROM geosampa_bus_stops WHERE nm_ponto_onibus = :stop_name"), {"stop_name": SAMPLE_GEOSAMPA_STOP_NAME})
+        await conn.execute(text("DELETE FROM gtfs_trips WHERE trip_id = :trip_id"), {"trip_id": SAMPLE_ARTIFACT_TRIP_ID})
+        await conn.execute(text("DELETE FROM gtfs_routes WHERE route_id = :route_id"), {"route_id": SAMPLE_ARTIFACT_ROUTE_ID})
+        await conn.execute(text("DELETE FROM gtfs_shapes WHERE shape_id = :shape_id"), {"shape_id": SAMPLE_ARTIFACT_SHAPE_ID})
         await conn.execute(text("DELETE FROM gtfs_stop_times WHERE trip_id = ANY(:trip_ids)"), {"trip_ids": list(SAMPLE_TRIP_IDS)})
         await conn.execute(text("DELETE FROM gtfs_trips WHERE trip_id = ANY(:trip_ids)"), {"trip_ids": list(SAMPLE_TRIP_IDS)})
         await conn.execute(text("DELETE FROM gtfs_routes WHERE route_id = ANY(:route_ids)"), {"route_ids": list(SAMPLE_ROUTE_IDS)})
@@ -103,12 +109,14 @@ async def _insert_sample_gtfs_rows() -> None:
                 INSERT INTO gtfs_routes (route_id, route_short_name, route_long_name, route_type)
                 VALUES
                     (:route_id_1, '175T-10', 'Linha 175T-10', 3),
-                    (:route_id_2, '875A-10', 'Linha 875A-10', 3)
+                    (:route_id_2, '875A-10', 'Linha 875A-10', 3),
+                    (:artifact_route_id, '7000-10', 'Linha Artefato', 3)
                 """
             ),
             {
                 "route_id_1": SAMPLE_ROUTE_IDS[0],
                 "route_id_2": SAMPLE_ROUTE_IDS[1],
+                "artifact_route_id": SAMPLE_ARTIFACT_ROUTE_ID,
             },
         )
         await conn.execute(
@@ -117,7 +125,8 @@ async def _insert_sample_gtfs_rows() -> None:
                 INSERT INTO gtfs_trips (trip_id, route_id, shape_id)
                 VALUES
                     (:trip_id_1, :route_id_1, :shape_id),
-                    (:trip_id_2, :route_id_2, :shape_id)
+                    (:trip_id_2, :route_id_2, :shape_id),
+                    (:artifact_trip_id, :artifact_route_id, :artifact_shape_id)
                 """
             ),
             {
@@ -126,6 +135,9 @@ async def _insert_sample_gtfs_rows() -> None:
                 "route_id_1": SAMPLE_ROUTE_IDS[0],
                 "route_id_2": SAMPLE_ROUTE_IDS[1],
                 "shape_id": SAMPLE_SHAPE_ID,
+                "artifact_trip_id": SAMPLE_ARTIFACT_TRIP_ID,
+                "artifact_route_id": SAMPLE_ARTIFACT_ROUTE_ID,
+                "artifact_shape_id": SAMPLE_ARTIFACT_SHAPE_ID,
             },
         )
         await conn.execute(
@@ -149,7 +161,10 @@ async def _insert_sample_gtfs_rows() -> None:
                 INSERT INTO gtfs_shapes (shape_id, shape_pt_sequence, location)
                 VALUES
                     (:shape_id, 1, ST_SetSRID(ST_MakePoint(:lon_1, :lat_1), 4326)),
-                    (:shape_id, 2, ST_SetSRID(ST_MakePoint(:lon_2, :lat_2), 4326))
+                    (:shape_id, 2, ST_SetSRID(ST_MakePoint(:lon_2, :lat_2), 4326)),
+                    (:artifact_shape_id, 1, ST_SetSRID(ST_MakePoint(:artifact_lon_1, :artifact_lat_1), 4326)),
+                    (:artifact_shape_id, 2, ST_SetSRID(ST_MakePoint(:artifact_lon_2, :artifact_lat_2), 4326)),
+                    (:artifact_shape_id, 3, ST_SetSRID(ST_MakePoint(:artifact_lon_3, :artifact_lat_3), 4326))
                 """
             ),
             {
@@ -158,6 +173,13 @@ async def _insert_sample_gtfs_rows() -> None:
                 "lat_1": SAMPLE_LAT,
                 "lon_2": SAMPLE_LON + 0.005,
                 "lat_2": SAMPLE_LAT + 0.005,
+                "artifact_shape_id": SAMPLE_ARTIFACT_SHAPE_ID,
+                "artifact_lon_1": SAMPLE_LON,
+                "artifact_lat_1": SAMPLE_LAT,
+                "artifact_lon_2": SAMPLE_LON + 0.03,
+                "artifact_lat_2": SAMPLE_LAT,
+                "artifact_lon_3": SAMPLE_LON + 0.006,
+                "artifact_lat_3": SAMPLE_LAT + 0.004,
             },
         )
 
@@ -231,6 +253,40 @@ async def test_transport_stop_details_return_lines_on_demand() -> None:
         assert gtfs_result["buses"] == ["175T-10", "875A-10"]
         assert geosampa_result["count"] == 2
         assert geosampa_result["buses"] == ["175T-10", "875A-10"]
+    finally:
+        await _cleanup_sample_rows()
+        await close_db()
+
+
+@pytest.mark.anyio
+async def test_transport_line_rows_use_complete_shape_geometry_before_tile_clipping() -> None:
+    init_db(os.environ["DATABASE_URL"])
+    try:
+        if not await _ensure_gtfs_schema() or not await _ensure_geosampa_schema():
+            pytest.skip("Phase 3 transport schemas not migrated. Run alembic upgrade head.")
+
+        await _cleanup_sample_rows()
+        await _insert_sample_gtfs_rows()
+
+        zoom = 14
+        x, y = _lonlat_to_tile(SAMPLE_LON, SAMPLE_LAT, zoom)
+        params = {"z": zoom, "x": x, "y": y, "line_id": SAMPLE_ARTIFACT_SHAPE_ID}
+
+        engine = get_engine()
+        async with engine.connect() as conn:
+            result = await conn.execute(
+                text(
+                    f"""
+                    SELECT ST_NPoints(geom_4326) AS point_count
+                    FROM ({_TRANSPORT_LINES_TILE_ROWS_SQL}) AS line_rows
+                    WHERE id = :line_id
+                    """
+                ),
+                params,
+            )
+
+        row = result.mappings().one()
+        assert row["point_count"] == 3
     finally:
         await _cleanup_sample_rows()
         await close_db()

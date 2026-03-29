@@ -1,5 +1,27 @@
 # Work Log
 
+## 2026-03-29 - Corrigir artefatos retos nas linhas de transporte
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para corrigir o defeito na origem geométrica, com diff pequeno e regressao de banco reproduzivel.
+- Trigger: usuario reportou que as linhas verticais e horizontais na camada roxa de transporte pareciam erros de renderizacao.
+- Root cause identified:
+  - as shapes GTFS da layer de linhas estavam sendo reconstruidas com `ST_MakeLine(...)` usando apenas os pontos que caiam dentro do tile atual (`gs.location && b.env_4326`), o que podia conectar pontos remanescentes com segmentos retos artificiais;
+  - o endpoint legado `/transport/layers` repetia o mesmo padrao ao montar GeoJSON por viewport.
+- Scope executed:
+  - `apps/api/src/api/routes/transport.py`:
+    - removido o filtro por tile dentro de `gtfs_lines`, de modo que cada shape GTFS candidata passe a ser montada com todos os pontos ordenados antes do clipping da vector tile;
+    - ajustado tambem o endpoint `/transport/layers` para selecionar shapes candidatas pelo viewport, mas montar a linha completa por `shape_id`.
+  - `apps/api/tests/test_transport_tile_metadata.py`:
+    - adicionada fixture de shape GTFS com tres pontos, sendo um fora da tile e dois dentro, para garantir que a row query de linhas preserve os `3` pontos da shape completa antes do clipping.
+- Validation:
+  - backend focado: `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_transport_tile_metadata.py -q --color=no` -> `3 passed`.
+  - smoke HTTP local: tiles de `/transport/tiles/lines/10/380/581.pbf` e `/transport/tiles/stops/10/380/581.pbf` responderam `200`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
 ## 2026-03-29 - Separar plotagem rapida dos pontos de transporte da associacao de linhas
 
 - Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
