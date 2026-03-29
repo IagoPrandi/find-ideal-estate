@@ -44,7 +44,7 @@ async def _zone_generation_step(job_id: UUID) -> None:
             message=(
                 "Zone reused from fingerprint cache"
                 if zone.reused
-                else "Zone generated from legacy candidate pipeline"
+                else "Zone generated"
             ),
             payload_json={
                 "zone_id": str(zone.zone_id),

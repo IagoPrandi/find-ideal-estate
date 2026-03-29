@@ -57,12 +57,14 @@ def compute_poi_cache_config_hash(
     categories: Sequence[str],
     provider: str = POI_PROVIDER_MAPBOX_SEARCHBOX,
     limit_per_category: int = 10,
+    search_geometry_strategy: str = "zone_bbox",
 ) -> str:
     canonical = {
         "categories": sorted(str(category).strip() for category in categories if str(category).strip()),
         "limit_per_category": int(limit_per_category),
         "provider": provider,
-        "version": 1,
+        "search_geometry_strategy": str(search_geometry_strategy).strip() or "zone_bbox",
+        "version": 2,
     }
     payload = json.dumps(canonical, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]

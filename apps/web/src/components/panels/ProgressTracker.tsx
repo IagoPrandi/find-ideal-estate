@@ -1,5 +1,6 @@
 import { ChevronDown, ChevronUp } from "lucide-react";
-import { WIZARD_STEPS, type WizardStepId } from "../../features/app/wizardSteps";
+import { getVisibleWizardSteps, type WizardStepId } from "../../features/app/wizardSteps";
+import { useJourneyStore } from "../../state";
 
 export type TrackerStep = {
   id: WizardStepId;
@@ -15,10 +16,13 @@ type Props = {
 };
 
 export function ProgressTracker({ currentStep, maxStep, isCollapsed, onStepClick, onToggleCollapse }: Props) {
+  const modal = useJourneyStore((state) => state.config.modal);
+  const visibleSteps = getVisibleWizardSteps(modal);
+
   return (
     <div className="flex items-center justify-between rounded-3xl border border-slate-200 bg-white/95 p-2.5 shadow-md backdrop-blur-md transition-all">
       <div className="no-scrollbar flex flex-1 items-center gap-1 overflow-x-auto px-1">
-        {WIZARD_STEPS.map((step, index) => {
+        {visibleSteps.map((step, index) => {
           const isPast = step.id < currentStep;
           const isCurrent = step.id === currentStep;
           const isLocked = step.id > maxStep;
@@ -40,7 +44,7 @@ export function ProgressTracker({ currentStep, maxStep, isCollapsed, onStepClick
               >
                 <step.Icon className="h-4 w-4" />
               </button>
-              {index < WIZARD_STEPS.length - 1 ? (
+              {index < visibleSteps.length - 1 ? (
                 <div
                   className={`mx-1 h-[3px] w-3 rounded-full sm:w-4 ${step.id < currentStep ? "bg-pastel-violet-300" : "bg-slate-200"}`}
                   aria-hidden="true"

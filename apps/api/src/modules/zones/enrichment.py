@@ -18,6 +18,10 @@ from modules.pois.storage import (
     persist_poi_cache_payload,
     project_poi_payload_to_zone,
 )
+from modules.zones.isochrone_proxy import (
+    ISOCHRONE_PROXY_SEARCH_STRATEGY,
+    build_isochrone_proxy_circle,
+)
 from sqlalchemy import text
 
 _POI_CATEGORIES = ("school", "supermarket", "pharmacy", "park", "restaurant", "gym")
@@ -31,6 +35,7 @@ _ZONE_POI_CONTEXT_SQL = text(
         z.fingerprint AS poi_source_fingerprint,
         ST_X(ST_Centroid(z.isochrone_geom)) AS lon,
         ST_Y(ST_Centroid(z.isochrone_geom)) AS lat,
+        ST_Area(z.isochrone_geom::geography) AS area_m2,
         ST_XMin(z.isochrone_geom)::DOUBLE PRECISION AS xmin,
         ST_YMin(z.isochrone_geom)::DOUBLE PRECISION AS ymin,
         ST_XMax(z.isochrone_geom)::DOUBLE PRECISION AS xmax,
@@ -130,6 +135,7 @@ _JOURNEY_ZONE_POI_CONTEXT_SQL = text(
         poi_source.fingerprint AS poi_source_fingerprint,
         ST_X(poi_source.center_geom) AS lon,
         ST_Y(poi_source.center_geom) AS lat,
+        poi_source.area_m2 AS area_m2,
         ST_XMin(poi_source.isochrone_geom)::DOUBLE PRECISION AS xmin,
         ST_YMin(poi_source.isochrone_geom)::DOUBLE PRECISION AS ymin,
         ST_XMax(poi_source.isochrone_geom)::DOUBLE PRECISION AS xmax,
@@ -228,7 +234,7 @@ def _poi_cache_key(
             separators=(",", ":"),
         ).encode("utf-8")
     ).hexdigest()[:20]
-    return f"zone_pois:v4:{digest}"
+    return f"zone_pois:v5:{digest}"
 
 
 def _legacy_zone_payload_from_context(zone: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -412,11 +418,27 @@ async def enrich_zone_pois(
     if zone is None or zone["lon"] is None or zone["lat"] is None:
         return {"zone_id": str(zone_id), "poi_counts": {}}
 
-    bbox = (float(zone["xmin"]), float(zone["ymin"]), float(zone["xmax"]), float(zone["ymax"]))
+    try:
+        proxy_circle = build_isochrone_proxy_circle(
+            lon=float(zone["lon"]),
+            lat=float(zone["lat"]),
+            area_m2=float(zone["area_m2"]),
+        )
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(f"Zone {zone_id} has invalid isochrone area for POI search proxy") from exc
+
+    proxy_bbox = proxy_circle["bbox"]
+    bbox = (
+        float(proxy_bbox[0]),
+        float(proxy_bbox[1]),
+        float(proxy_bbox[2]),
+        float(proxy_bbox[3]),
+    )
     zone_fingerprint = str(zone["poi_source_fingerprint"] or zone["zone_fingerprint"])
     config_hash = compute_poi_cache_config_hash(
         categories=_POI_CATEGORIES,
         limit_per_category=_POI_FETCH_LIMIT,
+        search_geometry_strategy=ISOCHRONE_PROXY_SEARCH_STRATEGY,
     )
     cache_key = _poi_cache_key(
         zone_fingerprint=zone_fingerprint,

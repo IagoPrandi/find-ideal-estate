@@ -1,6 +1,118 @@
 # Work Log
 
+## 2026-03-29 - Representar isocronas por circulo equivalente na coleta de ruas e POIs
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `skills/best-practices/references/web2-backend.md`, `skills/best-practices/references/testing.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para aplicar uma mudanca pequena, versionada e validada no backend sem fallback silencioso de geometria.
+- Trigger: usuario pediu que a coleta de ruas e POIs deixasse de usar a geometria real da isocrona e passasse a usar uma circunferencia derivada do centroide da isocrona.
+- Root cause identified:
+  - o enrichment de POIs ainda montava o `bbox` externo a partir do envelope bruto da isocrona;
+  - o endpoint de `address-suggest` ainda repassava a geometria e o `bbox` reais da isocrona para a amostragem de ruas;
+  - os caches existentes nao distinguiam a estrategia geométrica, entao poderiam reutilizar resultados antigos mesmo apos a troca da representacao.
+- Scope executed:
+  - `apps/api/src/modules/zones/isochrone_proxy.py`:
+    - criado helper compartilhado para montar um circulo de area equivalente centrado no centroide da isocrona, com `geometry`, `bbox` e `radius_m`.
+  - `apps/api/src/modules/zones/enrichment.py`:
+    - o enrichment de POIs agora usa o circulo equivalente para montar o `bbox` enviado ao Mapbox Searchbox;
+    - adicionada leitura de `area_m2` no contexto SQL e falha explicita quando a area da isocrona e invalida para proxy.
+  - `apps/api/src/api/routes/listings.py`:
+    - `GET /journeys/{id}/listings/address-suggest` passou a construir o proxy circular e a repassar essa geometria para o pipeline de sugestoes de ruas.
+  - `apps/api/src/modules/listings/address_suggestions.py`:
+    - cache de sugestoes elevado para `zone_address_suggestions:v2` para invalidar resultados baseados na geometria antiga.
+  - `apps/api/src/modules/pois/storage.py` e `apps/api/src/modules/zones/enrichment.py`:
+    - hash persistido de cache de POIs agora inclui `search_geometry_strategy` e foi versionado para `2`;
+    - hot cache Redis de POIs elevado para `zone_pois:v5`.
+  - testes:
+    - `apps/api/tests/test_phase4_zone_poi_enrichment.py` atualizado para validar o novo `bbox` equivalente;
+    - `apps/api/tests/test_phase5_address_suggestions.py` atualizado para validar o helper do proxy e o cache versionado;
+    - expectativas legadas de label de rua foram alinhadas ao formato real atual do helper (`Cidade, UF`).
+- Validation:
+  - backend focado: `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase4_zone_poi_enrichment.py apps/api/tests/test_phase5_address_suggestions.py -q --color=no` -> `7 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
 ## 2026-03-29 - Persistir e reutilizar POIs com cache canonico em Postgres
+
+## 2026-03-29 - Fluxo de caminhada com isocrona unica via Valhalla
+
+## 2026-03-29 - Corrigir fallback circular local e ocultar etapa 2 no tracker de caminhada
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para corrigir a causa raiz operacional do fallback da isocrona na stack local sem mascarar erro no backend.
+  - `skills/develop-frontend/SKILL.md` para manter o tracker coerente com o fluxo pulado de caminhada.
+- Trigger: usuario reportou que a isocrona nao estava retornando e pediu tambem para esconder visualmente a etapa 2 do tracker quando o modal for caminhada.
+- Root cause identified:
+  - o container `api` estava configurado com `VALHALLA_URL=http://valhalla:8002`, mas o `docker-compose.yml` atual nao sobe nenhum servico `valhalla`;
+  - na maquina local existe um Valhalla funcional em `http://localhost:8002`, entao o backend em Docker caia no fallback circular apenas por apontar para o host errado;
+  - o tracker ainda renderizava a etapa `Origem` mesmo quando a jornada usa `walk` e pula essa etapa.
+- Scope executed:
+  - `docker-compose.yml`:
+    - `api` passou a usar `VALHALLA_URL=${VALHALLA_URL:-http://host.docker.internal:8002}`;
+    - adicionado `extra_hosts` para resolver `host.docker.internal` a partir do container.
+  - `apps/web/src/features/app/wizardSteps.ts`:
+    - adicionada a funcao `getVisibleWizardSteps(modal)` para filtrar as etapas visiveis conforme o modal.
+  - `apps/web/src/components/panels/ProgressTracker.tsx`:
+    - tracker agora oculta a etapa 2 quando `config.modal === 'walk'`, preservando os mesmos ids reais do wizard.
+  - `apps/web/src/components/panels/ProgressTracker.test.tsx`:
+    - adicionadas regressões para garantir que `Origem` some em caminhada e continua visivel em transito.
+  - ambiente local:
+    - `docker compose up -d --build api` executado para reaplicar a URL correta do Valhalla;
+    - probe dentro do container confirmou acesso a `http://host.docker.internal:8002/status`.
+  - verificacao funcional do fluxo:
+    - jornada temporaria de caminhada criada via API local;
+    - `zone_generation` concluido com `total_zones=1` e `is_circle_fallback=false`.
+- Validation:
+  - compose/local: `docker compose exec api python -c "import os, urllib.request; base=os.environ['VALHALLA_URL']; print(base); print(urllib.request.urlopen(base + '/status').read().decode())"` -> respondeu `http://host.docker.internal:8002` + payload `status` do Valhalla.
+  - verificacao funcional: jornada temporaria `walk` -> `job_state=completed`, `total_zones=1`, `is_circle_fallback=false`, `travel_time_minutes=15`.
+  - frontend focado: `Set-Location "c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/apps/web"; $env:CI='1'; .\node_modules\.bin\vitest.cmd run --config vitest.config.ts src/components/panels/ProgressTracker.test.tsx --reporter=dot --no-color` -> `2 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/best-practices/SKILL.md` como skill principal para alinhar contrato backend/frontend e testes no fluxo de jornada.
+  - `skills/develop-frontend/SKILL.md` como apoio para ajustar o wizard sem regressao visual ou de acessibilidade.
+- Trigger: usuario pediu que, ao escolher `A pe`, a busca deixasse de usar selecao de raio/seed de transporte e passasse a gerar uma unica isocrona temporal; depois esclareceu que a isocrona deve vir do Valhalla, nao do Mapbox.
+- Root cause identified:
+  - o wizard assumia sempre o fluxo `configuracao -> transporte -> geracao de zonas`, mesmo quando o modal era caminhada;
+  - o backend de `zone_generation` exigia `transport_point_id` e coordenadas de um seed de transporte, entao falhava para um fluxo de caminhada puro;
+  - o contrato `ZoneRead` ainda tratava `transport_point_id` como obrigatorio, embora a modelagem SQL permita `NULL` para zonas sem seed de transporte.
+- Scope executed:
+  - `apps/api/src/modules/zones/service.py`:
+    - `walk` agora deriva a origem do `reference_point` salvo em `journeys.input_snapshot`;
+    - `zone_generation` gera uma unica isocrona via Valhalla para caminhada, sem passar pelo pipeline de candidatos de transporte;
+    - quando nao houver `zone_radius_meters` explicito para caminhada, o backend estima o raio de fallback a partir do tempo configurado;
+    - o caminho legado `ensure_zone_for_job()` tambem passou a aceitar caminhada sem `transport_point_id`.
+  - `packages/contracts/contracts/zones.py`:
+    - `ZoneRead.transport_point_id` passou a aceitar `None`.
+  - `apps/api/src/workers/handlers/zones.py`:
+    - mensagem de evento ajustada para `Zone generated`, sem afirmar incorretamente que toda geracao vem do pipeline legado de candidatos.
+  - `apps/web/src/components/panels/Step1Config.tsx`:
+    - ao escolher `A pe`, a configuracao mostra `Tempo de caminhada` no lugar do raio de busca do transporte;
+    - o submit cria a jornada e segue direto para a etapa de processamento, sem abrir a tela de transporte;
+    - o slider passou a ter label acessivel.
+  - `apps/web/src/components/panels/Step2Transport.tsx`:
+    - o painel redireciona automaticamente para a etapa 3 quando o modal da jornada e `walk`.
+  - `apps/web/src/components/panels/Step3Zones.tsx`:
+    - o fluxo de caminhada auto-inicia a geracao/enriquecimento assim que a etapa abre;
+    - a etapa deixou de exigir `selectedTransportId` para caminhada;
+    - o snapshot reenviado ao backend preserva `green_vegetation_level` junto dos demais enrichments.
+  - `apps/web/src/features/app/FindIdealApp.tsx`:
+    - o mapa nao tenta mais carregar pontos candidatos de transporte quando a jornada esta em caminhada.
+  - testes:
+    - `apps/web/src/components/panels/Step1Config.test.tsx`: cobrindo `walk` indo direto para a etapa 3.
+    - `apps/web/src/components/panels/Step2Transport.test.tsx`: cobrindo o skip automatico da etapa 2.
+    - `apps/web/src/components/panels/Step3Zones.test.tsx`: cobrindo auto-start do pipeline de caminhada sem seed de transporte.
+    - `apps/api/tests/test_phase1_journeys_jobs_routes.py`: cobrindo `transport_point_id = null` no payload de zonas.
+    - `apps/api/tests/test_phase4_legacy_candidate_zone_generation.py`: cobrindo a isocrona unica de caminhada sem chamar a geracao de candidatos.
+- Validation:
+  - frontend focado: `Set-Location "c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/apps/web"; $env:CI='1'; .\node_modules\.bin\vitest.cmd run --config vitest.config.ts src/components/panels/Step1Config.test.tsx src/components/panels/Step2Transport.test.tsx src/components/panels/Step3Zones.test.tsx --reporter=dot --no-color` -> `7 passed`.
+  - backend focado: `Set-Location "c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal"; C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase1_journeys_jobs_routes.py apps/api/tests/test_phase4_legacy_candidate_zone_generation.py -q --color=no` -> `11 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
 
 - Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `skills/best-practices/references/web2-backend.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
 - Skill used:

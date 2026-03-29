@@ -106,6 +106,7 @@ async def test_enrich_zone_pois_uses_forward_endpoint_and_counts_features() -> N
         "poi_source_fingerprint": "zone-fp-123",
         "lon": -46.727036999999946,
         "lat": -23.520907999999263,
+        "area_m2": 3141592.653589793,
         "xmin": -46.73879353133167,
         "ymin": -23.53168773409916,
         "xmax": -46.71528046866825,
@@ -181,7 +182,7 @@ async def test_enrich_zone_pois_uses_forward_endpoint_and_counts_features() -> N
     first_call = client_get.await_args_list[0]
     assert first_call.args[0] == "https://api.mapbox.com/search/searchbox/v1/forward"
     assert first_call.kwargs["params"]["types"] == "poi"
-    assert first_call.kwargs["params"]["bbox"] == "-46.738794,-23.531688,-46.715280,-23.510128"
+    assert first_call.kwargs["params"]["bbox"] == "-46.736834,-23.529891,-46.717240,-23.511925"
     assert first_call.kwargs["params"]["proximity"] == "-46.727037,-23.520908"
     persist_kwargs = persist_mock.await_args.kwargs
     assert persist_kwargs["zone_fingerprint"] == "zone-fp-123"
@@ -200,6 +201,7 @@ async def test_enrich_zone_pois_reuses_canonical_zone_center_from_journey_scope(
         "poi_source_fingerprint": "zone-a",
         "lon": -46.625161,
         "lat": -23.516131,
+        "area_m2": 785398.1633974483,
         "xmin": -46.629078,
         "ymin": -23.519743,
         "xmax": -46.621245,
@@ -241,7 +243,7 @@ async def test_enrich_zone_pois_reuses_canonical_zone_center_from_journey_scope(
     expected_cache_key = _poi_cache_key(
         zone_fingerprint="zone-a",
         categories=("school", "supermarket", "pharmacy", "park", "restaurant", "gym"),
-        bbox=(-46.629078, -23.519743, -46.621245, -23.51252),
+        bbox=(-46.630059, -23.520623, -46.620263, -23.511639),
     )
     assert persisted_mock.await_args.args == ("zone-a", persisted_mock.await_args.args[1])
     assert result["zone_id"] == str(zone_id)

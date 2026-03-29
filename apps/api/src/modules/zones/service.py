@@ -17,6 +17,7 @@ from modules.zones.candidate_generation import CandidateZone, CandidateZoneGener
 from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
+_ESTIMATED_WALKING_SPEED_METERS_PER_MINUTE = 80
 
 @dataclass(frozen=True)
 class ZoneGenerationOutcome:
@@ -107,12 +108,29 @@ def _extract_zone_config(input_snapshot: dict[str, Any] | None) -> tuple[str, in
     )
     if isinstance(raw_radius, (int, float)) and raw_radius > 0:
         radius_meters = int(raw_radius)
+    elif modal == "walking":
+        radius_meters = max(300, max_time_minutes * _ESTIMATED_WALKING_SPEED_METERS_PER_MINUTE)
     else:
         radius_meters = 1500
 
     dataset_version = input_snapshot.get("dataset_version_id")
     dataset_version_id = str(dataset_version) if dataset_version is not None else None
     return modal, max_time_minutes, radius_meters, dataset_version_id
+
+
+def _extract_reference_point(input_snapshot: dict[str, Any] | None) -> tuple[float, float] | None:
+    if not isinstance(input_snapshot, dict):
+        return None
+
+    raw_reference = input_snapshot.get("reference_point") or input_snapshot.get("primary_reference_point")
+    if not isinstance(raw_reference, dict):
+        return None
+
+    lat = raw_reference.get("lat")
+    lon = raw_reference.get("lon")
+    if not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
+        return None
+    return float(lat), float(lon)
 
 
 def _extract_public_transport_mode(input_snapshot: dict[str, Any] | None) -> str | None:
@@ -210,6 +228,29 @@ def _circle_polygon(lat: float, lon: float, radius_m: float, n_points: int = 36)
     return {"type": "Polygon", "coordinates": [coords]}
 
 
+async def _clear_journey_zone_links(conn, journey_id: UUID) -> None:
+    await conn.execute(
+        text(
+            """
+            DELETE FROM journey_zones
+            WHERE journey_id = :journey_id
+            """
+        ),
+        {"journey_id": journey_id},
+    )
+
+    await conn.execute(
+        text(
+            """
+            UPDATE journeys
+            SET selected_zone_id = NULL, updated_at = now()
+            WHERE id = :journey_id
+            """
+        ),
+        {"journey_id": journey_id},
+    )
+
+
 class ZoneService:
     """Zone orchestration service for generation and reuse flow."""
 
@@ -229,6 +270,140 @@ class ZoneService:
     @property
     def otp_adapter(self) -> OTPAdapter:
         return self._otp_adapter
+
+    async def _persist_single_isochrone_zone(
+        self,
+        conn,
+        *,
+        journey_id: UUID,
+        transport_point_id: UUID | None,
+        lat: float,
+        lon: float,
+        modal: str,
+        max_time_minutes: int,
+        radius_meters: int,
+        dataset_version_id: str | None,
+    ) -> ZoneGenerationOutcome:
+        fingerprint = compute_zone_fingerprint(
+            lat,
+            lon,
+            modal,
+            max_time_minutes,
+            radius_meters,
+            dataset_version_id,
+        )
+
+        existing_result = await conn.execute(
+            text(
+                """
+                SELECT id
+                FROM zones
+                WHERE fingerprint = :fingerprint
+                LIMIT 1
+                """
+            ),
+            {"fingerprint": fingerprint},
+        )
+        existing = existing_result.mappings().first()
+        if existing is not None:
+            await conn.execute(
+                text(
+                    """
+                    INSERT INTO journey_zones (journey_id, zone_id, transport_point_id)
+                    VALUES (:journey_id, :zone_id, :transport_point_id)
+                    ON CONFLICT (journey_id, zone_id) DO UPDATE
+                    SET transport_point_id = EXCLUDED.transport_point_id
+                    """
+                ),
+                {
+                    "journey_id": journey_id,
+                    "zone_id": existing["id"],
+                    "transport_point_id": transport_point_id,
+                },
+            )
+            return ZoneGenerationOutcome(
+                zone_id=existing["id"],
+                fingerprint=fingerprint,
+                reused=True,
+            )
+
+        is_circle_fallback = False
+        try:
+            isochrone_geojson = await self._valhalla_adapter.isochrone(
+                origin=GeoPoint(lat=float(lat), lon=float(lon)),
+                costing=_modal_to_valhalla_costing(modal),
+                contours_minutes=[max_time_minutes],
+            )
+            geometry = _extract_isochrone_geometry(isochrone_geojson)
+        except (ValhallaCommunicationError, ValueError) as exc:
+            logger.warning("Valhalla unavailable, using circle fallback: %s", exc)
+            geometry = _circle_polygon(float(lat), float(lon), float(radius_meters))
+            is_circle_fallback = True
+
+        insert_result = await conn.execute(
+            text(
+                """
+                INSERT INTO zones (
+                    journey_id,
+                    transport_point_id,
+                    modal,
+                    max_time_minutes,
+                    radius_meters,
+                    fingerprint,
+                    isochrone_geom,
+                    is_circle_fallback,
+                    dataset_version_id,
+                    state,
+                    updated_at
+                ) VALUES (
+                    :journey_id,
+                    :transport_point_id,
+                    :modal,
+                    :max_time_minutes,
+                    :radius_meters,
+                    :fingerprint,
+                    ST_SetSRID(ST_GeomFromGeoJSON(:isochrone_geom), 4326),
+                    :is_circle_fallback,
+                    CAST(:dataset_version_id AS UUID),
+                    'enriching',
+                    now()
+                )
+                RETURNING id
+                """
+            ),
+            {
+                "journey_id": journey_id,
+                "transport_point_id": transport_point_id,
+                "modal": modal,
+                "max_time_minutes": max_time_minutes,
+                "radius_meters": radius_meters,
+                "fingerprint": fingerprint,
+                "isochrone_geom": json.dumps(geometry, ensure_ascii=True),
+                "is_circle_fallback": is_circle_fallback,
+                "dataset_version_id": dataset_version_id,
+            },
+        )
+        created = insert_result.mappings().one()
+        await conn.execute(
+            text(
+                """
+                INSERT INTO journey_zones (journey_id, zone_id, transport_point_id)
+                VALUES (:journey_id, :zone_id, :transport_point_id)
+                ON CONFLICT (journey_id, zone_id) DO UPDATE
+                SET transport_point_id = EXCLUDED.transport_point_id
+                """
+            ),
+            {
+                "journey_id": journey_id,
+                "zone_id": created["id"],
+                "transport_point_id": transport_point_id,
+            },
+        )
+        return ZoneGenerationOutcome(
+            zone_id=created["id"],
+            fingerprint=fingerprint,
+            reused=False,
+        )
 
     async def ensure_zones_for_job(self, job_id: UUID) -> dict[str, Any]:
         """Generate candidate zones for the selected seed point, emitting partial results.
@@ -272,15 +447,43 @@ class ZoneService:
 
         journey_id = context["journey_id"]
         input_snapshot = context["input_snapshot"]
-        transport_point_id = context["transport_point_id"]
-        lat = context["lat"]
-        lon = context["lon"]
-        if transport_point_id is None or lat is None or lon is None:
-            raise RuntimeError(f"No selected transport seed found for journey {journey_id}")
-
         modal, max_time_minutes, radius_meters, dataset_version_id = _extract_zone_config(
             input_snapshot
         )
+
+        transport_point_id = context["transport_point_id"]
+        lat = context["lat"]
+        lon = context["lon"]
+        if modal == "walking":
+            reference_point = _extract_reference_point(input_snapshot)
+            if reference_point is not None:
+                lat, lon = reference_point
+            if lat is None or lon is None:
+                raise RuntimeError(f"No reference point found for walking zone generation in journey {journey_id}")
+
+            async with engine.begin() as conn:
+                await _clear_journey_zone_links(conn, journey_id)
+                outcome = await self._persist_single_isochrone_zone(
+                    conn,
+                    journey_id=journey_id,
+                    transport_point_id=None,
+                    lat=float(lat),
+                    lon=float(lon),
+                    modal=modal,
+                    max_time_minutes=max_time_minutes,
+                    radius_meters=radius_meters,
+                    dataset_version_id=dataset_version_id,
+                )
+
+            return {
+                "zones": [outcome],
+                "total": 1,
+                "completed": 0 if outcome.reused else 1,
+            }
+
+        if transport_point_id is None or lat is None or lon is None:
+            raise RuntimeError(f"No selected transport seed found for journey {journey_id}")
+
         public_transport_mode = _extract_public_transport_mode(input_snapshot)
         _validate_public_transport_seed(
             public_transport_mode,
@@ -298,26 +501,7 @@ class ZoneService:
 
         zones = []
         async with engine.begin() as conn:
-            await conn.execute(
-                text(
-                    """
-                    DELETE FROM journey_zones
-                    WHERE journey_id = :journey_id
-                    """
-                ),
-                {"journey_id": journey_id},
-            )
-
-            await conn.execute(
-                text(
-                    """
-                    UPDATE journeys
-                    SET selected_zone_id = NULL, updated_at = now()
-                    WHERE id = :journey_id
-                    """
-                ),
-                {"journey_id": journey_id},
-            )
+            await _clear_journey_zone_links(conn, journey_id)
 
             for candidate in candidate_zones:
                 fingerprint = compute_candidate_zone_fingerprint(
@@ -475,134 +659,32 @@ class ZoneService:
             if context is None:
                 raise RuntimeError(f"Zone generation context not found for job {job_id}")
 
-            transport_point_id = context["transport_point_id"]
-            lat = context["lat"]
-            lon = context["lon"]
-            if transport_point_id is None or lat is None or lon is None:
-                raise RuntimeError("Zone generation requires at least one transport point")
-
             modal, max_time_minutes, radius_meters, dataset_version_id = _extract_zone_config(
                 context["input_snapshot"]
             )
-            fingerprint = compute_zone_fingerprint(
-                float(lat),
-                float(lon),
-                modal,
-                max_time_minutes,
-                radius_meters,
-                dataset_version_id,
-            )
+            transport_point_id = context["transport_point_id"]
+            lat = context["lat"]
+            lon = context["lon"]
+            if modal == "walking":
+                reference_point = _extract_reference_point(context["input_snapshot"])
+                if reference_point is not None:
+                    lat, lon = reference_point
+                transport_point_id = None
+            if lat is None or lon is None:
+                raise RuntimeError("Zone generation requires a valid reference point")
+            if modal != "walking" and transport_point_id is None:
+                raise RuntimeError("Zone generation requires at least one transport point")
 
-            existing_result = await conn.execute(
-                text(
-                    """
-                    SELECT id
-                    FROM zones
-                    WHERE fingerprint = :fingerprint
-                    LIMIT 1
-                    """
-                ),
-                {"fingerprint": fingerprint},
-            )
-            existing = existing_result.mappings().first()
-            if existing is not None:
-                await conn.execute(
-                    text(
-                        """
-                        INSERT INTO journey_zones (journey_id, zone_id, transport_point_id)
-                        VALUES (:journey_id, :zone_id, :transport_point_id)
-                        ON CONFLICT (journey_id, zone_id) DO UPDATE
-                        SET transport_point_id = EXCLUDED.transport_point_id
-                        """
-                    ),
-                    {
-                        "journey_id": context["journey_id"],
-                        "zone_id": existing["id"],
-                        "transport_point_id": transport_point_id,
-                    },
-                )
-                return ZoneGenerationOutcome(
-                    zone_id=existing["id"],
-                    fingerprint=fingerprint,
-                    reused=True,
-                )
-
-            is_circle_fallback = False
-            try:
-                isochrone_geojson = await self._valhalla_adapter.isochrone(
-                    origin=GeoPoint(lat=float(lat), lon=float(lon)),
-                    costing=_modal_to_valhalla_costing(modal),
-                    contours_minutes=[max_time_minutes],
-                )
-                geometry = _extract_isochrone_geometry(isochrone_geojson)
-            except (ValhallaCommunicationError, ValueError) as exc:
-                logger.warning("Valhalla unavailable, using circle fallback: %s", exc)
-                geometry = _circle_polygon(float(lat), float(lon), float(radius_meters))
-                is_circle_fallback = True
-
-            insert_result = await conn.execute(
-                text(
-                    """
-                    INSERT INTO zones (
-                        journey_id,
-                        transport_point_id,
-                        modal,
-                        max_time_minutes,
-                        radius_meters,
-                        fingerprint,
-                        isochrone_geom,
-                        is_circle_fallback,
-                        dataset_version_id,
-                        state,
-                        updated_at
-                    ) VALUES (
-                        :journey_id,
-                        :transport_point_id,
-                        :modal,
-                        :max_time_minutes,
-                        :radius_meters,
-                        :fingerprint,
-                        ST_SetSRID(ST_GeomFromGeoJSON(:isochrone_geom), 4326),
-                        :is_circle_fallback,
-                        CAST(:dataset_version_id AS UUID),
-                        'enriching',
-                        now()
-                    )
-                    RETURNING id
-                    """
-                ),
-                {
-                    "journey_id": context["journey_id"],
-                    "transport_point_id": transport_point_id,
-                    "modal": modal,
-                    "max_time_minutes": max_time_minutes,
-                    "radius_meters": radius_meters,
-                    "fingerprint": fingerprint,
-                    "isochrone_geom": json.dumps(geometry, ensure_ascii=True),
-                    "is_circle_fallback": is_circle_fallback,
-                    "dataset_version_id": dataset_version_id,
-                },
-            )
-            created = insert_result.mappings().one()
-            await conn.execute(
-                text(
-                    """
-                    INSERT INTO journey_zones (journey_id, zone_id, transport_point_id)
-                    VALUES (:journey_id, :zone_id, :transport_point_id)
-                    ON CONFLICT (journey_id, zone_id) DO UPDATE
-                    SET transport_point_id = EXCLUDED.transport_point_id
-                    """
-                ),
-                {
-                    "journey_id": context["journey_id"],
-                    "zone_id": created["id"],
-                    "transport_point_id": transport_point_id,
-                },
-            )
-            return ZoneGenerationOutcome(
-                zone_id=created["id"],
-                fingerprint=fingerprint,
-                reused=False,
+            return await self._persist_single_isochrone_zone(
+                conn,
+                journey_id=context["journey_id"],
+                transport_point_id=transport_point_id,
+                lat=float(lat),
+                lon=float(lon),
+                modal=modal,
+                max_time_minutes=max_time_minutes,
+                radius_meters=radius_meters,
+                dataset_version_id=dataset_version_id,
             )
 
     async def list_zones_for_journey(self, journey_id: UUID) -> list[dict[str, Any]]:

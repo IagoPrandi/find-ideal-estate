@@ -54,4 +54,29 @@ describe("Step1Config", () => {
       );
     });
   });
+
+  it("sends walk mode directly to the isochrone generation step", async () => {
+    useJourneyStore.getState().setPickedCoord({ lat: -23.55, lon: -46.63, label: "Trabalho" });
+    render(<Step1Config />);
+
+    fireEvent.click(screen.getByRole("button", { name: /A pé/i }));
+    fireEvent.change(screen.getByRole("slider", { name: /Tempo de caminhada/i }), { target: { value: "25" } });
+    fireEvent.click(screen.getByRole("button", { name: /Gerar isocrona a pe/i }));
+
+    await waitFor(() => {
+      expect(createJourney).toHaveBeenCalledWith(
+        expect.objectContaining({
+          input_snapshot: expect.objectContaining({
+            transport_mode: "walk",
+            max_travel_minutes: 25,
+            zone_radius_meters: null,
+            transport_search_radius_meters: null,
+          })
+        })
+      );
+    });
+
+    expect(useUIStore.getState().step).toBe(3);
+    expect(useUIStore.getState().maxStep).toBe(3);
+  });
 });

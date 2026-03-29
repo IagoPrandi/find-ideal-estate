@@ -102,4 +102,21 @@ describe("sanitizeTransportPoints", () => {
       expect(screen.getByText(/175T-10/i)).toBeInTheDocument();
     });
   });
+
+  it("skips the transport step entirely for walk mode", async () => {
+    useJourneyStore.setState((state) => ({
+      ...state,
+      config: {
+        ...state.config,
+        modal: "walk"
+      }
+    }));
+
+    render(<Step2Transport />);
+
+    await waitFor(() => {
+      expect(useUIStore.getState().step).toBe(3);
+      expect(useUIStore.getState().maxStep).toBe(3);
+    });
+  });
 });

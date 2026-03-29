@@ -50,7 +50,7 @@ def _format_street_address(street: str, neighborhood: str, city: str, state: str
 
 def _cache_key(zone_fingerprint: str) -> str:
     digest = hashlib.sha256(zone_fingerprint.encode("utf-8")).hexdigest()[:20]
-    return f"zone_address_suggestions:v1:{digest}"
+    return f"zone_address_suggestions:v2:{digest}"
 
 
 def _point_on_segment(px: float, py: float, x1: float, y1: float, x2: float, y2: float) -> bool:

@@ -73,12 +73,26 @@ export function Step2Transport() {
   const [busLinesByPointId, setBusLinesByPointId] = useState<Record<string, string[]>>({});
   const [loadingBusLinesPointId, setLoadingBusLinesPointId] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (config.modal !== "walk" || !journeyId) {
+      return;
+    }
+    setMaxStep(3);
+    goToStep(3);
+  }, [config.modal, goToStep, journeyId, setMaxStep]);
+
   const selectedPoint = useMemo(
     () => points.find((point) => point.id === selectedTransportId) ?? null,
     [points, selectedTransportId]
   );
 
   useEffect(() => {
+    if (config.modal === "walk") {
+      setIsLoading(false);
+      setError(null);
+      setPoints([]);
+      return;
+    }
     if (!journeyId) {
       setError("Jornada ausente. Volte para a etapa de configuração.");
       setIsLoading(false);
@@ -171,7 +185,7 @@ export function Step2Transport() {
         window.clearInterval(intervalId);
       }
     };
-  }, [journeyId, selectedTransportId, setJobIds, setSelectedTransportId, transportJobId]);
+  }, [config.modal, journeyId, selectedTransportId, setJobIds, setSelectedTransportId, transportJobId]);
 
   useEffect(() => {
     if (!canLoadBusStopLines(selectedPoint)) {

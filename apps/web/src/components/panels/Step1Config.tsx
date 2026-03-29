@@ -36,6 +36,7 @@ export function Step1Config() {
   const [error, setError] = useState<string | null>(null);
   const [isGreenPopoverOpen, setIsGreenPopoverOpen] = useState(false);
   const greenEnabled = config.enrichments.green;
+  const isWalkingMode = config.modal === "walk";
 
   const zoneToggleCards = [
     { id: "safety", label: "Segurança", icon: ShieldAlert },
@@ -117,8 +118,8 @@ export function Step1Config() {
           transport_mode: config.modal,
           public_transport_mode: config.modal === "transit" ? config.publicTransportMode : null,
           max_travel_minutes: config.time,
-          zone_radius_meters: config.zoneRadiusMeters,
-          transport_search_radius_meters: config.transportSearchRadiusMeters,
+          zone_radius_meters: isWalkingMode ? null : config.zoneRadiusMeters,
+          transport_search_radius_meters: isWalkingMode ? null : config.transportSearchRadiusMeters,
           enrichments: {
             ...config.enrichments,
             green_vegetation_level: config.greenVegetationLevel
@@ -127,8 +128,8 @@ export function Step1Config() {
       });
 
       setJourneyId(journey.id);
-      setMaxStep(2);
-      goToStep(2);
+      setMaxStep(isWalkingMode ? 3 : 2);
+      goToStep(isWalkingMode ? 3 : 2);
     } catch (caughtError) {
       setError(apiActionHint(caughtError));
     } finally {
@@ -241,21 +242,42 @@ export function Step1Config() {
           ) : null}
         </div>
 
-        <div className="space-y-3">
-          <div className="flex items-center justify-between">
-            <label className="text-sm font-medium text-slate-700">Raio de busca do transporte</label>
-            <span className="text-sm font-bold text-pastel-violet-600">{config.transportSearchRadiusMeters} m</span>
+        {isWalkingMode ? (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <label htmlFor="walk-time-minutes" className="text-sm font-medium text-slate-700">Tempo de caminhada</label>
+              <span className="text-sm font-bold text-pastel-violet-600">{config.time} min</span>
+            </div>
+            <input
+              id="walk-time-minutes"
+              type="range"
+              min="5"
+              max="60"
+              step="5"
+              value={config.time}
+              onChange={(event) => setConfig({ time: Number(event.target.value) })}
+              className="w-full accent-pastel-violet-500"
+            />
+            <p className="text-xs text-slate-400">A zona sera a propria isocrona gerada a partir do ponto principal selecionado.</p>
           </div>
-          <input
-            type="range"
-            min="300"
-            max="2500"
-            step="100"
-            value={config.transportSearchRadiusMeters}
-            onChange={(event) => setConfig({ transportSearchRadiusMeters: Number(event.target.value) })}
-            className="w-full accent-pastel-violet-500"
-          />
-        </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <label htmlFor="transport-search-radius" className="text-sm font-medium text-slate-700">Raio de busca do transporte</label>
+              <span className="text-sm font-bold text-pastel-violet-600">{config.transportSearchRadiusMeters} m</span>
+            </div>
+            <input
+              id="transport-search-radius"
+              type="range"
+              min="300"
+              max="2500"
+              step="100"
+              value={config.transportSearchRadiusMeters}
+              onChange={(event) => setConfig({ transportSearchRadiusMeters: Number(event.target.value) })}
+              className="w-full accent-pastel-violet-500"
+            />
+          </div>
+        )}
 
         <div className="space-y-3 border-t border-slate-100 pt-2">
           <label className="text-sm font-medium text-slate-700">Analisar nas zonas</label>
@@ -323,7 +345,7 @@ export function Step1Config() {
 
       <div className="border-t border-slate-100 bg-white p-5">
         <button type="button" onClick={handleSubmit} disabled={isSubmitting} className="gem-primary-button w-full disabled:cursor-not-allowed disabled:opacity-60">
-          {isSubmitting ? "Criando jornada..." : "Encontrar pontos seed"}
+          {isSubmitting ? "Criando jornada..." : isWalkingMode ? "Gerar isocrona a pe" : "Encontrar pontos seed"}
           <ArrowRight className="h-4 w-4" />
         </button>
       </div>

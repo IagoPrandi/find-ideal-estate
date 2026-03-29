@@ -1191,7 +1191,7 @@ export function FindIdealApp() {
     let cancelled = false;
 
     async function syncTransportCandidates() {
-      if (!journeyId || step < 2) {
+      if (!journeyId || step < 2 || config.modal === "walk") {
         setGeoJsonSourceData(activeMap, TRANSPORT_CANDIDATES_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
         return;
       }
@@ -1215,7 +1215,7 @@ export function FindIdealApp() {
     return () => {
       cancelled = true;
     };
-  }, [isMapReady, journeyId, selectedTransportId, step]);
+  }, [config.modal, isMapReady, journeyId, selectedTransportId, step]);
 
   useEffect(() => {
     const map = mapRef.current;

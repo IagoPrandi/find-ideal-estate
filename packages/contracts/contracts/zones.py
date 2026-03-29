@@ -31,7 +31,7 @@ class ZoneRead(BaseModel):
 
     id: UUID
     journey_id: UUID
-    transport_point_id: UUID
+    transport_point_id: UUID | None = None
     fingerprint: str
     state: str  # "pending", "generating", "enriching", "complete", "failed"
     is_circle_fallback: bool = False

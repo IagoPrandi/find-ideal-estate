@@ -21,14 +21,31 @@ os.environ.setdefault("OTP_URL", "http://localhost:8080")
 
 from src.modules.listings.address_suggestions import (  # noqa: E402
     _format_street_address,
+    _cache_key,
     get_zone_address_suggestions,
 )
+from src.modules.zones.isochrone_proxy import build_isochrone_proxy_circle  # noqa: E402
 
 
 def test_format_street_address_matches_scraper_expectation() -> None:
     assert (
         _format_street_address("Rua Schilling", "Vila Leopoldina", "Sao Paulo", "SP")
-        == "Rua Schilling, Vila Leopoldina, Sao Paulo-SP"
+        == "Rua Schilling, Vila Leopoldina, Sao Paulo, SP"
+    )
+
+
+def test_build_isochrone_proxy_circle_matches_equivalent_area_bbox() -> None:
+    proxy_circle = build_isochrone_proxy_circle(
+        lon=-46.727036999999946,
+        lat=-23.520907999999263,
+        area_m2=3141592.653589793,
+    )
+
+    assert proxy_circle["geometry"]["type"] == "Polygon"
+    assert len(proxy_circle["geometry"]["coordinates"][0]) == 65
+    assert proxy_circle["bbox"] == pytest.approx(
+        (-46.736834, -23.529891, -46.717240, -23.511925),
+        abs=1e-6,
     )
 
 
@@ -76,14 +93,16 @@ async def test_get_zone_address_suggestions_formats_labels_from_tilequery_flow()
 
     assert suggestions == [
         {
-            "label": "Rua Schilling, Vila Leopoldina, Sao Paulo-SP",
-            "normalized": "rua schilling, vila leopoldina, sao paulo-sp",
+            "label": "Rua Schilling, Vila Leopoldina, Sao Paulo, SP",
+            "normalized": "rua schilling, vila leopoldina, sao paulo, sp",
             "location_type": "street",
             "lat": -23.520908,
             "lon": -46.727037,
         }
     ]
+    redis_mock.get.assert_awaited_once_with(_cache_key("zone-fp-123"))
     redis_mock.set.assert_awaited_once()
+    assert redis_mock.set.await_args.args[0] == _cache_key("zone-fp-123")
 
 
 @pytest.mark.anyio
@@ -122,4 +141,5 @@ async def test_get_zone_address_suggestions_filters_cached_combobox_options() ->
         )
 
     assert suggestions == [cached_suggestions[1]]
+    redis_mock.get.assert_awaited_once_with(_cache_key("zone-fp-123"))
     mock_client_cls.assert_not_called()

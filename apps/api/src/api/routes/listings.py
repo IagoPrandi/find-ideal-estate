@@ -32,6 +32,7 @@ from modules.listings.dedup import fetch_listing_cards_for_zone
 from modules.listings.platform_registry import PlatformRegistryError, get_platform_registry
 from modules.listings.address_suggestions import get_zone_address_suggestions
 from modules.listings.search_requests import record_search_request
+from modules.zones.isochrone_proxy import build_isochrone_proxy_circle
 from pydantic import BaseModel
 from sqlalchemy import text
 from modules.jobs.service import enqueue_job, get_job
@@ -336,6 +337,7 @@ async def address_suggest(
                     ST_AsGeoJSON(z.isochrone_geom) AS isochrone_geom,
                     ST_X(ST_Centroid(z.isochrone_geom)) AS centroid_lon,
                     ST_Y(ST_Centroid(z.isochrone_geom)) AS centroid_lat,
+                    ST_Area(z.isochrone_geom::geography) AS area_m2,
                     ST_XMin(z.isochrone_geom)::DOUBLE PRECISION AS xmin,
                     ST_YMin(z.isochrone_geom)::DOUBLE PRECISION AS ymin,
                     ST_XMax(z.isochrone_geom)::DOUBLE PRECISION AS xmax,
@@ -354,17 +356,24 @@ async def address_suggest(
     if zone is None or not zone["isochrone_geom"]:
         raise HTTPException(status_code=404, detail="Zona nao encontrada para sugestao de enderecos")
 
+    try:
+        proxy_circle = build_isochrone_proxy_circle(
+            lon=float(zone["centroid_lon"]),
+            lat=float(zone["centroid_lat"]),
+            area_m2=float(zone["area_m2"]),
+        )
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=500,
+            detail="Zona invalida para proxy circular de enderecos",
+        ) from exc
+
     settings = get_settings()
     raw_suggestions = await get_zone_address_suggestions(
         access_token=settings.mapbox_access_token,
         zone_fingerprint=str(zone["fingerprint"]),
-        geometry=json.loads(zone["isochrone_geom"]),
-        bbox=(
-            float(zone["xmin"]),
-            float(zone["ymin"]),
-            float(zone["xmax"]),
-            float(zone["ymax"]),
-        ),
+        geometry=proxy_circle["geometry"],
+        bbox=proxy_circle["bbox"],
         centroid=(float(zone["centroid_lon"]), float(zone["centroid_lat"])),
         q=q,
     )

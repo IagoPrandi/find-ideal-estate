@@ -192,7 +192,6 @@ def test_get_journey_transport_points_returns_enriched_list(monkeypatch):
 def test_get_journey_zones_returns_list_response(monkeypatch):
     sample = _sample_journey()
     zone_id = str(uuid4())
-    transport_point_id = str(uuid4())
 
     async def _get(journey_id):
         assert journey_id == sample.id
@@ -205,7 +204,7 @@ def test_get_journey_zones_returns_list_response(monkeypatch):
                 {
                     "id": zone_id,
                     "journey_id": str(sample.id),
-                    "transport_point_id": transport_point_id,
+                    "transport_point_id": None,
                     "fingerprint": "fp-1",
                     "state": "complete",
                     "is_circle_fallback": False,
@@ -254,6 +253,7 @@ def test_get_journey_zones_returns_list_response(monkeypatch):
     assert body["completed_count"] == 1
     assert len(body["zones"]) == 1
     assert body["zones"][0]["id"] == zone_id
+    assert body["zones"][0]["transport_point_id"] is None
     assert body["zones"][0]["poi_points"][0]["name"] == "Colegio Centro"
     assert body["zones"][0]["badges"]["green_badge"]["tier"] == "excellent"
 

@@ -13,7 +13,7 @@ services:
       DB_POOL_TIMEOUT_SECONDS: ${DB_POOL_TIMEOUT_SECONDS:-60}
       REDIS_URL: redis://redis:6379/0
       MAPTILER_API_KEY: ${MAPTILER_API_KEY:-local-dev-key}
-      VALHALLA_URL: ${VALHALLA_URL:-http://valhalla:8002}
+      VALHALLA_URL: ${VALHALLA_URL:-http://host.docker.internal:8002}
       OTP_URL: ${OTP_URL:-http://otp:8080}
       DISPLAY: ":99"
     ports:
@@ -29,6 +29,8 @@ services:
       - ./infra:/app/infra
       - ./alembic.ini:/app/alembic.ini:ro
       - ./platforms.yaml:/app/platforms.yaml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     shm_size: "1gb"
     command: ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--reload-dir", "/app/apps/api/src", "--reload-dir", "/app/packages/contracts"]
     healthcheck:
