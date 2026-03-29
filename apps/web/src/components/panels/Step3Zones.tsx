@@ -23,8 +23,10 @@ export function Step3Zones() {
   const generationIntervalRef = useRef<number | undefined>(undefined);
   const enrichmentIntervalRef = useRef<number | undefined>(undefined);
   const cancelledRef = useRef(false);
-  const walkAutoStartedRef = useRef(false);
+  const directAutoStartedRef = useRef(false);
   const isWalkingMode = config.modal === "walk";
+  const isDrivingMode = config.modal === "car";
+  const isDirectIsochroneMode = isWalkingMode || isDrivingMode;
 
   useEffect(() => {
     cancelledRef.current = false;
@@ -67,10 +69,10 @@ export function Step3Zones() {
       public_transport_mode: config.modal === "transit" ? config.publicTransportMode : null,
       max_travel_minutes: config.time,
       max_travel_time_min: config.time,
-      zone_radius_meters: isWalkingMode ? null : config.zoneRadiusMeters,
-      zone_radius_m: isWalkingMode ? null : config.zoneRadiusMeters,
-      transport_search_radius_m: isWalkingMode ? null : config.transportSearchRadiusMeters,
-      transport_search_radius_meters: isWalkingMode ? null : config.transportSearchRadiusMeters,
+      zone_radius_meters: isDirectIsochroneMode ? null : config.zoneRadiusMeters,
+      zone_radius_m: isDirectIsochroneMode ? null : config.zoneRadiusMeters,
+      transport_search_radius_m: isDirectIsochroneMode ? null : config.transportSearchRadiusMeters,
+      transport_search_radius_meters: isDirectIsochroneMode ? null : config.transportSearchRadiusMeters,
       enrichments: {
         ...config.enrichments,
         green_vegetation_level: config.greenVegetationLevel
@@ -144,7 +146,7 @@ export function Step3Zones() {
       return;
     }
 
-    if (!isWalkingMode && !selectedTransportId) {
+    if (!isDirectIsochroneMode && !selectedTransportId) {
       setError("Selecione um ponto seed na etapa anterior antes de gerar as zonas.");
       return;
     }
@@ -155,8 +157,8 @@ export function Step3Zones() {
     try {
       await updateJourney(journeyId, {
         input_snapshot: inputSnapshot,
-        selected_transport_point_id: isWalkingMode ? null : selectedTransportId,
-        last_completed_step: isWalkingMode ? 1 : 2
+        selected_transport_point_id: isDirectIsochroneMode ? null : selectedTransportId,
+        last_completed_step: isDirectIsochroneMode ? 1 : 2
       });
 
       setStageMode("generation");
@@ -231,25 +233,25 @@ export function Step3Zones() {
   }
 
   useEffect(() => {
-    walkAutoStartedRef.current = false;
-  }, [isWalkingMode, journeyId]);
+    directAutoStartedRef.current = false;
+  }, [isDirectIsochroneMode, journeyId]);
 
   useEffect(() => {
-    if (!isWalkingMode || !journeyId || stageMode !== "idle" || walkAutoStartedRef.current) {
+    if (!isDirectIsochroneMode || !journeyId || stageMode !== "idle" || directAutoStartedRef.current) {
       return;
     }
-    walkAutoStartedRef.current = true;
+    directAutoStartedRef.current = true;
     void runGenerationPipeline();
-  }, [isWalkingMode, journeyId, stageMode]);
+  }, [isDirectIsochroneMode, journeyId, stageMode]);
 
   const isBusy = stageMode !== "idle";
-  const stageLabel = stageMode === "generation" ? (isWalkingMode ? "Gerando isocrona" : "Gerando zonas") : stageMode === "enrichment" ? "Enriquecendo camadas" : "Finalizando";
+  const stageLabel = stageMode === "generation" ? (isDirectIsochroneMode ? "Gerando isocrona" : "Gerando zonas") : stageMode === "enrichment" ? "Enriquecendo camadas" : "Finalizando";
 
   return (
     <div className="flex h-full flex-col animate-[fadeInRight_0.3s_ease-out]">
       <div className="border-b border-slate-100 p-5">
-        <h2 className="text-xl font-semibold tracking-tight text-slate-800">{isWalkingMode ? "Gerar isocrona" : "Gerar zonas"}</h2>
-        <p className="text-sm text-slate-500">{isWalkingMode ? "No modo a pe, a zona e uma unica isocrona gerada a partir do ponto principal selecionado." : "Ajuste os parâmetros da busca e gere as zonas a partir do ponto seed escolhido."}</p>
+        <h2 className="text-xl font-semibold tracking-tight text-slate-800">{isDirectIsochroneMode ? "Gerar isocrona" : "Gerar zonas"}</h2>
+        <p className="text-sm text-slate-500">{isWalkingMode ? "No modo a pe, a zona e uma unica isocrona gerada a partir do ponto principal selecionado." : isDrivingMode ? "No modo carro, a zona e uma unica isocrona viaria gerada a partir do ponto principal selecionado." : "Ajuste os parâmetros da busca e gere as zonas a partir do ponto seed escolhido."}</p>
       </div>
 
       <div className="panel-scroll flex-1 overflow-y-auto bg-slate-50/50 p-4">
@@ -260,7 +262,7 @@ export function Step3Zones() {
               <div className="absolute inset-0 rounded-2xl border-4 border-pastel-violet-200 opacity-20 animate-ping" />
             </div>
             <h3 className="mb-2 text-xl font-semibold text-slate-800">{stageMode === "finalizing" ? "Concluindo preparação" : "Processando zonas"}</h3>
-            <p className="mb-8 max-w-xs text-sm text-slate-500">{stageMode === "generation" ? (isWalkingMode ? "Gerando a isocrona de caminhada a partir do ponto principal selecionado." : "Executando a geração das zonas candidatas a partir do seed selecionado.") : stageMode === "enrichment" ? "Calculando camadas urbanas e consolidando comparações da etapa seguinte." : "Salvando o estado final da jornada para abrir a comparação."}</p>
+            <p className="mb-8 max-w-xs text-sm text-slate-500">{stageMode === "generation" ? (isWalkingMode ? "Gerando a isocrona de caminhada a partir do ponto principal selecionado." : isDrivingMode ? "Gerando a isocrona viaria a partir do ponto principal selecionado." : "Executando a geração das zonas candidatas a partir do seed selecionado.") : stageMode === "enrichment" ? "Calculando camadas urbanas e consolidando comparações da etapa seguinte." : "Salvando o estado final da jornada para abrir a comparação."}</p>
 
             <div className="w-full max-w-xs space-y-2">
               <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
@@ -272,14 +274,15 @@ export function Step3Zones() {
               </div>
             </div>
 
-            <button type="button" onClick={() => goToStep(isWalkingMode ? 1 : 2)} className="mt-8 text-sm font-medium text-slate-400 transition-colors hover:text-rose-600">
-              {isWalkingMode ? "Voltar para a configuracao" : "Voltar para o seed"}
+            <button type="button" onClick={() => goToStep(isDirectIsochroneMode ? 1 : 2)} className="mt-8 text-sm font-medium text-slate-400 transition-colors hover:text-rose-600">
+              {isDirectIsochroneMode ? "Voltar para a configuracao" : "Voltar para o seed"}
             </button>
           </div>
         ) : (
           <div className="space-y-4">
-            {!isWalkingMode && !selectedTransportId ? <p className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Escolha um ponto seed na etapa de transporte antes de gerar as zonas.</p> : null}
+            {!isDirectIsochroneMode && !selectedTransportId ? <p className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Escolha um ponto seed na etapa de transporte antes de gerar as zonas.</p> : null}
             {isWalkingMode ? <p className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">A busca a pe nao depende de seed de transporte. O backend vai gerar uma unica isocrona usando o tempo de caminhada definido na configuracao.</p> : null}
+            {isDrivingMode ? <p className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">A busca de carro nao depende de seed de transporte. O backend vai gerar uma unica isocrona viaria usando o tempo de carro definido na configuracao.</p> : null}
             {error ? <p className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}
 
             <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -293,10 +296,10 @@ export function Step3Zones() {
                 </div>
               </div>
 
-              {isWalkingMode ? (
+              {isDirectIsochroneMode ? (
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Tempo de caminhada</p>
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">{isWalkingMode ? "Tempo de caminhada" : "Tempo de carro"}</p>
                     <p className="mt-2 text-2xl font-semibold text-slate-800">{config.time} min</p>
                     <p className="mt-1 text-xs text-slate-500">Usado para gerar a mancha unica da isocrona.</p>
                   </div>
@@ -354,7 +357,7 @@ export function Step3Zones() {
           onClick={() => {
             void runGenerationPipeline();
           }}
-          disabled={(!isWalkingMode && !selectedTransportId) || (isWalkingMode && !pickedCoord) || isBusy}
+          disabled={(!isDirectIsochroneMode && !selectedTransportId) || (isDirectIsochroneMode && !pickedCoord) || isBusy}
           className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-3 text-sm font-medium text-white transition-all hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
         >
           {isBusy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <MapIcon className="h-4 w-4" />}

@@ -1191,7 +1191,7 @@ export function FindIdealApp() {
     let cancelled = false;
 
     async function syncTransportCandidates() {
-      if (!journeyId || step < 2 || config.modal === "walk") {
+      if (!journeyId || step < 2 || config.modal === "walk" || config.modal === "car") {
         setGeoJsonSourceData(activeMap, TRANSPORT_CANDIDATES_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
         return;
       }

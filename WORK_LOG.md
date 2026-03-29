@@ -1,5 +1,42 @@
 # Work Log
 
+## 2026-03-29 - Habilitar modo carro com isocrona unica e skip da etapa de transporte
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
+- Note: `BEST_PRACTICES.md` nao existe no workspace atual.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para espelhar o fluxo de `walk` em `car` com diff pequeno, testes focados e sem mexer no fluxo de `transit`.
+- Trigger: usuario pediu para deixar o transporte por carro habilitado e aplicar o mesmo comportamento do modo a pe para carro.
+- Root cause identified:
+  - o frontend ja reconhecia `car` no store, mas a etapa 1 ainda exibia `Carro` como opcao travada;
+  - os skips de etapa e o tracker ocultavam a etapa 2 apenas para `walk`;
+  - o backend ja sabia converter `car` para `auto` no Valhalla, mas continuava tratando `car` como fluxo legado dependente de seed de transporte.
+- Scope executed:
+  - `apps/web/src/components/panels/Step1Config.tsx`:
+    - habilitada a opcao `Carro` na UI;
+    - `walk` e `car` agora compartilham o fluxo direto de isocrona unica, usando tempo em vez de seed/radio de transporte;
+    - submit passa `zone_radius_meters=null` e `transport_search_radius_meters=null` para ambos os modos diretos e vai direto para a etapa 3.
+  - `apps/web/src/components/panels/Step2Transport.tsx`:
+    - etapa 2 passa a ser pulada tanto para `walk` quanto para `car`.
+  - `apps/web/src/components/panels/Step3Zones.tsx`:
+    - `car` ganhou auto-start do pipeline sem `selected_transport_point_id`;
+    - copy, labels e guardas de validacao foram ajustados para um branch compartilhado de modos diretos.
+  - `apps/web/src/features/app/wizardSteps.ts`, `apps/web/src/components/panels/ProgressTracker.tsx` e `apps/web/src/features/app/FindIdealApp.tsx`:
+    - tracker passa a esconder a etapa 2 tambem em `car`;
+    - o mapa deixa de buscar/renderizar candidatos de transporte quando o modal e direto (`walk`/`car`).
+  - `apps/api/src/modules/zones/service.py`:
+    - `car` passou a entrar no mesmo branch de isocrona unica que `walking`, usando `reference_point` da jornada e sem exigir transport seed;
+    - adicionada normalizacao defensiva para aliases de carro (`drive`, `driving`, `auto` -> `car`);
+    - fallback circular por tempo foi ajustado para `car` com velocidade estimada propria.
+  - testes:
+    - frontend: novos casos para `car` em `Step1Config`, `Step2Transport`, `Step3Zones` e `ProgressTracker`;
+    - backend: nova regressao cobrindo geracao de isocrona unica de `car` sem seed em `apps/api/tests/test_phase4_legacy_candidate_zone_generation.py`.
+- Validation:
+  - frontend focado: `Set-Location "c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/apps/web"; $env:CI='1'; .\node_modules\.bin\vitest.cmd run --config vitest.config.ts src/components/panels/Step1Config.test.tsx src/components/panels/Step2Transport.test.tsx src/components/panels/Step3Zones.test.tsx src/components/panels/ProgressTracker.test.tsx src/features/app/FindIdealApp.test.tsx --reporter=dot --no-color` -> `22 passed`.
+  - backend focado: `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase4_legacy_candidate_zone_generation.py -q --color=no` -> `5 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
 ## 2026-03-29 - Representar isocronas por circulo equivalente na coleta de ruas e POIs
 
 - Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `skills/best-practices/references/web2-backend.md`, `skills/best-practices/references/testing.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.

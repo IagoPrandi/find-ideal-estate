@@ -79,4 +79,29 @@ describe("Step1Config", () => {
     expect(useUIStore.getState().step).toBe(3);
     expect(useUIStore.getState().maxStep).toBe(3);
   });
+
+  it("sends car mode directly to the isochrone generation step", async () => {
+    useJourneyStore.getState().setPickedCoord({ lat: -23.55, lon: -46.63, label: "Trabalho" });
+    render(<Step1Config />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Carro/i }));
+    fireEvent.change(screen.getByRole("slider", { name: /Tempo de carro/i }), { target: { value: "30" } });
+    fireEvent.click(screen.getByRole("button", { name: /Gerar isocrona de carro/i }));
+
+    await waitFor(() => {
+      expect(createJourney).toHaveBeenCalledWith(
+        expect.objectContaining({
+          input_snapshot: expect.objectContaining({
+            transport_mode: "car",
+            max_travel_minutes: 30,
+            zone_radius_meters: null,
+            transport_search_radius_meters: null,
+          })
+        })
+      );
+    });
+
+    expect(useUIStore.getState().step).toBe(3);
+    expect(useUIStore.getState().maxStep).toBe(3);
+  });
 });

@@ -21,7 +21,7 @@ export const WIZARD_STEPS: {
 ];
 
 export function getVisibleWizardSteps(modal: TravelMode) {
-  if (modal === "walk") {
+  if (modal === "walk" || modal === "car") {
     return WIZARD_STEPS.filter((step) => step.id !== 2);
   }
   return WIZARD_STEPS;

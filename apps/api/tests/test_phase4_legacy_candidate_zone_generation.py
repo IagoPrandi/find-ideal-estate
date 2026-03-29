@@ -337,3 +337,71 @@ def test_zone_service_generates_single_walk_isochrone_without_transport_seed(mon
 	assert outcome["total"] == 1
 	assert outcome["completed"] == 1
 	assert [zone.reused for zone in outcome["zones"]] == [False]
+
+
+def test_zone_service_generates_single_car_isochrone_without_transport_seed(monkeypatch) -> None:
+	class _FakeValhallaAdapter:
+		async def isochrone(self, origin, costing, contours_minutes):
+			assert round(origin.lat, 5) == -23.55052
+			assert round(origin.lon, 5) == -46.63331
+			assert costing == "auto"
+			assert contours_minutes == [30]
+			return {
+				"type": "FeatureCollection",
+				"features": [
+					{
+						"type": "Feature",
+						"geometry": {
+							"type": "Polygon",
+							"coordinates": [[[-46.63331, -23.55052], [-46.631, -23.55052], [-46.631, -23.548], [-46.63331, -23.55052]]],
+						},
+					}
+				],
+			}
+
+	service = ZoneService(valhalla_adapter=_FakeValhallaAdapter(), otp_adapter=object())
+	journey_id = uuid4()
+	created_zone_id = uuid4()
+
+	context_row = {
+		"journey_id": journey_id,
+		"input_snapshot": {
+			"transport_mode": "car",
+			"max_travel_minutes": 30,
+			"reference_point": {"lat": -23.55052, "lon": -46.63331},
+		},
+		"transport_point_id": None,
+		"transport_point_source": None,
+		"transport_point_modal_types": [],
+		"lat": None,
+		"lon": None,
+	}
+	fake_conn = _FakeConn(
+		context_row=context_row,
+		existing_zone_rows=[None],
+		created_zone_ids=[created_zone_id],
+	)
+
+	async def _unexpected_generate_candidate_zones_for_seed(**kwargs):
+		raise AssertionError("candidate generation should not run for car mode")
+
+	monkeypatch.setattr("src.modules.zones.service.get_engine", lambda: _FakeEngine(fake_conn))
+	monkeypatch.setattr(
+		"src.modules.zones.service.generate_candidate_zones_for_seed",
+		_unexpected_generate_candidate_zones_for_seed,
+	)
+
+	outcome = asyncio.run(service.ensure_zones_for_job(uuid4()))
+
+	assert fake_conn.deleted_previous_associations is True
+	assert fake_conn.cleared_selected_zone is True
+	assert len(fake_conn.insert_zone_params) == 1
+	assert fake_conn.insert_zone_params[0]["transport_point_id"] is None
+	assert fake_conn.insert_zone_params[0]["modal"] == "car"
+	assert fake_conn.insert_zone_params[0]["max_time_minutes"] == 30
+	assert fake_conn.insert_zone_params[0]["radius_meters"] == 15000
+	assert len(fake_conn.association_params) == 1
+	assert fake_conn.association_params[0]["transport_point_id"] is None
+	assert outcome["total"] == 1
+	assert outcome["completed"] == 1
+	assert [zone.reused for zone in outcome["zones"]] == [False]

@@ -119,4 +119,21 @@ describe("sanitizeTransportPoints", () => {
       expect(useUIStore.getState().maxStep).toBe(3);
     });
   });
+
+  it("skips the transport step entirely for car mode", async () => {
+    useJourneyStore.setState((state) => ({
+      ...state,
+      config: {
+        ...state.config,
+        modal: "car"
+      }
+    }));
+
+    render(<Step2Transport />);
+
+    await waitFor(() => {
+      expect(useUIStore.getState().step).toBe(3);
+      expect(useUIStore.getState().maxStep).toBe(3);
+    });
+  });
 });

@@ -18,6 +18,11 @@ from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 _ESTIMATED_WALKING_SPEED_METERS_PER_MINUTE = 80
+_ESTIMATED_DRIVING_SPEED_METERS_PER_MINUTE = 500
+
+
+def _is_direct_isochrone_modal(modal: str) -> bool:
+    return str(modal).strip().lower() in {"walking", "car"}
 
 @dataclass(frozen=True)
 class ZoneGenerationOutcome:
@@ -87,6 +92,8 @@ def _extract_zone_config(input_snapshot: dict[str, Any] | None) -> tuple[str, in
     modal = str(raw_modal or "walking").strip().lower()
     if modal in {"walk", "pedestrian"}:
         modal = "walking"
+    elif modal in {"drive", "driving", "auto"}:
+        modal = "car"
 
     raw_max_time = (
         input_snapshot.get("max_travel_time_minutes")
@@ -110,6 +117,8 @@ def _extract_zone_config(input_snapshot: dict[str, Any] | None) -> tuple[str, in
         radius_meters = int(raw_radius)
     elif modal == "walking":
         radius_meters = max(300, max_time_minutes * _ESTIMATED_WALKING_SPEED_METERS_PER_MINUTE)
+    elif modal == "car":
+        radius_meters = max(500, max_time_minutes * _ESTIMATED_DRIVING_SPEED_METERS_PER_MINUTE)
     else:
         radius_meters = 1500
 
@@ -454,12 +463,12 @@ class ZoneService:
         transport_point_id = context["transport_point_id"]
         lat = context["lat"]
         lon = context["lon"]
-        if modal == "walking":
+        if _is_direct_isochrone_modal(modal):
             reference_point = _extract_reference_point(input_snapshot)
             if reference_point is not None:
                 lat, lon = reference_point
             if lat is None or lon is None:
-                raise RuntimeError(f"No reference point found for walking zone generation in journey {journey_id}")
+                raise RuntimeError(f"No reference point found for direct isochrone zone generation in journey {journey_id}")
 
             async with engine.begin() as conn:
                 await _clear_journey_zone_links(conn, journey_id)
@@ -665,14 +674,14 @@ class ZoneService:
             transport_point_id = context["transport_point_id"]
             lat = context["lat"]
             lon = context["lon"]
-            if modal == "walking":
+            if _is_direct_isochrone_modal(modal):
                 reference_point = _extract_reference_point(context["input_snapshot"])
                 if reference_point is not None:
                     lat, lon = reference_point
                 transport_point_id = None
             if lat is None or lon is None:
                 raise RuntimeError("Zone generation requires a valid reference point")
-            if modal != "walking" and transport_point_id is None:
+            if not _is_direct_isochrone_modal(modal) and transport_point_id is None:
                 raise RuntimeError("Zone generation requires at least one transport point")
 
             return await self._persist_single_isochrone_zone(

@@ -60,4 +60,40 @@ describe("Step3Zones", () => {
       expect(useUIStore.getState().maxStep).toBe(4);
     }, { timeout: 2000 });
   }, 10000);
+
+  it("auto-starts the single car isochrone pipeline without a transport seed", async () => {
+    useJourneyStore.setState((state) => ({
+      ...state,
+      config: {
+        ...state.config,
+        modal: "car",
+        time: 30,
+      },
+    }));
+
+    render(<Step3Zones />);
+
+    await waitFor(() => {
+      expect(updateJourney).toHaveBeenCalledWith(
+        "journey-1",
+        expect.objectContaining({
+          selected_transport_point_id: null,
+          last_completed_step: 1,
+          input_snapshot: expect.objectContaining({
+            transport_mode: "car",
+            max_travel_minutes: 30,
+            zone_radius_meters: null,
+            transport_search_radius_meters: null,
+          }),
+        })
+      );
+      expect(createZoneGenerationJob).toHaveBeenCalledWith("journey-1");
+      expect(createZoneEnrichmentJob).toHaveBeenCalledWith("journey-1");
+    });
+
+    await waitFor(() => {
+      expect(useUIStore.getState().step).toBe(4);
+      expect(useUIStore.getState().maxStep).toBe(4);
+    }, { timeout: 2000 });
+  }, 10000);
 });

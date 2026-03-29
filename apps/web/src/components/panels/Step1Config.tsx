@@ -1,4 +1,4 @@
-import { MapPin, Route, ShieldAlert, Trees, Droplets, Search, ArrowRight, Building2, Lock, Bus, Train, Blend } from "lucide-react";
+import { MapPin, Route, ShieldAlert, Trees, Droplets, Search, ArrowRight, Bus, Train, Blend, CarFront } from "lucide-react";
 import { useState } from "react";
 import { apiActionHint, createJourney } from "../../api/client";
 import { GREEN_VEGETATION_LABELS, GREEN_VEGETATION_LEVELS, useJourneyStore } from "../../state";
@@ -37,6 +37,8 @@ export function Step1Config() {
   const [isGreenPopoverOpen, setIsGreenPopoverOpen] = useState(false);
   const greenEnabled = config.enrichments.green;
   const isWalkingMode = config.modal === "walk";
+  const isDrivingMode = config.modal === "car";
+  const isDirectIsochroneMode = isWalkingMode || isDrivingMode;
 
   const zoneToggleCards = [
     { id: "safety", label: "Segurança", icon: ShieldAlert },
@@ -118,8 +120,8 @@ export function Step1Config() {
           transport_mode: config.modal,
           public_transport_mode: config.modal === "transit" ? config.publicTransportMode : null,
           max_travel_minutes: config.time,
-          zone_radius_meters: isWalkingMode ? null : config.zoneRadiusMeters,
-          transport_search_radius_meters: isWalkingMode ? null : config.transportSearchRadiusMeters,
+          zone_radius_meters: isDirectIsochroneMode ? null : config.zoneRadiusMeters,
+          transport_search_radius_meters: isDirectIsochroneMode ? null : config.transportSearchRadiusMeters,
           enrichments: {
             ...config.enrichments,
             green_vegetation_level: config.greenVegetationLevel
@@ -128,8 +130,8 @@ export function Step1Config() {
       });
 
       setJourneyId(journey.id);
-      setMaxStep(isWalkingMode ? 3 : 2);
-      goToStep(isWalkingMode ? 3 : 2);
+      setMaxStep(isDirectIsochroneMode ? 3 : 2);
+      goToStep(isDirectIsochroneMode ? 3 : 2);
     } catch (caughtError) {
       setError(apiActionHint(caughtError));
     } finally {
@@ -212,11 +214,14 @@ export function Step1Config() {
               <Route className="mb-1 h-5 w-5" />
               <span className="text-xs font-medium">A pé</span>
             </button>
-            <div className="relative flex cursor-not-allowed flex-col items-center justify-center rounded-xl border border-slate-100 bg-slate-50 p-3 text-slate-400">
-              <Lock className="absolute right-2 top-2 h-3 w-3" />
-              <Building2 className="mb-1 h-5 w-5" />
-              <span className="text-xs font-medium">Carro (Pro)</span>
-            </div>
+            <button
+              type="button"
+              onClick={() => setConfig({ modal: "car" })}
+              className={`flex flex-col items-center justify-center rounded-xl border p-3 transition-all ${config.modal === "car" ? "border-pastel-violet-400 bg-pastel-violet-50 text-pastel-violet-600" : "border-slate-200 text-slate-600 hover:border-slate-300"}`}
+            >
+              <CarFront className="mb-1 h-5 w-5" />
+              <span className="text-xs font-medium">Carro</span>
+            </button>
           </div>
 
           {config.modal === "transit" ? (
@@ -242,14 +247,14 @@ export function Step1Config() {
           ) : null}
         </div>
 
-        {isWalkingMode ? (
+        {isDirectIsochroneMode ? (
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <label htmlFor="walk-time-minutes" className="text-sm font-medium text-slate-700">Tempo de caminhada</label>
+              <label htmlFor="direct-travel-time-minutes" className="text-sm font-medium text-slate-700">{isWalkingMode ? "Tempo de caminhada" : "Tempo de carro"}</label>
               <span className="text-sm font-bold text-pastel-violet-600">{config.time} min</span>
             </div>
             <input
-              id="walk-time-minutes"
+              id="direct-travel-time-minutes"
               type="range"
               min="5"
               max="60"
@@ -345,7 +350,7 @@ export function Step1Config() {
 
       <div className="border-t border-slate-100 bg-white p-5">
         <button type="button" onClick={handleSubmit} disabled={isSubmitting} className="gem-primary-button w-full disabled:cursor-not-allowed disabled:opacity-60">
-          {isSubmitting ? "Criando jornada..." : isWalkingMode ? "Gerar isocrona a pe" : "Encontrar pontos seed"}
+          {isSubmitting ? "Criando jornada..." : isWalkingMode ? "Gerar isocrona a pe" : isDrivingMode ? "Gerar isocrona de carro" : "Encontrar pontos seed"}
           <ArrowRight className="h-4 w-4" />
         </button>
       </div>

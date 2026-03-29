@@ -72,14 +72,15 @@ export function Step2Transport() {
   const [error, setError] = useState<string | null>(null);
   const [busLinesByPointId, setBusLinesByPointId] = useState<Record<string, string[]>>({});
   const [loadingBusLinesPointId, setLoadingBusLinesPointId] = useState<string | null>(null);
+  const isDirectIsochroneMode = config.modal === "walk" || config.modal === "car";
 
   useEffect(() => {
-    if (config.modal !== "walk" || !journeyId) {
+    if (!isDirectIsochroneMode || !journeyId) {
       return;
     }
     setMaxStep(3);
     goToStep(3);
-  }, [config.modal, goToStep, journeyId, setMaxStep]);
+  }, [goToStep, isDirectIsochroneMode, journeyId, setMaxStep]);
 
   const selectedPoint = useMemo(
     () => points.find((point) => point.id === selectedTransportId) ?? null,
@@ -87,7 +88,7 @@ export function Step2Transport() {
   );
 
   useEffect(() => {
-    if (config.modal === "walk") {
+    if (isDirectIsochroneMode) {
       setIsLoading(false);
       setError(null);
       setPoints([]);
@@ -185,7 +186,7 @@ export function Step2Transport() {
         window.clearInterval(intervalId);
       }
     };
-  }, [config.modal, journeyId, selectedTransportId, setJobIds, setSelectedTransportId, transportJobId]);
+  }, [isDirectIsochroneMode, journeyId, selectedTransportId, setJobIds, setSelectedTransportId, transportJobId]);
 
   useEffect(() => {
     if (!canLoadBusStopLines(selectedPoint)) {

@@ -53,4 +53,28 @@ describe("ProgressTracker", () => {
 
     expect(screen.getByRole("button", { name: /Ir para etapa Origem/i })).toBeInTheDocument();
   });
+
+  it("hides step 2 when the journey modal is car", () => {
+    useJourneyStore.setState((state) => ({
+      ...state,
+      config: {
+        ...state.config,
+        modal: "car"
+      }
+    }));
+
+    render(
+      <ProgressTracker
+        currentStep={3}
+        maxStep={3}
+        isCollapsed={false}
+        onStepClick={vi.fn()}
+        onToggleCollapse={vi.fn()}
+      />
+    );
+
+    expect(screen.queryByRole("button", { name: /Ir para etapa Origem/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Ir para etapa Configuração/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Ir para etapa Zonas/i })).toBeInTheDocument();
+  });
 });

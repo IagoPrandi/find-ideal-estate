@@ -26,7 +26,7 @@ from sqlalchemy import text
 
 _POI_CATEGORIES = ("school", "supermarket", "pharmacy", "park", "restaurant", "gym")
 _POI_CACHE_TTL_SECONDS = 1800
-_POI_FETCH_LIMIT = 10
+_POI_FETCH_LIMIT = 15
 
 _ZONE_POI_CONTEXT_SQL = text(
     """
