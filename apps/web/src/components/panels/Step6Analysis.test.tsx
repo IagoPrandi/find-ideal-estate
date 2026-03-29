@@ -118,8 +118,10 @@ describe("Step6Analysis", () => {
     renderWithQueryClient();
 
     const progressPanel = await screen.findByTestId("listings-platform-progress");
+    const progressGrid = within(progressPanel).getByTestId("listings-platform-progress-grid");
 
     expect(progressPanel).toBeInTheDocument();
+    expect(progressGrid.className).toContain("grid-cols-1");
     expect(within(progressPanel).getByText(/Progresso por plataforma/i)).toBeInTheDocument();
     expect(screen.getByText(/Job de listings: 67%/i)).toBeInTheDocument();
     expect(within(progressPanel).getByText(/^QuintoAndar$/i)).toBeInTheDocument();
@@ -128,6 +130,7 @@ describe("Step6Analysis", () => {
     expect(within(progressPanel).getByText(/^Concluída$/i)).toBeInTheDocument();
     expect(within(progressPanel).getByText(/Raspando agora nesta plataforma/i)).toBeInTheDocument();
     expect(within(progressPanel).getByText(/96 anúncios raspados no worker/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /recolher progresso do scraping/i })).toHaveAttribute("aria-expanded", "true");
 
     await waitFor(() => {
       expect(getJob).toHaveBeenCalledWith("listings-job-1");
@@ -178,7 +181,17 @@ describe("Step6Analysis", () => {
 
     renderWithQueryClient();
 
-    expect(await screen.findByTestId("listings-platform-progress")).toBeInTheDocument();
+    const progressPanel = await screen.findByTestId("listings-platform-progress");
+    const progressToggle = screen.getByRole("button", { name: /expandir progresso do scraping/i });
+
+    expect(progressPanel).toBeInTheDocument();
+    expect(progressToggle).toHaveAttribute("aria-expanded", "false");
+    expect(within(progressPanel).queryByText(/^QuintoAndar$/i)).not.toBeInTheDocument();
+
+    fireEvent.click(progressToggle);
+
+    expect(screen.getByRole("button", { name: /recolher progresso do scraping/i })).toHaveAttribute("aria-expanded", "true");
+    expect(within(progressPanel).getByText(/^QuintoAndar$/i)).toBeInTheDocument();
     expect(screen.getByText(/Resultado consolidado/i)).toBeInTheDocument();
     expect(screen.getByText(/raspou 210 anúncios, mas nenhum permaneceu elegível para esta busca após os filtros do backend/i)).toBeInTheDocument();
     expect(screen.getByText(/Job de listings: 100%/i)).toBeInTheDocument();
@@ -272,6 +285,14 @@ describe("Step6Analysis", () => {
     expect(screen.getByText(/Endereço sem coordenadas/i)).toBeInTheDocument();
     expect(screen.getByText(/1 dentro da zona · 1 fora da zona · 1 sem coordenadas/i)).toBeInTheDocument();
     expect(screen.getByAltText(/Rua Fora, 20/i)).toHaveAttribute("src", "https://www.vivareal.com.br/listing-images/vr-1.webp");
+
+    fireEvent.click(screen.getByRole("button", { name: /recolher filtros de imóveis/i }));
+    expect(screen.getByRole("button", { name: /expandir filtros de imóveis/i })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByLabelText(/Escopo espacial/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /expandir filtros de imóveis/i }));
+    expect(screen.getByRole("button", { name: /recolher filtros de imóveis/i })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByLabelText(/Escopo espacial/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("listing-card-property:prop-2"));
     expect(useJourneyStore.getState().selectedListingKey).toBe("property:prop-2");

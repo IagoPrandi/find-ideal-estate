@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   CircleDot,
   ExternalLink,
   Home,
@@ -157,6 +159,10 @@ export function Step6Analysis() {
   const setActiveTab = useUIStore((state) => state.setActiveTab);
   const listingCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const lastScrolledListingKeyRef = useRef<string | null>(null);
+  const lastProgressRunKeyRef = useRef<string | null>(null);
+  const autoCollapsedProgressRunKeyRef = useRef<string | null>(null);
+  const [isProgressCollapsed, setIsProgressCollapsed] = useState(false);
+  const [isFiltersCollapsed, setIsFiltersCollapsed] = useState(false);
 
   const persistedListingsJobId = listingsJobId;
 
@@ -247,6 +253,17 @@ export function Step6Analysis() {
   const isScraping = listingsQuery.isLoading || listingsQuery.data?.freshness_status === "no_cache" || listingsJobQuery.data?.state === "running";
   const diagnosticsSummary = scrapeDiagnostics?.summary;
   const overallDuration = formatDuration(scrapeDiagnostics?.total_duration_ms);
+  const progressRunKey = [
+    journeyId || "no-journey",
+    zoneFingerprint || "no-zone",
+    effectiveListingsJobId || "no-job",
+    listingsQuery.data?.freshness_status || "unknown"
+  ].join(":");
+  const hasCompletedListingsGeneration = Boolean(platformEntries.length)
+    && !isScraping
+    && (listingsJobQuery.data?.state === "completed"
+      || listingsQuery.data?.freshness_status === "fresh"
+      || listingsQuery.data?.freshness_status === "stale");
   const scrapedButNoCards = (listingsQuery.data?.source === "cache")
     && rawListings.length === 0
     && (diagnosticsSummary?.total_scraped || 0) > 0
@@ -274,6 +291,26 @@ export function Step6Analysis() {
     selectedCard.scrollIntoView({ block: "nearest", behavior: "smooth" });
     lastScrolledListingKeyRef.current = selectedListingKey;
   }, [displayedListings, selectedListingKey]);
+
+  useEffect(() => {
+    if (lastProgressRunKeyRef.current === progressRunKey) {
+      return;
+    }
+    lastProgressRunKeyRef.current = progressRunKey;
+    autoCollapsedProgressRunKeyRef.current = null;
+    setIsProgressCollapsed(false);
+  }, [progressRunKey]);
+
+  useEffect(() => {
+    if (!hasCompletedListingsGeneration) {
+      return;
+    }
+    if (autoCollapsedProgressRunKeyRef.current === progressRunKey) {
+      return;
+    }
+    setIsProgressCollapsed(true);
+    autoCollapsedProgressRunKeyRef.current = progressRunKey;
+  }, [hasCompletedListingsGeneration, progressRunKey]);
 
   return (
     <div className="flex h-full flex-col bg-slate-50 animate-[fadeInRight_0.5s_ease-out]">
@@ -304,57 +341,71 @@ export function Step6Analysis() {
 
           {platformEntries.length > 0 ? (
             <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm" data-testid="listings-platform-progress">
-              <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Progresso por plataforma</p>
                   <p className="mt-1 text-sm text-slate-600">
                     {diagnosticsSummary?.total_scraped ? `${diagnosticsSummary.total_scraped} anúncios raspados no worker` : "Acompanhando o scrape em tempo real."}
                   </p>
                 </div>
-                <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-                  <span className="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-600">
-                    {diagnosticsSummary?.platforms_completed?.length || 0} concluídas
-                  </span>
-                  <span className="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-600">
-                    {diagnosticsSummary?.platforms_failed?.length || 0} falhas
-                  </span>
+                <div className="flex items-center gap-2 self-start">
+                  <div className="flex flex-wrap items-center justify-end gap-2 text-xs text-slate-500">
+                    <span className="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-600">
+                      {diagnosticsSummary?.platforms_completed?.length || 0} concluídas
+                    </span>
+                    <span className="rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-600">
+                      {diagnosticsSummary?.platforms_failed?.length || 0} falhas
+                    </span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsProgressCollapsed((value) => !value)}
+                    className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition-colors hover:bg-pastel-violet-50 hover:text-pastel-violet-600"
+                    aria-expanded={!isProgressCollapsed}
+                    aria-controls="listings-platform-progress-body"
+                    aria-label={isProgressCollapsed ? "Expandir progresso do scraping" : "Recolher progresso do scraping"}
+                  >
+                    {isProgressCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+                  </button>
                 </div>
               </div>
 
-              <div className="mt-4 grid gap-3 md:grid-cols-3">
-                {platformEntries.map(({ platform, details }) => {
-                  const meta = platformStatusMeta(details.status);
-                  const duration = formatDuration(details.total_duration_ms);
-                  const Icon = meta.Icon;
-                  const isActivePlatform = scrapeDiagnostics?.active_platform === platform && details.status !== "completed";
-                  return (
-                    <div key={platform} className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-semibold text-slate-800">{platformLabel(platform)}</p>
-                          <p className="mt-1 text-xs text-slate-500">
-                            {details.scraped_count || details.persisted_count
-                              ? `${details.persisted_count ?? details.scraped_count ?? 0} anúncios processados`
-                              : "Sem contagem ainda"}
-                          </p>
+              {!isProgressCollapsed ? (
+                <div id="listings-platform-progress-body" className="mt-4 grid grid-cols-1 gap-3" data-testid="listings-platform-progress-grid">
+                  {platformEntries.map(({ platform, details }) => {
+                    const meta = platformStatusMeta(details.status);
+                    const duration = formatDuration(details.total_duration_ms);
+                    const Icon = meta.Icon;
+                    const isActivePlatform = scrapeDiagnostics?.active_platform === platform && details.status !== "completed";
+                    return (
+                      <div key={platform} className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-semibold text-slate-800">{platformLabel(platform)}</p>
+                            <p className="mt-1 text-xs text-slate-500">
+                              {details.scraped_count || details.persisted_count
+                                ? `${details.persisted_count ?? details.scraped_count ?? 0} anúncios processados`
+                                : "Sem contagem ainda"}
+                            </p>
+                          </div>
+                          <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-semibold ${meta.className}`}>
+                            <Icon className={`h-3.5 w-3.5 ${details.status === "scraping" ? "animate-spin" : ""}`} />
+                            {meta.label}
+                          </span>
                         </div>
-                        <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[11px] font-semibold ${meta.className}`}>
-                          <Icon className={`h-3.5 w-3.5 ${details.status === "scraping" ? "animate-spin" : ""}`} />
-                          {meta.label}
-                        </span>
-                      </div>
 
-                      <div className="mt-3 space-y-1.5 text-xs text-slate-600">
-                        {isActivePlatform ? <p className="font-medium text-pastel-violet-700">Raspando agora nesta plataforma.</p> : null}
-                        {duration ? <p>Duração: {duration}</p> : null}
-                        {details.scrape_duration_ms ? <p>Scrape: {formatDuration(details.scrape_duration_ms)}</p> : null}
-                        {details.persist_duration_ms ? <p>Persistência: {formatDuration(details.persist_duration_ms)}</p> : null}
-                        {details.error_message ? <p className="text-rose-700">{details.error_message}</p> : null}
+                        <div className="mt-3 space-y-1.5 text-xs text-slate-600">
+                          {isActivePlatform ? <p className="font-medium text-pastel-violet-700">Raspando agora nesta plataforma.</p> : null}
+                          {duration ? <p>Duração: {duration}</p> : null}
+                          {details.scrape_duration_ms ? <p>Scrape: {formatDuration(details.scrape_duration_ms)}</p> : null}
+                          {details.persist_duration_ms ? <p>Persistência: {formatDuration(details.persist_duration_ms)}</p> : null}
+                          {details.error_message ? <p className="text-rose-700">{details.error_message}</p> : null}
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              ) : null}
             </div>
           ) : null}
 
@@ -373,83 +424,99 @@ export function Step6Analysis() {
         {activeTab === "imoveis" ? (
           <div className="space-y-4 animate-[fadeIn_0.3s_ease-out]">
             <div className="rounded-xl border border-slate-200 bg-white p-4">
-              <div className="mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">
-                <SlidersHorizontal className="h-3.5 w-3.5" />
-                Filtros
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="col-span-2 flex flex-col gap-1">
-                  <label className="text-xs text-slate-500">Escopo espacial</label>
-                  <select
-                    aria-label="Escopo espacial"
-                    value={listingsFilters.spatialScope}
-                    onChange={(e) => setListingsFilters({ spatialScope: e.target.value as "all" | "inside_zone" })}
-                    className="rounded-md border border-slate-200 px-2 py-1.5 text-sm text-slate-700 outline-none focus:border-pastel-violet-400 focus:ring-1 focus:ring-pastel-violet-200"
-                  >
-                    <option value="all">Todos os imóveis</option>
-                    <option value="inside_zone">Apenas dentro da zona</option>
-                  </select>
-                  <p className="text-xs text-slate-500">
-                    {listingsInZone.length} dentro da zona · {listingsOutsideZone.length} fora da zona · {listingsWithoutCoordinates.length} sem coordenadas
-                  </p>
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-500">
+                  <SlidersHorizontal className="h-3.5 w-3.5" />
+                  Filtros
                 </div>
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs text-slate-500">Preço mín. (R$)</label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={listingsFilters.minPrice}
-                    onChange={(e) => setListingsFilters({ minPrice: e.target.value })}
-                    placeholder="0"
-                    className="rounded-md border border-slate-200 px-2 py-1.5 text-sm text-slate-700 outline-none focus:border-pastel-violet-400 focus:ring-1 focus:ring-pastel-violet-200"
-                  />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs text-slate-500">Preço máx. (R$)</label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={listingsFilters.maxPrice}
-                    onChange={(e) => setListingsFilters({ maxPrice: e.target.value })}
-                    placeholder="Sem limite"
-                    className="rounded-md border border-slate-200 px-2 py-1.5 text-sm text-slate-700 outline-none focus:border-pastel-violet-400 focus:ring-1 focus:ring-pastel-violet-200"
-                  />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs text-slate-500">Área mín. (m²)</label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={listingsFilters.minSize}
-                    onChange={(e) => setListingsFilters({ minSize: e.target.value })}
-                    placeholder="0"
-                    className="rounded-md border border-slate-200 px-2 py-1.5 text-sm text-slate-700 outline-none focus:border-pastel-violet-400 focus:ring-1 focus:ring-pastel-violet-200"
-                  />
-                </div>
-                <div className="flex flex-col gap-1">
-                  <label className="text-xs text-slate-500">Área máx. (m²)</label>
-                  <input
-                    type="number"
-                    min={0}
-                    value={listingsFilters.maxSize}
-                    onChange={(e) => setListingsFilters({ maxSize: e.target.value })}
-                    placeholder="Sem limite"
-                    className="rounded-md border border-slate-200 px-2 py-1.5 text-sm text-slate-700 outline-none focus:border-pastel-violet-400 focus:ring-1 focus:ring-pastel-violet-200"
-                  />
-                </div>
-              </div>
-              <div className="mt-3 flex flex-col gap-1">
-                <label className="text-xs text-slate-500">Tipo de imóvel</label>
-                <select
-                  value={listingsFilters.usageType}
-                  onChange={(e) => setListingsFilters({ usageType: e.target.value as "all" | "residential" | "commercial" })}
-                  className="rounded-md border border-slate-200 px-2 py-1.5 text-sm text-slate-700 outline-none focus:border-pastel-violet-400 focus:ring-1 focus:ring-pastel-violet-200"
+                <button
+                  type="button"
+                  onClick={() => setIsFiltersCollapsed((value) => !value)}
+                  className="flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition-colors hover:bg-pastel-violet-50 hover:text-pastel-violet-600"
+                  aria-expanded={!isFiltersCollapsed}
+                  aria-controls="listings-filters-body"
+                  aria-label={isFiltersCollapsed ? "Expandir filtros de imóveis" : "Recolher filtros de imóveis"}
                 >
-                  <option value="all">Todos</option>
-                  <option value="residential">Residencial</option>
-                  <option value="commercial">Comercial</option>
-                </select>
+                  {isFiltersCollapsed ? <ChevronDown className="h-4 w-4" /> : <ChevronUp className="h-4 w-4" />}
+                </button>
               </div>
+              {!isFiltersCollapsed ? (
+                <div id="listings-filters-body" className="mt-3" data-testid="listings-filters-body">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="col-span-2 flex flex-col gap-1">
+                      <label className="text-xs text-slate-500">Escopo espacial</label>
+                      <select
+                        aria-label="Escopo espacial"
+                        value={listingsFilters.spatialScope}
+                        onChange={(e) => setListingsFilters({ spatialScope: e.target.value as "all" | "inside_zone" })}
+                        className="rounded-md border border-slate-200 px-2 py-1.5 text-sm text-slate-700 outline-none focus:border-pastel-violet-400 focus:ring-1 focus:ring-pastel-violet-200"
+                      >
+                        <option value="all">Todos os imóveis</option>
+                        <option value="inside_zone">Apenas dentro da zona</option>
+                      </select>
+                      <p className="text-xs text-slate-500">
+                        {listingsInZone.length} dentro da zona · {listingsOutsideZone.length} fora da zona · {listingsWithoutCoordinates.length} sem coordenadas
+                      </p>
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs text-slate-500">Preço mín. (R$)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={listingsFilters.minPrice}
+                        onChange={(e) => setListingsFilters({ minPrice: e.target.value })}
+                        placeholder="0"
+                        className="rounded-md border border-slate-200 px-2 py-1.5 text-sm text-slate-700 outline-none focus:border-pastel-violet-400 focus:ring-1 focus:ring-pastel-violet-200"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs text-slate-500">Preço máx. (R$)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={listingsFilters.maxPrice}
+                        onChange={(e) => setListingsFilters({ maxPrice: e.target.value })}
+                        placeholder="Sem limite"
+                        className="rounded-md border border-slate-200 px-2 py-1.5 text-sm text-slate-700 outline-none focus:border-pastel-violet-400 focus:ring-1 focus:ring-pastel-violet-200"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs text-slate-500">Área mín. (m²)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={listingsFilters.minSize}
+                        onChange={(e) => setListingsFilters({ minSize: e.target.value })}
+                        placeholder="0"
+                        className="rounded-md border border-slate-200 px-2 py-1.5 text-sm text-slate-700 outline-none focus:border-pastel-violet-400 focus:ring-1 focus:ring-pastel-violet-200"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1">
+                      <label className="text-xs text-slate-500">Área máx. (m²)</label>
+                      <input
+                        type="number"
+                        min={0}
+                        value={listingsFilters.maxSize}
+                        onChange={(e) => setListingsFilters({ maxSize: e.target.value })}
+                        placeholder="Sem limite"
+                        className="rounded-md border border-slate-200 px-2 py-1.5 text-sm text-slate-700 outline-none focus:border-pastel-violet-400 focus:ring-1 focus:ring-pastel-violet-200"
+                      />
+                    </div>
+                  </div>
+                  <div className="mt-3 flex flex-col gap-1">
+                    <label className="text-xs text-slate-500">Tipo de imóvel</label>
+                    <select
+                      value={listingsFilters.usageType}
+                      onChange={(e) => setListingsFilters({ usageType: e.target.value as "all" | "residential" | "commercial" })}
+                      className="rounded-md border border-slate-200 px-2 py-1.5 text-sm text-slate-700 outline-none focus:border-pastel-violet-400 focus:ring-1 focus:ring-pastel-violet-200"
+                    >
+                      <option value="all">Todos</option>
+                      <option value="residential">Residencial</option>
+                      <option value="commercial">Comercial</option>
+                    </select>
+                  </div>
+                </div>
+              ) : null}
             </div>
             {listingsQuery.isLoading ? <p className="rounded-xl bg-white p-4 text-sm text-slate-500">Carregando imóveis...</p> : null}
             {listingsQuery.error ? <p className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{apiActionHint(listingsQuery.error)}</p> : null}

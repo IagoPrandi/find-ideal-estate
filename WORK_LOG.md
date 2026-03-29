@@ -1,5 +1,26 @@
 # Work Log
 
+## 2026-03-29 - Recolher progresso do scraping e filtros na etapa de imóveis
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/develop-frontend/SKILL.md` para ajustar a densidade da etapa 6 sem criar estado duplicado fora do componente de resultados.
+- Trigger: usuario pediu que, ao finalizar a geração da lista de imóveis, a seção de progresso do scraping fosse recolhida automaticamente, que os cards por plataforma passassem a aparecer em três linhas e que os filtros do painel de imóveis pudessem ser recolhidos e expandidos manualmente.
+- Root cause identified:
+  - a etapa 6 renderizava o progresso por plataforma sempre expandido e em grade fixa de três colunas, mesmo depois de o scraping terminar;
+  - o bloco de filtros também era sempre aberto, ocupando altura fixa no topo da aba de imóveis sem controle do usuário.
+- Scope executed:
+  - `apps/web/src/components/panels/Step6Analysis.tsx`:
+    - adicionados toggles acessíveis para recolher/expandir o progresso do scraping e os filtros de imóveis;
+    - a seção de progresso agora recolhe automaticamente quando a geração dos listings termina com sucesso para a execução atual;
+    - os cards de progresso por plataforma passaram a ser exibidos em coluna única, um por linha.
+  - `apps/web/src/components/panels/Step6Analysis.test.tsx`:
+    - testes atualizados para validar o recolhimento automático do progresso após conclusão, a expansão manual posterior, o layout vertical dos cards e o acordeão dos filtros.
+- Validation:
+  - frontend focado: `Set-Location "c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/apps/web"; $env:CI='1'; .\node_modules\.bin\vitest.cmd run --config vitest.config.ts src/components/panels/Step6Analysis.test.tsx --reporter=dot --no-color` -> `4 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
 ## 2026-03-29 - Corrigir regressao de renderizacao dos POIs no mapa
 
 - Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.
