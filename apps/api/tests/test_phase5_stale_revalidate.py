@@ -56,7 +56,7 @@ def _fake_cards() -> list[dict[str, object]]:
     ]
 
 
-def test_listings_search_partial_hit_triggers_background_revalidation(monkeypatch) -> None:
+def test_listings_search_without_address_cache_queues_new_scrape(monkeypatch) -> None:
     cache_partial = {
         "status": "partial",
         "zone_fingerprint": "zone-b",
@@ -78,8 +78,8 @@ def test_listings_search_partial_hit_triggers_background_revalidation(monkeypatc
     async def _fake_get_cache_record(_zfp, _cfg):
         return None
 
-    async def _fake_partial(_zfp, _cfg):
-        return cache_partial
+    async def _fake_address_cache(_normalized, **_kwargs):
+        return None
 
     def _fake_cache_is_usable(record):
         return bool(record)
@@ -91,17 +91,20 @@ def test_listings_search_partial_hit_triggers_background_revalidation(monkeypatc
         fetch_calls.append(_kwargs)
         return _fake_cards()
 
-    async def _fake_create_cache_record(_zfp, _cfg):
+    async def _fake_create_cache_record(_normalized, **_kwargs):
         calls["create_cache"] += 1
 
     async def _fake_enqueue(**_kwargs):
         calls["enqueue"] += 1
         return uuid4()
 
+    async def _fake_find_active_job(*_args, **_kwargs):
+        return None
+
     monkeypatch.setattr("api.routes.listings.get_platform_registry", lambda: _Registry())
     monkeypatch.setattr("api.routes.listings.get_cache_record", _fake_get_cache_record)
     monkeypatch.setattr(
-        "api.routes.listings.find_partial_hit_from_overlapping_zone", _fake_partial
+        "api.routes.listings.find_usable_cache_for_search_location", _fake_address_cache
     )
     monkeypatch.setattr("api.routes.listings.cache_is_usable", _fake_cache_is_usable)
     monkeypatch.setattr("api.routes.listings.record_search_request", _fake_record_search_request)
@@ -111,6 +114,7 @@ def test_listings_search_partial_hit_triggers_background_revalidation(monkeypatc
     )
     monkeypatch.setattr("api.routes.listings.create_cache_record", _fake_create_cache_record)
     monkeypatch.setattr("api.routes.listings._enqueue_listings_scrape_job", _fake_enqueue)
+    monkeypatch.setattr("api.routes.listings._find_active_listings_job_id", _fake_find_active_job)
 
     journey_id = uuid4()
     with TestClient(app) as client:
@@ -121,10 +125,9 @@ def test_listings_search_partial_hit_triggers_background_revalidation(monkeypatc
 
     assert response.status_code == 200
     body = response.json()
-    assert body["source"] == "cache"
-    assert body["total_count"] == 1
-    assert fetch_calls[0]["platforms"] == ["quintoandar"]
-    assert fetch_calls[0]["observed_since"] == cache_partial["created_at"]
+    assert body["source"] == "none"
+    assert body["freshness_status"] == "queued_for_next_prewarm"
+    assert len(fetch_calls) == 0
     assert calls["record"] == 1
     assert calls["create_cache"] == 1
     assert calls["enqueue"] == 1
@@ -150,10 +153,10 @@ def test_listings_search_stale_cache_hit_triggers_background_revalidation(monkey
             return list(names)
 
     async def _fake_get_cache_record(_zfp, _cfg):
-        return stale_cache
-
-    async def _fake_partial(_zfp, _cfg):
         return None
+
+    async def _fake_address_cache(_normalized, **_kwargs):
+        return stale_cache
 
     def _fake_cache_is_usable(record):
         return bool(record)
@@ -165,17 +168,20 @@ def test_listings_search_stale_cache_hit_triggers_background_revalidation(monkey
         fetch_calls.append(_kwargs)
         return _fake_cards()
 
-    async def _fake_create_cache_record(_zfp, _cfg):
+    async def _fake_create_cache_record(_normalized, **_kwargs):
         calls["create_cache"] += 1
 
     async def _fake_enqueue(**_kwargs):
         calls["enqueue"] += 1
         return uuid4()
 
+    async def _fake_find_active_job(*_args, **_kwargs):
+        return None
+
     monkeypatch.setattr("api.routes.listings.get_platform_registry", lambda: _Registry())
     monkeypatch.setattr("api.routes.listings.get_cache_record", _fake_get_cache_record)
     monkeypatch.setattr(
-        "api.routes.listings.find_partial_hit_from_overlapping_zone", _fake_partial
+        "api.routes.listings.find_usable_cache_for_search_location", _fake_address_cache
     )
     monkeypatch.setattr("api.routes.listings.cache_is_usable", _fake_cache_is_usable)
     monkeypatch.setattr("api.routes.listings.record_search_request", _fake_record_search_request)
@@ -185,6 +191,7 @@ def test_listings_search_stale_cache_hit_triggers_background_revalidation(monkey
     )
     monkeypatch.setattr("api.routes.listings.create_cache_record", _fake_create_cache_record)
     monkeypatch.setattr("api.routes.listings._enqueue_listings_scrape_job", _fake_enqueue)
+    monkeypatch.setattr("api.routes.listings._find_active_listings_job_id", _fake_find_active_job)
 
     journey_id = uuid4()
     with TestClient(app) as client:
@@ -224,10 +231,10 @@ def test_listings_search_fresh_cache_hit_does_not_enqueue_revalidation(monkeypat
             return list(names)
 
     async def _fake_get_cache_record(_zfp, _cfg):
-        return fresh_cache
-
-    async def _fake_partial(_zfp, _cfg):
         return None
+
+    async def _fake_address_cache(_normalized, **_kwargs):
+        return fresh_cache
 
     def _fake_cache_is_usable(record):
         return bool(record)
@@ -239,7 +246,7 @@ def test_listings_search_fresh_cache_hit_does_not_enqueue_revalidation(monkeypat
         fetch_calls.append(_kwargs)
         return _fake_cards()
 
-    async def _fake_create_cache_record(_zfp, _cfg):
+    async def _fake_create_cache_record(_normalized, **_kwargs):
         calls["create_cache"] += 1
 
     async def _fake_enqueue(**_kwargs):
@@ -249,7 +256,7 @@ def test_listings_search_fresh_cache_hit_does_not_enqueue_revalidation(monkeypat
     monkeypatch.setattr("api.routes.listings.get_platform_registry", lambda: _Registry())
     monkeypatch.setattr("api.routes.listings.get_cache_record", _fake_get_cache_record)
     monkeypatch.setattr(
-        "api.routes.listings.find_partial_hit_from_overlapping_zone", _fake_partial
+        "api.routes.listings.find_usable_cache_for_search_location", _fake_address_cache
     )
     monkeypatch.setattr("api.routes.listings.cache_is_usable", _fake_cache_is_usable)
     monkeypatch.setattr("api.routes.listings.record_search_request", _fake_record_search_request)
@@ -297,8 +304,11 @@ def test_get_zone_listings_uses_cache_completed_platforms(monkeypatch) -> None:
         def resolve_names(self, names):
             return list(names)
 
-    async def _fake_get_cache_record(_zfp, _cfg):
+    async def _fake_get_cache_record(_normalized):
         return cache
+
+    async def _fake_latest_search(_journey_id, _zone_fp):
+        return {"search_location_normalized": _payload()["search_location_normalized"]}
 
     def _fake_cache_is_usable(record):
         return bool(record)
@@ -309,6 +319,7 @@ def test_get_zone_listings_uses_cache_completed_platforms(monkeypatch) -> None:
 
     monkeypatch.setattr("api.routes.listings.get_platform_registry", lambda: _Registry())
     monkeypatch.setattr("api.routes.listings.get_cache_record", _fake_get_cache_record)
+    monkeypatch.setattr("api.routes.listings.get_latest_search_request_for_zone", _fake_latest_search)
     monkeypatch.setattr("api.routes.listings.cache_is_usable", _fake_cache_is_usable)
     monkeypatch.setattr(
         "api.routes.listings.fetch_listing_cards_for_zone",
@@ -329,8 +340,8 @@ def test_get_zone_listings_uses_cache_completed_platforms(monkeypatch) -> None:
     assert fetch_calls[0]["observed_since"] == cache["created_at"]
 
 
-def test_get_zone_listings_falls_back_to_overlapping_partial_cache(monkeypatch) -> None:
-    partial_cache = {
+def test_get_zone_listings_reuses_latest_search_address_cache_across_zones(monkeypatch) -> None:
+    reused_cache = {
         "status": "partial",
         "zone_fingerprint": "zone-overlap",
         "platforms_completed": ["quintoandar"],
@@ -348,11 +359,11 @@ def test_get_zone_listings_falls_back_to_overlapping_partial_cache(monkeypatch) 
         def resolve_names(self, names):
             return list(names)
 
-    async def _fake_get_cache_record(_zfp, _cfg):
-        return None
+    async def _fake_get_cache_record(_normalized):
+        return reused_cache
 
-    async def _fake_find_partial_hit(_zfp, _cfg):
-        return partial_cache
+    async def _fake_latest_search(_journey_id, _zone_fp):
+        return {"search_location_normalized": _payload()["search_location_normalized"]}
 
     def _fake_cache_is_usable(record):
         return bool(record)
@@ -363,10 +374,7 @@ def test_get_zone_listings_falls_back_to_overlapping_partial_cache(monkeypatch) 
 
     monkeypatch.setattr("api.routes.listings.get_platform_registry", lambda: _Registry())
     monkeypatch.setattr("api.routes.listings.get_cache_record", _fake_get_cache_record)
-    monkeypatch.setattr(
-        "api.routes.listings.find_partial_hit_from_overlapping_zone",
-        _fake_find_partial_hit,
-    )
+    monkeypatch.setattr("api.routes.listings.get_latest_search_request_for_zone", _fake_latest_search)
     monkeypatch.setattr("api.routes.listings.cache_is_usable", _fake_cache_is_usable)
     monkeypatch.setattr(
         "api.routes.listings.fetch_listing_cards_for_zone",
@@ -384,7 +392,7 @@ def test_get_zone_listings_falls_back_to_overlapping_partial_cache(monkeypatch) 
     assert response.json()["total_count"] == 1
     assert fetch_calls[0]["zone_fingerprint"] == "zone-a"
     assert fetch_calls[0]["platforms"] == ["quintoandar"]
-    assert fetch_calls[0]["observed_since"] == partial_cache["created_at"]
+    assert fetch_calls[0]["observed_since"] == reused_cache["created_at"]
 
 
 def test_get_zone_listings_supports_all_spatial_scope(monkeypatch) -> None:
@@ -406,8 +414,11 @@ def test_get_zone_listings_supports_all_spatial_scope(monkeypatch) -> None:
         def resolve_names(self, names):
             return list(names)
 
-    async def _fake_get_cache_record(_zfp, _cfg):
+    async def _fake_get_cache_record(_normalized):
         return cache
+
+    async def _fake_latest_search(_journey_id, _zone_fp):
+        return {"search_location_normalized": _payload()["search_location_normalized"]}
 
     def _fake_cache_is_usable(record):
         return bool(record)
@@ -423,6 +434,7 @@ def test_get_zone_listings_supports_all_spatial_scope(monkeypatch) -> None:
 
     monkeypatch.setattr("api.routes.listings.get_platform_registry", lambda: _Registry())
     monkeypatch.setattr("api.routes.listings.get_cache_record", _fake_get_cache_record)
+    monkeypatch.setattr("api.routes.listings.get_latest_search_request_for_zone", _fake_latest_search)
     monkeypatch.setattr("api.routes.listings.cache_is_usable", _fake_cache_is_usable)
     monkeypatch.setattr(
         "api.routes.listings.fetch_listing_cards_for_zone",
@@ -456,7 +468,7 @@ def test_listings_search_cache_miss_returns_job_id(monkeypatch) -> None:
     async def _fake_get_cache_record(_zfp, _cfg):
         return None
 
-    async def _fake_partial(_zfp, _cfg):
+    async def _fake_address_cache(_normalized, **_kwargs):
         return None
 
     def _fake_cache_is_usable(record):
@@ -465,19 +477,25 @@ def test_listings_search_cache_miss_returns_job_id(monkeypatch) -> None:
     async def _fake_record_search_request(**_kwargs):
         return None
 
-    async def _fake_create_cache_record(_zfp, _cfg):
+    async def _fake_create_cache_record(_normalized, **_kwargs):
         return None
 
     async def _fake_enqueue(**_kwargs):
         return created_job_id
 
+    async def _fake_find_active_job(*_args, **_kwargs):
+        return None
+
     monkeypatch.setattr("api.routes.listings.get_platform_registry", lambda: _Registry())
     monkeypatch.setattr("api.routes.listings.get_cache_record", _fake_get_cache_record)
-    monkeypatch.setattr("api.routes.listings.find_partial_hit_from_overlapping_zone", _fake_partial)
+    monkeypatch.setattr(
+        "api.routes.listings.find_usable_cache_for_search_location", _fake_address_cache
+    )
     monkeypatch.setattr("api.routes.listings.cache_is_usable", _fake_cache_is_usable)
     monkeypatch.setattr("api.routes.listings.record_search_request", _fake_record_search_request)
     monkeypatch.setattr("api.routes.listings.create_cache_record", _fake_create_cache_record)
     monkeypatch.setattr("api.routes.listings._enqueue_listings_scrape_job", _fake_enqueue)
+    monkeypatch.setattr("api.routes.listings._find_active_listings_job_id", _fake_find_active_job)
 
     journey_id = uuid4()
     with TestClient(app) as client:
@@ -492,6 +510,79 @@ def test_listings_search_cache_miss_returns_job_id(monkeypatch) -> None:
     assert body["job_id"] == str(created_job_id)
     assert body["freshness_status"] == "queued_for_next_prewarm"
 
+def test_listings_search_reuses_cache_across_different_zones_and_configs(monkeypatch) -> None:
+    """
+    Verify that cache is address-scoped: the same address reuses cache across zone/config.
+    """
+    class _Registry:
+        def default_free_platforms(self):
+            return ["quintoandar", "zapimoveis"]
+
+        def resolve_names(self, names):
+            return list(names)
+
+    async def _fake_get_cache_record(_zfp, _cfg):
+        return None
+
+    async def _fake_address_cache(_normalized, **_kwargs):
+        return {
+            "status": "complete",
+            "zone_fingerprint": "zone-a",
+            "platforms_completed": ["quintoandar", "zapimoveis"],
+            "expires_at": datetime.now(tz=timezone.utc) + timedelta(hours=6),
+            "scraped_at": datetime.now(tz=timezone.utc),
+            "created_at": datetime.now(tz=timezone.utc) - timedelta(minutes=5),
+        }
+
+    def _fake_cache_is_usable(record):
+        return bool(record)
+
+    async def _fake_record_search_request(**_kwargs):
+        return None
+
+    async def _fake_create_cache_record(_normalized, **_kwargs):
+        raise AssertionError("create_cache_record should not be called on cache hit")
+
+    async def _fake_enqueue(**_kwargs):
+        raise AssertionError("_enqueue_listings_scrape_job should not be called on cache hit")
+
+    monkeypatch.setattr("api.routes.listings.get_platform_registry", lambda: _Registry())
+    monkeypatch.setattr("api.routes.listings.get_cache_record", _fake_get_cache_record)
+    monkeypatch.setattr(
+        "api.routes.listings.find_usable_cache_for_search_location", _fake_address_cache
+    )
+    monkeypatch.setattr("api.routes.listings.cache_is_usable", _fake_cache_is_usable)
+    monkeypatch.setattr("api.routes.listings.record_search_request", _fake_record_search_request)
+    monkeypatch.setattr("api.routes.listings.create_cache_record", _fake_create_cache_record)
+    monkeypatch.setattr("api.routes.listings._enqueue_listings_scrape_job", _fake_enqueue)
+
+    journey_id = uuid4()
+    with TestClient(app) as client:
+        response = client.post(
+            f"/journeys/{journey_id}/listings/search",
+            json=_payload(),
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source"] == "cache"
+
+    payload_zone_b = _payload()
+    payload_zone_b["zone_fingerprint"] = "zone-b"
+    payload_zone_b["platforms"] = ["vivareal"]
+    
+    with TestClient(app) as client:
+        response = client.post(
+            f"/journeys/{journey_id}/listings/search",
+            json=payload_zone_b,
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source"] == "cache"
+
+
+
 
 def test_get_zone_listings_no_cache_exposes_active_job_id(monkeypatch) -> None:
     active_job_id = uuid4()
@@ -503,21 +594,22 @@ def test_get_zone_listings_no_cache_exposes_active_job_id(monkeypatch) -> None:
         def resolve_names(self, names):
             return list(names)
 
-    async def _fake_get_cache_record(_zfp, _cfg):
+    async def _fake_get_cache_record(_normalized):
         return None
 
-    async def _fake_partial(_zfp, _cfg):
-        return None
+    async def _fake_latest_search(_journey_id, _zone_fp):
+        return {"search_location_normalized": _payload()["search_location_normalized"]}
 
     def _fake_cache_is_usable(record):
         return bool(record)
 
-    async def _fake_find_active_job(_journey_id, _zone_fp):
+    async def _fake_find_active_job(_journey_id, zone_fingerprint=None, search_location_normalized=None):
+        del zone_fingerprint, search_location_normalized
         return active_job_id
 
     monkeypatch.setattr("api.routes.listings.get_platform_registry", lambda: _Registry())
     monkeypatch.setattr("api.routes.listings.get_cache_record", _fake_get_cache_record)
-    monkeypatch.setattr("api.routes.listings.find_partial_hit_from_overlapping_zone", _fake_partial)
+    monkeypatch.setattr("api.routes.listings.get_latest_search_request_for_zone", _fake_latest_search)
     monkeypatch.setattr("api.routes.listings.cache_is_usable", _fake_cache_is_usable)
     monkeypatch.setattr("api.routes.listings._find_active_listings_job_id", _fake_find_active_job)
 

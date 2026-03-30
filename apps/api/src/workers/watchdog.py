@@ -22,7 +22,7 @@ async def sweep_stale_running_jobs() -> None:
         result = await conn.execute(
             text(
                 """
-                SELECT id
+                SELECT id, result_ref->>'zone_fingerprint' AS zone_fingerprint
                 FROM jobs
                 WHERE state = 'running'
                 """
@@ -32,6 +32,7 @@ async def sweep_stale_running_jobs() -> None:
 
     for row in rows:
         job_id = row["id"]
+        zone_fingerprint = row.get("zone_fingerprint")
         heartbeat_key = JobHeartbeatMiddleware.heartbeat_key(job_id)
         heartbeat_exists = await redis.exists(heartbeat_key)
         if heartbeat_exists:
@@ -43,25 +44,27 @@ async def sweep_stale_running_jobs() -> None:
             current_stage="watchdog",
             error_message="missing_heartbeat",
             mark_finished=True,
-            result_ref={"status": "cancelled_partial", "reason": "missing_heartbeat"},
+            result_ref={
+                "status": "cancelled_partial",
+                "reason": "missing_heartbeat",
+                "zone_fingerprint": zone_fingerprint,
+            },
         )
         # Reset any zone_listing_caches that were left in 'scraping' state by the
         # cancelled job so that the next retry can start fresh.
-        async with engine.begin() as conn:
-            await conn.execute(
-                text(
-                    """
-                    UPDATE zone_listing_caches
-                    SET status = 'cancelled_partial'
-                    WHERE zone_fingerprint = (
-                        SELECT result_ref->>'zone_fingerprint'
-                        FROM jobs WHERE id = :job_id
-                    )
-                    AND status = 'scraping'
-                    """
-                ),
-                {"job_id": job_id},
-            )
+        if zone_fingerprint:
+            async with engine.begin() as conn:
+                await conn.execute(
+                    text(
+                        """
+                        UPDATE zone_listing_caches
+                        SET status = 'cancelled_partial'
+                        WHERE zone_fingerprint = :zone_fingerprint
+                          AND status = 'scraping'
+                        """
+                    ),
+                    {"zone_fingerprint": zone_fingerprint},
+                )
         await publish_job_event(
             job_id,
             "job.failed",

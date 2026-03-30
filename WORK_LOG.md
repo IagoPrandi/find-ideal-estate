@@ -1,5 +1,116 @@
 # Work Log
 
+## 2026-03-29 - Corrigir erro 500 no Step 5 apos troca do cache para endereco-only
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para corrigir regressao pontual no backend com diff minimo e validacao em runtime.
+- Trigger: UI da etapa "Refinar Busca" passou a mostrar erro ao iniciar scraping apos a alteracao do cache por endereco.
+- Root cause identified:
+  - `POST /journeys/{journey_id}/listings/search` quebrava em `_find_active_listings_job_id()`;
+  - a query SQL usava um `OR` com parametros nulos (`search_location_normalized` / `zone_fingerprint`), e o `asyncpg` levantava `AmbiguousParameterError: could not determine data type of parameter $2`.
+- Scope executed:
+  - `apps/api/src/api/routes/listings.py`:
+    - `_find_active_listings_job_id()` foi simplificada para montar dois caminhos separados em Python:
+      - busca por `search_location_normalized` quando o endereco existe;
+      - fallback por `zone_fingerprint` apenas quando nao houver endereco.
+    - removido o SQL com `OR` e parametros nulos que causava o 500.
+- Validation:
+  - `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase5_stale_revalidate.py -q --tb=short` -> `9 passed`.
+  - `docker compose restart api` executado para recarregar o backend.
+  - POST real para `http://localhost:8000/journeys/2450d523-628c-42b7-a5a3-7b0ff6a84ab1/listings/search` voltou a responder `200` com payload JSON valido (`source=none`, `job_id=...`, `freshness_status=queued_for_next_prewarm`).
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-29 - Trocar cache de listings para chave somente por endereco
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para aplicar mudanca de comportamento com diff minimo, migration incremental e validacao focada.
+- Trigger: usuario pediu para mudar o comportamento do cache de listings para reutilizar somente pelo endereco, independentemente de zona ou configuracao.
+- Behavior change:
+  - `zone_listing_caches` passa a ser reutilizado apenas por `search_location_normalized`;
+  - se o endereco ja existe no cache, a busca reutiliza esse cache mesmo com outra zona/modal/plataformas;
+  - se o endereco nao existe, o scraping e acionado.
+- Scope executed:
+  - `apps/api/src/modules/listings/cache.py`:
+    - `get_cache_record()` e `find_usable_cache_for_search_location()` agora consultam apenas `search_location_normalized`;
+    - `create_cache_record()` faz `ON CONFLICT (search_location_normalized)` e mantem `zone_fingerprint/config_hash` apenas como metadados do request.
+  - `apps/api/src/modules/listings/scraping_lock.py`:
+    - lock Redis agora usa somente o endereco normalizado.
+  - `apps/api/src/modules/listings/search_requests.py`:
+    - adicionada `get_latest_search_request_for_zone()` para o Step 6 resolver qual endereco confirmado da zona deve abrir no cache.
+  - `apps/api/src/api/routes/listings.py`:
+    - `POST /listings/search` passou a decidir cache hit apenas pelo endereco;
+    - reuse de job ativo tambem passou a priorizar `search_location_normalized`;
+    - `GET /zones/{zone}/listings` agora resolve o ultimo endereco confirmado da zona e abre o cache por esse endereco.
+  - `apps/api/src/workers/handlers/listings.py`:
+    - worker rele, cria cache e coordena lock apenas por endereco normalizado.
+  - `infra/migrations/versions/20260329_0015_listings_cache_address_only_scope.py`:
+    - nova migration criada para deduplicar linhas antigas por endereco e trocar a unicidade para `search_location_normalized` apenas.
+  - testes:
+    - `apps/api/tests/test_phase5_stale_revalidate.py` atualizado para validar reuse cross-zone/cross-config por endereco e Step 6 baseado no ultimo endereco pesquisado;
+    - `apps/api/tests/test_phase5_scraping_lock.py` atualizado para lock address-only.
+- Validation:
+  - `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase5_stale_revalidate.py apps/api/tests/test_phase5_scraping_lock.py -q --tb=short` -> `15 passed`.
+  - `DATABASE_URL=postgresql://postgres:postgres@localhost:5432/find_ideal_estate` + `alembic upgrade head` -> migration `20260329_0015` aplicada com sucesso.
+  - `docker compose exec -T api sh -lc "alembic upgrade head"` executado no container da API para alinhar schema em runtime.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-29 - Fix definitivo: cache de listings separado por endereco (schema + worker + lock)
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para corrigir causa raiz estrutural com alteracao de schema, lock e fluxo de worker.
+- Trigger: usuario confirmou regressao persistente de retorno da mesma lista de imoveis para enderecos diferentes.
+- Root cause identified:
+  - `zone_listing_caches` ainda era unico por `(zone_fingerprint, config_hash)`;
+  - isso forca o mesmo registro de cache para qualquer endereco dentro da mesma zona/config;
+  - mesmo com lookup por endereco no endpoint, o worker e o lock continuavam operando sem escopo de endereco.
+- Scope executed:
+  - `infra/migrations/versions/20260329_0014_listings_cache_address_scope.py`:
+    - adicionada coluna `search_location_normalized` em `zone_listing_caches`;
+    - removida unicidade antiga e criada unicidade nova em `(zone_fingerprint, config_hash, search_location_normalized)`.
+  - `apps/api/src/modules/listings/cache.py`:
+    - adicionada `normalize_search_location()`;
+    - `create_cache_record()` e `get_cache_record()` passaram a suportar escopo por endereco normalizado;
+    - `find_usable_cache_for_search_location()` passou a consultar diretamente `zone_listing_caches` por `(zona + config + endereco)`.
+  - `apps/api/src/api/routes/listings.py`:
+    - `create_cache_record()` e `_enqueue_listings_scrape_job()` agora recebem `search_location_normalized`.
+  - `apps/api/src/workers/handlers/listings.py`:
+    - lock e leitura/escrita de cache agora usam `search_location_normalized` do contexto do job.
+  - `apps/api/src/modules/listings/scraping_lock.py`:
+    - chave Redis do lock passou a incluir `search_location_normalized`.
+  - testes:
+    - `apps/api/tests/test_phase5_stale_revalidate.py` e `apps/api/tests/test_phase5_scraping_lock.py` atualizados para novas assinaturas e escopo.
+- Validation:
+  - `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase5_stale_revalidate.py apps/api/tests/test_phase5_scraping_lock.py -q --tb=short` -> `15 passed`.
+  - `DATABASE_URL=postgresql://postgres:postgres@localhost:5432/find_ideal_estate` + `alembic upgrade head` -> migration `20260329_0014` aplicada com sucesso.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-03-29 - Corrigir regressao de cache de listings retornando mesma lista para enderecos diferentes
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para aplicar correcao pontual, com diff minimo e validacao por testes.
+- Trigger: usuario reportou que a busca de imoveis voltou a retornar a mesma lista para enderecos diferentes.
+- Root cause identified:
+  - no fluxo `POST /journeys/{journey_id}/listings/search`, a decisao de cache ainda priorizava `get_cache_record(zone_fingerprint, config_hash)`;
+  - esse hit por zona+config acontecia antes do match por endereco e permitia reaproveitar resultados de outro endereco dentro da mesma zona.
+- Scope executed:
+  - `apps/api/src/api/routes/listings.py`:
+    - removida a prioridade de cache por zona para o endpoint de busca por endereco;
+    - o `cache_hit` agora depende primeiro de `find_usable_cache_for_search_location(search_location_normalized, config_hash, zone_fingerprint)`;
+    - sem match por endereco, o fluxo cai direto para `cache_miss` e dispara novo scraping (sem fallback de overlap).
+  - `apps/api/tests/test_phase5_stale_revalidate.py`:
+    - ajustados testes de cache `stale` e `fresh` para mockar hit via lookup por endereco (nova ordem de decisao).
+- Validation:
+  - `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase5_stale_revalidate.py -q --tb=short` -> `9 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
 ## 2026-03-29 - Tornar `POST /jobs` idempotente para jobs canônicos por jornada
 
 - Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `skills/best-practices/references/web2-backend.md`, `/memories/repo/working-rules.md`, `WORK_LOG.md`.

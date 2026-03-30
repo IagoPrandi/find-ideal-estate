@@ -28,25 +28,34 @@ def compute_config_hash(
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
+def normalize_search_location(search_location_normalized: str | None) -> str:
+    return (search_location_normalized or "").strip().lower()
+
+
 async def get_cache_record(
-    zone_fingerprint: str,
-    config_hash: str,
+    search_location_normalized: str | None,
 ) -> dict[str, Any] | None:
-    """Return the current zone_listing_cache row, or None."""
+    """Return the current zone_listing_cache row for a normalized address, or None."""
+    normalized = normalize_search_location(search_location_normalized)
+    if not normalized:
+        return None
+
     engine = get_engine()
     async with engine.connect() as conn:
         row = await conn.execute(
             text(
                 """
-                SELECT id, zone_fingerprint, config_hash, status,
+                SELECT id, zone_fingerprint, config_hash, search_location_normalized, status,
                        platforms_completed, platforms_failed,
                        coverage_ratio, preliminary_count,
                        scraped_at, expires_at, created_at
                 FROM zone_listing_caches
-                WHERE zone_fingerprint = :zfp AND config_hash = :ch
+                WHERE search_location_normalized = :normalized
+                ORDER BY created_at DESC
+                LIMIT 1
                 """
             ),
-            {"zfp": zone_fingerprint, "ch": config_hash},
+            {"normalized": normalized},
         )
         record = row.mappings().first()
         if record is None:
@@ -83,22 +92,30 @@ def cache_age_hours(record: dict[str, Any] | None) -> float | None:
 
 
 async def create_cache_record(
+    search_location_normalized: str | None,
+    *,
     zone_fingerprint: str,
     config_hash: str,
 ) -> UUID:
     """Create a new pending cache record. Return its id."""
+    normalized = normalize_search_location(search_location_normalized)
+    if not normalized:
+        raise ValueError("search_location_normalized is required for listings cache")
+
     engine = get_engine()
     async with engine.begin() as conn:
         result = await conn.execute(
             text(
                 """
-                INSERT INTO zone_listing_caches (zone_fingerprint, config_hash, status)
-                VALUES (:zfp, :ch, 'pending')
-                ON CONFLICT (zone_fingerprint, config_hash) DO NOTHING
+                INSERT INTO zone_listing_caches (
+                    zone_fingerprint, config_hash, search_location_normalized, status
+                )
+                VALUES (:zfp, :ch, :normalized, 'pending')
+                ON CONFLICT (search_location_normalized) DO NOTHING
                 RETURNING id
                 """
             ),
-            {"zfp": zone_fingerprint, "ch": config_hash},
+            {"zfp": zone_fingerprint, "ch": config_hash, "normalized": normalized},
         )
         row = result.first()
         if row:
@@ -108,9 +125,9 @@ async def create_cache_record(
         existing = await conn.execute(
             text(
                 "SELECT id FROM zone_listing_caches "
-                "WHERE zone_fingerprint = :zfp AND config_hash = :ch"
+                "WHERE search_location_normalized = :normalized"
             ),
-            {"zfp": zone_fingerprint, "ch": config_hash},
+            {"normalized": normalized},
         )
         return existing.scalar_one()
 
@@ -194,6 +211,42 @@ async def find_partial_hit_from_overlapping_zone(
                 """
             ),
             {"zone_fp": zone_fingerprint, "ch": config_hash},
+        )
+        record = row.mappings().first()
+        return dict(record) if record else None
+
+
+async def find_usable_cache_for_search_location(
+    search_location_normalized: str,
+) -> dict[str, Any] | None:
+    """
+    Return the latest usable cache associated with a normalized search location.
+
+    Cache for the same address is reused across zones and search configurations.
+    """
+    normalized = normalize_search_location(search_location_normalized)
+    if not normalized:
+        return None
+
+    engine = get_engine()
+    async with engine.connect() as conn:
+        row = await conn.execute(
+            text(
+                """
+                SELECT zlc.id, zlc.zone_fingerprint, zlc.config_hash,
+                       zlc.search_location_normalized,
+                       zlc.status, zlc.platforms_completed, zlc.platforms_failed,
+                       zlc.coverage_ratio, zlc.preliminary_count,
+                       zlc.scraped_at, zlc.expires_at, zlc.created_at
+                FROM zone_listing_caches zlc
+                WHERE zlc.search_location_normalized = :normalized
+                  AND zlc.status IN ('complete', 'partial')
+                  AND (zlc.expires_at IS NULL OR zlc.expires_at > now())
+                ORDER BY zlc.scraped_at DESC NULLS LAST, zlc.created_at DESC
+                LIMIT 1
+                """
+            ),
+            {"normalized": normalized},
         )
         record = row.mappings().first()
         return dict(record) if record else None

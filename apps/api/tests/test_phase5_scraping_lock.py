@@ -55,7 +55,7 @@ async def _run_single_writer_contention() -> int:
 
     async def _worker() -> bool:
         nonlocal writes
-        async with scraping_lock("zone-fp", "cfg-hash", timeout_seconds=0.05) as acquired:
+        async with scraping_lock("rua teste lock 100", timeout_seconds=0.05) as acquired:
             if not acquired:
                 return False
             writes += 1
@@ -99,15 +99,18 @@ def test_listings_step_reopens_cache_after_lock_contention(monkeypatch) -> None:
     async def _fake_update_job_execution_state(*_args, **_kwargs):
         return None
 
-    async def _fake_get_cache_record(_zone_fingerprint, _config_hash):
+    async def _fake_get_cache_record(_normalized):
         return {
             "status": ZoneCacheStatus.COMPLETE,
             "zone_fingerprint": "zone-fp",
         }
 
     @asynccontextmanager
-    async def _fake_scraping_lock(_zone_fingerprint, _config_hash, timeout_seconds=120.0):
-        del timeout_seconds
+    async def _fake_scraping_lock(
+        search_location_normalized,
+        timeout_seconds=120.0,
+    ):
+        del search_location_normalized, timeout_seconds
         yield False
 
     monkeypatch.setattr(listings_handler, "_load_job_context", _fake_load_job_context)
@@ -158,14 +161,14 @@ def test_listings_step_force_refresh_bypasses_usable_cache(monkeypatch) -> None:
         del _job_id, stage, progress_percent
         stage_messages.append(message)
 
-    async def _fake_get_cache_record(_zone_fingerprint, _config_hash):
+    async def _fake_get_cache_record(_normalized):
         return {
             "id": uuid4(),
             "status": ZoneCacheStatus.COMPLETE,
             "zone_fingerprint": "zone-fp",
         }
 
-    async def _fake_create_cache_record(_zone_fingerprint, _config_hash):
+    async def _fake_create_cache_record(_normalized, **_kwargs):
         return uuid4()
 
     async def _fake_transition_cache_status(cache_id, current_status, new_status, **kwargs):
@@ -215,8 +218,11 @@ def test_listings_step_force_refresh_bypasses_usable_cache(monkeypatch) -> None:
         return None
 
     @asynccontextmanager
-    async def _fake_scraping_lock(_zone_fingerprint, _config_hash, timeout_seconds=120.0):
-        del timeout_seconds
+    async def _fake_scraping_lock(
+        search_location_normalized,
+        timeout_seconds=120.0,
+    ):
+        del search_location_normalized, timeout_seconds
         yield True
 
     monkeypatch.setattr(listings_handler, "_load_job_context", _fake_load_job_context)
@@ -280,14 +286,14 @@ def test_listings_step_records_platform_diagnostics(monkeypatch) -> None:
             "platforms": ["quintoandar", "vivareal"],
         }
 
-    async def _fake_get_cache_record(_zone_fingerprint, _config_hash):
+    async def _fake_get_cache_record(_normalized):
         return {
             "id": uuid4(),
             "status": ZoneCacheStatus.PENDING,
             "zone_fingerprint": "zone-fp",
         }
 
-    async def _fake_create_cache_record(_zone_fingerprint, _config_hash):
+    async def _fake_create_cache_record(_normalized, **_kwargs):
         return uuid4()
 
     async def _fake_transition_cache_status(cache_id, current_status, new_status, **kwargs):
@@ -345,8 +351,11 @@ def test_listings_step_records_platform_diagnostics(monkeypatch) -> None:
         return None
 
     @asynccontextmanager
-    async def _fake_scraping_lock(_zone_fingerprint, _config_hash, timeout_seconds=120.0):
-        del timeout_seconds
+    async def _fake_scraping_lock(
+        search_location_normalized,
+        timeout_seconds=120.0,
+    ):
+        del search_location_normalized, timeout_seconds
         yield True
 
     monkeypatch.setattr(listings_handler, "_load_job_context", _fake_load_job_context)
@@ -416,14 +425,14 @@ def test_listings_step_recovers_stale_scraping_cache(monkeypatch) -> None:
             "platforms": ["quintoandar"],
         }
 
-    async def _fake_get_cache_record(_zone_fingerprint, _config_hash):
+    async def _fake_get_cache_record(_normalized):
         return {
             "id": uuid4(),
             "status": ZoneCacheStatus.SCRAPING,
             "zone_fingerprint": "zone-fp",
         }
 
-    async def _fake_create_cache_record(_zone_fingerprint, _config_hash):
+    async def _fake_create_cache_record(_normalized, **_kwargs):
         return uuid4()
 
     async def _fake_transition_cache_status(cache_id, current_status, new_status, **kwargs):
@@ -479,8 +488,11 @@ def test_listings_step_recovers_stale_scraping_cache(monkeypatch) -> None:
         return None
 
     @asynccontextmanager
-    async def _fake_scraping_lock(_zone_fingerprint, _config_hash, timeout_seconds=120.0):
-        del timeout_seconds
+    async def _fake_scraping_lock(
+        search_location_normalized,
+        timeout_seconds=120.0,
+    ):
+        del search_location_normalized, timeout_seconds
         yield True
 
     monkeypatch.setattr(listings_handler, "_load_job_context", _fake_load_job_context)
@@ -607,7 +619,7 @@ async def test_scraping_lock_concurrency_has_no_duplicate_db_writes() -> None:
     schema_ready = False
 
     async def _contending_writer() -> bool:
-        async with scraping_lock(zone_fingerprint, config_hash, timeout_seconds=0.05) as acquired:
+        async with scraping_lock("rua teste lock 100", timeout_seconds=0.05) as acquired:
             if not acquired:
                 return False
             await upsert_property_and_ad(

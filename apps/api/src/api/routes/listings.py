@@ -25,13 +25,16 @@ from modules.listings.cache import (
     cache_is_usable,
     compute_config_hash,
     create_cache_record,
-    find_partial_hit_from_overlapping_zone,
+    find_usable_cache_for_search_location,
     get_cache_record,
 )
 from modules.listings.dedup import fetch_listing_cards_for_zone
 from modules.listings.platform_registry import PlatformRegistryError, get_platform_registry
 from modules.listings.address_suggestions import get_zone_address_suggestions
-from modules.listings.search_requests import record_search_request
+from modules.listings.search_requests import (
+    get_latest_search_request_for_zone,
+    record_search_request,
+)
 from modules.zones.isochrone_proxy import build_isochrone_proxy_circle
 from pydantic import BaseModel
 from sqlalchemy import text
@@ -83,6 +86,7 @@ async def _enqueue_listings_scrape_job(
     *,
     journey_id: UUID,
     zone_fingerprint: str,
+    search_location_normalized: str,
     search_address: str,
     search_type: str,
     usage_type: str,
@@ -105,6 +109,7 @@ async def _enqueue_listings_scrape_job(
                 "result_ref": json.dumps(
                     {
                         "zone_fingerprint": zone_fingerprint,
+                        "search_location_normalized": search_location_normalized,
                         "search_address": search_address,
                         "search_type": search_type,
                         "usage_type": usage_type,
@@ -126,10 +131,35 @@ async def _enqueue_listings_scrape_job(
 
 async def _find_active_listings_job_id(
     journey_id: UUID,
-    zone_fingerprint: str,
+    zone_fingerprint: str | None = None,
+    search_location_normalized: str | None = None,
 ) -> UUID | None:
     engine = _get_engine()
     async with engine.connect() as conn:
+        if search_location_normalized is not None:
+            result = await conn.execute(
+                text(
+                    """
+                    SELECT id
+                    FROM jobs
+                    WHERE journey_id = :journey_id
+                      AND job_type = 'listings_scrape'
+                      AND state IN ('pending', 'running', 'retrying')
+                      AND result_ref->>'search_location_normalized' = :search_location_normalized
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                    """
+                ),
+                {
+                    "journey_id": journey_id,
+                    "search_location_normalized": search_location_normalized,
+                },
+            )
+            return result.scalar_one_or_none()
+
+        if zone_fingerprint is None:
+            return None
+
         result = await conn.execute(
             text(
                 """
@@ -143,7 +173,10 @@ async def _find_active_listings_job_id(
                 LIMIT 1
                 """
             ),
-            {"journey_id": journey_id, "zone_fingerprint": zone_fingerprint},
+                        {
+                                "journey_id": journey_id,
+                                "zone_fingerprint": zone_fingerprint,
+                        },
         )
         return result.scalar_one_or_none()
 
@@ -179,20 +212,15 @@ async def listings_search(
         json.dumps(sorted(platforms), separators=(",", ":")).encode()
     ).hexdigest()[:16]
 
-    # Determine result source
-    cache = await get_cache_record(body.zone_fingerprint, config_hash)
+    # Determine result source.
+    # Cache hits for listings/search must be address-scoped to avoid reusing
+    # results scraped with a different search address in the same zone.
+    cache = await find_usable_cache_for_search_location(body.search_location_normalized)
 
-    if cache_is_usable(cache):
+    if cache and cache_is_usable(cache):
         result_source = "cache_hit"
     else:
-        partial = await find_partial_hit_from_overlapping_zone(
-            body.zone_fingerprint, config_hash
-        )
-        if partial and cache_is_usable(partial):
-            result_source = "cache_partial"
-            cache = partial
-        else:
-            result_source = "cache_miss"
+        result_source = "cache_miss"
 
     # Always record demand (including misses -- drives prewarm)
     await record_search_request(
@@ -209,12 +237,32 @@ async def listings_search(
     )
 
     if result_source == "cache_miss":
+        active_job_id = await _find_active_listings_job_id(
+            journey_id,
+            search_location_normalized=body.search_location_normalized,
+        )
+        if active_job_id is not None:
+            return ListingsRequestResult(
+                source="none",
+                job_id=active_job_id,
+                freshness_status="queued_for_next_prewarm",
+                upgrade_reason="fresh_listings",
+                next_refresh_window="03:00-05:30",
+                listings=[],
+                total_count=0,
+            )
+
         # Ensure cache row exists (for lock coordination) and enqueue scrape job
-        await create_cache_record(body.zone_fingerprint, config_hash)
+        await create_cache_record(
+            body.search_location_normalized,
+            zone_fingerprint=body.zone_fingerprint,
+            config_hash=config_hash,
+        )
 
         job_id = await _enqueue_listings_scrape_job(
             journey_id=journey_id,
             zone_fingerprint=body.zone_fingerprint,
+            search_location_normalized=body.search_location_normalized,
             search_address=body.search_location_label,
             search_type=body.search_type,
             usage_type=body.usage_type,
@@ -235,7 +283,7 @@ async def listings_search(
     # Cache hit or partial hit -- return listings
     display_platforms = _cache_display_platforms(cache, platforms)
     listing_cards_raw = await fetch_listing_cards_for_zone(
-        zone_fingerprint=cache["zone_fingerprint"],
+        zone_fingerprint=body.zone_fingerprint,
         search_type=body.search_type,
         usage_type=body.usage_type,
         platforms=display_platforms,
@@ -250,16 +298,26 @@ async def listings_search(
         result_source == "cache_hit" and freshness == "stale"
     )
     if should_revalidate:
-        await create_cache_record(body.zone_fingerprint, config_hash)
-        await _enqueue_listings_scrape_job(
-            journey_id=journey_id,
-            zone_fingerprint=body.zone_fingerprint,
-            search_address=body.search_location_label,
-            search_type=body.search_type,
-            usage_type=body.usage_type,
-            platforms=platforms,
-            force_refresh=True,
+        active_job_id = await _find_active_listings_job_id(
+            journey_id,
+            search_location_normalized=body.search_location_normalized,
         )
+        if active_job_id is None:
+            await create_cache_record(
+                body.search_location_normalized,
+                zone_fingerprint=body.zone_fingerprint,
+                config_hash=config_hash,
+            )
+            await _enqueue_listings_scrape_job(
+                journey_id=journey_id,
+                zone_fingerprint=body.zone_fingerprint,
+                search_location_normalized=body.search_location_normalized,
+                search_address=body.search_location_label,
+                search_type=body.search_type,
+                usage_type=body.usage_type,
+                platforms=platforms,
+                force_refresh=True,
+            )
 
     return ListingsRequestResult(
         source="cache",
@@ -420,15 +478,19 @@ async def get_zone_listings(
     if spatial_scope not in {"inside_zone", "all"}:
         raise HTTPException(status_code=400, detail="spatial_scope deve ser 'inside_zone' ou 'all'")
 
-    config_hash = compute_config_hash(search_type, usage_type, canonical_platforms)
-    cache = await get_cache_record(zone_fingerprint, config_hash)
-    if not cache_is_usable(cache):
-        partial = await find_partial_hit_from_overlapping_zone(zone_fingerprint, config_hash)
-        if partial and cache_is_usable(partial):
-            cache = partial
+    latest_search = await get_latest_search_request_for_zone(journey_id, zone_fingerprint)
+    cache = await get_cache_record(
+        latest_search["search_location_normalized"] if latest_search else None
+    )
 
     if not cache or not cache_is_usable(cache):
-        active_job_id = await _find_active_listings_job_id(journey_id, zone_fingerprint)
+        active_job_id = await _find_active_listings_job_id(
+            journey_id,
+            zone_fingerprint=zone_fingerprint,
+            search_location_normalized=(
+                str(latest_search["search_location_normalized"]) if latest_search else None
+            ),
+        )
         return ListingsRequestResult(
             source="none",
             job_id=active_job_id,

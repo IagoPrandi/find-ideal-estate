@@ -1,8 +1,8 @@
 ﻿"""Dramatiq handler for LISTINGS_SCRAPE jobs (M5.3 / M5.4).
 
 Flow per execution:
-    1. Load job context (zone_fingerprint, config_hash, platforms, search params).
-    2. Acquire Redis scraping lock and bail out (re-read cache) if another worker holds it.
+    1. Load job context (zone_fingerprint, platforms, search params).
+    2. Acquire Redis scraping lock for the normalized address and bail out if another worker holds it.
     3. Transition zone_listing_cache: pending -> scraping.
     4. For each platform: run Playwright scraper, upsert properties+ads+snapshots.
     5. Transition to partial/complete; emit SSE events.
@@ -12,6 +12,7 @@ Flow per execution:
 from __future__ import annotations
 
 import asyncio
+import os
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
@@ -26,6 +27,7 @@ from modules.listings.cache import (
     compute_config_hash,
     create_cache_record,
     get_cache_record,
+    normalize_search_location,
     transition_cache_status,
 )
 from modules.listings.dedup import compute_property_fingerprint, upsert_property_and_ad
@@ -72,6 +74,15 @@ def _utcnow() -> datetime:
 
 def _isoformat(value: datetime | None = None) -> str:
     return (value or _utcnow()).isoformat()
+
+
+def _scraper_platform_timeout_seconds() -> float:
+    raw_value = os.getenv("LISTINGS_SCRAPER_PLATFORM_TIMEOUT_SECONDS", "240")
+    try:
+        parsed = float(raw_value)
+    except (TypeError, ValueError):
+        return 240.0
+    return max(parsed, 30.0)
 
 
 def _duration_ms(started_at: datetime | None, finished_at: datetime | None) -> int | None:
@@ -232,6 +243,23 @@ async def _run_scraper_for_platform(
     return await scraper.scrape()
 
 
+async def _run_scraper_for_platform_with_timeout(
+    platform: str,
+    search_address: str,
+    search_type: str,
+) -> list[dict[str, Any]]:
+    timeout_seconds = _scraper_platform_timeout_seconds()
+    try:
+        return await asyncio.wait_for(
+            _run_scraper_for_platform(platform, search_address, search_type),
+            timeout=timeout_seconds,
+        )
+    except asyncio.TimeoutError as exc:
+        raise ScraperError(
+            f"Scraper timeout for platform '{platform}' after {int(timeout_seconds)}s"
+        ) from exc
+
+
 async def _persist_listings(
     listings: list[dict[str, Any]],
     platform: str,
@@ -291,6 +319,9 @@ async def _listings_scrape_step(job_id: UUID) -> None:
     ctx = await _load_job_context(job_id)
     zone_fingerprint: str = ctx.get("zone_fingerprint", "")
     search_address: str = ctx.get("search_address", "")
+    search_location_normalized: str = normalize_search_location(
+        ctx.get("search_location_normalized") or search_address
+    )
     search_type: str = ctx.get("search_type", "rent")
     usage_type: str = ctx.get("usage_type", "residential")
     registry = get_platform_registry()
@@ -318,7 +349,7 @@ async def _listings_scrape_step(job_id: UUID) -> None:
         message="Acquiring scraping lock",
     )
 
-    async with scraping_lock(zone_fingerprint, config_hash) as acquired:
+    async with scraping_lock(search_location_normalized) as acquired:
         if not acquired:
             diagnostics["status"] = "lock_contention"
             diagnostics["lock"] = {
@@ -327,7 +358,7 @@ async def _listings_scrape_step(job_id: UUID) -> None:
                 "checked_at": _isoformat(),
             }
             # Another worker is already scraping; re-open cache before exiting.
-            cache_after_wait = await get_cache_record(zone_fingerprint, config_hash)
+            cache_after_wait = await get_cache_record(search_location_normalized)
             cache_status = (
                 cache_after_wait["status"] if cache_after_wait else ZoneCacheStatus.PENDING
             )
@@ -364,8 +395,12 @@ async def _listings_scrape_step(job_id: UUID) -> None:
             return
 
         # Create or retrieve cache record
-        cache_id = await create_cache_record(zone_fingerprint, config_hash)
-        cache = await get_cache_record(zone_fingerprint, config_hash)
+        cache_id = await create_cache_record(
+            search_location_normalized,
+            zone_fingerprint=zone_fingerprint,
+            config_hash=config_hash,
+        )
+        cache = await get_cache_record(search_location_normalized)
         current_status = cache["status"] if cache else ZoneCacheStatus.PENDING
         diagnostics["lock"] = {
             "acquired": True,
@@ -471,7 +506,11 @@ async def _listings_scrape_step(job_id: UUID) -> None:
             )
 
             try:
-                listings = await _run_scraper_for_platform(platform, search_address, search_type)
+                listings = await _run_scraper_for_platform_with_timeout(
+                    platform,
+                    search_address,
+                    search_type,
+                )
             except ScraperDisallowedError as exc:
                 platforms_failed.append(platform)
                 platform_finished_at = _utcnow()

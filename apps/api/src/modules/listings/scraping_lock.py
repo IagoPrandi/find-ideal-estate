@@ -1,7 +1,7 @@
 """Redis-backed distributed scraping lock (M5.2).
 
-Prevents two workers from scraping the same zone+config simultaneously.
-Lock key: scraping_lock:{fingerprint}:{config_hash}
+Prevents two workers from scraping the same normalized address simultaneously.
+Lock key: scraping_lock:{normalized_address}
 TTL: 300 seconds (5 min) — auto-expires if worker crashes without releasing.
 """
 
@@ -16,32 +16,43 @@ from core.redis import get_redis
 LOCK_TTL_SECONDS = 300
 
 
-def _lock_key(zone_fingerprint: str, config_hash: str) -> str:
-    return f"scraping_lock:{zone_fingerprint}:{config_hash}"
+def _normalize_lock_part(search_location_normalized: str | None) -> str:
+    normalized = (search_location_normalized or "").strip().lower()
+    return normalized or "__any__"
 
 
-async def try_acquire_lock(zone_fingerprint: str, config_hash: str) -> bool:
+def _lock_key(
+    search_location_normalized: str | None,
+) -> str:
+    normalized_part = _normalize_lock_part(search_location_normalized)
+    return f"scraping_lock:{normalized_part}"
+
+
+async def try_acquire_lock(
+    search_location_normalized: str | None,
+) -> bool:
     """
     Try to acquire the scraping lock.
     Returns True on success (NX set), False if already held.
     """
     redis = get_redis()
-    key = _lock_key(zone_fingerprint, config_hash)
+    key = _lock_key(search_location_normalized)
     result = await redis.set(key, "1", ex=LOCK_TTL_SECONDS, nx=True)
     return result is True
 
 
-async def release_lock(zone_fingerprint: str, config_hash: str) -> None:
+async def release_lock(
+    search_location_normalized: str | None,
+) -> None:
     """Release the scraping lock."""
     redis = get_redis()
-    key = _lock_key(zone_fingerprint, config_hash)
+    key = _lock_key(search_location_normalized)
     await redis.delete(key)
 
 
 @asynccontextmanager
 async def scraping_lock(
-    zone_fingerprint: str,
-    config_hash: str,
+    search_location_normalized: str | None,
     timeout_seconds: float = 120.0,
 ) -> AsyncIterator[bool]:
     """
@@ -55,13 +66,13 @@ async def scraping_lock(
 
     Usage::
 
-        async with scraping_lock(fp, ch) as acquired:
+        async with scraping_lock(search_location_normalized) as acquired:
             if not acquired:
                 # another worker already scraping
                 return
             ... scrape ...
     """
-    acquired = await try_acquire_lock(zone_fingerprint, config_hash)
+    acquired = await try_acquire_lock(search_location_normalized)
     if (not acquired) and timeout_seconds > 0:
         await asyncio.sleep(timeout_seconds)
 
@@ -69,4 +80,4 @@ async def scraping_lock(
         yield acquired
     finally:
         if acquired:
-            await release_lock(zone_fingerprint, config_hash)
+            await release_lock(search_location_normalized)

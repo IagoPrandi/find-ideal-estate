@@ -121,3 +121,35 @@ async def get_prewarm_targets(
             {"since": since, "limit": limit},
         )
         return [dict(row) for row in rows.mappings()]
+
+
+async def get_latest_search_request_for_zone(
+    journey_id: UUID,
+    zone_fingerprint: str,
+) -> dict[str, Any] | None:
+    """Return the most recent confirmed Step 5 search for a journey zone."""
+    engine = get_engine()
+    async with engine.connect() as conn:
+        result = await conn.execute(
+            text(
+                """
+                SELECT
+                    search_location_normalized,
+                    search_location_label,
+                    search_location_type,
+                    search_type,
+                    usage_type,
+                    platforms_hash,
+                    result_source,
+                    requested_at
+                FROM listing_search_requests
+                WHERE journey_id = :journey_id
+                  AND zone_fingerprint = :zone_fingerprint
+                ORDER BY requested_at DESC
+                LIMIT 1
+                """
+            ),
+            {"journey_id": journey_id, "zone_fingerprint": zone_fingerprint},
+        )
+        row = result.mappings().first()
+        return dict(row) if row else None

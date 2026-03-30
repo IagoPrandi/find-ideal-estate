@@ -31,7 +31,7 @@ _POI_CATEGORY_CANONICAL_IDS = {
     "pharmacy": "pharmacy",
     "park": "park",
     "restaurant": "restaurant",
-    "gym": "fitness_centre",
+    "gym": "fitness_center",
 }
 _POI_CACHE_TTL_SECONDS = 1800
 _POI_FETCH_LIMIT = 15
