@@ -23,7 +23,7 @@ const ZONES_SOURCE_ID = "journey-zones-source-runtime";
 const ZONE_POIS_SOURCE_ID = "journey-zone-pois-source-runtime";
 const LISTINGS_SOURCE_ID = "journey-listings-source-runtime";
 const SAFETY_SOURCE_ID = "public-safety-source-runtime";
-const POPUP_PERSIST_LAYER_LIST = [...BUS_LAYER_LIST, "zone-pois-highlight-layer", "zone-pois-layer", "safety-incident-layer", "safety-incident-clusters-layer"] as const;
+const POPUP_PERSIST_LAYER_LIST = [...BUS_LAYER_LIST, "zone-pois-highlight-layer", "zone-pois-layer", "safety-incident-layer"] as const;
 const LAYER_TOGGLE_BUTTON_CLASS = "pointer-events-auto flex h-8 w-8 items-center justify-center rounded-lg border border-slate-100 bg-white/95 text-slate-500 shadow-md backdrop-blur-md transition-colors hover:bg-pastel-violet-50 hover:text-pastel-violet-600";
 const PANEL_EDGE_OFFSET_PX = 16;
 const LEGEND_PANEL_GAP_PX = 12;
@@ -754,9 +754,6 @@ export function FindIdealApp() {
       map.addSource(SAFETY_SOURCE_ID, {
         type: "geojson",
         data: EMPTY_FEATURE_COLLECTION,
-        cluster: true,
-        clusterMaxZoom: 13,
-        clusterRadius: 42,
       });
 
       map.addLayer({
@@ -952,33 +949,35 @@ export function FindIdealApp() {
       });
 
       map.addLayer({
-        id: "safety-incident-clusters-layer",
-        type: "circle",
+        id: "safety-incident-heatmap-layer",
+        type: "heatmap",
         source: SAFETY_SOURCE_ID,
-        filter: ["has", "point_count"],
         layout: { visibility: "none" },
         paint: {
-          "circle-color": "#1e293b",
-          "circle-radius": ["step", ["get", "point_count"], 14, 12, 18, 24, 22],
-          "circle-opacity": 0.88,
-          "circle-stroke-color": "#ffffff",
-          "circle-stroke-width": 1.8,
-        },
-      });
-
-      map.addLayer({
-        id: "safety-incident-cluster-count-layer",
-        type: "symbol",
-        source: SAFETY_SOURCE_ID,
-        filter: ["has", "point_count"],
-        layout: {
-          visibility: "none",
-          "text-field": ["get", "point_count_abbreviated"],
-          "text-size": 11,
-          "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
-        },
-        paint: {
-          "text-color": "#ffffff",
+          "heatmap-weight": [
+            "case",
+            ["has", "point_count"],
+            ["interpolate", ["linear"], ["get", "point_count"], 1, 0.2, 20, 0.55, 80, 1],
+            0.12
+          ],
+          "heatmap-intensity": ["interpolate", ["linear"], ["zoom"], 10, 0.8, 12, 1.05, 14, 1.35],
+          "heatmap-color": [
+            "interpolate",
+            ["linear"],
+            ["heatmap-density"],
+            0,
+            "rgba(59,130,246,0)",
+            0.2,
+            "rgba(56,189,248,0.28)",
+            0.45,
+            "rgba(250,204,21,0.48)",
+            0.7,
+            "rgba(249,115,22,0.68)",
+            1,
+            "rgba(220,38,38,0.88)"
+          ],
+          "heatmap-radius": ["interpolate", ["linear"], ["zoom"], 10, 18, 12, 26, 14, 36],
+          "heatmap-opacity": ["interpolate", ["linear"], ["zoom"], 10, 0.6, 13, 0.78, 14, 0.48, 15, 0],
         },
       });
 
@@ -1005,9 +1004,10 @@ export function FindIdealApp() {
             "#7c3aed",
             "#64748b"
           ],
-          "circle-opacity": 0.9,
+          "circle-opacity": ["interpolate", ["linear"], ["zoom"], 10, 0, 15, 0, 16, 0.9],
           "circle-stroke-color": "#ffffff",
-          "circle-stroke-width": 1.5,
+          "circle-stroke-opacity": ["interpolate", ["linear"], ["zoom"], 10, 0, 15, 0, 16, 0.92],
+          "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 10, 0, 15, 0, 16, 1.5],
         },
       });
 
@@ -1224,23 +1224,6 @@ export function FindIdealApp() {
         });
       });
 
-      map.on("click", "safety-incident-clusters-layer", (event) => {
-        const feature = event.features?.[0];
-        const geometry = feature?.geometry;
-        if (!geometry || geometry.type !== "Point") {
-          return;
-        }
-        const coordinates = geometry.coordinates;
-        if (!Array.isArray(coordinates) || coordinates.length < 2) {
-          return;
-        }
-        map.easeTo({
-          center: [Number(coordinates[0]), Number(coordinates[1])],
-          duration: 450,
-          zoom: Math.max(map.getZoom() + 2, 13),
-        });
-      });
-
       map.on("click", "safety-incident-layer", (event) => {
         const feature = event.features?.[0];
         const properties = feature?.properties as Record<string, unknown> | undefined;
@@ -1312,7 +1295,7 @@ export function FindIdealApp() {
         });
       }
 
-      for (const layerId of ["transport-candidate-layer", "zones-runtime-fill-layer", "zone-pois-highlight-layer", "zone-pois-layer", "journey-listings-layer", "safety-incident-layer", "safety-incident-clusters-layer"] as const) {
+      for (const layerId of ["transport-candidate-layer", "zones-runtime-fill-layer", "zone-pois-highlight-layer", "zone-pois-layer", "journey-listings-layer", "safety-incident-layer"] as const) {
         map.on("mouseenter", layerId, () => {
           map.getCanvas().style.cursor = "pointer";
         });
@@ -1631,8 +1614,7 @@ export function FindIdealApp() {
     map.setLayoutProperty("zone-pois-highlight-layer", "visibility", layerVisibility.pois ? "visible" : "none");
     map.setLayoutProperty("zone-pois-layer", "visibility", layerVisibility.pois ? "visible" : "none");
     map.setLayoutProperty("journey-listings-layer", "visibility", layerVisibility.listings ? "visible" : "none");
-    map.setLayoutProperty("safety-incident-clusters-layer", "visibility", layerVisibility.safety && config.enrichments.safety ? "visible" : "none");
-    map.setLayoutProperty("safety-incident-cluster-count-layer", "visibility", layerVisibility.safety && config.enrichments.safety ? "visible" : "none");
+    map.setLayoutProperty("safety-incident-heatmap-layer", "visibility", layerVisibility.safety && config.enrichments.safety ? "visible" : "none");
     map.setLayoutProperty("safety-incident-layer", "visibility", layerVisibility.safety && config.enrichments.safety ? "visible" : "none");
     map.setLayoutProperty("flood-layer", "visibility", floodVisible ? "visible" : "none");
     map.setLayoutProperty("green-layer", "visibility", greenVisible ? "visible" : "none");

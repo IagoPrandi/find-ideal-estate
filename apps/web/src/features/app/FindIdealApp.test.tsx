@@ -397,19 +397,19 @@ describe("FindIdealApp", () => {
     expect(labelLayer?.layout?.["text-ignore-placement"]).toBe(true);
   });
 
-  it("restores the safety layer with clustered viewport loading and aligned legend", async () => {
+  it("restores the safety layer with heatmap viewport loading and aligned legend", async () => {
     useUIStore.setState((state) => ({ ...state, step: 1, panelWidth: 420, isCollapsed: false }));
 
     renderWithQueryClient();
 
     await waitFor(() => {
       expect(mapAddedLayers.some((layer) => layer.id === "safety-incident-layer")).toBe(true);
-      expect(mapAddedLayers.some((layer) => layer.id === "safety-incident-clusters-layer")).toBe(true);
+      expect(mapAddedLayers.some((layer) => layer.id === "safety-incident-heatmap-layer")).toBe(true);
+      expect(mapAddedLayers.some((layer) => layer.id === "safety-incident-clusters-layer")).toBe(false);
       expect(mapSourceDefinitions["public-safety-source-runtime"]).toMatchObject({
         type: "geojson",
-        cluster: true,
-        clusterMaxZoom: 13,
       });
+      expect(mapSourceDefinitions["public-safety-source-runtime"].cluster).toBeUndefined();
       expect(getPublicSafetyIncidentsForViewport).toHaveBeenCalledWith({
         minLon: -46.72,
         minLat: -23.62,
@@ -417,17 +417,16 @@ describe("FindIdealApp", () => {
         maxLat: -23.48,
       }, 10, ["theft", "robbery", "violence", "sexual", "drugs", "other"]);
       expect((mapSourceData["public-safety-source-runtime"] as { features?: Array<{ properties?: Record<string, unknown> }> }).features?.[0]?.properties.point_count).toBe(7);
-      expect(mapSetLayoutPropertyMock).toHaveBeenCalledWith("safety-incident-clusters-layer", "visibility", "visible");
+      expect(mapSetLayoutPropertyMock).toHaveBeenCalledWith("safety-incident-heatmap-layer", "visibility", "visible");
       expect(mapSetLayoutPropertyMock).toHaveBeenCalledWith("safety-incident-layer", "visibility", "visible");
     });
 
-    await act(async () => {
-      mapLayerClickHandlers["safety-incident-clusters-layer"]({
-        features: [{ geometry: { type: "Point", coordinates: [-46.68, -23.54] } }]
-      });
-    });
-
-    expect(mapEaseToMock).toHaveBeenCalledWith(expect.objectContaining({ center: [-46.68, -23.54] }));
+    const heatmapLayer = mapAddedLayers.find((layer) => layer.id === "safety-incident-heatmap-layer");
+    const incidentLayer = mapAddedLayers.find((layer) => layer.id === "safety-incident-layer");
+    expect(heatmapLayer?.paint?.["heatmap-opacity"]).toEqual(["interpolate", ["linear"], ["zoom"], 10, 0.6, 13, 0.78, 14, 0.48, 15, 0]);
+    expect(incidentLayer?.paint?.["circle-opacity"]).toEqual(["interpolate", ["linear"], ["zoom"], 10, 0, 15, 0, 16, 0.9]);
+    expect(incidentLayer?.paint?.["circle-stroke-opacity"]).toEqual(["interpolate", ["linear"], ["zoom"], 10, 0, 15, 0, 16, 0.92]);
+    expect(incidentLayer?.paint?.["circle-stroke-width"]).toEqual(["interpolate", ["linear"], ["zoom"], 10, 0, 15, 0, 16, 1.5]);
 
     const legend = screen.getByText("Tipos de ocorrência").parentElement;
     expect(legend).not.toBeNull();
@@ -445,7 +444,7 @@ describe("FindIdealApp", () => {
     fireEvent.click(screen.getByLabelText("Segurança"));
 
     await waitFor(() => {
-      expect(mapSetLayoutPropertyMock).toHaveBeenCalledWith("safety-incident-clusters-layer", "visibility", "none");
+      expect(mapSetLayoutPropertyMock).toHaveBeenCalledWith("safety-incident-heatmap-layer", "visibility", "none");
       expect(mapSetLayoutPropertyMock).toHaveBeenCalledWith("safety-incident-layer", "visibility", "none");
     });
   });

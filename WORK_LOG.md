@@ -42,6 +42,26 @@
 - Progress Tracker:
   - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
 
+## 2026-04-03 - Trocar clusters de seguranca por heatmap
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/develop-frontend/SKILL.md` para substituir a agregacao visual de seguranca por heatmap preservando a resposta a zoom, viewport e filtros por categoria.
+- Trigger: usuario pediu que a visualizacao agregada deixasse de usar clusters e passasse a usar mapa de calor, ainda obedecendo a visualizacao atual e os itens selecionados na legenda.
+- Scope executed:
+  - `apps/web/src/features/app/FindIdealApp.tsx`:
+    - removida a clusterizacao cliente da source GeoJSON de seguranca;
+    - substituidas as layers de cluster/contador por uma heatmap layer;
+    - mantidos os pontos individuais para detalhes e popup, agora aparecendo apenas depois que o heatmap some no zoom mais alto;
+    - ocultados tambem os contornos dos pontos enquanto o heatmap estiver ativo, evitando aneis brancos residuais no mapa;
+    - a heatmap responde ao fetch por viewport e aos filtros/isolamento por categoria ja existentes.
+  - `apps/web/src/features/app/FindIdealApp.test.tsx`:
+    - atualizada a regressao da camada de seguranca para exigir heatmap no lugar dos clusters.
+- Validation:
+  - `Set-Location C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/apps/web; $env:CI='1'; .\node_modules\.bin\vitest.cmd run --config vitest.config.ts src/features/app/FindIdealApp.test.tsx --reporter=dot --no-color` -> `11 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
 ## 2026-04-03 - Restaurar pop-up de plataformas no badge amarelo da etapa 6
 
 - Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
