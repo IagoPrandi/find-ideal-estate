@@ -11,6 +11,7 @@ from typing import Any
 from uuid import UUID
 
 from core.db import get_engine
+from modules.listings.cache import normalize_search_location
 from sqlalchemy import text
 
 
@@ -34,6 +35,8 @@ async def record_search_request(
     result_source must be one of:
         'cache_hit' | 'cache_partial' | 'cache_miss' | 'fresh_scrape'
     """
+    normalized_search_location = normalize_search_location(search_location_normalized)
+
     engine = get_engine()
     async with engine.begin() as conn:
         result = await conn.execute(
@@ -68,7 +71,7 @@ async def record_search_request(
                 "user_id": user_id,
                 "session_id": session_id,
                 "zone_fingerprint": zone_fingerprint,
-                "search_location_normalized": search_location_normalized,
+                "search_location_normalized": normalized_search_location,
                 "search_location_label": search_location_label,
                 "search_location_type": search_location_type,
                 "search_type": search_type,

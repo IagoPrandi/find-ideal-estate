@@ -10,6 +10,7 @@ import {
   Home,
   Loader2,
   MapIcon,
+  Minus,
   ShieldX,
   ShieldAlert,
   SlidersHorizontal,
@@ -328,6 +329,25 @@ export function Step6Analysis() {
     setOpenAvailabilityPopoverKey((current) => (current === cardKey ? null : current));
   }
 
+  function toggleListingsSort(sortField: "price" | "size") {
+    setListingsFilters({
+      sortField,
+      sortDirection: listingsFilters.sortField === sortField
+        ? (listingsFilters.sortDirection === "asc" ? "desc" : "asc")
+        : "asc"
+    });
+  }
+
+  function sortButtonLabel(sortField: "price" | "size") {
+    const isActive = listingsFilters.sortField === sortField;
+    const criterion = sortField === "price" ? "preço" : "tamanho";
+    if (!isActive) {
+      return `Ativar ordenação por ${criterion}`;
+    }
+    const ordering = listingsFilters.sortDirection === "asc" ? "crescente" : "decrescente";
+    return `Ordenar por ${criterion} ${ordering}`;
+  }
+
   return (
     <div className="flex h-full flex-col bg-slate-50 animate-[fadeInRight_0.5s_ease-out]">
       <div className="shrink-0 border-b border-slate-200 bg-white">
@@ -474,49 +494,85 @@ export function Step6Analysis() {
                         {listingsInZone.length} dentro da zona · {listingsOutsideZone.length} fora da zona · {listingsWithoutCoordinates.length} sem coordenadas
                       </p>
                     </div>
-                    <div className="flex flex-col gap-1">
-                      <label className="text-xs text-slate-500">Preço mín. (R$)</label>
-                      <input
-                        type="number"
-                        min={0}
-                        value={listingsFilters.minPrice}
-                        onChange={(e) => setListingsFilters({ minPrice: e.target.value })}
-                        placeholder="0"
-                        className="rounded-md border border-slate-200 px-2 py-1.5 text-sm text-slate-700 outline-none focus:border-pastel-violet-400 focus:ring-1 focus:ring-pastel-violet-200"
-                      />
+                    <div className="col-span-2 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
+                      <div className="flex flex-col gap-1">
+                        <label className="text-xs text-slate-500">Preço mín. (R$)</label>
+                        <input
+                          type="number"
+                          min={0}
+                          value={listingsFilters.minPrice}
+                          onChange={(e) => setListingsFilters({ minPrice: e.target.value })}
+                          placeholder="0"
+                          className="rounded-md border border-slate-200 px-2 py-1.5 text-sm text-slate-700 outline-none focus:border-pastel-violet-400 focus:ring-1 focus:ring-pastel-violet-200"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <label className="text-xs text-slate-500">Preço máx. (R$)</label>
+                        <input
+                          type="number"
+                          min={0}
+                          value={listingsFilters.maxPrice}
+                          onChange={(e) => setListingsFilters({ maxPrice: e.target.value })}
+                          placeholder="Sem limite"
+                          className="rounded-md border border-slate-200 px-2 py-1.5 text-sm text-slate-700 outline-none focus:border-pastel-violet-400 focus:ring-1 focus:ring-pastel-violet-200"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        aria-label={sortButtonLabel("price")}
+                        aria-pressed={listingsFilters.sortField === "price"}
+                        data-testid="listings-sort-price"
+                        onClick={() => toggleListingsSort("price")}
+                        className={`flex h-10 w-10 items-center justify-center self-start rounded-md border transition-colors focus:outline-none focus:ring-2 focus:ring-pastel-violet-200 sm:self-auto ${listingsFilters.sortField === "price" ? "border-pastel-violet-300 bg-pastel-violet-50 text-pastel-violet-700" : "border-slate-200 text-slate-500 hover:bg-pastel-violet-50 hover:text-pastel-violet-700"}`}
+                      >
+                        {listingsFilters.sortField !== "price" ? (
+                          <Minus className="h-4 w-4" />
+                        ) : listingsFilters.sortDirection === "desc" ? (
+                          <ChevronDown className="h-4 w-4" />
+                        ) : (
+                          <ChevronUp className="h-4 w-4" />
+                        )}
+                      </button>
                     </div>
-                    <div className="flex flex-col gap-1">
-                      <label className="text-xs text-slate-500">Preço máx. (R$)</label>
-                      <input
-                        type="number"
-                        min={0}
-                        value={listingsFilters.maxPrice}
-                        onChange={(e) => setListingsFilters({ maxPrice: e.target.value })}
-                        placeholder="Sem limite"
-                        className="rounded-md border border-slate-200 px-2 py-1.5 text-sm text-slate-700 outline-none focus:border-pastel-violet-400 focus:ring-1 focus:ring-pastel-violet-200"
-                      />
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <label className="text-xs text-slate-500">Área mín. (m²)</label>
-                      <input
-                        type="number"
-                        min={0}
-                        value={listingsFilters.minSize}
-                        onChange={(e) => setListingsFilters({ minSize: e.target.value })}
-                        placeholder="0"
-                        className="rounded-md border border-slate-200 px-2 py-1.5 text-sm text-slate-700 outline-none focus:border-pastel-violet-400 focus:ring-1 focus:ring-pastel-violet-200"
-                      />
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <label className="text-xs text-slate-500">Área máx. (m²)</label>
-                      <input
-                        type="number"
-                        min={0}
-                        value={listingsFilters.maxSize}
-                        onChange={(e) => setListingsFilters({ maxSize: e.target.value })}
-                        placeholder="Sem limite"
-                        className="rounded-md border border-slate-200 px-2 py-1.5 text-sm text-slate-700 outline-none focus:border-pastel-violet-400 focus:ring-1 focus:ring-pastel-violet-200"
-                      />
+                    <div className="col-span-2 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
+                      <div className="flex flex-col gap-1">
+                        <label className="text-xs text-slate-500">Área mín. (m²)</label>
+                        <input
+                          type="number"
+                          min={0}
+                          value={listingsFilters.minSize}
+                          onChange={(e) => setListingsFilters({ minSize: e.target.value })}
+                          placeholder="0"
+                          className="rounded-md border border-slate-200 px-2 py-1.5 text-sm text-slate-700 outline-none focus:border-pastel-violet-400 focus:ring-1 focus:ring-pastel-violet-200"
+                        />
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <label className="text-xs text-slate-500">Área máx. (m²)</label>
+                        <input
+                          type="number"
+                          min={0}
+                          value={listingsFilters.maxSize}
+                          onChange={(e) => setListingsFilters({ maxSize: e.target.value })}
+                          placeholder="Sem limite"
+                          className="rounded-md border border-slate-200 px-2 py-1.5 text-sm text-slate-700 outline-none focus:border-pastel-violet-400 focus:ring-1 focus:ring-pastel-violet-200"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        aria-label={sortButtonLabel("size")}
+                        aria-pressed={listingsFilters.sortField === "size"}
+                        data-testid="listings-sort-size"
+                        onClick={() => toggleListingsSort("size")}
+                        className={`flex h-10 w-10 items-center justify-center self-start rounded-md border transition-colors focus:outline-none focus:ring-2 focus:ring-pastel-violet-200 sm:self-auto ${listingsFilters.sortField === "size" ? "border-pastel-violet-300 bg-pastel-violet-50 text-pastel-violet-700" : "border-slate-200 text-slate-500 hover:bg-pastel-violet-50 hover:text-pastel-violet-700"}`}
+                      >
+                        {listingsFilters.sortField !== "size" ? (
+                          <Minus className="h-4 w-4" />
+                        ) : listingsFilters.sortDirection === "desc" ? (
+                          <ChevronDown className="h-4 w-4" />
+                        ) : (
+                          <ChevronUp className="h-4 w-4" />
+                        )}
+                      </button>
                     </div>
                   </div>
                   <div className="mt-3 flex flex-col gap-1">

@@ -27,6 +27,7 @@ from modules.listings.cache import (
     create_cache_record,
     find_usable_cache_for_search_location,
     get_cache_record,
+    normalize_search_location,
 )
 from modules.listings.dedup import fetch_listing_cards_for_zone
 from modules.listings.platform_registry import PlatformRegistryError, get_platform_registry
@@ -94,6 +95,8 @@ async def _enqueue_listings_scrape_job(
     force_refresh: bool = False,
 ) -> UUID:
     """Create and dispatch a listings_scrape job, returning the created job id."""
+    normalized_search_location = normalize_search_location(search_location_normalized)
+
     engine = _get_engine()
     async with engine.begin() as conn:
         job_result = await conn.execute(
@@ -109,7 +112,7 @@ async def _enqueue_listings_scrape_job(
                 "result_ref": json.dumps(
                     {
                         "zone_fingerprint": zone_fingerprint,
-                        "search_location_normalized": search_location_normalized,
+                        "search_location_normalized": normalized_search_location,
                         "search_address": search_address,
                         "search_type": search_type,
                         "usage_type": usage_type,
@@ -134,9 +137,11 @@ async def _find_active_listings_job_id(
     zone_fingerprint: str | None = None,
     search_location_normalized: str | None = None,
 ) -> UUID | None:
+    normalized_search_location = normalize_search_location(search_location_normalized)
+
     engine = _get_engine()
     async with engine.connect() as conn:
-        if search_location_normalized is not None:
+        if normalized_search_location:
             result = await conn.execute(
                 text(
                     """
@@ -152,7 +157,7 @@ async def _find_active_listings_job_id(
                 ),
                 {
                     "journey_id": journey_id,
-                    "search_location_normalized": search_location_normalized,
+                    "search_location_normalized": normalized_search_location,
                 },
             )
             return result.scalar_one_or_none()
@@ -211,11 +216,15 @@ async def listings_search(
     platforms_hash = hashlib.sha256(
         json.dumps(sorted(platforms), separators=(",", ":")).encode()
     ).hexdigest()[:16]
+    normalized_search_location = normalize_search_location(body.search_location_normalized)
+
+    if not normalized_search_location:
+        raise HTTPException(status_code=400, detail="search_location_normalized nao pode ser vazio")
 
     # Determine result source.
     # Cache hits for listings/search must be address-scoped to avoid reusing
     # results scraped with a different search address in the same zone.
-    cache = await find_usable_cache_for_search_location(body.search_location_normalized)
+    cache = await find_usable_cache_for_search_location(normalized_search_location)
 
     if cache and cache_is_usable(cache):
         result_source = "cache_hit"
@@ -227,7 +236,7 @@ async def listings_search(
         journey_id=journey_id,
         session_id=anonymous_session_id,
         zone_fingerprint=body.zone_fingerprint,
-        search_location_normalized=body.search_location_normalized,
+        search_location_normalized=normalized_search_location,
         search_location_label=body.search_location_label,
         search_location_type=body.search_location_type,
         search_type=body.search_type,
@@ -239,7 +248,7 @@ async def listings_search(
     if result_source == "cache_miss":
         active_job_id = await _find_active_listings_job_id(
             journey_id,
-            search_location_normalized=body.search_location_normalized,
+            search_location_normalized=normalized_search_location,
         )
         if active_job_id is not None:
             return ListingsRequestResult(
@@ -254,7 +263,7 @@ async def listings_search(
 
         # Ensure cache row exists (for lock coordination) and enqueue scrape job
         await create_cache_record(
-            body.search_location_normalized,
+            normalized_search_location,
             zone_fingerprint=body.zone_fingerprint,
             config_hash=config_hash,
         )
@@ -262,7 +271,7 @@ async def listings_search(
         job_id = await _enqueue_listings_scrape_job(
             journey_id=journey_id,
             zone_fingerprint=body.zone_fingerprint,
-            search_location_normalized=body.search_location_normalized,
+            search_location_normalized=normalized_search_location,
             search_address=body.search_location_label,
             search_type=body.search_type,
             usage_type=body.usage_type,
@@ -291,27 +300,26 @@ async def listings_search(
     )
 
     age_hours = cache_age_hours(cache)
-    freshness = "fresh" if (age_hours is not None and age_hours < 2) else "stale"
+    freshness = "fresh"
 
-    # M5.4 stale-while-revalidate: serve immediately and refresh in background.
-    should_revalidate = result_source == "cache_partial" or (
-        result_source == "cache_hit" and freshness == "stale"
-    )
+    # Listings cache remains valid by default; background refresh only happens
+    # for explicit partial-hit flows.
+    should_revalidate = result_source == "cache_partial"
     if should_revalidate:
         active_job_id = await _find_active_listings_job_id(
             journey_id,
-            search_location_normalized=body.search_location_normalized,
+            search_location_normalized=normalized_search_location,
         )
         if active_job_id is None:
             await create_cache_record(
-                body.search_location_normalized,
+                normalized_search_location,
                 zone_fingerprint=body.zone_fingerprint,
                 config_hash=config_hash,
             )
             await _enqueue_listings_scrape_job(
                 journey_id=journey_id,
                 zone_fingerprint=body.zone_fingerprint,
-                search_location_normalized=body.search_location_normalized,
+                search_location_normalized=normalized_search_location,
                 search_address=body.search_location_label,
                 search_type=body.search_type,
                 usage_type=body.usage_type,
@@ -509,7 +517,7 @@ async def get_zone_listings(
         spatial_scope=spatial_scope,
     )
     age_hours = cache_age_hours(cache)
-    freshness = "fresh" if (age_hours is not None and age_hours < 2) else "stale"
+    freshness = "fresh"
 
     return ListingsRequestResult(
         source="cache",

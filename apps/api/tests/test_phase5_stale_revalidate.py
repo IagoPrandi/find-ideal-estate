@@ -133,8 +133,8 @@ def test_listings_search_without_address_cache_queues_new_scrape(monkeypatch) ->
     assert calls["enqueue"] == 1
 
 
-def test_listings_search_stale_cache_hit_triggers_background_revalidation(monkeypatch) -> None:
-    stale_cache = {
+def test_listings_search_old_cache_hit_remains_valid_without_revalidation(monkeypatch) -> None:
+    old_cache = {
         "status": "complete",
         "zone_fingerprint": "zone-a",
         "platforms_completed": ["quintoandar", "zapimoveis"],
@@ -156,7 +156,7 @@ def test_listings_search_stale_cache_hit_triggers_background_revalidation(monkey
         return None
 
     async def _fake_address_cache(_normalized, **_kwargs):
-        return stale_cache
+        return old_cache
 
     def _fake_cache_is_usable(record):
         return bool(record)
@@ -203,12 +203,12 @@ def test_listings_search_stale_cache_hit_triggers_background_revalidation(monkey
     assert response.status_code == 200
     body = response.json()
     assert body["source"] == "cache"
-    assert body["freshness_status"] == "stale"
+    assert body["freshness_status"] == "fresh"
     assert fetch_calls[0]["platforms"] == ["quintoandar", "zapimoveis"]
-    assert fetch_calls[0]["observed_since"] == stale_cache["created_at"]
+    assert fetch_calls[0]["observed_since"] == old_cache["created_at"]
     assert calls["record"] == 1
-    assert calls["create_cache"] == 1
-    assert calls["enqueue"] == 1
+    assert calls["create_cache"] == 0
+    assert calls["enqueue"] == 0
 
 
 def test_listings_search_fresh_cache_hit_does_not_enqueue_revalidation(monkeypatch) -> None:
@@ -334,6 +334,7 @@ def test_get_zone_listings_uses_cache_completed_platforms(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert response.json()["total_count"] == 1
+    assert response.json()["freshness_status"] == "fresh"
     assert response.json()["listings"][0]["lat"] == -23.5209
     assert response.json()["listings"][0]["lon"] == -46.727
     assert fetch_calls[0]["platforms"] == ["quintoandar"]
@@ -389,6 +390,7 @@ def test_get_zone_listings_reuses_latest_search_address_cache_across_zones(monke
 
     assert response.status_code == 200
     assert response.json()["source"] == "cache"
+    assert response.json()["freshness_status"] == "fresh"
     assert response.json()["total_count"] == 1
     assert fetch_calls[0]["zone_fingerprint"] == "zone-a"
     assert fetch_calls[0]["platforms"] == ["quintoandar"]
@@ -450,6 +452,7 @@ def test_get_zone_listings_supports_all_spatial_scope(monkeypatch) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["total_count"] == 1
+    assert body["freshness_status"] == "fresh"
     assert body["listings"][0]["inside_zone"] is False
     assert body["listings"][0]["has_coordinates"] is False
     assert fetch_calls[0]["spatial_scope"] == "all"
@@ -624,3 +627,67 @@ def test_get_zone_listings_no_cache_exposes_active_job_id(monkeypatch) -> None:
     assert body["source"] == "none"
     assert body["job_id"] == str(active_job_id)
     assert body["freshness_status"] == "no_cache"
+
+
+def test_listings_search_normalizes_address_before_active_job_lookup(monkeypatch) -> None:
+    calls = {"record": 0}
+
+    class _Registry:
+        def default_free_platforms(self):
+            return ["quintoandar", "zapimoveis"]
+
+        def resolve_names(self, names):
+            return list(names)
+
+    async def _fake_address_cache(_normalized, **_kwargs):
+        return None
+
+    def _fake_cache_is_usable(record):
+        return bool(record)
+
+    async def _fake_record_search_request(**kwargs):
+        calls["record"] += 1
+        assert kwargs["search_location_normalized"] == (
+            "avenida brigadeiro luis antonio, jardim paulista, sao paulo, sp"
+        )
+
+    async def _fake_find_active_job(_journey_id, zone_fingerprint=None, search_location_normalized=None):
+        del zone_fingerprint
+        assert search_location_normalized == (
+            "avenida brigadeiro luis antonio, jardim paulista, sao paulo, sp"
+        )
+        return uuid4()
+
+    async def _fake_create_cache_record(_normalized, **_kwargs):
+        raise AssertionError("create_cache_record should not be called when active job is reused")
+
+    async def _fake_enqueue(**_kwargs):
+        raise AssertionError("_enqueue_listings_scrape_job should not be called when active job is reused")
+
+    monkeypatch.setattr("api.routes.listings.get_platform_registry", lambda: _Registry())
+    monkeypatch.setattr(
+        "api.routes.listings.find_usable_cache_for_search_location", _fake_address_cache
+    )
+    monkeypatch.setattr("api.routes.listings.cache_is_usable", _fake_cache_is_usable)
+    monkeypatch.setattr("api.routes.listings.record_search_request", _fake_record_search_request)
+    monkeypatch.setattr("api.routes.listings._find_active_listings_job_id", _fake_find_active_job)
+    monkeypatch.setattr("api.routes.listings.create_cache_record", _fake_create_cache_record)
+    monkeypatch.setattr("api.routes.listings._enqueue_listings_scrape_job", _fake_enqueue)
+
+    journey_id = uuid4()
+    payload = _payload()
+    payload["search_location_normalized"] = (
+        "  Avenida Brigadeiro Luís Antônio,   Jardim Paulista, São Paulo, SP  "
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            f"/journeys/{journey_id}/listings/search",
+            json=payload,
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source"] == "none"
+    assert body["freshness_status"] == "queued_for_next_prewarm"
+    assert calls["record"] == 1

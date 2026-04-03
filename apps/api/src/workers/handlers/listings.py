@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 from uuid import UUID
@@ -24,6 +24,7 @@ from core.db import get_engine
 from modules.jobs.events import publish_job_event
 from modules.jobs.service import update_job_execution_state
 from modules.listings.cache import (
+    cache_is_usable,
     compute_config_hash,
     create_cache_record,
     get_cache_record,
@@ -362,7 +363,7 @@ async def _listings_scrape_step(job_id: UUID) -> None:
             cache_status = (
                 cache_after_wait["status"] if cache_after_wait else ZoneCacheStatus.PENDING
             )
-            if ZoneCacheStatus.is_usable(cache_status) and not force_refresh:
+            if cache_is_usable(cache_after_wait) and not force_refresh:
                 diagnostics["status"] = "cache_reopen"
                 diagnostics["cache_status"] = cache_status
                 await _persist_scrape_diagnostics(job_id, ctx)
@@ -411,7 +412,7 @@ async def _listings_scrape_step(job_id: UUID) -> None:
         diagnostics["status"] = "cache_ready"
         await _persist_scrape_diagnostics(job_id, ctx)
 
-        if ZoneCacheStatus.is_usable(current_status) and not force_refresh:
+        if cache_is_usable(cache) and not force_refresh:
             diagnostics["status"] = "cache_hit"
             diagnostics["finished_at"] = _isoformat()
             diagnostics["total_duration_ms"] = _duration_ms(
@@ -681,14 +682,6 @@ async def _listings_scrape_step(job_id: UUID) -> None:
                 },
             )
 
-        # Determine TTL for cache
-        ttl_hours = (
-            PreliminaryResultThresholds.MAX_CACHE_AGE_RENTAL
-            if search_type == "rent"
-            else PreliminaryResultThresholds.MAX_CACHE_AGE_SALE
-        )
-        expires_at = datetime.now(tz=timezone.utc) + timedelta(hours=ttl_hours)
-
         if platforms_failed and not platforms_completed:
             diagnostics["status"] = "failed"
             diagnostics["finished_at"] = _isoformat()
@@ -732,7 +725,6 @@ async def _listings_scrape_step(job_id: UUID) -> None:
             platforms_completed=platforms_completed,
             platforms_failed=platforms_failed,
             preliminary_count=total_scraped,
-            expires_at=expires_at,
         )
 
         for platform in set(platforms_completed + platforms_failed):

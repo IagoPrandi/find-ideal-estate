@@ -5,6 +5,7 @@ import importlib
 import os
 import sys
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
@@ -258,6 +259,123 @@ def test_listings_step_force_refresh_bypasses_usable_cache(monkeypatch) -> None:
     ]
     assert transitions[0] == (ZoneCacheStatus.COMPLETE, ZoneCacheStatus.SCRAPING)
     assert transitions[-1][0] == ZoneCacheStatus.SCRAPING
+
+
+def test_listings_step_expired_cache_remains_usable_by_default(monkeypatch) -> None:
+    job_id = uuid4()
+    stage_messages: list[str] = []
+    scrape_calls: list[tuple[str, str, str]] = []
+
+    class _FakeBegin:
+        async def __aenter__(self):
+            return object()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class _FakeEngine:
+        def begin(self):
+            return _FakeBegin()
+
+    async def _fake_load_job_context(_job_id):
+        return {
+            "zone_fingerprint": "zone-fp",
+            "search_address": "Rua Guaipa, Vila Leopoldina, Sao Paulo - SP",
+            "search_type": "rent",
+            "usage_type": "residential",
+            "platforms": ["quintoandar"],
+        }
+
+    async def _fake_emit_stage_progress(_job_id, stage, progress_percent, message):
+        del _job_id, stage, progress_percent
+        stage_messages.append(message)
+
+    async def _fake_get_cache_record(_normalized):
+        return {
+            "id": uuid4(),
+            "status": ZoneCacheStatus.COMPLETE,
+            "zone_fingerprint": "zone-fp",
+            "expires_at": datetime.now(tz=timezone.utc) - timedelta(minutes=5),
+        }
+
+    async def _fake_create_cache_record(_normalized, **_kwargs):
+        return uuid4()
+
+    async def _fake_run_scraper_for_platform(platform, search_address, search_type):
+        scrape_calls.append((platform, search_address, search_type))
+        return [
+            {
+                "platform": platform,
+                "platform_listing_id": "qa-expired-cache-1",
+                "url": "https://example.org/qa-expired-cache-1",
+                "lat": -23.52,
+                "lon": -46.72,
+                "price_brl": 3200,
+                "area_m2": 50,
+                "bedrooms": 2,
+                "bathrooms": 1,
+                "parking": 1,
+                "address": "Rua Guaipa, Vila Leopoldina, Sao Paulo, SP",
+                "condo_fee_brl": 500,
+                "iptu_brl": 120,
+            }
+        ]
+
+    async def _fake_persist_listings(listings, platform, search_type):
+        del platform, search_type
+        return len(listings)
+
+    async def _fake_publish_job_event(*_args, **_kwargs):
+        return None
+
+    async def _fake_update_job_execution_state(*_args, **_kwargs):
+        return None
+
+    async def _fake_record_degradation_event(*_args, **_kwargs):
+        return None
+
+    async def _fake_record_success_rate_degradation_if_needed(*_args, **_kwargs):
+        return None
+
+    async def _fake_compute_rollup(*_args, **_kwargs):
+        return None
+
+    async def _fake_purge_rollups(*_args, **_kwargs):
+        return None
+
+    @asynccontextmanager
+    async def _fake_scraping_lock(
+        search_location_normalized,
+        timeout_seconds=120.0,
+    ):
+        del search_location_normalized, timeout_seconds
+        yield True
+
+    monkeypatch.setattr(listings_handler, "_load_job_context", _fake_load_job_context)
+    monkeypatch.setattr(listings_handler, "emit_stage_progress", _fake_emit_stage_progress)
+    monkeypatch.setattr(listings_handler, "get_cache_record", _fake_get_cache_record)
+    monkeypatch.setattr(listings_handler, "create_cache_record", _fake_create_cache_record)
+    monkeypatch.setattr(listings_handler, "_run_scraper_for_platform", _fake_run_scraper_for_platform)
+    monkeypatch.setattr(listings_handler, "_persist_listings", _fake_persist_listings)
+    monkeypatch.setattr(listings_handler, "publish_job_event", _fake_publish_job_event)
+    monkeypatch.setattr(listings_handler, "update_job_execution_state", _fake_update_job_execution_state)
+    monkeypatch.setattr(listings_handler, "_record_degradation_event", _fake_record_degradation_event)
+    monkeypatch.setattr(
+        listings_handler,
+        "_record_success_rate_degradation_if_needed",
+        _fake_record_success_rate_degradation_if_needed,
+    )
+    monkeypatch.setattr(listings_handler, "compute_and_upsert_rollup", _fake_compute_rollup)
+    monkeypatch.setattr(listings_handler, "purge_old_rollups", _fake_purge_rollups)
+    monkeypatch.setattr(listings_handler, "scraping_lock", _fake_scraping_lock)
+    monkeypatch.setattr(listings_handler, "check_cancellation", lambda _job_id: asyncio.sleep(0))
+    monkeypatch.setattr(listings_handler, "get_engine", lambda: _FakeEngine())
+
+    asyncio.run(listings_handler._listings_scrape_step(job_id))
+
+    assert any("Cache hit - listings already available" in msg for msg in stage_messages)
+    assert not any("Scraping listings..." in msg for msg in stage_messages)
+    assert scrape_calls == []
 
 
 def test_listings_step_records_platform_diagnostics(monkeypatch) -> None:

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
+import unicodedata
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
@@ -29,7 +31,10 @@ def compute_config_hash(
 
 
 def normalize_search_location(search_location_normalized: str | None) -> str:
-    return (search_location_normalized or "").strip().lower()
+    normalized = unicodedata.normalize("NFKD", (search_location_normalized or ""))
+    ascii_only = normalized.encode("ascii", "ignore").decode("ascii")
+    lowered = ascii_only.strip().lower()
+    return re.sub(r"\s+", " ", lowered)
 
 
 async def get_cache_record(
@@ -64,18 +69,10 @@ async def get_cache_record(
 
 
 def cache_is_usable(record: dict[str, Any] | None) -> bool:
-    """True when cache is complete/partial and not expired."""
+    """True when cache is complete/partial; listings cache stays valid by default."""
     if record is None:
         return False
-    if not ZoneCacheStatus.is_usable(record.get("status")):
-        return False
-    expires_at = record.get("expires_at")
-    if expires_at is None:
-        return True
-    now = datetime.now(tz=timezone.utc)
-    if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=timezone.utc)
-    return now < expires_at
+    return ZoneCacheStatus.is_usable(record.get("status"))
 
 
 def cache_age_hours(record: dict[str, Any] | None) -> float | None:
@@ -202,7 +199,6 @@ async def find_partial_hit_from_overlapping_zone(
                 JOIN zones alt ON alt.fingerprint = zlc.zone_fingerprint
                 WHERE zlc.config_hash = :ch
                   AND zlc.status IN ('complete', 'partial')
-                  AND (zlc.expires_at IS NULL OR zlc.expires_at > now())
                   AND alt.fingerprint != :zone_fp
                   AND ST_Area(ST_Intersection(src.isochrone_geom, alt.isochrone_geom))
                       / NULLIF(ST_Area(src.isochrone_geom), 0) >= 0.70

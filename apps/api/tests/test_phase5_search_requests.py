@@ -160,6 +160,31 @@ class TestRecordSearchRequest:
                 session_id=None,
             )
 
+    @pytest.mark.anyio
+    async def test_normalizes_search_location_before_insert(self) -> None:
+        """Equivalent addresses must persist under a single canonical key."""
+        engine = _mock_engine(scalar_return=uuid4())
+        with patch(
+            "modules.listings.search_requests.get_engine", return_value=engine
+        ):
+            await record_search_request(
+                zone_fingerprint="fp-abc",
+                search_location_normalized="  Avenida Brigadeiro Luís Antônio,   Jardim Paulista, São Paulo, SP  ",
+                search_location_label="Avenida Brigadeiro Luís Antônio, Jardim Paulista, São Paulo, SP",
+                search_location_type="street",
+                search_type="rent",
+                usage_type="residential",
+                platforms_hash="hash4",
+                result_source="cache_hit",
+            )
+
+        ctx = engine.begin.return_value
+        conn = ctx.__aenter__.return_value
+        execute_args = conn.execute.call_args.args[1]
+        assert execute_args["search_location_normalized"] == (
+            "avenida brigadeiro luis antonio, jardim paulista, sao paulo, sp"
+        )
+
 
 # ---------------------------------------------------------------------------
 # get_prewarm_targets

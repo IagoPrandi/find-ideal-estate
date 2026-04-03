@@ -123,19 +123,35 @@ export function applyListingsPanelFilters(
     ? listings.filter((listing) => listing.inside_zone)
     : listings;
 
-  return scopedListings.filter((listing) => {
-    const price = getListingDisplayPrice(listing);
-    const area = typeof listing.area_m2 === "number" ? listing.area_m2 : null;
-    const minPrice = filters.minPrice !== "" ? Number(filters.minPrice) : null;
-    const maxPrice = filters.maxPrice !== "" ? Number(filters.maxPrice) : null;
-    const minSize = filters.minSize !== "" ? Number(filters.minSize) : null;
-    const maxSize = filters.maxSize !== "" ? Number(filters.maxSize) : null;
+  return scopedListings
+    .filter((listing) => {
+      const price = getListingDisplayPrice(listing);
+      const area = typeof listing.area_m2 === "number" ? listing.area_m2 : null;
+      const minPrice = filters.minPrice !== "" ? Number(filters.minPrice) : null;
+      const maxPrice = filters.maxPrice !== "" ? Number(filters.maxPrice) : null;
+      const minSize = filters.minSize !== "" ? Number(filters.minSize) : null;
+      const maxSize = filters.maxSize !== "" ? Number(filters.maxSize) : null;
 
-    if (minPrice !== null && (price === null || price < minPrice)) return false;
-    if (maxPrice !== null && (price === null || price > maxPrice)) return false;
-    if (filters.usageType !== "all" && listing.usage_type != null && listing.usage_type !== filters.usageType) return false;
-    if (minSize !== null && (area === null || area < minSize)) return false;
-    if (maxSize !== null && (area === null || area > maxSize)) return false;
-    return true;
-  });
+      if (minPrice !== null && (price === null || price < minPrice)) return false;
+      if (maxPrice !== null && (price === null || price > maxPrice)) return false;
+      if (filters.usageType !== "all" && listing.usage_type != null && listing.usage_type !== filters.usageType) return false;
+      if (minSize !== null && (area === null || area < minSize)) return false;
+      if (maxSize !== null && (area === null || area > maxSize)) return false;
+      return true;
+    })
+    .sort((left, right) => {
+      const leftValue = filters.sortField === "size"
+        ? (typeof left.area_m2 === "number" ? left.area_m2 : null)
+        : getListingDisplayPrice(left);
+      const rightValue = filters.sortField === "size"
+        ? (typeof right.area_m2 === "number" ? right.area_m2 : null)
+        : getListingDisplayPrice(right);
+
+      if (leftValue === null && rightValue === null) return 0;
+      if (leftValue === null) return 1;
+      if (rightValue === null) return -1;
+      return filters.sortDirection === "desc"
+        ? rightValue - leftValue
+        : leftValue - rightValue;
+    });
 }

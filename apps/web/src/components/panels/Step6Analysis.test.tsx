@@ -211,6 +211,7 @@ describe("Step6Analysis", () => {
           current_best_price: "3500",
           condo_fee: "500",
           iptu: "100",
+          area_m2: 70,
           inside_zone: true,
           has_coordinates: true,
           lat: -23.5,
@@ -226,6 +227,7 @@ describe("Step6Analysis", () => {
           current_best_price: "4200",
           condo_fee: "300",
           iptu: "50",
+          area_m2: 90,
           inside_zone: false,
           has_coordinates: true,
           lat: -23.49,
@@ -240,6 +242,7 @@ describe("Step6Analysis", () => {
           current_best_price: "3900",
           condo_fee: "250",
           iptu: "25",
+          area_m2: 50,
           inside_zone: false,
           has_coordinates: false,
           lat: null,
@@ -285,6 +288,40 @@ describe("Step6Analysis", () => {
     expect(screen.getByText(/Endereço sem coordenadas/i)).toBeInTheDocument();
     expect(screen.getByText(/1 dentro da zona · 1 fora da zona · 1 sem coordenadas/i)).toBeInTheDocument();
     expect(screen.getByAltText(/Rua Fora, 20/i)).toHaveAttribute("src", "https://www.vivareal.com.br/listing-images/vr-1.webp");
+    expect(screen.getByTestId("listings-sort-price").querySelector("svg")).toHaveClass("lucide-chevron-up");
+    expect(screen.getByTestId("listings-sort-size").querySelector("svg")).toHaveClass("lucide-minus");
+
+    expect(
+      Array.from(document.querySelectorAll('[data-testid^="listing-card-"]')).map((card) => card.textContent || "")
+    ).toEqual([
+      expect.stringContaining("Rua Dentro, 10"),
+      expect.stringContaining("Endereço sem coordenadas"),
+      expect.stringContaining("Rua Fora, 20")
+    ]);
+
+    fireEvent.click(screen.getByTestId("listings-sort-price"));
+
+    expect(screen.getByTestId("listings-sort-price").querySelector("svg")).toHaveClass("lucide-chevron-down");
+    expect(screen.getByTestId("listings-sort-size").querySelector("svg")).toHaveClass("lucide-minus");
+    expect(
+      Array.from(document.querySelectorAll('[data-testid^="listing-card-"]')).map((card) => card.textContent || "")
+    ).toEqual([
+      expect.stringContaining("Rua Fora, 20"),
+      expect.stringContaining("Endereço sem coordenadas"),
+      expect.stringContaining("Rua Dentro, 10")
+    ]);
+
+    fireEvent.click(screen.getByTestId("listings-sort-size"));
+
+    expect(screen.getByTestId("listings-sort-price").querySelector("svg")).toHaveClass("lucide-minus");
+    expect(screen.getByTestId("listings-sort-size").querySelector("svg")).toHaveClass("lucide-chevron-up");
+    expect(
+      Array.from(document.querySelectorAll('[data-testid^="listing-card-"]')).map((card) => card.textContent || "")
+    ).toEqual([
+      expect.stringContaining("Endereço sem coordenadas"),
+      expect.stringContaining("Rua Dentro, 10"),
+      expect.stringContaining("Rua Fora, 20")
+    ]);
 
     fireEvent.click(screen.getByRole("button", { name: /recolher filtros de imóveis/i }));
     expect(screen.getByRole("button", { name: /expandir filtros de imóveis/i })).toHaveAttribute("aria-expanded", "false");

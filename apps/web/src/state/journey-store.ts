@@ -54,6 +54,8 @@ export type SelectedAddress = {
 
 export type ListingsSpatialScope = "all" | "inside_zone";
 export type ListingsUsageFilter = "all" | "residential" | "commercial";
+export type ListingsSortField = "price" | "size";
+export type ListingsSortDirection = "asc" | "desc";
 
 export type ListingsPanelFilters = {
   minPrice: string;
@@ -62,6 +64,8 @@ export type ListingsPanelFilters = {
   spatialScope: ListingsSpatialScope;
   minSize: string;
   maxSize: string;
+  sortField: ListingsSortField;
+  sortDirection: ListingsSortDirection;
 };
 
 type JourneyState = {
@@ -127,7 +131,9 @@ export const defaultListingsPanelFilters: ListingsPanelFilters = {
   usageType: "all",
   spatialScope: "all",
   minSize: "",
-  maxSize: ""
+  maxSize: "",
+  sortField: "price",
+  sortDirection: "asc"
 };
 
 export const useJourneyStore = create<JourneyState>((set) => ({

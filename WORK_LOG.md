@@ -1,5 +1,151 @@
 # Work Log
 
+## 2026-04-03 - Refinar ordenacao inline por preco e tamanho na etapa 6
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/develop-frontend/SKILL.md` para concluir a refinacao visual da etapa 6 com diff pequeno e regressao focada.
+- Trigger: usuario pediu que a ordenacao fosse apenas um icone inline ao lado dos ranges de preco e tamanho, com suporte a ambos os criterios e exibindo um traco quando o criterio estiver inativo.
+- Behavior change:
+  - os filtros da etapa 6 agora exibem controles icon-only de ordenacao logo apos o valor maximo de preco e de metragem;
+  - a ordenacao pode alternar entre `preco` e `tamanho`;
+  - o criterio ativo mostra seta para cima/baixo conforme a direcao atual, e o criterio inativo mostra `-`.
+- Scope executed:
+  - `apps/web/src/state/journey-store.ts`:
+    - `ListingsPanelFilters` passou a usar `sortField` + `sortDirection` em vez de um toggle restrito a preco.
+  - `apps/web/src/lib/listingFormat.ts`:
+    - `applyListingsPanelFilters()` passou a ordenar por preco total exibido ou por `area_m2`, respeitando o criterio e a direcao ativos.
+  - `apps/web/src/components/panels/Step6Analysis.tsx`:
+    - substituido o botao textual por icones inline apos os campos maximos de preco e metragem;
+    - criterio inativo agora renderiza `Minus`, e o ativo renderiza `ChevronUp`/`ChevronDown`.
+  - testes:
+    - `apps/web/src/lib/listingFormat.test.ts` cobre ordenacao por preco e por tamanho;
+    - `apps/web/src/components/panels/Step6Analysis.test.tsx` cobre os icones inline, o estado inativo com traco e a troca de ordenacao entre preco e tamanho.
+- Validation:
+  - `Set-Location "c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/apps/web"; $env:CI='1'; .\node_modules\.bin\vitest.cmd run --config vitest.config.ts src/lib/listingFormat.test.ts src/components/panels/Step6Analysis.test.tsx --reporter=dot --no-color` -> `14 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-04-03 - Adicionar toggle de ordenacao por preco nos filtros de imóveis
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/develop-frontend/SKILL.md` para ajustar a UX da etapa 6 com diff pequeno, estado previsivel e regressao de UI.
+- Trigger: usuario pediu um controle nos filtros para ordenar a lista de imóveis, com padrão do menor para o maior e inversão ao clicar novamente.
+- Behavior change:
+  - os filtros da etapa 6 agora exibem um controle de ordenação por preço dentro do card de filtros;
+  - por padrão, a lista abre em `Menor para maior`;
+  - cada clique alterna entre `Menor para maior` e `Maior para menor`.
+- Scope executed:
+  - `apps/web/src/state/journey-store.ts`:
+    - `ListingsPanelFilters` ganhou `priceSortDirection` com default `asc`.
+  - `apps/web/src/lib/listingFormat.ts`:
+    - `applyListingsPanelFilters()` passou a respeitar `priceSortDirection` ao ordenar os imóveis filtrados.
+  - `apps/web/src/components/panels/Step6Analysis.tsx`:
+    - adicionado botão de toggle de ordenação dentro da seção de filtros.
+  - testes:
+    - `apps/web/src/lib/listingFormat.test.ts` cobre a ordenação ascendente padrão e a descendente após toggle;
+    - `apps/web/src/components/panels/Step6Analysis.test.tsx` cobre a ordem visível inicial e a inversão ao clicar no novo controle.
+- Validation:
+  - `Set-Location "c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/apps/web"; $env:CI='1'; .\node_modules\.bin\vitest.cmd run --config vitest.config.ts src/lib/listingFormat.test.ts src/components/panels/Step6Analysis.test.tsx --reporter=dot --no-color` -> `13 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-04-03 - Ordenar lista de imóveis do maior para o menor preço
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/develop-frontend/SKILL.md` para ajustar comportamento visível da etapa 6 com diff pequeno e cobertura focada na UI.
+- Trigger: usuario pediu que a lista de imóveis fosse ordenada do maior preço para o menor preço.
+- Behavior change:
+  - a lista exibida na etapa 6 agora e ordenada por preco total exibido (`current_best_price + condo_fee + iptu`) em ordem decrescente;
+  - imóveis sem preço continuam aparecendo por ultimo.
+- Scope executed:
+  - `apps/web/src/lib/listingFormat.ts`:
+    - `applyListingsPanelFilters()` passou a ordenar os imóveis filtrados por preço exibido em ordem decrescente.
+  - testes:
+    - `apps/web/src/lib/listingFormat.test.ts` ganhou regressao unitária cobrindo a ordenacao `maior -> menor`;
+    - `apps/web/src/components/panels/Step6Analysis.test.tsx` passou a validar a ordem visível dos cards na etapa 6.
+- Validation:
+  - `Set-Location "c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/apps/web"; $env:CI='1'; .\node_modules\.bin\vitest.cmd run --config vitest.config.ts src/lib/listingFormat.test.ts src/components/panels/Step6Analysis.test.tsx --reporter=dot --no-color` -> `12 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-04-03 - Manter cache de listings valido por padrao
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para alinhar a politica de cache no backend com diff minimo, comportamento explicito e validacao focada.
+- Trigger: usuario definiu que o cache nao deve ficar invalido por alteracoes de sessao/tempo e que, por padrao, deve permanecer valido.
+- Behavior change:
+  - cache de listings agora e considerado valido por padrao enquanto o `status` for `complete` ou `partial`, independentemente de `expires_at`.
+  - respostas de cache em `POST /journeys/{id}/listings/search` e `GET /journeys/{id}/zones/{zone}/listings` passam a retornar `freshness_status=fresh` quando servem do cache.
+  - revalidacao automatica por idade deixa de acontecer por padrao; refresh continua apenas em fluxos explicitos de `force_refresh` / hit parcial.
+- Scope executed:
+  - `apps/api/src/modules/listings/cache.py`:
+    - `cache_is_usable()` passou a usar apenas o estado do cache, ignorando expiracao temporal;
+    - a query de overlap deixou de filtrar por `expires_at`.
+  - `apps/api/src/api/routes/listings.py`:
+    - removida a distincao `fresh/stale` baseada em idade para listings servidos de cache;
+    - removida a revalidacao automatica disparada apenas por cache antigo.
+  - `apps/api/src/workers/handlers/listings.py`:
+    - o worker deixou de gravar novo TTL/`expires_at` ao finalizar scrape de listings.
+  - testes:
+    - `apps/api/tests/test_phase5_stale_revalidate.py` foi ajustado para validar que cache antigo continua `fresh` e nao enfileira revalidacao por idade;
+    - `apps/api/tests/test_phase5_scraping_lock.py` foi ajustado para validar que um cache expirado legado continua reutilizavel por padrao.
+- Validation:
+  - `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase5_scraping_lock.py apps/api/tests/test_phase5_stale_revalidate.py -q --color=no` -> `17 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-04-03 - Corrigir falso cache hit em listings com cache expirado
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para corrigir a causa raiz no backend com diff minimo, validacao focada e sem fallback silencioso.
+- Trigger: apos a canonizacao da chave por endereco, o usuario reproduziu nova busca e a UI ficou travada em scraping sem gerar a lista de imoveis.
+- Root cause identified:
+  - para a jornada mais recente, `POST /journeys/{id}/listings/search` registrou `cache_miss` porque a linha do endereco estava expirada;
+  - o worker `listings_scrape`, ao adquirir o lock, olhava apenas `status=complete/partial` e ignorava `expires_at`, encerrando o job como `cache_hit` mesmo com cache expirado;
+  - isso deixava a etapa 6 em um estado inconsistente: `GET /zones/{zone}/listings` respondia `freshness_status=no_cache`, sem job ativo e sem novo scrape executado, aparentando scraping infinito.
+- Scope executed:
+  - `apps/api/src/workers/handlers/listings.py`:
+    - o short-circuit de cache e o reopen apos lock contention passaram a usar `cache_is_usable(cache_record)` em vez de apenas `ZoneCacheStatus.is_usable(status)`, respeitando `expires_at`.
+  - testes:
+    - `apps/api/tests/test_phase5_scraping_lock.py` ganhou regressao garantindo que cache expirado com `status=complete` dispara scraping real e nao finaliza como `cache_hit`.
+- Validation:
+  - inspeção SQL confirmou que o job `745585cd-06e7-4565-ac1d-ae54a6dce596` tinha `job_type=listings_scrape`, `state=completed`, `scrape_diagnostics.status=cache_hit` e `cache_status_before=complete` para um endereco cuja linha em `zone_listing_caches` ja estava expirada;
+  - `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase5_scraping_lock.py apps/api/tests/test_phase5_stale_revalidate.py -q --color=no` -> `17 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-04-02 - Canonicalizar chave de cache de listings por endereco
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para corrigir a causa raiz no backend com diff minimo, canonizacao consistente e validacao focada.
+- Trigger: usuario reportou que ao pesquisar novamente por `Avenida Brigadeiro Luís Antônio, Jardim Paulista, São Paulo, SP` o fluxo nao estava reaproveitando as informacoes em cache apesar de o endereco ja existir salvo na base.
+- Root cause identified:
+  - a linha correspondente ja existia em `zone_listing_caches` com `status=complete`, entao o problema nao era ausencia de persistencia;
+  - o backend aceitava variacoes de `search_location_normalized` com tratamento desigual entre rota, cache, jobs e `listing_search_requests`, o que podia separar chaves equivalentes por acentos/espacamento e prejudicar reuse/coordenacao.
+- Scope executed:
+  - `apps/api/src/modules/listings/cache.py`:
+    - `normalize_search_location()` agora remove acentos e colapsa espacos, mantendo chave canonica unica para o mesmo endereco.
+  - `apps/api/src/modules/listings/search_requests.py`:
+    - `record_search_request()` passou a persistir sempre o endereco ja canonizado.
+  - `apps/api/src/api/routes/listings.py`:
+    - `POST /journeys/{id}/listings/search` agora normaliza o endereco uma unica vez e reutiliza esse valor em cache lookup, gravacao do search request, reuse de job ativo, criacao de cache e payload do job.
+    - `_find_active_listings_job_id()` e `_enqueue_listings_scrape_job()` tambem passaram a operar com o endereco canonico.
+  - testes:
+    - `apps/api/tests/test_phase5_search_requests.py` ganhou regressao garantindo persistencia sem acentos/espacos extras;
+    - `apps/api/tests/test_phase5_stale_revalidate.py` ganhou regressao garantindo que uma busca com acentos reaproveita o job/cache pela chave canonica.
+- Validation:
+  - consulta SQL em `zone_listing_caches` confirmou o endereco `avenida brigadeiro luis antonio, jardim paulista, sao paulo, sp` ja persistido com `status=complete`;
+  - consulta SQL em `listing_search_requests` confirmou `cache_hit` para esse mesmo endereco apos a reproducao da busca;
+  - `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase5_search_requests.py apps/api/tests/test_phase5_stale_revalidate.py -q --color=no` -> `19 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
 ## 2026-04-02 - Disponibilizar seguranca na etapa 1 e alinhar legenda ao painel
 
 - Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
