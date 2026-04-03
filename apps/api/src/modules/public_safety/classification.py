@@ -18,7 +18,7 @@ def classify_public_safety_group(category: str | None) -> tuple[str, str]:
     normalized = normalize_public_safety_category(category)
 
     if any(keyword in normalized for keyword in ("ESTUPRO", "ASSEDIO SEX", "IMPORTUNACAO SEX", "VIOLACAO SEX")):
-        return "sexual", "Violencia sexual"
+        return "sexual", "Violência sexual"
     if any(keyword in normalized for keyword in ("TRAFIC", "ENTORPEC", "DROGA")):
         return "drugs", "Drogas"
     if any(keyword in normalized for keyword in ("LATROC", "ROUBO", "EXTORSA")):
@@ -29,7 +29,7 @@ def classify_public_safety_group(category: str | None) -> tuple[str, str]:
         keyword in normalized
         for keyword in ("HOMIC", "LESAO", "AGRESS", "AMEACA", "SEQUESTRO", "VIOLENCIA DOMESTICA", "TORTURA", "MAUS TRATOS")
     ):
-        return "violence", "Violencia"
+        return "violence", "Violência"
     return "other", "Outros"
 
 

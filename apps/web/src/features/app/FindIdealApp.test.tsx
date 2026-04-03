@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FindIdealApp } from "./FindIdealApp";
 import { useJourneyStore, useUIStore } from "../../state";
-import { getBusLineDetails, getBusStopDetails, getJourneyTransportPoints, getJourneyZonesList, getTransportStopDetails, getZoneListings } from "../../api/client";
+import { getBusLineDetails, getBusStopDetails, getJourneyTransportPoints, getJourneyZonesList, getPublicSafetyIncidentsForViewport, getTransportStopDetails, getZoneListings } from "../../api/client";
 
 const mapEaseToMock = vi.fn();
 const mapSetLayoutPropertyMock = vi.fn();
@@ -14,6 +14,7 @@ const mapEventHandlers: Record<string, Array<(event?: any) => void>> = {};
 const loadedSourceIds = new Set<string>();
 const mapAddedLayers: Array<Record<string, any>> = [];
 const mapSourceData: Record<string, unknown> = {};
+const mapSourceDefinitions: Record<string, Record<string, any>> = {};
 
 function emitMapEvent(event: string, payload?: any) {
   for (const handler of mapEventHandlers[event] || []) {
@@ -32,6 +33,7 @@ vi.mock("../../api/client", () => ({
   getTransportStopDetails: vi.fn(),
   getJourneyTransportPoints: vi.fn(),
   getJourneyZonesList: vi.fn(),
+  getPublicSafetyIncidentsForViewport: vi.fn(),
   getZoneListings: vi.fn()
 }));
 
@@ -73,6 +75,12 @@ vi.mock("maplibre-gl", () => {
   class MockMap {
     private sources: Record<string, { setData: (data: unknown) => void }> = {};
     private layers = new Set<string>();
+    private bounds = {
+      getWest: () => -46.72,
+      getSouth: () => -23.62,
+      getEast: () => -46.58,
+      getNorth: () => -23.48,
+    };
 
     on(
       event: string,
@@ -91,18 +99,35 @@ vi.mock("maplibre-gl", () => {
       }
       return this;
     }
+    off(
+      event: string,
+      layerOrCallback: string | (() => void) | ((event: { features?: Array<{ properties?: Record<string, unknown> }> }) => void),
+      maybeCallback?: (event: { features?: Array<{ properties?: Record<string, unknown> }> }) => void
+    ) {
+      if (typeof layerOrCallback === "function" && event !== "load") {
+        mapEventHandlers[event] = (mapEventHandlers[event] || []).filter((handler) => handler !== layerOrCallback);
+      }
+      if (event === "click" && typeof layerOrCallback === "string" && maybeCallback && mapLayerClickHandlers[layerOrCallback] === maybeCallback) {
+        delete mapLayerClickHandlers[layerOrCallback];
+      }
+      return this;
+    }
     hasImage() {
       return false;
     }
     addImage() {
       return this;
     }
-    addSource(name: string) {
-      this.sources[name] = {
-        setData: (data: unknown) => {
-          mapSourceData[name] = data;
-        }
-      };
+    addSource(name: string, definition?: Record<string, any>) {
+      mapSourceDefinitions[name] = definition || {};
+      if (definition?.type === "geojson") {
+        mapSourceData[name] = definition.data;
+        this.sources[name] = {
+          setData: (data: unknown) => {
+            mapSourceData[name] = data;
+          }
+        };
+      }
       return this;
     }
     getSource(name: string) {
@@ -135,6 +160,9 @@ vi.mock("maplibre-gl", () => {
     }
     getZoom() {
       return 10.7;
+    }
+    getBounds() {
+      return this.bounds;
     }
     easeTo(payload: unknown) {
       mapEaseToMock(payload);
@@ -182,6 +210,7 @@ describe("FindIdealApp", () => {
     loadedSourceIds.clear();
     mapAddedLayers.length = 0;
     Object.keys(mapSourceData).forEach((key) => delete mapSourceData[key]);
+    Object.keys(mapSourceDefinitions).forEach((key) => delete mapSourceDefinitions[key]);
 
     useJourneyStore.getState().resetJourney();
     useUIStore.getState().resetUI();
@@ -197,6 +226,20 @@ describe("FindIdealApp", () => {
     vi.mocked(getTransportStopDetails).mockResolvedValue({ count: 0, buses: [], source: "gtfs_stop" } as never);
     vi.mocked(getJourneyTransportPoints).mockResolvedValue([] as never);
     vi.mocked(getJourneyZonesList).mockResolvedValue({ zones: [], total_count: 0, completed_count: 0 } as never);
+    vi.mocked(getPublicSafetyIncidentsForViewport).mockResolvedValue({
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          geometry: { type: "Point", coordinates: [-46.68, -23.54] },
+          properties: {
+            id: "cluster:10:1:1",
+            point_count: 7,
+            point_count_abbreviated: "7"
+          }
+        }
+      ]
+    } as never);
     vi.mocked(getZoneListings).mockResolvedValue({
       source: "cache",
       job_id: null,
@@ -352,6 +395,59 @@ describe("FindIdealApp", () => {
     const labelLayer = mapAddedLayers.find((layer) => layer.id === "zones-runtime-label-layer");
     expect(labelLayer?.layout?.["text-allow-overlap"]).toBe(true);
     expect(labelLayer?.layout?.["text-ignore-placement"]).toBe(true);
+  });
+
+  it("restores the safety layer with clustered viewport loading and aligned legend", async () => {
+    useUIStore.setState((state) => ({ ...state, step: 1, panelWidth: 420, isCollapsed: false }));
+
+    renderWithQueryClient();
+
+    await waitFor(() => {
+      expect(mapAddedLayers.some((layer) => layer.id === "safety-incident-layer")).toBe(true);
+      expect(mapAddedLayers.some((layer) => layer.id === "safety-incident-clusters-layer")).toBe(true);
+      expect(mapSourceDefinitions["public-safety-source-runtime"]).toMatchObject({
+        type: "geojson",
+        cluster: true,
+        clusterMaxZoom: 13,
+      });
+      expect(getPublicSafetyIncidentsForViewport).toHaveBeenCalledWith({
+        minLon: -46.72,
+        minLat: -23.62,
+        maxLon: -46.58,
+        maxLat: -23.48,
+      }, 10);
+      expect((mapSourceData["public-safety-source-runtime"] as { features?: Array<{ properties?: Record<string, unknown> }> }).features?.[0]?.properties.point_count).toBe(7);
+      expect(mapSetLayoutPropertyMock).toHaveBeenCalledWith("safety-incident-clusters-layer", "visibility", "visible");
+      expect(mapSetLayoutPropertyMock).toHaveBeenCalledWith("safety-incident-layer", "visibility", "visible");
+    });
+
+    await act(async () => {
+      mapLayerClickHandlers["safety-incident-clusters-layer"]({
+        features: [{ geometry: { type: "Point", coordinates: [-46.68, -23.54] } }]
+      });
+    });
+
+    expect(mapEaseToMock).toHaveBeenCalledWith(expect.objectContaining({ center: [-46.68, -23.54] }));
+
+    const legend = screen.getByText("Tipos de ocorrência").parentElement;
+    expect(legend).not.toBeNull();
+    expect(legend).toHaveStyle({ left: "448px", bottom: "16px" });
+
+    await act(async () => {
+      useUIStore.getState().setCollapsed(true);
+    });
+
+    await waitFor(() => {
+      expect(legend).toHaveStyle({ left: "16px", bottom: "16px" });
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Camadas" }));
+    fireEvent.click(screen.getByLabelText("Segurança"));
+
+    await waitFor(() => {
+      expect(mapSetLayoutPropertyMock).toHaveBeenCalledWith("safety-incident-clusters-layer", "visibility", "none");
+      expect(mapSetLayoutPropertyMock).toHaveBeenCalledWith("safety-incident-layer", "visibility", "none");
+    });
   });
 
   it("renders selected zone POIs on the map with category metadata and popup", async () => {

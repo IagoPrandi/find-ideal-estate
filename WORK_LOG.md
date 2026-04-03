@@ -1,5 +1,23 @@
 # Work Log
 
+## 2026-04-03 - Restaurar implementação da camada de segurança no mapa
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/develop-frontend/SKILL.md` para recolocar a integração frontend do mapa com diff focado e sem perder ajustes recentes fora da camada de segurança.
+- Trigger: usuario informou que modificacoes posteriores nao carregaram mais a implementacao da camada de seguranca, exigindo reaplicacao da integracao no mapa.
+- Scope executed:
+  - `apps/web/src/features/app/FindIdealApp.tsx`:
+    - restaurada a source GeoJSON clusterizada de seguranca carregada por viewport;
+    - restauradas as layers de cluster, contador e ocorrencia individual;
+    - restaurados popup, toggle de camada e legenda alinhada ao painel.
+  - `apps/web/src/features/app/FindIdealApp.test.tsx`:
+    - restaurada a cobertura da camada de seguranca com fetch por viewport, clusterizacao e reposicionamento da legenda.
+- Validation:
+  - `Set-Location C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/apps/web; $env:CI='1'; .\node_modules\.bin\vitest.cmd run --config vitest.config.ts src/features/app/FindIdealApp.test.tsx --reporter=dot --no-color` -> `10 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
 ## 2026-04-03 - Restaurar pop-up de plataformas no badge amarelo da etapa 6
 
 - Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
