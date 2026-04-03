@@ -177,7 +177,7 @@ export function Step6Analysis() {
 
   const listingsQuery = useQuery({
     queryKey: ["zone-listings", journeyId, zoneFingerprint, config.type, "all"],
-    queryFn: async () => getZoneListings(journeyId as string, zoneFingerprint as string, config.type, "residential", "all"),
+    queryFn: async () => getZoneListings(journeyId as string, zoneFingerprint as string, config.type, "all", "all"),
     enabled: Boolean(journeyId && zoneFingerprint),
     refetchInterval: (query) => {
       const data = query.state.data;

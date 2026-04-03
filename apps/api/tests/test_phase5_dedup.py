@@ -317,3 +317,117 @@ async def test_fetch_listing_cards_for_zone_supports_all_spatial_scope() -> None
                 zone_fingerprint=zone_fingerprint,
             )
         await close_db()
+
+
+@pytest.mark.anyio
+async def test_upsert_property_and_ad_updates_existing_property_usage_type() -> None:
+    init_db(os.environ["DATABASE_URL"])
+
+    fingerprint = compute_property_fingerprint(
+        address_normalized="Rua Teste Comercial, 50",
+        lat=-23.5505,
+        lon=-46.6333,
+        area_m2=31,
+        bedrooms=0,
+    )
+    platform_listing_id = f"usage-{uuid4().hex[:8]}"
+    schema_ready = False
+
+    try:
+        schema_ready = await _phase5_schema_ready()
+        if not schema_ready:
+            pytest.skip("Phase 5 schema not migrated. Run alembic upgrade head.")
+
+        engine = get_engine()
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    """
+                    DELETE FROM listing_snapshots
+                    WHERE listing_ad_id IN (
+                        SELECT id FROM listing_ads WHERE platform_listing_id = :platform_listing_id
+                    )
+                    """
+                ),
+                {"platform_listing_id": platform_listing_id},
+            )
+            await conn.execute(
+                text("DELETE FROM listing_ads WHERE platform_listing_id = :platform_listing_id"),
+                {"platform_listing_id": platform_listing_id},
+            )
+            await conn.execute(
+                text("DELETE FROM properties WHERE fingerprint = :fingerprint"),
+                {"fingerprint": fingerprint},
+            )
+
+        await upsert_property_and_ad(
+            fingerprint=fingerprint,
+            address_normalized="Rua Teste Comercial, 50",
+            lat=-23.5505,
+            lon=-46.6333,
+            area_m2=31,
+            bedrooms=0,
+            bathrooms=1,
+            parking=0,
+            usage_type="residential",
+            platform="zapimoveis",
+            platform_listing_id=platform_listing_id,
+            url="https://www.zapimoveis.com.br/imovel/aluguel-apartamento-centro-sp-id-1/",
+            advertised_usage_type="rent",
+            price=Decimal("3100"),
+            condo_fee=Decimal("200"),
+            iptu=Decimal("50"),
+            raw_payload={"url": "https://www.zapimoveis.com.br/imovel/aluguel-apartamento-centro-sp-id-1/"},
+        )
+
+        await upsert_property_and_ad(
+            fingerprint=fingerprint,
+            address_normalized="Rua Teste Comercial, 50",
+            lat=-23.5505,
+            lon=-46.6333,
+            area_m2=31,
+            bedrooms=0,
+            bathrooms=1,
+            parking=0,
+            usage_type="commercial",
+            platform="zapimoveis",
+            platform_listing_id=platform_listing_id,
+            url="https://www.zapimoveis.com.br/imovel/aluguel-conjunto-comercial-centro-sp-id-1/",
+            advertised_usage_type="rent",
+            price=Decimal("3100"),
+            condo_fee=Decimal("200"),
+            iptu=Decimal("50"),
+            raw_payload={"url": "https://www.zapimoveis.com.br/imovel/aluguel-conjunto-comercial-centro-sp-id-1/"},
+        )
+
+        async with engine.connect() as conn:
+            usage_type = await conn.scalar(
+                text("SELECT usage_type FROM properties WHERE fingerprint = :fingerprint"),
+                {"fingerprint": fingerprint},
+            )
+
+        assert usage_type == "commercial"
+    finally:
+        if schema_ready:
+            engine = get_engine()
+            async with engine.begin() as conn:
+                await conn.execute(
+                    text(
+                        """
+                        DELETE FROM listing_snapshots
+                        WHERE listing_ad_id IN (
+                            SELECT id FROM listing_ads WHERE platform_listing_id = :platform_listing_id
+                        )
+                        """
+                    ),
+                    {"platform_listing_id": platform_listing_id},
+                )
+                await conn.execute(
+                    text("DELETE FROM listing_ads WHERE platform_listing_id = :platform_listing_id"),
+                    {"platform_listing_id": platform_listing_id},
+                )
+                await conn.execute(
+                    text("DELETE FROM properties WHERE fingerprint = :fingerprint"),
+                    {"fingerprint": fingerprint},
+                )
+        await close_db()

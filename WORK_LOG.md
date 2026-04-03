@@ -1,254 +1,76 @@
 # Work Log
 
-## 2026-04-03 - Refinar ordenacao inline por preco e tamanho na etapa 6
+## 2026-04-03 - Restaurar pop-up de plataformas no badge amarelo da etapa 6
 
 - Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
 - Skill used:
-  - `skills/develop-frontend/SKILL.md` para concluir a refinacao visual da etapa 6 com diff pequeno e regressao focada.
-- Trigger: usuario pediu que a ordenacao fosse apenas um icone inline ao lado dos ranges de preco e tamanho, com suporte a ambos os criterios e exibindo um traco quando o criterio estiver inativo.
-- Behavior change:
-  - os filtros da etapa 6 agora exibem controles icon-only de ordenacao logo apos o valor maximo de preco e de metragem;
-  - a ordenacao pode alternar entre `preco` e `tamanho`;
-  - o criterio ativo mostra seta para cima/baixo conforme a direcao atual, e o criterio inativo mostra `-`.
+  - `skills/develop-frontend/SKILL.md` para depurar regressao de UX no card de imoveis e corrigir a causa raiz no contrato backend/frontend.
+- Trigger: usuario reportou que, ao posicionar o cursor sobre o retangulo amarelo de disponibilidade em multiplas plataformas, o pop-up com os precos por plataforma deixou de aparecer.
+- Root cause identified:
+  - `apps/api/src/modules/listings/dedup.py` deixou de incluir `platform_variants` no payload de `fetch_listing_cards_for_zone()`;
+  - a UI do `Step6Analysis` so abre o pop-up quando `duplication_badge` existe e `platform_variants.length > 1`, entao o badge continuava visivel mas sem dados para o hover.
 - Scope executed:
-  - `apps/web/src/state/journey-store.ts`:
-    - `ListingsPanelFilters` passou a usar `sortField` + `sortDirection` em vez de um toggle restrito a preco.
-  - `apps/web/src/lib/listingFormat.ts`:
-    - `applyListingsPanelFilters()` passou a ordenar por preco total exibido ou por `area_m2`, respeitando o criterio e a direcao ativos.
-  - `apps/web/src/components/panels/Step6Analysis.tsx`:
-    - substituido o botao textual por icones inline apos os campos maximos de preco e metragem;
-    - criterio inativo agora renderiza `Minus`, e o ativo renderiza `ChevronUp`/`ChevronDown`.
-  - testes:
-    - `apps/web/src/lib/listingFormat.test.ts` cobre ordenacao por preco e por tamanho;
-    - `apps/web/src/components/panels/Step6Analysis.test.tsx` cobre os icones inline, o estado inativo com traco e a troca de ordenacao entre preco e tamanho.
+  - `apps/api/src/modules/listings/dedup.py`:
+    - restaurado o ranking por plataforma (`platform_rank`), a agregacao `platform_variants` via `JSONB_AGG` e a serializacao canonica dos valores monetarios/links observados.
+  - `apps/api/tests/test_phase5_dedup.py`:
+    - restauradas as asserts de regressao que exigem `platform_variants` completos para um imovel deduplicado em duas plataformas.
 - Validation:
-  - `Set-Location "c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/apps/web"; $env:CI='1'; .\node_modules\.bin\vitest.cmd run --config vitest.config.ts src/lib/listingFormat.test.ts src/components/panels/Step6Analysis.test.tsx --reporter=dot --no-color` -> `14 passed`.
+  - `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase5_dedup.py -q --color=no` -> `14 passed`.
+  - `apps/web`: `vitest run --config vitest.config.ts src/components/panels/Step6Analysis.test.tsx --reporter=dot --no-color` -> `5 passed`.
+  - observacao: a suite frontend continua emitindo warnings antigos de `act(...)`, mas sem falha nova relacionada a este ajuste.
 - Progress Tracker:
   - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
 
-## 2026-04-03 - Adicionar toggle de ordenacao por preco nos filtros de imóveis
-
-- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
-- Skill used:
-  - `skills/develop-frontend/SKILL.md` para ajustar a UX da etapa 6 com diff pequeno, estado previsivel e regressao de UI.
-- Trigger: usuario pediu um controle nos filtros para ordenar a lista de imóveis, com padrão do menor para o maior e inversão ao clicar novamente.
-- Behavior change:
-  - os filtros da etapa 6 agora exibem um controle de ordenação por preço dentro do card de filtros;
-  - por padrão, a lista abre em `Menor para maior`;
-  - cada clique alterna entre `Menor para maior` e `Maior para menor`.
-- Scope executed:
-  - `apps/web/src/state/journey-store.ts`:
-    - `ListingsPanelFilters` ganhou `priceSortDirection` com default `asc`.
-  - `apps/web/src/lib/listingFormat.ts`:
-    - `applyListingsPanelFilters()` passou a respeitar `priceSortDirection` ao ordenar os imóveis filtrados.
-  - `apps/web/src/components/panels/Step6Analysis.tsx`:
-    - adicionado botão de toggle de ordenação dentro da seção de filtros.
-  - testes:
-    - `apps/web/src/lib/listingFormat.test.ts` cobre a ordenação ascendente padrão e a descendente após toggle;
-    - `apps/web/src/components/panels/Step6Analysis.test.tsx` cobre a ordem visível inicial e a inversão ao clicar no novo controle.
-- Validation:
-  - `Set-Location "c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/apps/web"; $env:CI='1'; .\node_modules\.bin\vitest.cmd run --config vitest.config.ts src/lib/listingFormat.test.ts src/components/panels/Step6Analysis.test.tsx --reporter=dot --no-color` -> `13 passed`.
-- Progress Tracker:
-  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
-
-## 2026-04-03 - Ordenar lista de imóveis do maior para o menor preço
-
-- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
-- Skill used:
-  - `skills/develop-frontend/SKILL.md` para ajustar comportamento visível da etapa 6 com diff pequeno e cobertura focada na UI.
-- Trigger: usuario pediu que a lista de imóveis fosse ordenada do maior preço para o menor preço.
-- Behavior change:
-  - a lista exibida na etapa 6 agora e ordenada por preco total exibido (`current_best_price + condo_fee + iptu`) em ordem decrescente;
-  - imóveis sem preço continuam aparecendo por ultimo.
-- Scope executed:
-  - `apps/web/src/lib/listingFormat.ts`:
-    - `applyListingsPanelFilters()` passou a ordenar os imóveis filtrados por preço exibido em ordem decrescente.
-  - testes:
-    - `apps/web/src/lib/listingFormat.test.ts` ganhou regressao unitária cobrindo a ordenacao `maior -> menor`;
-    - `apps/web/src/components/panels/Step6Analysis.test.tsx` passou a validar a ordem visível dos cards na etapa 6.
-- Validation:
-  - `Set-Location "c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/apps/web"; $env:CI='1'; .\node_modules\.bin\vitest.cmd run --config vitest.config.ts src/lib/listingFormat.test.ts src/components/panels/Step6Analysis.test.tsx --reporter=dot --no-color` -> `12 passed`.
-- Progress Tracker:
-  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
-
-## 2026-04-03 - Manter cache de listings valido por padrao
+## 2026-04-03 - Rodar backfill de classificacao de tipo de imovel na base
 
 - Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `WORK_LOG.md`.
 - Skill used:
-  - `skills/best-practices/SKILL.md` para alinhar a politica de cache no backend com diff minimo, comportamento explicito e validacao focada.
-- Trigger: usuario definiu que o cache nao deve ficar invalido por alteracoes de sessao/tempo e que, por padrao, deve permanecer valido.
-- Behavior change:
-  - cache de listings agora e considerado valido por padrao enquanto o `status` for `complete` ou `partial`, independentemente de `expires_at`.
-  - respostas de cache em `POST /journeys/{id}/listings/search` e `GET /journeys/{id}/zones/{zone}/listings` passam a retornar `freshness_status=fresh` quando servem do cache.
-  - revalidacao automatica por idade deixa de acontecer por padrao; refresh continua apenas em fluxos explicitos de `force_refresh` / hit parcial.
+  - `skills/best-practices/SKILL.md` para executar manutencao pontual em dados com regra de negocio ja implementada e validacao por contagem antes/depois.
+- Trigger: usuario pediu para rodar a classificacao de tipo de imovel para os imoveis ja salvos na base.
 - Scope executed:
-  - `apps/api/src/modules/listings/cache.py`:
-    - `cache_is_usable()` passou a usar apenas o estado do cache, ignorando expiracao temporal;
-    - a query de overlap deixou de filtrar por `expires_at`.
-  - `apps/api/src/api/routes/listings.py`:
-    - removida a distincao `fresh/stale` baseada em idade para listings servidos de cache;
-    - removida a revalidacao automatica disparada apenas por cache antigo.
+  - executado backfill direto na base `find_ideal_estate`, reaproveitando `modules.listings.classification.infer_listing_usage_type_from_url()`;
+  - para cada linha em `properties`, foi buscada a URL mais recente em `listing_ads` e recalculado `usage_type` com fallback por quartos quando a URL nao trouxesse sinal suficiente;
+  - atualizado `properties.usage_type` e marcado `properties.usage_type_inferred = true`.
+- Validation:
+  - base usada: `postgresql://postgres:postgres@localhost:5432/find_ideal_estate`.
+  - total de imoveis processados: `3092`.
+  - total de linhas atualizadas: `3092`.
+  - distribuicao antes: `commercial=114`, `residential=2978`.
+  - distribuicao recalculada: `commercial=877`, `residential=2215`.
+  - distribuicao apos gravacao: `commercial=877`, `residential=2215`.
+  - amostra verificada de URLs comerciais persistidas continuou classificada como `commercial`, incluindo slugs como `aluguel-conjunto-comercial-sala-...`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-04-03 - Corrigir classificacao por URL do anuncio sem alterar scraping
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para aplicar bugfix pontual com diff minimo e sem alterar o fluxo de scraping.
+- Trigger: usuario pediu que a classificacao comercial vs residencial fosse inferida pela URL do anuncio, pois a URL ja carregava esse sinal (`aluguel-conjunto-comercial-sala-...`) e nao deveria haver mudanca nos scrapers.
+- Root cause identified:
+  - o worker de listings persistia todos os imoveis com `usage_type="residential"`, ignorando a URL ja capturada pelo scraper;
+  - propriedades existentes reaproveitadas por fingerprint nao tinham `usage_type` corrigido;
+  - a etapa 6 e o mapa continuavam consultando `usage_type=residential`, escondendo comerciais mesmo apos classificacao correta no backend.
+- Scope executed:
+  - `apps/api/src/modules/listings/classification.py`:
+    - adicionada inferencia isolada baseada apenas na URL do anuncio, com fallback para quartos quando a URL nao trouxer sinal suficiente.
   - `apps/api/src/workers/handlers/listings.py`:
-    - o worker deixou de gravar novo TTL/`expires_at` ao finalizar scrape de listings.
-  - testes:
-    - `apps/api/tests/test_phase5_stale_revalidate.py` foi ajustado para validar que cache antigo continua `fresh` e nao enfileira revalidacao por idade;
-    - `apps/api/tests/test_phase5_scraping_lock.py` foi ajustado para validar que um cache expirado legado continua reutilizavel por padrao.
-- Validation:
-  - `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase5_scraping_lock.py apps/api/tests/test_phase5_stale_revalidate.py -q --color=no` -> `17 passed`.
-- Progress Tracker:
-  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
-
-## 2026-04-03 - Corrigir falso cache hit em listings com cache expirado
-
-- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `WORK_LOG.md`.
-- Skill used:
-  - `skills/best-practices/SKILL.md` para corrigir a causa raiz no backend com diff minimo, validacao focada e sem fallback silencioso.
-- Trigger: apos a canonizacao da chave por endereco, o usuario reproduziu nova busca e a UI ficou travada em scraping sem gerar a lista de imoveis.
-- Root cause identified:
-  - para a jornada mais recente, `POST /journeys/{id}/listings/search` registrou `cache_miss` porque a linha do endereco estava expirada;
-  - o worker `listings_scrape`, ao adquirir o lock, olhava apenas `status=complete/partial` e ignorava `expires_at`, encerrando o job como `cache_hit` mesmo com cache expirado;
-  - isso deixava a etapa 6 em um estado inconsistente: `GET /zones/{zone}/listings` respondia `freshness_status=no_cache`, sem job ativo e sem novo scrape executado, aparentando scraping infinito.
-- Scope executed:
-  - `apps/api/src/workers/handlers/listings.py`:
-    - o short-circuit de cache e o reopen apos lock contention passaram a usar `cache_is_usable(cache_record)` em vez de apenas `ZoneCacheStatus.is_usable(status)`, respeitando `expires_at`.
-  - testes:
-    - `apps/api/tests/test_phase5_scraping_lock.py` ganhou regressao garantindo que cache expirado com `status=complete` dispara scraping real e nao finaliza como `cache_hit`.
-- Validation:
-  - inspeção SQL confirmou que o job `745585cd-06e7-4565-ac1d-ae54a6dce596` tinha `job_type=listings_scrape`, `state=completed`, `scrape_diagnostics.status=cache_hit` e `cache_status_before=complete` para um endereco cuja linha em `zone_listing_caches` ja estava expirada;
-  - `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase5_scraping_lock.py apps/api/tests/test_phase5_stale_revalidate.py -q --color=no` -> `17 passed`.
-- Progress Tracker:
-  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
-
-## 2026-04-02 - Canonicalizar chave de cache de listings por endereco
-
-- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `WORK_LOG.md`.
-- Skill used:
-  - `skills/best-practices/SKILL.md` para corrigir a causa raiz no backend com diff minimo, canonizacao consistente e validacao focada.
-- Trigger: usuario reportou que ao pesquisar novamente por `Avenida Brigadeiro Luís Antônio, Jardim Paulista, São Paulo, SP` o fluxo nao estava reaproveitando as informacoes em cache apesar de o endereco ja existir salvo na base.
-- Root cause identified:
-  - a linha correspondente ja existia em `zone_listing_caches` com `status=complete`, entao o problema nao era ausencia de persistencia;
-  - o backend aceitava variacoes de `search_location_normalized` com tratamento desigual entre rota, cache, jobs e `listing_search_requests`, o que podia separar chaves equivalentes por acentos/espacamento e prejudicar reuse/coordenacao.
-- Scope executed:
-  - `apps/api/src/modules/listings/cache.py`:
-    - `normalize_search_location()` agora remove acentos e colapsa espacos, mantendo chave canonica unica para o mesmo endereco.
-  - `apps/api/src/modules/listings/search_requests.py`:
-    - `record_search_request()` passou a persistir sempre o endereco ja canonizado.
-  - `apps/api/src/api/routes/listings.py`:
-    - `POST /journeys/{id}/listings/search` agora normaliza o endereco uma unica vez e reutiliza esse valor em cache lookup, gravacao do search request, reuse de job ativo, criacao de cache e payload do job.
-    - `_find_active_listings_job_id()` e `_enqueue_listings_scrape_job()` tambem passaram a operar com o endereco canonico.
-  - testes:
-    - `apps/api/tests/test_phase5_search_requests.py` ganhou regressao garantindo persistencia sem acentos/espacos extras;
-    - `apps/api/tests/test_phase5_stale_revalidate.py` ganhou regressao garantindo que uma busca com acentos reaproveita o job/cache pela chave canonica.
-- Validation:
-  - consulta SQL em `zone_listing_caches` confirmou o endereco `avenida brigadeiro luis antonio, jardim paulista, sao paulo, sp` ja persistido com `status=complete`;
-  - consulta SQL em `listing_search_requests` confirmou `cache_hit` para esse mesmo endereco apos a reproducao da busca;
-  - `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase5_search_requests.py apps/api/tests/test_phase5_stale_revalidate.py -q --color=no` -> `19 passed`.
-- Progress Tracker:
-  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
-
-## 2026-04-02 - Disponibilizar seguranca na etapa 1 e alinhar legenda ao painel
-
-- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
-- Skill used:
-  - `skills/develop-frontend/SKILL.md` para ajustar comportamento de mapa/UI com diff focado e cobertura nos fluxos afetados.
-- Trigger: usuario pediu que a legenda de seguranca ficasse alinhada ao rodape do painel, ao lado dele quando expandido e no canto inferior esquerdo quando oculto, e que o mapa de seguranca estivesse disponivel desde a etapa 1 como verde/alagamento.
-- Scope executed:
-  - backend:
-    - `apps/api/src/modules/public_safety/classification.py` centraliza a classificacao canonica de ocorrencias e a versao SQL usada em tiles;
-    - `apps/api/src/api/routes/transport.py` passa a expor `/transport/tiles/environment/safety/{z}/{x}/{y}.pbf` com propriedades `crime_group`, `crime_group_label`, `crime_type` e `occurred_at` diretamente de `public_safety_incidents`.
+    - `_persist_listings()` passou a classificar por `listing.url` antes do `upsert`, sem tocar no scraping.
+  - `apps/api/src/modules/listings/dedup.py`:
+    - `upsert_property_and_ad()` passou a atualizar `properties.usage_type` em conflito por fingerprint.
   - frontend:
-    - `apps/web/src/features/app/FindIdealApp.tsx` troca a camada de seguranca de GeoJSON por vector tile, liberando visualizacao ja na etapa 1 sem depender de zona selecionada;
-    - a legenda de seguranca agora usa `panelWidth` e `isCollapsed` do `ui-store` para ficar ao lado do painel quando aberto e voltar ao canto inferior esquerdo quando oculto.
+    - `apps/web/src/components/panels/Step6Analysis.tsx`
+    - `apps/web/src/features/app/FindIdealApp.tsx`
+    - consultas da etapa 6/mapa passaram a buscar `usage_type=all` para nao ocultar comerciais.
   - testes:
-    - `apps/api/tests/test_transport_tile_metadata.py` valida a classificacao canonica da tile de seguranca;
-    - `apps/api/tests/test_phase3_transport_tile_perf.py` cobre o `min_zoom` da nova tile;
-    - `apps/web/src/features/app/FindIdealApp.test.tsx` valida disponibilidade na etapa 1, source vetorial e reposicionamento da legenda.
+    - `apps/api/tests/test_phase5_scraper_extraction.py`: regressao para classificacao comercial/residencial a partir da URL.
+    - `apps/api/tests/test_phase5_dedup.py`: regressao para atualizar `usage_type` de propriedade ja existente.
+    - `apps/web/src/components/panels/Step6Analysis.test.tsx` e `apps/web/src/features/app/FindIdealApp.test.tsx`: regressao para garantir consulta com `usage_type=all`.
 - Validation:
-  - `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_transport_tile_metadata.py apps/api/tests/test_phase3_transport_tile_perf.py -q --color=no` -> `8 passed`.
-  - `Set-Location apps/web; $env:CI='1'; .\node_modules\.bin\vitest.cmd run --config vitest.config.ts src/features/app/FindIdealApp.test.tsx --reporter=dot --no-color` -> `10 passed`.
-- Progress Tracker:
-  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
-
-## 2026-04-02 - Restaurar clusterizacao de ocorrencias por zoom
-
-- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
-- Skill used:
-  - `skills/develop-frontend/SKILL.md` para corrigir regressao visual/comportamental na camada de mapa sem desmontar o restante do fluxo.
-- Trigger: usuario reportou que os pontos de ocorrencia deveriam voltar a ficar clusterizados por zoom, como no comportamento anterior.
-- Root cause identified:
-  - a camada de seguranca havia sido migrada para `vector tile`, e o MapLibre so aplica `cluster` nativamente em `geojson sources`.
-- Scope executed:
-  - backend:
-    - `apps/api/src/api/routes/transport.py` ganhou endpoint de viewport `GET /transport/safety-incidents?bbox=...&zoom=...`, com agrupamento por grade dependente do zoom ate o nivel em que os pontos voltam a aparecer individualmente.
-  - frontend:
-    - `apps/web/src/api/client.ts` passou a buscar ocorrencias por viewport;
-    - `apps/web/src/features/app/FindIdealApp.tsx` voltou a usar `geojson source` clusterizada para seguranca, com refresh em `moveend` e layers de cluster/contador restauradas.
-  - testes:
-    - `apps/api/tests/test_phase3_transport_tile_perf.py` cobre a progressao da grade de cluster por zoom;
-    - `apps/web/src/features/app/FindIdealApp.test.tsx` cobre source clusterizada, fetch por viewport e click no cluster.
-- Validation:
-  - `Set-Location C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal; C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase3_transport_tile_perf.py -q --color=no` -> `5 passed`.
-  - `Set-Location apps/web; $env:CI='1'; .\node_modules\.bin\vitest.cmd run --config vitest.config.ts src/features/app/FindIdealApp.test.tsx --reporter=dot --no-color` -> `10 passed`.
-  - `Invoke-RestMethod 'http://localhost:8000/transport/safety-incidents?bbox=-46.72,-23.62,-46.58,-23.48&zoom=10'` -> `324` features; primeira feature com `point_count=1513` e `id=cluster:10:-5831:-2941`.
-- Follow-up optimization:
-  - a agregacao de clusters de seguranca em low zoom saiu de Python e foi para SQL em `apps/api/src/api/routes/transport.py`, removendo o gargalo principal do endpoint de viewport.
-  - depois disso, o caminho low zoom foi reduzido novamente para duas fases: agrega primeiro e busca detalhes apenas dos singletons, evitando classificar todas as ocorrencias do bbox quando o mapa ainda esta agrupado.
-  - validacao runtime apos rebuild da API:
-    - helper interno `_query_public_safety_feature_collection(...)` no container `api` caiu para `427.61 ms` no bbox `-46.72,-23.62,-46.58,-23.48` com `zoom=10`.
-    - endpoint HTTP `GET /transport/safety-incidents?...&zoom=10` caiu para `0.414 s`, `0.262 s` e `0.281 s` em tres amostras consecutivas.
-- Progress Tracker:
-  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
-
-## 2026-04-02 - Popular `public_safety_incidents` com o dataset SSP usado pelo mapa
-
-- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `WORK_LOG.md`.
-- Skill used:
-  - `skills/best-practices/SKILL.md` para corrigir a causa raiz no backend/dados com diff pequeno, validação reprodutivel e sem fallback silencioso.
-- Trigger: usuario reportou que os pontos de ocorrencia ainda nao apareciam no mapa e pediu verificacao se os dados de seguranca haviam sido levados para a base, usando `cods_ok/segurancaRegiao.py` como referencia da fonte.
-- Root cause identified:
-  - a UI e a rota `GET /journeys/{journey_id}/zones/{zone_fingerprint}/safety-incidents` ja estavam prontas, mas `public_safety_incidents` estava com `0` linhas;
-  - `scripts/bootstrap_m4_4_layers.py` criava a tabela e o indice GIST, mas nao populava os dados SSP/PostGIS.
-- Scope executed:
-  - `apps/api/src/modules/public_safety/ingestion.py`:
-    - nova rotina de ingestao que carrega o XLSX SSP cacheado em `data_cache/dados_criminais_<ano>.xlsx` usando o mesmo parsing de `cods_ok/segurancaRegiao.py`;
-    - valida `occurred_at`, `category`, `latitude` e `longitude`, descarta linhas invalidas e substitui de forma idempotente o recorte anual na tabela `public_safety_incidents`.
-  - `apps/api/src/modules/public_safety/__init__.py`:
-    - exporta a API publica da nova rotina de ingestao.
-  - `scripts/ingest_public_safety_postgis.py`:
-    - novo CLI para backfill/reexecucao explicita da carga SSP no PostGIS.
-  - `scripts/bootstrap_m4_4_layers.py`:
-    - agora executa a ingestao de seguranca apos o bootstrap de camadas, evitando que ambientes novos fiquem com a tabela vazia.
-  - ambiente local:
-    - instalados `openpyxl` e `pyarrow` na `.venv` para suportar leitura do XLSX/cache SSP.
-- Validation:
-  - `Set-Location "c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal"; $env:DATABASE_URL='postgresql://postgres:postgres@localhost:5432/find_ideal_estate'; C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe scripts/ingest_public_safety_postgis.py --year 2025` -> `inserted_rows=1060199`, `dropped_rows=1`.
-  - `docker compose exec -T postgres psql -U postgres -d find_ideal_estate -c "SELECT COUNT(*) AS incidents, COUNT(*) FILTER (WHERE location IS NOT NULL) AS with_location, MIN(occurred_at) AS min_occurred_at, MAX(occurred_at) AS max_occurred_at FROM public_safety_incidents;"` -> `1060199` linhas, todas com geometria, cobrindo `2025-01-01` a `2025-12-31`.
-  - `docker compose exec -T postgres psql -U postgres -d find_ideal_estate -c "SELECT category, COUNT(*) AS total FROM public_safety_incidents GROUP BY category ORDER BY total DESC LIMIT 10;"` -> categorias SSP presentes como `FURTO - OUTROS`, `LESÃO CORPORAL DOLOSA`, `ROUBO - OUTROS`, `TRÁFICO DE ENTORPECENTES`, `ESTUPRO DE VULNERÁVEL`.
-  - `Invoke-RestMethod http://localhost:8000/journeys/b8f946ed-0dd5-4e49-8298-2f32416f27bb/zones/983777e57a12cd763ea07bc028bdfc0ddb730687159efee59d3556ad6ee0ce16/safety-incidents` -> `FeatureCollection` com `196` features reais; primeira ocorrencia classificada como `robbery` a partir de `ROUBO - OUTROS`.
-- Progress Tracker:
-  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
-
-## 2026-04-01 - Implementar camada de segurança no mapa com cor por tipo de ocorrência
-
-- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
-- Skill used:
-  - `skills/develop-frontend/SKILL.md` para integrar a nova camada ao mapa com diff focado, coerência visual e validação dirigida.
-- Trigger: usuario reportou que a camada de segurança nao estava visivel no mapa e definiu que as cores devem ser baseadas no tipo de ocorrencia.
-- Scope executed:
-  - backend:
-    - `packages/contracts/contracts/zones.py` e `apps/api/contracts/__init__.py` receberam DTOs GeoJSON para ocorrencias de seguranca no mapa;
-    - `apps/api/src/api/routes/journeys.py` passou a expor `GET /journeys/{journey_id}/zones/{zone_fingerprint}/safety-incidents`;
-    - a rota classifica `category` em grupos canonicos (`theft`, `robbery`, `violence`, `sexual`, `drugs`, `other`) preservando o tipo bruto para tooltip/debug.
-  - frontend:
-    - `apps/web/src/api/schemas.ts` e `apps/web/src/api/client.ts` receberam o contrato e o cliente da nova FeatureCollection de seguranca;
-    - `apps/web/src/features/app/FindIdealApp.tsx` ganhou source/layers MapLibre para seguranca, toggle no menu de camadas, clusterizacao, popup por ocorrencia e legenda dos grupos canonicos;
-    - a camada e carregada por zona selecionada e respeita `config.enrichments.safety` sem fallback silencioso.
-  - testes:
-    - `apps/api/tests/test_phase1_journeys_jobs_routes.py` cobre a classificacao canonica e a nova rota de ocorrencias;
-    - `apps/web/src/features/app/FindIdealApp.test.tsx` cobre carga da source, criacao da layer e toggle de visibilidade.
-- Validation:
-  - `Set-Location "c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal"; C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase1_journeys_jobs_routes.py -q --color=no` -> `11 passed`.
-  - `Set-Location "c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/apps/web"; $env:CI='1'; .\node_modules\.bin\vitest.cmd run --config vitest.config.ts src/features/app/FindIdealApp.test.tsx --reporter=dot --no-color` -> `10 passed`.
+  - `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase5_scraper_extraction.py apps/api/tests/test_phase5_dedup.py -q --tb=short` -> `34 passed`.
+  - `apps/web`: `vitest run --config vitest.config.ts src/components/panels/Step6Analysis.test.tsx src/features/app/FindIdealApp.test.tsx --reporter=dot --no-color` -> `2 passed`, `14 passed`.
+  - observacao: a suite frontend continua emitindo warnings antigos de `act(...)` em `Step6Analysis.test.tsx`, mas nao houve falha nem erro novo relacionado a esta mudanca.
 - Progress Tracker:
   - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
 

@@ -161,22 +161,6 @@ Testar pelo menos:
 
 ---
 
-## Estrutura de pasta de skill no padrão usado internamente (OpenAI)
-Uma pasta de skill costuma ser **autoexplicativa** e conter um arquivo principal `skill.md` como ponto de entrada.
-
-Estrutura recomendada:
-
-```
-skill_frontend_ai_quality/
-  skill.md                    # Guia principal (este arquivo)
-  checklists/
-    checklist_pronto.md       # Checklists reutilizáveis (opcional)
-  templates/
-    prompt_de_revisao.md      # Templates de prompt / padrões (opcional)
-  examples/
-    exemplo_antes_depois.md   # Exemplos curtos e reproduzíveis (opcional)
-```
-
 Regras práticas:
 - **`skill.md` é obrigatório** e deve funcionar sozinho.
 - Arquivos extras são **opcionais**, mas ajudam na adoção (checklists, templates, exemplos).

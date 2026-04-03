@@ -15,6 +15,7 @@ import sys
 # Ensure the API source tree is on the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
+from modules.listings.classification import infer_listing_usage_type_from_url  # noqa: E402
 from modules.listings.scrapers.quintoandar import (  # noqa: E402
     _extract_from_quintoandar_dom_rows,
     _extract_from_quintoandar_payload,
@@ -195,6 +196,28 @@ class TestVivaRealExtraction:
         assert len(results) == 1
         assert results[0]["lat"] == -23.521
         assert results[0]["lon"] == -46.729
+
+
+class TestListingUsageInferenceFromUrl:
+    def test_marks_commercial_from_listing_url(self) -> None:
+        usage_type = infer_listing_usage_type_from_url(
+            "https://www.zapimoveis.com.br/imovel/aluguel-conjunto-comercial-sala-bela-vista-centro-sao-paulo-sp-31m2-id-2877617488/",
+            2,
+        )
+
+        assert usage_type == "commercial"
+
+    def test_marks_residential_from_listing_url(self) -> None:
+        usage_type = infer_listing_usage_type_from_url(
+            "https://www.zapimoveis.com.br/imovel/aluguel-apartamento-pinheiros-sao-paulo-sp-70m2-id-123456/",
+            0,
+        )
+
+        assert usage_type == "residential"
+
+    def test_falls_back_to_bedrooms_when_url_has_no_signal(self) -> None:
+        assert infer_listing_usage_type_from_url("https://www.example.com/imovel/123", 0) == "commercial"
+        assert infer_listing_usage_type_from_url("https://www.example.com/imovel/123", 2) == "residential"
 
 
 # ---------------------------------------------------------------------------

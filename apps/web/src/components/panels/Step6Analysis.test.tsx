@@ -120,6 +120,10 @@ describe("Step6Analysis", () => {
     const progressPanel = await screen.findByTestId("listings-platform-progress");
     const progressGrid = within(progressPanel).getByTestId("listings-platform-progress-grid");
 
+    await waitFor(() => {
+      expect(getZoneListings).toHaveBeenCalledWith("journey-1", "zone-fp-1", "rent", "all", "all");
+    });
+
     expect(progressPanel).toBeInTheDocument();
     expect(progressGrid.className).toContain("grid-cols-1");
     expect(within(progressPanel).getByText(/Progresso por plataforma/i)).toBeInTheDocument();

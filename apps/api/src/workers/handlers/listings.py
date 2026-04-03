@@ -31,6 +31,7 @@ from modules.listings.cache import (
     normalize_search_location,
     transition_cache_status,
 )
+from modules.listings.classification import infer_listing_usage_type_from_url
 from modules.listings.dedup import compute_property_fingerprint, upsert_property_and_ad
 from modules.listings.models import (
     PreliminaryResultThresholds,
@@ -274,6 +275,7 @@ async def _persist_listings(
         lon = listing.get("lon")
         area_m2 = listing.get("area_m2")
         bedrooms = listing.get("bedrooms")
+        usage_type = infer_listing_usage_type_from_url(listing.get("url"), bedrooms)
 
         fingerprint = compute_property_fingerprint(
             address_normalized=address,
@@ -299,7 +301,7 @@ async def _persist_listings(
             bedrooms=bedrooms,
             bathrooms=listing.get("bathrooms"),
             parking=listing.get("parking"),
-            usage_type="residential",
+            usage_type=usage_type,
             platform=platform,
             platform_listing_id=listing["platform_listing_id"],
             url=listing.get("url"),

@@ -101,7 +101,8 @@ async def upsert_property_and_ad(
                     :area_m2, :bedrooms, :bathrooms,
                     :parking, :usage_type, :fingerprint
                 )
-                ON CONFLICT (fingerprint) DO NOTHING
+                ON CONFLICT (fingerprint) DO UPDATE
+                    SET usage_type = COALESCE(EXCLUDED.usage_type, properties.usage_type)
                 """
             ),
             {
