@@ -18,6 +18,30 @@
 - Progress Tracker:
   - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
 
+## 2026-04-03 - Adicionar filtros por categoria na legenda de seguranca
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/develop-frontend/SKILL.md` para estender a legenda interativa com controles por categoria sem quebrar a UX do mapa nem a clusterizacao em zoom baixo.
+- Trigger: usuario pediu um olho e um icone de foco por item da legenda, alinhados a direita, com comportamento de ocultar categoria e isolar somente a categoria clicada.
+- Scope executed:
+  - `apps/web/src/features/app/FindIdealApp.tsx`:
+    - adicionados botoes de olho e foco em cada item da legenda de seguranca;
+    - o olho alterna a visibilidade da categoria;
+    - o foco isola apenas a categoria clicada e reverte ao clicar novamente;
+    - a legenda deixou de bloquear clique para permitir a interacao.
+  - `apps/web/src/api/client.ts`:
+    - `getPublicSafetyIncidentsForViewport()` agora aceita a lista ativa de categorias e envia `groups=` para a API.
+  - `apps/api/src/api/routes/transport.py`:
+    - `/transport/safety-incidents` passou a aceitar filtro opcional de grupos e aplicar o recorte antes da agregacao dos clusters.
+  - `apps/web/src/features/app/FindIdealApp.test.tsx` e `apps/api/tests/test_transport_tile_metadata.py`:
+    - adicionadas regressos para filtragem/isolamento pela legenda e para o filtro de grupos na feature collection de seguranca.
+- Validation:
+  - `Set-Location C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/apps/web; $env:CI='1'; .\node_modules\.bin\vitest.cmd run --config vitest.config.ts src/features/app/FindIdealApp.test.tsx --reporter=dot --no-color` -> `11 passed`.
+  - `Set-Location C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal; C:\Users\iagoo\PESSOAL\projetos\onde_morar\principal\.venv\Scripts\python.exe -m pytest apps/api/tests/test_transport_tile_metadata.py -q --color=no` -> `5 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
 ## 2026-04-03 - Restaurar pop-up de plataformas no badge amarelo da etapa 6
 
 - Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.

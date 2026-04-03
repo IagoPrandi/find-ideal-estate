@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Layers } from "lucide-react";
+import { Eye, EyeOff, Layers } from "lucide-react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { API_BASE, getBusLineDetails, getBusStopDetails, getJourneyTransportPoints, getJourneyZonesList, getPublicSafetyIncidentsForViewport, getTransportStopDetails, getZoneListings } from "../../api/client";
@@ -47,6 +47,14 @@ const SAFETY_GROUP_META = [
   { key: "drugs", label: "Drogas", color: "#7c3aed" },
   { key: "other", label: "Outros", color: "#64748b" },
 ] as const;
+
+type SafetyGroupKey = typeof SAFETY_GROUP_META[number]["key"];
+
+const DEFAULT_SAFETY_GROUP_VISIBILITY = Object.fromEntries(
+  SAFETY_GROUP_META.map((item) => [item.key, true])
+) as Record<SafetyGroupKey, boolean>;
+
+const SAFETY_GROUP_KEYS = SAFETY_GROUP_META.map((item) => item.key) as SafetyGroupKey[];
 
 type MapOverlayLayerKey =
   | "routes"
@@ -516,6 +524,8 @@ export function FindIdealApp() {
   const [mapError, setMapError] = useState<string | null>(null);
   const [isLayerMenuOpen, setIsLayerMenuOpen] = useState(false);
   const [layerVisibility, setLayerVisibility] = useState<Record<MapOverlayLayerKey, boolean>>(DEFAULT_LAYER_VISIBILITY);
+  const [safetyGroupVisibility, setSafetyGroupVisibility] = useState<Record<SafetyGroupKey, boolean>>(DEFAULT_SAFETY_GROUP_VISIBILITY);
+  const [isolatedSafetyGroup, setIsolatedSafetyGroup] = useState<SafetyGroupKey | null>(null);
   const [visibleSequentialLayerGroupIndex, setVisibleSequentialLayerGroupIndex] = useState(-1);
   const [selectedZonePoiState, setSelectedZonePoiState] = useState<{ zoneFingerprint: string | null; poiPoints: ZonePoiPointLike[] }>({
     zoneFingerprint: null,
@@ -550,6 +560,21 @@ export function FindIdealApp() {
       ...current,
       [key]: !current[key]
     }));
+  }
+
+  function toggleSafetyGroupVisibility(groupKey: SafetyGroupKey) {
+    setSafetyGroupVisibility((current) => {
+      const nextVisibility = !current[groupKey];
+      return {
+        ...current,
+        [groupKey]: nextVisibility,
+      };
+    });
+    setIsolatedSafetyGroup((current) => (current === groupKey ? null : current));
+  }
+
+  function toggleSafetyGroupIsolation(groupKey: SafetyGroupKey) {
+    setIsolatedSafetyGroup((current) => (current === groupKey ? null : groupKey));
   }
 
   useEffect(() => {
@@ -622,6 +647,15 @@ export function FindIdealApp() {
     () => applyListingsPanelFilters(listingsQuery.data?.listings || [], listingsFilters),
     [listingsFilters, listingsQuery.data?.listings]
   );
+
+  const activeSafetyGroups = useMemo(() => {
+    if (isolatedSafetyGroup) {
+      return [isolatedSafetyGroup];
+    }
+    return SAFETY_GROUP_KEYS.filter((groupKey) => safetyGroupVisibility[groupKey]);
+  }, [isolatedSafetyGroup, safetyGroupVisibility]);
+
+  const activeSafetyGroupsKey = activeSafetyGroups.join(",");
 
   const safetyLegendStyle = {
     bottom: PANEL_EDGE_OFFSET_PX,
@@ -1361,6 +1395,11 @@ export function FindIdealApp() {
         return;
       }
 
+      if (activeSafetyGroups.length === 0) {
+        setGeoJsonSourceData(map, SAFETY_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
+        return;
+      }
+
       const zoom = Math.floor(map.getZoom());
       if (zoom < 10) {
         setGeoJsonSourceData(map, SAFETY_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
@@ -1371,7 +1410,7 @@ export function FindIdealApp() {
       const currentRequestId = requestId;
 
       try {
-        const response = await getPublicSafetyIncidentsForViewport(getMapViewportBounds(map), zoom);
+        const response = await getPublicSafetyIncidentsForViewport(getMapViewportBounds(map), zoom, activeSafetyGroups);
         if (cancelled || currentRequestId !== requestId) {
           return;
         }
@@ -1395,7 +1434,7 @@ export function FindIdealApp() {
       cancelled = true;
       map.off("moveend", handleMoveEnd);
     };
-  }, [config.enrichments.safety, isMapReady, layerVisibility.safety]);
+  }, [activeSafetyGroups, activeSafetyGroupsKey, config.enrichments.safety, isMapReady, layerVisibility.safety]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1612,13 +1651,37 @@ export function FindIdealApp() {
     <main className="relative h-screen w-full overflow-hidden">
       <div ref={mapContainerRef} className="h-full w-full" aria-label="Mapa principal" />
       {layerVisibility.safety && config.enrichments.safety ? (
-        <div className="pointer-events-none absolute z-40 rounded-xl border border-slate-200 bg-white/95 px-4 py-3 shadow-lg backdrop-blur-md" style={safetyLegendStyle}>
+        <div className="pointer-events-auto absolute z-40 rounded-xl border border-slate-200 bg-white/95 px-4 py-3 shadow-lg backdrop-blur-md" style={safetyLegendStyle}>
           <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Tipos de ocorrência</p>
           <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs text-slate-700">
             {SAFETY_GROUP_META.map((item) => (
-              <div key={item.key} className="flex items-center gap-2">
-                <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />
-                <span>{item.label}</span>
+              <div key={item.key} className="flex items-center justify-between gap-3 rounded-lg px-1 py-0.5">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />
+                  <span className={`${isolatedSafetyGroup === item.key || safetyGroupVisibility[item.key] ? "text-slate-700" : "text-slate-400 line-through"}`}>{item.label}</span>
+                </div>
+                <div className="flex items-center justify-end gap-1.5">
+                  <button
+                    type="button"
+                    aria-label={`${safetyGroupVisibility[item.key] ? "Ocultar" : "Mostrar"} ${item.label}`}
+                    aria-pressed={!safetyGroupVisibility[item.key]}
+                    onClick={() => toggleSafetyGroupVisibility(item.key)}
+                    className={`flex h-7 w-7 items-center justify-center rounded-md border transition ${safetyGroupVisibility[item.key] ? "border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700" : "border-rose-200 bg-rose-50 text-rose-500 hover:border-rose-300 hover:text-rose-600"}`}
+                  >
+                    {safetyGroupVisibility[item.key] ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                  </button>
+                  <button
+                    type="button"
+                    aria-label={`${isolatedSafetyGroup === item.key ? "Mostrar todas as categorias novamente" : `Mostrar apenas ${item.label}`}`}
+                    aria-pressed={isolatedSafetyGroup === item.key}
+                    onClick={() => toggleSafetyGroupIsolation(item.key)}
+                    className={`flex h-7 w-7 items-center justify-center rounded-md border transition ${isolatedSafetyGroup === item.key ? "border-pastel-violet-300 bg-pastel-violet-50 text-pastel-violet-700" : "border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700"}`}
+                  >
+                    <span className="relative block h-3.5 w-3.5 rounded-[0.35rem] border border-current">
+                      <span className="absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" />
+                    </span>
+                  </button>
+                </div>
               </div>
             ))}
           </div>

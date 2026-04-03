@@ -591,6 +591,7 @@ async def _query_public_safety_feature_collection(
     max_lon: float,
     max_lat: float,
     zoom: int,
+    groups: tuple[str, ...] | None = None,
 ) -> dict:
     if zoom < _SAFETY_TILE_MIN_ZOOM:
         return {"type": "FeatureCollection", "features": []}
@@ -600,6 +601,14 @@ async def _query_public_safety_feature_collection(
     max_lon_sql = f"{max_lon:.8f}"
     max_lat_sql = f"{max_lat:.8f}"
     bbox_sql = f"ST_MakeEnvelope({min_lon_sql}, {min_lat_sql}, {max_lon_sql}, {max_lat_sql}, 4326)"
+    group_filter_clause = ""
+    group_filter_params: dict[str, object] = {}
+
+    if groups:
+        group_filter_clause = "\n  AND {crime_group_sql} = ANY(:groups)".format(
+            crime_group_sql=public_safety_group_case_sql("psi.category").strip(),
+        )
+        group_filter_params["groups"] = list(groups)
 
     raw_incidents_sql = """
 WITH bounds AS (
@@ -621,11 +630,13 @@ CROSS JOIN bounds b
 WHERE psi.location IS NOT NULL
   AND psi.location && b.env_4326
   AND ST_Intersects(psi.location, b.env_4326)
+    {group_filter_clause}
 ORDER BY psi.occurred_at DESC NULLS LAST, psi.id ASC
 """.format(
         bbox_sql=bbox_sql,
         crime_group_sql=public_safety_group_case_sql("psi.category"),
         crime_group_label_sql=public_safety_group_label_case_sql("psi.category"),
+                group_filter_clause=group_filter_clause,
     )
 
     clustered_incidents_sql = """
@@ -643,6 +654,7 @@ WITH bounds AS (
     WHERE psi.location IS NOT NULL
       AND psi.location && b.env_4326
       AND ST_Intersects(psi.location, b.env_4326)
+            {group_filter_clause}
 ), aggregated AS (
     SELECT
         grid_x,
@@ -666,6 +678,7 @@ ORDER BY point_count DESC, grid_x ASC, grid_y ASC
 """.format(
         bbox_sql=bbox_sql,
         grid_size_sql=f"{_public_safety_cluster_grid_size(zoom):.8f}",
+    group_filter_clause=group_filter_clause,
     )
 
     singleton_details_sql = """
@@ -688,9 +701,9 @@ WHERE psi.id::text = ANY(:incident_ids)
     async with engine.begin() as conn:
         await conn.execute(text("SET LOCAL jit = off"))
         if zoom > 13:
-            rows = (await conn.execute(text(raw_incidents_sql))).mappings().all()
+            rows = (await conn.execute(text(raw_incidents_sql), group_filter_params)).mappings().all()
         else:
-            rows = (await conn.execute(text(clustered_incidents_sql))).mappings().all()
+            rows = (await conn.execute(text(clustered_incidents_sql), group_filter_params)).mappings().all()
             singleton_ids = [str(row.get("incident_id")) for row in rows if int(row.get("point_count") or 0) <= 1 and row.get("incident_id")]
             singleton_details = {}
             if singleton_ids:
@@ -833,6 +846,7 @@ async def get_public_safety_tile(
 async def get_public_safety_incidents(
     bbox: str = Query(..., min_length=7),
     zoom: int = Query(..., ge=0, le=22),
+    groups: str | None = Query(default=None),
 ) -> dict:
     raw_parts = bbox.split(",")
     if len(raw_parts) != 4:
@@ -846,6 +860,15 @@ async def get_public_safety_incidents(
     if min_lon >= max_lon or min_lat >= max_lat:
         raise HTTPException(status_code=400, detail="bbox invalido. Envelope deve ter min < max")
 
+    allowed_groups = {"theft", "robbery", "violence", "sexual", "drugs", "other"}
+    parsed_groups: tuple[str, ...] | None = None
+    if groups is not None:
+        parsed_group_values = tuple(part.strip() for part in groups.split(",") if part.strip())
+        invalid_groups = sorted({group for group in parsed_group_values if group not in allowed_groups})
+        if invalid_groups:
+            raise HTTPException(status_code=400, detail="groups invalido. Use theft,robbery,violence,sexual,drugs,other")
+        parsed_groups = tuple(dict.fromkeys(parsed_group_values))
+
     engine = get_engine()
     return await _query_public_safety_feature_collection(
         engine,
@@ -854,6 +877,7 @@ async def get_public_safety_incidents(
         max_lon=max_lon,
         max_lat=max_lat,
         zoom=zoom,
+        groups=parsed_groups,
     )
 
 

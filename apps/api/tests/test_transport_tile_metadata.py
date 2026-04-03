@@ -22,6 +22,7 @@ from src.api.routes.transport import (  # noqa: E402
     _PUBLIC_SAFETY_TILE_ROWS_SQL,
     _TRANSPORT_LINES_TILE_ROWS_SQL,
     _TRANSPORT_STOPS_TILE_ROWS_SQL,
+    _query_public_safety_feature_collection,
     get_transport_stop_details,
 )
 from core.db import close_db, get_engine, init_db  # noqa: E402
@@ -38,6 +39,7 @@ SAMPLE_LAT = 0.01
 SAMPLE_LON = 0.01
 SAMPLE_GEOSAMPA_STOP_NAME = "GeoSampa Tile Stop"
 SAMPLE_SAFETY_CATEGORY = "ROUBO - TESTE TILE META"
+SAMPLE_SAFETY_SECOND_CATEGORY = "FURTO - TESTE TILE META"
 SAMPLE_SAFETY_OCCURRED_AT = datetime(2026, 4, 2, 9, 15, tzinfo=timezone.utc)
 
 
@@ -73,7 +75,7 @@ async def _ensure_public_safety_schema() -> bool:
 async def _cleanup_sample_rows() -> None:
     engine = get_engine()
     async with engine.begin() as conn:
-        await conn.execute(text("DELETE FROM public_safety_incidents WHERE category = :category"), {"category": SAMPLE_SAFETY_CATEGORY})
+        await conn.execute(text("DELETE FROM public_safety_incidents WHERE category = ANY(:categories)"), {"categories": [SAMPLE_SAFETY_CATEGORY, SAMPLE_SAFETY_SECOND_CATEGORY]})
         await conn.execute(text("DELETE FROM geosampa_bus_stops WHERE nm_ponto_onibus = :stop_name"), {"stop_name": SAMPLE_GEOSAMPA_STOP_NAME})
         await conn.execute(text("DELETE FROM gtfs_trips WHERE trip_id = :trip_id"), {"trip_id": SAMPLE_ARTIFACT_TRIP_ID})
         await conn.execute(text("DELETE FROM gtfs_routes WHERE route_id = :route_id"), {"route_id": SAMPLE_ARTIFACT_ROUTE_ID})
@@ -104,6 +106,24 @@ async def _insert_sample_gtfs_rows() -> None:
                 "category": SAMPLE_SAFETY_CATEGORY,
                 "incident_lon": SAMPLE_LON,
                 "incident_lat": SAMPLE_LAT,
+            },
+        )
+        await conn.execute(
+            text(
+                """
+                INSERT INTO public_safety_incidents (occurred_at, category, location)
+                VALUES (
+                    :occurred_at,
+                    :category,
+                    ST_SetSRID(ST_MakePoint(:incident_lon, :incident_lat), 4326)
+                )
+                """
+            ),
+            {
+                "occurred_at": SAMPLE_SAFETY_OCCURRED_AT,
+                "category": SAMPLE_SAFETY_SECOND_CATEGORY,
+                "incident_lon": SAMPLE_LON + 0.0002,
+                "incident_lat": SAMPLE_LAT + 0.0002,
             },
         )
         await conn.execute(
@@ -313,6 +333,39 @@ async def test_public_safety_tile_rows_classify_incidents_for_step_one_map() -> 
         assert safety_row["crime_group"] == "robbery"
         assert safety_row["crime_group_label"] == "Roubo"
         assert safety_row["occurred_at"] == "2026-04-02T09:15:00Z"
+    finally:
+        if has_public_safety_schema:
+            await _cleanup_sample_rows()
+        await close_db()
+
+
+@pytest.mark.anyio
+async def test_public_safety_feature_collection_filters_groups_for_legend_controls() -> None:
+    init_db(os.environ["DATABASE_URL"])
+    has_public_safety_schema = False
+    try:
+        has_public_safety_schema = await _ensure_public_safety_schema()
+        if not has_public_safety_schema:
+            pytest.skip("Public safety schema not migrated. Run alembic upgrade head.")
+
+        await _cleanup_sample_rows()
+        await _insert_sample_gtfs_rows()
+
+        engine = get_engine()
+        feature_collection = await _query_public_safety_feature_collection(
+            engine,
+            min_lon=SAMPLE_LON - 0.01,
+            min_lat=SAMPLE_LAT - 0.01,
+            max_lon=SAMPLE_LON + 0.01,
+            max_lat=SAMPLE_LAT + 0.01,
+            zoom=14,
+            groups=("robbery",),
+        )
+
+        assert feature_collection["features"]
+        assert all(feature["properties"]["crime_group"] == "robbery" for feature in feature_collection["features"])
+        assert any(feature["properties"]["crime_type"] == SAMPLE_SAFETY_CATEGORY for feature in feature_collection["features"])
+        assert all(feature["properties"]["crime_type"] != SAMPLE_SAFETY_SECOND_CATEGORY for feature in feature_collection["features"])
     finally:
         if has_public_safety_schema:
             await _cleanup_sample_rows()

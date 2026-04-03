@@ -155,10 +155,14 @@ export async function getTransportStops(
 export async function getPublicSafetyIncidentsForViewport(
   viewport: { minLon: number; minLat: number; maxLon: number; maxLat: number },
   zoom: number,
+  groups?: string[],
 ): Promise<SafetyIncidentsCollection> {
   const bbox = `${viewport.minLon},${viewport.minLat},${viewport.maxLon},${viewport.maxLat}`;
+  const groupsQuery = groups && groups.length > 0
+    ? `&groups=${encodeURIComponent(groups.join(","))}`
+    : "";
   return (await requestJson(
-    `/transport/safety-incidents?bbox=${encodeURIComponent(bbox)}&zoom=${encodeURIComponent(String(zoom))}`,
+    `/transport/safety-incidents?bbox=${encodeURIComponent(bbox)}&zoom=${encodeURIComponent(String(zoom))}${groupsQuery}`,
     SafetyIncidentsCollectionSchema
   )) as SafetyIncidentsCollection;
 }

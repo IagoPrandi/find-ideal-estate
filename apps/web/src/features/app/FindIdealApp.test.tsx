@@ -415,7 +415,7 @@ describe("FindIdealApp", () => {
         minLat: -23.62,
         maxLon: -46.58,
         maxLat: -23.48,
-      }, 10);
+      }, 10, ["theft", "robbery", "violence", "sexual", "drugs", "other"]);
       expect((mapSourceData["public-safety-source-runtime"] as { features?: Array<{ properties?: Record<string, unknown> }> }).features?.[0]?.properties.point_count).toBe(7);
       expect(mapSetLayoutPropertyMock).toHaveBeenCalledWith("safety-incident-clusters-layer", "visibility", "visible");
       expect(mapSetLayoutPropertyMock).toHaveBeenCalledWith("safety-incident-layer", "visibility", "visible");
@@ -447,6 +447,62 @@ describe("FindIdealApp", () => {
     await waitFor(() => {
       expect(mapSetLayoutPropertyMock).toHaveBeenCalledWith("safety-incident-clusters-layer", "visibility", "none");
       expect(mapSetLayoutPropertyMock).toHaveBeenCalledWith("safety-incident-layer", "visibility", "none");
+    });
+  });
+
+  it("filters and isolates safety categories from the legend controls", async () => {
+    useUIStore.setState((state) => ({ ...state, step: 1, panelWidth: 420, isCollapsed: false }));
+
+    renderWithQueryClient();
+
+    await waitFor(() => {
+      expect(getPublicSafetyIncidentsForViewport).toHaveBeenCalledWith(
+        expect.any(Object),
+        10,
+        ["theft", "robbery", "violence", "sexual", "drugs", "other"]
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Ocultar Furto" }));
+
+    await waitFor(() => {
+      expect(getPublicSafetyIncidentsForViewport).toHaveBeenLastCalledWith(
+        expect.any(Object),
+        10,
+        ["robbery", "violence", "sexual", "drugs", "other"]
+      );
+    });
+
+    expect(screen.getByText("Furto")).toHaveClass("line-through");
+
+    fireEvent.click(screen.getByRole("button", { name: "Mostrar apenas Roubo" }));
+
+    await waitFor(() => {
+      expect(getPublicSafetyIncidentsForViewport).toHaveBeenLastCalledWith(
+        expect.any(Object),
+        10,
+        ["robbery"]
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Mostrar todas as categorias novamente" }));
+
+    await waitFor(() => {
+      expect(getPublicSafetyIncidentsForViewport).toHaveBeenLastCalledWith(
+        expect.any(Object),
+        10,
+        ["robbery", "violence", "sexual", "drugs", "other"]
+      );
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Mostrar Furto" }));
+
+    await waitFor(() => {
+      expect(getPublicSafetyIncidentsForViewport).toHaveBeenLastCalledWith(
+        expect.any(Object),
+        10,
+        ["theft", "robbery", "violence", "sexual", "drugs", "other"]
+      );
     });
   });
 
