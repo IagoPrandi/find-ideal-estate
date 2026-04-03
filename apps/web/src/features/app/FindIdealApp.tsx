@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Layers } from "lucide-react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { API_BASE, getBusLineDetails, getBusStopDetails, getJourneyTransportPoints, getJourneyZonesList, getTransportStopDetails, getZoneListings } from "../../api/client";
+import { API_BASE, getBusLineDetails, getBusStopDetails, getJourneyTransportPoints, getJourneyZonesList, getPublicSafetyIncidentsForViewport, getTransportStopDetails, getZoneListings } from "../../api/client";
 import { WizardPanel } from "../../components/panels";
 import { getPoiCategoryMeta, getZonePoiSelectionKey, sortPoiPoints, ZonePoiPointLike, zoneNeedsPoiBackfill } from "../../domain/poi";
 import { applyListingsPanelFilters, getListingDisplayPrice, getListingSelectionKey } from "../../lib/listingFormat";
@@ -22,8 +22,11 @@ const TRANSPORT_CANDIDATES_SOURCE_ID = "transport-candidates-source-runtime";
 const ZONES_SOURCE_ID = "journey-zones-source-runtime";
 const ZONE_POIS_SOURCE_ID = "journey-zone-pois-source-runtime";
 const LISTINGS_SOURCE_ID = "journey-listings-source-runtime";
-const POPUP_PERSIST_LAYER_LIST = [...BUS_LAYER_LIST, "zone-pois-highlight-layer", "zone-pois-layer"] as const;
+const SAFETY_SOURCE_ID = "public-safety-source-runtime";
+const POPUP_PERSIST_LAYER_LIST = [...BUS_LAYER_LIST, "zone-pois-highlight-layer", "zone-pois-layer", "safety-incident-layer", "safety-incident-clusters-layer"] as const;
 const LAYER_TOGGLE_BUTTON_CLASS = "pointer-events-auto flex h-8 w-8 items-center justify-center rounded-lg border border-slate-100 bg-white/95 text-slate-500 shadow-md backdrop-blur-md transition-colors hover:bg-pastel-violet-50 hover:text-pastel-violet-600";
+const PANEL_EDGE_OFFSET_PX = 16;
+const LEGEND_PANEL_GAP_PX = 12;
 
 const ZONE_COLOR_PALETTE = [
   { fill: "#bfdbfe", outline: "#2563eb", label: "#1d4ed8" },
@@ -36,6 +39,15 @@ const ZONE_COLOR_PALETTE = [
   { fill: "#e9d5ff", outline: "#9333ea", label: "#7e22ce" },
 ] as const;
 
+const SAFETY_GROUP_META = [
+  { key: "theft", label: "Furto", color: "#eab308" },
+  { key: "robbery", label: "Roubo", color: "#ef4444" },
+  { key: "violence", label: "Violencia", color: "#f97316" },
+  { key: "sexual", label: "Violencia sexual", color: "#db2777" },
+  { key: "drugs", label: "Drogas", color: "#7c3aed" },
+  { key: "other", label: "Outros", color: "#64748b" },
+] as const;
+
 type MapOverlayLayerKey =
   | "routes"
   | "metro"
@@ -45,6 +57,7 @@ type MapOverlayLayerKey =
   | "zones"
   | "pois"
   | "listings"
+  | "safety"
   | "flood"
   | "green";
 
@@ -64,6 +77,7 @@ const DEFAULT_LAYER_VISIBILITY: Record<MapOverlayLayerKey, boolean> = {
   zones: true,
   pois: true,
   listings: true,
+  safety: true,
   flood: true,
   green: true,
 };
@@ -77,6 +91,7 @@ const MAP_LAYER_MENU_ITEMS: Array<{ key: MapOverlayLayerKey; label: string }> = 
   { key: "zones", label: "Zonas" },
   { key: "pois", label: "POIs da zona" },
   { key: "listings", label: "Imóveis" },
+  { key: "safety", label: "Segurança" },
   { key: "flood", label: "Alagamento" },
   { key: "green", label: "Área verde" },
 ];
@@ -154,6 +169,16 @@ const setGeoJsonSourceData = (map: maplibregl.Map, sourceId: string, data: GeoJS
   if (source) {
     source.setData(data);
   }
+};
+
+const getMapViewportBounds = (map: maplibregl.Map) => {
+  const bounds = map.getBounds();
+  return {
+    minLon: bounds.getWest(),
+    minLat: bounds.getSouth(),
+    maxLon: bounds.getEast(),
+    maxLat: bounds.getNorth(),
+  };
 };
 
 const getZonePalette = (index: number) => ZONE_COLOR_PALETTE[index % ZONE_COLOR_PALETTE.length];
@@ -461,6 +486,25 @@ const poiPopupContent = (name: string, categoryLabel: string, address: string | 
   </div>
 `;
 
+const formatSafetyOccurredAt = (occurredAt: string | null | undefined) => {
+  if (!occurredAt) {
+    return "Data indisponivel";
+  }
+  const parsed = new Date(occurredAt);
+  if (Number.isNaN(parsed.getTime())) {
+    return "Data indisponivel";
+  }
+  return parsed.toLocaleString("pt-BR");
+};
+
+const safetyPopupContent = (crimeType: string, crimeGroupLabel: string, occurredAt: string | null | undefined) => `
+  <div style="font-family: system-ui, -apple-system, Segoe UI, sans-serif; min-width: 220px;">
+    <p style="margin:0 0 4px; font-size:11px; letter-spacing:0.06em; text-transform:uppercase; color:#64748b;">${escapeHtml(crimeGroupLabel)}</p>
+    <p style="margin:0 0 8px; font-size:13px; font-weight:700; color:#0f172a;">${escapeHtml(crimeType)}</p>
+    <p style="margin:0; font-size:12px; color:#475569;">${escapeHtml(formatSafetyOccurredAt(occurredAt))}</p>
+  </div>
+`;
+
 export function FindIdealApp() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -478,6 +522,8 @@ export function FindIdealApp() {
     poiPoints: []
   });
   const step = useUIStore((state) => state.step);
+  const isPanelCollapsed = useUIStore((state) => state.isCollapsed);
+  const panelWidth = useUIStore((state) => state.panelWidth);
   const pickedCoord = useJourneyStore((state) => state.pickedCoord);
   const setPickedCoord = useJourneyStore((state) => state.setPickedCoord);
   const journeyId = useJourneyStore((state) => state.journeyId);
@@ -577,6 +623,11 @@ export function FindIdealApp() {
     [listingsFilters, listingsQuery.data?.listings]
   );
 
+  const safetyLegendStyle = {
+    bottom: PANEL_EDGE_OFFSET_PX,
+    left: isPanelCollapsed ? PANEL_EDGE_OFFSET_PX : PANEL_EDGE_OFFSET_PX + panelWidth + LEGEND_PANEL_GAP_PX,
+  };
+
   useEffect(() => {
     if (!mapContainerRef.current) return;
 
@@ -644,6 +695,14 @@ export function FindIdealApp() {
         minzoom: 9,
         maxzoom: 17,
         attribution: "GeoSampa",
+      });
+
+      map.addSource(SAFETY_SOURCE_ID, {
+        type: "geojson",
+        data: EMPTY_FEATURE_COLLECTION,
+        cluster: true,
+        clusterMaxZoom: 13,
+        clusterRadius: 42,
       });
 
       map.addSource(TRANSPORT_CANDIDATES_SOURCE_ID, {
@@ -855,6 +914,66 @@ export function FindIdealApp() {
           "text-color": ["case", ["boolean", ["get", "selected"], false], "#581c87", ["coalesce", ["get", "label_color"], "#0f172a"]],
           "text-halo-color": "#ffffff",
           "text-halo-width": 1.2,
+        },
+      });
+
+      map.addLayer({
+        id: "safety-incident-clusters-layer",
+        type: "circle",
+        source: SAFETY_SOURCE_ID,
+        filter: ["has", "point_count"],
+        layout: { visibility: "none" },
+        paint: {
+          "circle-color": "#1e293b",
+          "circle-radius": ["step", ["get", "point_count"], 14, 12, 18, 24, 22],
+          "circle-opacity": 0.88,
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 1.8,
+        },
+      });
+
+      map.addLayer({
+        id: "safety-incident-cluster-count-layer",
+        type: "symbol",
+        source: SAFETY_SOURCE_ID,
+        filter: ["has", "point_count"],
+        layout: {
+          visibility: "none",
+          "text-field": ["get", "point_count_abbreviated"],
+          "text-size": 11,
+          "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
+        },
+        paint: {
+          "text-color": "#ffffff",
+        },
+      });
+
+      map.addLayer({
+        id: "safety-incident-layer",
+        type: "circle",
+        source: SAFETY_SOURCE_ID,
+        filter: ["!", ["has", "point_count"]],
+        layout: { visibility: "none" },
+        paint: {
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 9, 4.5, 13, 6.5, 16, 8],
+          "circle-color": [
+            "match",
+            ["get", "crime_group"],
+            "theft",
+            "#eab308",
+            "robbery",
+            "#ef4444",
+            "violence",
+            "#f97316",
+            "sexual",
+            "#db2777",
+            "drugs",
+            "#7c3aed",
+            "#64748b"
+          ],
+          "circle-opacity": 0.9,
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 1.5,
         },
       });
 
@@ -1071,6 +1190,52 @@ export function FindIdealApp() {
         });
       });
 
+      map.on("click", "safety-incident-clusters-layer", (event) => {
+        const feature = event.features?.[0];
+        const geometry = feature?.geometry;
+        if (!geometry || geometry.type !== "Point") {
+          return;
+        }
+        const coordinates = geometry.coordinates;
+        if (!Array.isArray(coordinates) || coordinates.length < 2) {
+          return;
+        }
+        map.easeTo({
+          center: [Number(coordinates[0]), Number(coordinates[1])],
+          duration: 450,
+          zoom: Math.max(map.getZoom() + 2, 13),
+        });
+      });
+
+      map.on("click", "safety-incident-layer", (event) => {
+        const feature = event.features?.[0];
+        const properties = feature?.properties as Record<string, unknown> | undefined;
+        if (!properties) {
+          return;
+        }
+
+        const crimeType = typeof properties.crime_type === "string" && properties.crime_type.trim()
+          ? properties.crime_type.trim()
+          : "Ocorrencia sem tipo";
+        const crimeGroupLabel = typeof properties.crime_group_label === "string" && properties.crime_group_label.trim()
+          ? properties.crime_group_label.trim()
+          : "Seguranca";
+        const occurredAt = typeof properties.occurred_at === "string" ? properties.occurred_at : null;
+
+        busPopupRef.current?.remove();
+        const popup = new maplibregl.Popup({ closeButton: true, closeOnClick: false, maxWidth: "320px" })
+          .setLngLat(event.lngLat)
+          .setHTML(safetyPopupContent(crimeType, crimeGroupLabel, occurredAt))
+          .addTo(map);
+
+        busPopupRef.current = popup;
+        popup.on("close", () => {
+          if (busPopupRef.current === popup) {
+            busPopupRef.current = null;
+          }
+        });
+      });
+
       map.on("click", "journey-listings-layer", (event) => {
         const feature = event.features?.[0];
         const listingKey = feature?.properties?.listing_key;
@@ -1113,7 +1278,7 @@ export function FindIdealApp() {
         });
       }
 
-      for (const layerId of ["transport-candidate-layer", "zones-runtime-fill-layer", "zone-pois-highlight-layer", "zone-pois-layer", "journey-listings-layer"] as const) {
+      for (const layerId of ["transport-candidate-layer", "zones-runtime-fill-layer", "zone-pois-highlight-layer", "zone-pois-layer", "journey-listings-layer", "safety-incident-layer"] as const) {
         map.on("mouseenter", layerId, () => {
           map.getCanvas().style.cursor = "pointer";
         });
@@ -1180,6 +1345,57 @@ export function FindIdealApp() {
 
     map.easeTo({ center: [pickedCoord.lon, pickedCoord.lat], duration: 600, zoom: Math.max(map.getZoom(), 13) });
   }, [isMapReady, pickedCoord]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isMapReady) {
+      return;
+    }
+
+    let cancelled = false;
+    let requestId = 0;
+
+    const syncSafetyIncidents = async () => {
+      if (!config.enrichments.safety || !layerVisibility.safety) {
+        setGeoJsonSourceData(map, SAFETY_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
+        return;
+      }
+
+      const zoom = Math.floor(map.getZoom());
+      if (zoom < 10) {
+        setGeoJsonSourceData(map, SAFETY_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
+        return;
+      }
+
+      const currentRequestId = requestId + 1;
+      requestId = currentRequestId;
+
+      try {
+        const response = await getPublicSafetyIncidentsForViewport(getMapViewportBounds(map), zoom);
+        if (cancelled || requestId !== currentRequestId) {
+          return;
+        }
+        setGeoJsonSourceData(map, SAFETY_SOURCE_ID, response as GeoJSON.FeatureCollection<GeoJSON.Geometry>);
+      } catch {
+        if (cancelled || requestId !== currentRequestId) {
+          return;
+        }
+        setGeoJsonSourceData(map, SAFETY_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
+      }
+    };
+
+    const handleMoveEnd = () => {
+      void syncSafetyIncidents();
+    };
+
+    void syncSafetyIncidents();
+    map.on("moveend", handleMoveEnd);
+
+    return () => {
+      cancelled = true;
+      map.off("moveend", handleMoveEnd);
+    };
+  }, [config.enrichments.safety, isMapReady, layerVisibility.safety]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1376,10 +1592,13 @@ export function FindIdealApp() {
     map.setLayoutProperty("zone-pois-highlight-layer", "visibility", layerVisibility.pois ? "visible" : "none");
     map.setLayoutProperty("zone-pois-layer", "visibility", layerVisibility.pois ? "visible" : "none");
     map.setLayoutProperty("journey-listings-layer", "visibility", layerVisibility.listings ? "visible" : "none");
+    map.setLayoutProperty("safety-incident-clusters-layer", "visibility", layerVisibility.safety && config.enrichments.safety ? "visible" : "none");
+    map.setLayoutProperty("safety-incident-cluster-count-layer", "visibility", layerVisibility.safety && config.enrichments.safety ? "visible" : "none");
+    map.setLayoutProperty("safety-incident-layer", "visibility", layerVisibility.safety && config.enrichments.safety ? "visible" : "none");
     map.setLayoutProperty("flood-layer", "visibility", floodVisible ? "visible" : "none");
     map.setLayoutProperty("green-layer", "visibility", greenVisible ? "visible" : "none");
     map.setFilter("green-layer", ["in", "vegetation_level", ...getIncludedGreenVegetationLevels(config.greenVegetationLevel)] as never);
-  }, [config, isMapReady, layerVisibility, visibleSequentialLayerGroupIndex]);
+  }, [config, isMapReady, layerVisibility, step, visibleSequentialLayerGroupIndex]);
 
   if (mapError) {
     return (
@@ -1392,6 +1611,19 @@ export function FindIdealApp() {
   return (
     <main className="relative h-screen w-full overflow-hidden">
       <div ref={mapContainerRef} className="h-full w-full" aria-label="Mapa principal" />
+      {layerVisibility.safety && config.enrichments.safety ? (
+        <div className="pointer-events-none absolute z-40 rounded-xl border border-slate-200 bg-white/95 px-4 py-3 shadow-lg backdrop-blur-md" style={safetyLegendStyle}>
+          <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Tipos de ocorrência</p>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs text-slate-700">
+            {SAFETY_GROUP_META.map((item) => (
+              <div key={item.key} className="flex items-center gap-2">
+                <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />
+                <span>{item.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
       <div className="pointer-events-none absolute bottom-14 right-4 z-40 flex flex-col items-end gap-2">
         {isLayerMenuOpen ? (
           <div

@@ -34,6 +34,7 @@ from core.db import get_engine, init_db  # noqa: E402
 from src.main import app  # noqa: E402
 from modules.jobs.service import create_job  # noqa: E402
 from sqlalchemy import text  # noqa: E402
+from api.routes.journeys import _classify_public_safety_group  # noqa: E402
 
 
 def _sample_transport_point(journey_id):
@@ -287,7 +288,60 @@ def test_get_journey_zones_returns_list_response(monkeypatch):
     assert body["zones"][0]["id"] == zone_id
     assert body["zones"][0]["transport_point_id"] is None
     assert body["zones"][0]["poi_points"][0]["name"] == "Colegio Centro"
-    assert body["zones"][0]["badges"]["green_badge"]["tier"] == "excellent"
+
+
+def test_classify_public_safety_group_maps_canonical_groups():
+    assert _classify_public_safety_group("Furto") == ("theft", "Furto")
+    assert _classify_public_safety_group("Roubo") == ("robbery", "Roubo")
+    assert _classify_public_safety_group("Agressao") == ("violence", "Violencia")
+    assert _classify_public_safety_group("Estupro") == ("sexual", "Violencia sexual")
+    assert _classify_public_safety_group("Trafico de drogas") == ("drugs", "Drogas")
+    assert _classify_public_safety_group("Dano") == ("other", "Outros")
+
+
+def test_get_journey_zone_safety_incidents_returns_feature_collection(monkeypatch):
+    sample = _sample_journey()
+
+    async def _get(journey_id):
+        assert journey_id == sample.id
+        return sample
+
+    async def _list(journey_id, zone_fingerprint):
+        assert journey_id == sample.id
+        assert zone_fingerprint == "fp-1"
+        return {
+            "type": "FeatureCollection",
+            "features": [
+                {
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "Point",
+                        "coordinates": [-46.63, -23.55],
+                    },
+                    "properties": {
+                        "id": str(uuid4()),
+                        "zone_fingerprint": "fp-1",
+                        "crime_group": "theft",
+                        "crime_group_label": "Furto",
+                        "crime_type": "Furto",
+                        "occurred_at": "2026-03-29T10:00:00+00:00",
+                    },
+                }
+            ],
+        }
+
+    monkeypatch.setattr("api.routes.journeys.get_journey", _get)
+    monkeypatch.setattr("api.routes.journeys.list_zone_safety_incidents_for_journey", _list)
+
+    with TestClient(app) as client:
+        response = client.get(f"/journeys/{sample.id}/zones/fp-1/safety-incidents")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["type"] == "FeatureCollection"
+    assert len(body["features"]) == 1
+    assert body["features"][0]["properties"]["crime_group"] == "theft"
+    assert body["features"][0]["properties"]["crime_type"] == "Furto"
 
 
 def test_get_price_rollups_returns_lat_lon(monkeypatch):

@@ -22,6 +22,7 @@ from .journeys import JourneyCreate, JourneyRead, JourneyReferencePoint, Journey
 from .listings import (
     ListingAdRead,
     ListingCardRead,
+    ListingPlatformVariantRead,
     ListingsRequestResult,
     ListingSnapshotRead,
     PriceRollupRead,
@@ -30,7 +31,16 @@ from .listings import (
     ZoneCacheStatusRead,
 )
 from .transport import TransportPointRead
-from .zones import ZoneBadgeRead, ZoneListResponse, ZoneRead
+from .zones import (
+    ZoneBadgeRead,
+    ZoneListResponse,
+    ZonePOIPointRead,
+    ZoneRead,
+    ZoneSafetyIncidentCollectionRead,
+    ZoneSafetyIncidentFeatureRead,
+    ZoneSafetyIncidentGeometryRead,
+    ZoneSafetyIncidentPropertiesRead,
+)
 
 __version__ = "0.1.0"
 
@@ -48,6 +58,7 @@ __all__ = [
     "JourneyUpdate",
     "ListingAdRead",
     "ListingCardRead",
+    "ListingPlatformVariantRead",
     "ListingsRequestResult",
     "ListingSnapshotRead",
     "PriceRollupRead",
@@ -56,6 +67,11 @@ __all__ = [
     "TransportPointRead",
     "ZoneBadgeRead",
     "ZoneCacheStatusRead",
+    "ZonePOIPointRead",
     "ZoneRead",
     "ZoneListResponse",
+    "ZoneSafetyIncidentCollectionRead",
+    "ZoneSafetyIncidentFeatureRead",
+    "ZoneSafetyIncidentGeometryRead",
+    "ZoneSafetyIncidentPropertiesRead",
 ]

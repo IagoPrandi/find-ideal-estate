@@ -1,6 +1,7 @@
 import math
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,7 @@ os.environ.setdefault("VALHALLA_URL", "http://localhost:8002")
 os.environ.setdefault("OTP_URL", "http://localhost:8080")
 
 from src.api.routes.transport import (  # noqa: E402
+    _PUBLIC_SAFETY_TILE_ROWS_SQL,
     _TRANSPORT_LINES_TILE_ROWS_SQL,
     _TRANSPORT_STOPS_TILE_ROWS_SQL,
     get_transport_stop_details,
@@ -35,6 +37,8 @@ SAMPLE_ARTIFACT_TRIP_ID = "T_TILE_META_ARTIFACT"
 SAMPLE_LAT = 0.01
 SAMPLE_LON = 0.01
 SAMPLE_GEOSAMPA_STOP_NAME = "GeoSampa Tile Stop"
+SAMPLE_SAFETY_CATEGORY = "ROUBO - TESTE TILE META"
+SAMPLE_SAFETY_OCCURRED_AT = datetime(2026, 4, 2, 9, 15, tzinfo=timezone.utc)
 
 
 def _lonlat_to_tile(lon: float, lat: float, zoom: int) -> tuple[int, int]:
@@ -59,9 +63,17 @@ async def _ensure_geosampa_schema() -> bool:
         return bool(exists.scalar())
 
 
+async def _ensure_public_safety_schema() -> bool:
+    engine = get_engine()
+    async with engine.connect() as conn:
+        exists = await conn.execute(text("SELECT to_regclass('public.public_safety_incidents') IS NOT NULL"))
+        return bool(exists.scalar())
+
+
 async def _cleanup_sample_rows() -> None:
     engine = get_engine()
     async with engine.begin() as conn:
+        await conn.execute(text("DELETE FROM public_safety_incidents WHERE category = :category"), {"category": SAMPLE_SAFETY_CATEGORY})
         await conn.execute(text("DELETE FROM geosampa_bus_stops WHERE nm_ponto_onibus = :stop_name"), {"stop_name": SAMPLE_GEOSAMPA_STOP_NAME})
         await conn.execute(text("DELETE FROM gtfs_trips WHERE trip_id = :trip_id"), {"trip_id": SAMPLE_ARTIFACT_TRIP_ID})
         await conn.execute(text("DELETE FROM gtfs_routes WHERE route_id = :route_id"), {"route_id": SAMPLE_ARTIFACT_ROUTE_ID})
@@ -76,6 +88,24 @@ async def _cleanup_sample_rows() -> None:
 async def _insert_sample_gtfs_rows() -> None:
     engine = get_engine()
     async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                """
+                INSERT INTO public_safety_incidents (occurred_at, category, location)
+                VALUES (
+                    :occurred_at,
+                    :category,
+                    ST_SetSRID(ST_MakePoint(:incident_lon, :incident_lat), 4326)
+                )
+                """
+            ),
+            {
+                "occurred_at": SAMPLE_SAFETY_OCCURRED_AT,
+                "category": SAMPLE_SAFETY_CATEGORY,
+                "incident_lon": SAMPLE_LON,
+                "incident_lat": SAMPLE_LAT,
+            },
+        )
         await conn.execute(
             text(
                 """
@@ -255,6 +285,37 @@ async def test_transport_stop_details_return_lines_on_demand() -> None:
         assert geosampa_result["buses"] == ["175T-10", "875A-10"]
     finally:
         await _cleanup_sample_rows()
+        await close_db()
+
+
+@pytest.mark.anyio
+async def test_public_safety_tile_rows_classify_incidents_for_step_one_map() -> None:
+    init_db(os.environ["DATABASE_URL"])
+    has_public_safety_schema = False
+    try:
+        has_public_safety_schema = await _ensure_public_safety_schema()
+        if not has_public_safety_schema:
+            pytest.skip("Public safety schema not migrated. Run alembic upgrade head.")
+
+        await _cleanup_sample_rows()
+        await _insert_sample_gtfs_rows()
+
+        zoom = 12
+        x, y = _lonlat_to_tile(SAMPLE_LON, SAMPLE_LAT, zoom)
+        params = {"z": zoom, "x": x, "y": y}
+
+        engine = get_engine()
+        async with engine.connect() as conn:
+            rows = (await conn.execute(text(_PUBLIC_SAFETY_TILE_ROWS_SQL), params)).mappings().all()
+
+        safety_row = next(row for row in rows if row["crime_type"] == SAMPLE_SAFETY_CATEGORY)
+
+        assert safety_row["crime_group"] == "robbery"
+        assert safety_row["crime_group_label"] == "Roubo"
+        assert safety_row["occurred_at"] == "2026-04-02T09:15:00Z"
+    finally:
+        if has_public_safety_schema:
+            await _cleanup_sample_rows()
         await close_db()
 
 

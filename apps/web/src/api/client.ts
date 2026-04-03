@@ -12,6 +12,8 @@ import {
   PriceRollupReadSchema,
   RunCreateResponse,
   RunStatusResponse,
+  SafetyIncidentsCollection,
+  SafetyIncidentsCollectionSchema,
   SimpleMessageResponse,
   TransportBusDetailResponse,
   TransportBusDetailResponseSchema,
@@ -148,6 +150,17 @@ export async function getTransportStops(
     `/transport/stops?${params}`,
     TransportStopsResponseSchema
   )) as TransportStopsResponse;
+}
+
+export async function getPublicSafetyIncidentsForViewport(
+  viewport: { minLon: number; minLat: number; maxLon: number; maxLat: number },
+  zoom: number,
+): Promise<SafetyIncidentsCollection> {
+  const bbox = `${viewport.minLon},${viewport.minLat},${viewport.maxLon},${viewport.maxLat}`;
+  return (await requestJson(
+    `/transport/safety-incidents?bbox=${encodeURIComponent(bbox)}&zoom=${encodeURIComponent(String(zoom))}`,
+    SafetyIncidentsCollectionSchema
+  )) as SafetyIncidentsCollection;
 }
 
 function computeGeoJsonCentroid(geom: any): { lon: number; lat: number } | null {
@@ -451,6 +464,16 @@ export async function getJourneyZonesList(journeyId: string) {
     `/journeys/${journeyId}/zones`,
     JourneyZonesListResponseSchema
   )) as z.output<typeof JourneyZonesListResponseSchema>;
+}
+
+export async function getJourneyZoneSafetyIncidents(
+  journeyId: string,
+  zoneFingerprint: string
+): Promise<SafetyIncidentsCollection> {
+  return (await requestJson(
+    `/journeys/${encodeURIComponent(journeyId)}/zones/${encodeURIComponent(zoneFingerprint)}/safety-incidents`,
+    SafetyIncidentsCollectionSchema
+  )) as SafetyIncidentsCollection;
 }
 
 export async function createZoneGenerationJob(journeyId: string): Promise<JobRead> {

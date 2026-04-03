@@ -34,7 +34,7 @@ _POI_CATEGORY_CANONICAL_IDS = {
     "gym": "fitness_center",
 }
 _POI_CACHE_TTL_SECONDS = 1800
-_POI_FETCH_LIMIT = 15
+_POI_FETCH_LIMIT = 20
 
 _ZONE_POI_CONTEXT_SQL = text(
     """

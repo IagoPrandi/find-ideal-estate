@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 from typing import Any
 from uuid import UUID
 
@@ -9,6 +8,7 @@ from contracts import (
     JourneyUpdate,
     TransportPointRead,
     ZoneListResponse,
+    ZoneSafetyIncidentCollectionRead,
 )
 from core.container import get_container
 from core.db import get_engine
@@ -21,6 +21,7 @@ from modules.journeys.service import (
     get_journey,
     update_journey,
 )
+from modules.public_safety import classify_public_safety_group
 from modules.zones.badges import build_metric_badge
 from modules.zones.vegetation import (
     extract_green_preferences,
@@ -195,6 +196,65 @@ async def list_zones_for_journey(journey_id: UUID) -> ZoneListResponse:
     )
 
 
+async def list_zone_safety_incidents_for_journey(
+    journey_id: UUID,
+    zone_fingerprint: str,
+) -> ZoneSafetyIncidentCollectionRead:
+    engine = get_engine()
+    async with engine.connect() as conn:
+        result = await conn.execute(
+            text(
+                """
+                SELECT
+                    psi.id,
+                    psi.occurred_at,
+                    psi.category,
+                    ST_X(psi.location) AS lon,
+                    ST_Y(psi.location) AS lat,
+                    z.fingerprint AS zone_fingerprint
+                FROM journey_zones jz
+                JOIN zones z ON z.id = jz.zone_id
+                JOIN public_safety_incidents psi
+                    ON z.isochrone_geom IS NOT NULL
+                    AND psi.location IS NOT NULL
+                    AND ST_Within(psi.location, z.isochrone_geom)
+                WHERE jz.journey_id = :journey_id
+                  AND z.fingerprint = :zone_fingerprint
+                ORDER BY psi.occurred_at DESC NULLS LAST, psi.id ASC
+                """
+            ),
+            {"journey_id": journey_id, "zone_fingerprint": zone_fingerprint},
+        )
+        rows = result.mappings().all()
+
+    features = []
+    for row in rows:
+        crime_group, crime_group_label = classify_public_safety_group(row.get("category"))
+        lon = row.get("lon")
+        lat = row.get("lat")
+        if lon is None or lat is None:
+            continue
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [float(lon), float(lat)],
+                },
+                "properties": {
+                    "id": row["id"],
+                    "zone_fingerprint": row["zone_fingerprint"],
+                    "crime_group": crime_group,
+                    "crime_group_label": crime_group_label,
+                    "crime_type": row.get("category"),
+                    "occurred_at": row.get("occurred_at"),
+                },
+            }
+        )
+
+    return ZoneSafetyIncidentCollectionRead(features=features)
+
+
 @router.post("", response_model=JourneyRead, status_code=status.HTTP_201_CREATED)
 async def create_journey_endpoint(
     payload: JourneyCreate,
@@ -250,3 +310,17 @@ async def list_zones_endpoint(journey_id: UUID) -> ZoneListResponse:
     if journey is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Journey not found")
     return await list_zones_for_journey(journey_id)
+
+
+@router.get(
+    "/{journey_id}/zones/{zone_fingerprint}/safety-incidents",
+    response_model=ZoneSafetyIncidentCollectionRead,
+)
+async def list_zone_safety_incidents_endpoint(
+    journey_id: UUID,
+    zone_fingerprint: str,
+) -> ZoneSafetyIncidentCollectionRead:
+    journey = await get_journey(journey_id)
+    if journey is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Journey not found")
+    return await list_zone_safety_incidents_for_journey(journey_id, zone_fingerprint)

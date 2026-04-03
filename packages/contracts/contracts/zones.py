@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
@@ -56,3 +56,36 @@ class ZoneListResponse(BaseModel):
     zones: list[ZoneRead]
     total_count: int
     completed_count: int
+
+
+class ZoneSafetyIncidentPropertiesRead(BaseModel):
+    """Properties for a single safety incident feature rendered on the map."""
+
+    id: UUID
+    zone_fingerprint: str
+    crime_group: str
+    crime_group_label: str
+    crime_type: str | None = None
+    occurred_at: datetime | None = None
+
+
+class ZoneSafetyIncidentGeometryRead(BaseModel):
+    """Point geometry for a safety incident."""
+
+    type: Literal["Point"] = "Point"
+    coordinates: tuple[float, float]
+
+
+class ZoneSafetyIncidentFeatureRead(BaseModel):
+    """GeoJSON feature representing a single safety incident."""
+
+    type: Literal["Feature"] = "Feature"
+    geometry: ZoneSafetyIncidentGeometryRead
+    properties: ZoneSafetyIncidentPropertiesRead
+
+
+class ZoneSafetyIncidentCollectionRead(BaseModel):
+    """GeoJSON FeatureCollection for journey zone safety incidents."""
+
+    type: Literal["FeatureCollection"] = "FeatureCollection"
+    features: list[ZoneSafetyIncidentFeatureRead]

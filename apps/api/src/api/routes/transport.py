@@ -6,6 +6,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Path, Query, Response
 from core.db import get_engine
+from modules.public_safety import public_safety_group_case_sql, public_safety_group_label_case_sql
 from modules.zones.vegetation import green_vegetation_case_sql
 from sqlalchemy import text
 from sqlalchemy.exc import ProgrammingError
@@ -19,6 +20,7 @@ _GTFS_STOP_TILE_BUFFER_METERS = 250.0
 _GEOSAMPA_BUS_STOP_MATCH_METERS = 45.0
 _GEOSAMPA_BUS_TERMINAL_MATCH_METERS = 180.0
 _GREEN_TILE_MIN_ZOOM = 12
+_SAFETY_TILE_MIN_ZOOM = 10
 
 
 def _meters_to_degree_buffer(meters: float) -> float:
@@ -495,6 +497,277 @@ WHERE geom IS NOT NULL
 """
 
 
+_PUBLIC_SAFETY_TILE_ROWS_SQL = """
+WITH bounds AS (
+    SELECT
+        ST_TileEnvelope(:z, :x, :y) AS env_3857,
+        ST_Transform(ST_TileEnvelope(:z, :x, :y), 4326) AS env_4326
+), layer_rows AS (
+    SELECT
+        psi.id::text AS id,
+        {crime_group_sql} AS crime_group,
+        {crime_group_label_sql} AS crime_group_label,
+        COALESCE(NULLIF(psi.category, ''), 'Ocorrencia sem tipo') AS crime_type,
+        CASE
+            WHEN psi.occurred_at IS NULL THEN NULL
+            ELSE to_char(psi.occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+        END AS occurred_at,
+        psi.location AS geom_4326,
+        env_3857,
+        64 AS mvt_buffer
+    FROM public_safety_incidents psi
+    CROSS JOIN bounds
+    WHERE psi.location IS NOT NULL
+      AND psi.location && env_4326
+      AND ST_Intersects(psi.location, env_4326)
+)
+SELECT
+    id,
+    crime_group,
+    crime_group_label,
+    crime_type,
+    occurred_at,
+    geom_4326,
+    env_3857,
+    mvt_buffer
+FROM layer_rows
+""".format(
+    crime_group_sql=public_safety_group_case_sql("psi.category"),
+    crime_group_label_sql=public_safety_group_label_case_sql("psi.category"),
+)
+
+
+_PUBLIC_SAFETY_TILE_SQL = f"""
+WITH layer_rows AS (
+    {_PUBLIC_SAFETY_TILE_ROWS_SQL}
+), mvtgeom AS (
+    SELECT
+        id,
+        crime_group,
+        crime_group_label,
+        crime_type,
+        occurred_at,
+        ST_AsMVTGeom(
+            ST_Transform(geom_4326, 3857),
+            env_3857,
+            4096,
+            mvt_buffer,
+            true
+        ) AS geom
+    FROM layer_rows
+)
+SELECT ST_AsMVT(mvtgeom, 'safety_incidents', 4096, 'geom')
+FROM mvtgeom
+WHERE geom IS NOT NULL
+"""
+
+
+def _public_safety_cluster_grid_size(zoom: int) -> float:
+    if zoom <= 10:
+        return 0.008
+    if zoom == 11:
+        return 0.005
+    if zoom == 12:
+        return 0.0025
+    if zoom == 13:
+        return 0.0012
+    return 0.0
+
+
+def _public_safety_count_label(count: int) -> str:
+    if count < 1000:
+        return str(count)
+    value = count / 1000.0
+    if count % 1000 == 0:
+        return f"{int(value)}k"
+    return f"{value:.1f}k"
+
+
+async def _query_public_safety_feature_collection(
+    engine,
+    *,
+    min_lon: float,
+    min_lat: float,
+    max_lon: float,
+    max_lat: float,
+    zoom: int,
+) -> dict:
+    if zoom < _SAFETY_TILE_MIN_ZOOM:
+        return {"type": "FeatureCollection", "features": []}
+
+    min_lon_sql = f"{min_lon:.8f}"
+    min_lat_sql = f"{min_lat:.8f}"
+    max_lon_sql = f"{max_lon:.8f}"
+    max_lat_sql = f"{max_lat:.8f}"
+    bbox_sql = f"ST_MakeEnvelope({min_lon_sql}, {min_lat_sql}, {max_lon_sql}, {max_lat_sql}, 4326)"
+
+    raw_incidents_sql = """
+WITH bounds AS (
+    SELECT {bbox_sql} AS env_4326
+)
+SELECT
+    psi.id::text AS id,
+    {crime_group_sql} AS crime_group,
+    {crime_group_label_sql} AS crime_group_label,
+    COALESCE(NULLIF(psi.category, ''), 'Ocorrencia sem tipo') AS crime_type,
+    CASE
+        WHEN psi.occurred_at IS NULL THEN NULL
+        ELSE to_char(psi.occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+    END AS occurred_at,
+    ST_X(psi.location) AS lon,
+    ST_Y(psi.location) AS lat
+FROM public_safety_incidents psi
+CROSS JOIN bounds b
+WHERE psi.location IS NOT NULL
+  AND psi.location && b.env_4326
+  AND ST_Intersects(psi.location, b.env_4326)
+ORDER BY psi.occurred_at DESC NULLS LAST, psi.id ASC
+""".format(
+        bbox_sql=bbox_sql,
+        crime_group_sql=public_safety_group_case_sql("psi.category"),
+        crime_group_label_sql=public_safety_group_label_case_sql("psi.category"),
+    )
+
+    clustered_incidents_sql = """
+WITH bounds AS (
+    SELECT {bbox_sql} AS env_4326
+), incidents AS (
+    SELECT
+        psi.id::text AS id,
+        ST_X(psi.location) AS lon,
+        ST_Y(psi.location) AS lat,
+        FLOOR(ST_X(psi.location) / {grid_size_sql})::bigint AS grid_x,
+        FLOOR(ST_Y(psi.location) / {grid_size_sql})::bigint AS grid_y
+    FROM public_safety_incidents psi
+    CROSS JOIN bounds b
+    WHERE psi.location IS NOT NULL
+      AND psi.location && b.env_4326
+      AND ST_Intersects(psi.location, b.env_4326)
+), aggregated AS (
+    SELECT
+        grid_x,
+        grid_y,
+        COUNT(*)::int AS point_count,
+        AVG(lon)::double precision AS centroid_lon,
+        AVG(lat)::double precision AS centroid_lat,
+        MIN(id) AS incident_id
+    FROM incidents
+    GROUP BY grid_x, grid_y
+)
+SELECT
+    grid_x,
+    grid_y,
+    point_count,
+    centroid_lon,
+    centroid_lat,
+    incident_id
+FROM aggregated
+ORDER BY point_count DESC, grid_x ASC, grid_y ASC
+""".format(
+        bbox_sql=bbox_sql,
+        grid_size_sql=f"{_public_safety_cluster_grid_size(zoom):.8f}",
+    )
+
+    singleton_details_sql = """
+SELECT
+    psi.id::text AS id,
+    {crime_group_sql} AS crime_group,
+    {crime_group_label_sql} AS crime_group_label,
+    COALESCE(NULLIF(psi.category, ''), 'Ocorrencia sem tipo') AS crime_type,
+    CASE
+        WHEN psi.occurred_at IS NULL THEN NULL
+        ELSE to_char(psi.occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+    END AS occurred_at
+FROM public_safety_incidents psi
+WHERE psi.id::text = ANY(:incident_ids)
+""".format(
+        crime_group_sql=public_safety_group_case_sql("psi.category"),
+        crime_group_label_sql=public_safety_group_label_case_sql("psi.category"),
+    )
+
+    async with engine.begin() as conn:
+        await conn.execute(text("SET LOCAL jit = off"))
+        if zoom > 13:
+            rows = (await conn.execute(text(raw_incidents_sql))).mappings().all()
+        else:
+            rows = (await conn.execute(text(clustered_incidents_sql))).mappings().all()
+            singleton_ids = [str(row.get("incident_id")) for row in rows if int(row.get("point_count") or 0) <= 1 and row.get("incident_id")]
+            singleton_details = {}
+            if singleton_ids:
+                singleton_detail_rows = (await conn.execute(
+                    text(singleton_details_sql),
+                    {"incident_ids": singleton_ids},
+                )).mappings().all()
+                singleton_details = {
+                    str(row["id"]): row
+                    for row in singleton_detail_rows
+                }
+
+    if zoom > 13:
+        features = []
+        for row in rows:
+            lon = row.get("lon")
+            lat = row.get("lat")
+            if lon is None or lat is None:
+                continue
+            features.append(
+                {
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [float(lon), float(lat)]},
+                    "properties": {
+                        "id": str(row["id"]),
+                        "crime_group": row.get("crime_group"),
+                        "crime_group_label": row.get("crime_group_label"),
+                        "crime_type": row.get("crime_type"),
+                        "occurred_at": row.get("occurred_at"),
+                    },
+                }
+            )
+        return {"type": "FeatureCollection", "features": features}
+
+    features = []
+    for row in rows:
+        point_count = int(row.get("point_count") or 0)
+        centroid_lon = row.get("centroid_lon")
+        centroid_lat = row.get("centroid_lat")
+        if centroid_lon is None or centroid_lat is None:
+            continue
+
+        if point_count <= 1:
+            incident_id = str(row.get("incident_id") or "")
+            detail_row = singleton_details.get(incident_id, {})
+            features.append(
+                {
+                    "type": "Feature",
+                    "geometry": {"type": "Point", "coordinates": [float(centroid_lon), float(centroid_lat)]},
+                    "properties": {
+                        "id": incident_id,
+                        "crime_group": detail_row.get("crime_group"),
+                        "crime_group_label": detail_row.get("crime_group_label"),
+                        "crime_type": detail_row.get("crime_type"),
+                        "occurred_at": detail_row.get("occurred_at"),
+                    },
+                }
+            )
+            continue
+
+        grid_x = int(row.get("grid_x") or 0)
+        grid_y = int(row.get("grid_y") or 0)
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [centroid_lon, centroid_lat]},
+                "properties": {
+                    "id": f"cluster:{zoom}:{grid_x}:{grid_y}",
+                    "point_count": point_count,
+                    "point_count_abbreviated": _public_safety_count_label(point_count),
+                },
+            }
+        )
+
+    return {"type": "FeatureCollection", "features": features}
+
+
 @router.get("/tiles/lines/{z}/{x}/{y}.pbf")
 async def get_transport_lines_tile(
     z: int = Path(..., ge=0, le=22),
@@ -540,6 +813,48 @@ async def get_flood_areas_tile(
     engine = get_engine()
     tile = await _query_vector_tile(engine, _FLOOD_TILE_SQL, {"z": z, "x": x, "y": y}, layer_name="flood_areas")
     return Response(content=tile, media_type=MVT_MEDIA_TYPE)
+
+
+@router.get("/tiles/environment/safety/{z}/{x}/{y}.pbf")
+async def get_public_safety_tile(
+    z: int = Path(..., ge=0, le=22),
+    x: int = Path(..., ge=0),
+    y: int = Path(..., ge=0),
+) -> Response:
+    if z < _SAFETY_TILE_MIN_ZOOM:
+        return Response(content=b"", media_type=MVT_MEDIA_TYPE)
+
+    engine = get_engine()
+    tile = await _query_vector_tile(engine, _PUBLIC_SAFETY_TILE_SQL, {"z": z, "x": x, "y": y}, layer_name="safety_incidents")
+    return Response(content=tile, media_type=MVT_MEDIA_TYPE)
+
+
+@router.get("/safety-incidents")
+async def get_public_safety_incidents(
+    bbox: str = Query(..., min_length=7),
+    zoom: int = Query(..., ge=0, le=22),
+) -> dict:
+    raw_parts = bbox.split(",")
+    if len(raw_parts) != 4:
+        raise HTTPException(status_code=400, detail="bbox invalido. Use minLon,minLat,maxLon,maxLat")
+
+    try:
+        min_lon, min_lat, max_lon, max_lat = (float(part.strip()) for part in raw_parts)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="bbox invalido. Coordenadas devem ser numericas") from exc
+
+    if min_lon >= max_lon or min_lat >= max_lat:
+        raise HTTPException(status_code=400, detail="bbox invalido. Envelope deve ter min < max")
+
+    engine = get_engine()
+    return await _query_public_safety_feature_collection(
+        engine,
+        min_lon=min_lon,
+        min_lat=min_lat,
+        max_lon=max_lon,
+        max_lat=max_lat,
+        zoom=zoom,
+    )
 
 
 @router.get("/details/bus-line")

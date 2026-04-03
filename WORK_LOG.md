@@ -1,5 +1,111 @@
 # Work Log
 
+## 2026-04-02 - Disponibilizar seguranca na etapa 1 e alinhar legenda ao painel
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/develop-frontend/SKILL.md` para ajustar comportamento de mapa/UI com diff focado e cobertura nos fluxos afetados.
+- Trigger: usuario pediu que a legenda de seguranca ficasse alinhada ao rodape do painel, ao lado dele quando expandido e no canto inferior esquerdo quando oculto, e que o mapa de seguranca estivesse disponivel desde a etapa 1 como verde/alagamento.
+- Scope executed:
+  - backend:
+    - `apps/api/src/modules/public_safety/classification.py` centraliza a classificacao canonica de ocorrencias e a versao SQL usada em tiles;
+    - `apps/api/src/api/routes/transport.py` passa a expor `/transport/tiles/environment/safety/{z}/{x}/{y}.pbf` com propriedades `crime_group`, `crime_group_label`, `crime_type` e `occurred_at` diretamente de `public_safety_incidents`.
+  - frontend:
+    - `apps/web/src/features/app/FindIdealApp.tsx` troca a camada de seguranca de GeoJSON por vector tile, liberando visualizacao ja na etapa 1 sem depender de zona selecionada;
+    - a legenda de seguranca agora usa `panelWidth` e `isCollapsed` do `ui-store` para ficar ao lado do painel quando aberto e voltar ao canto inferior esquerdo quando oculto.
+  - testes:
+    - `apps/api/tests/test_transport_tile_metadata.py` valida a classificacao canonica da tile de seguranca;
+    - `apps/api/tests/test_phase3_transport_tile_perf.py` cobre o `min_zoom` da nova tile;
+    - `apps/web/src/features/app/FindIdealApp.test.tsx` valida disponibilidade na etapa 1, source vetorial e reposicionamento da legenda.
+- Validation:
+  - `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_transport_tile_metadata.py apps/api/tests/test_phase3_transport_tile_perf.py -q --color=no` -> `8 passed`.
+  - `Set-Location apps/web; $env:CI='1'; .\node_modules\.bin\vitest.cmd run --config vitest.config.ts src/features/app/FindIdealApp.test.tsx --reporter=dot --no-color` -> `10 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-04-02 - Restaurar clusterizacao de ocorrencias por zoom
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/develop-frontend/SKILL.md` para corrigir regressao visual/comportamental na camada de mapa sem desmontar o restante do fluxo.
+- Trigger: usuario reportou que os pontos de ocorrencia deveriam voltar a ficar clusterizados por zoom, como no comportamento anterior.
+- Root cause identified:
+  - a camada de seguranca havia sido migrada para `vector tile`, e o MapLibre so aplica `cluster` nativamente em `geojson sources`.
+- Scope executed:
+  - backend:
+    - `apps/api/src/api/routes/transport.py` ganhou endpoint de viewport `GET /transport/safety-incidents?bbox=...&zoom=...`, com agrupamento por grade dependente do zoom ate o nivel em que os pontos voltam a aparecer individualmente.
+  - frontend:
+    - `apps/web/src/api/client.ts` passou a buscar ocorrencias por viewport;
+    - `apps/web/src/features/app/FindIdealApp.tsx` voltou a usar `geojson source` clusterizada para seguranca, com refresh em `moveend` e layers de cluster/contador restauradas.
+  - testes:
+    - `apps/api/tests/test_phase3_transport_tile_perf.py` cobre a progressao da grade de cluster por zoom;
+    - `apps/web/src/features/app/FindIdealApp.test.tsx` cobre source clusterizada, fetch por viewport e click no cluster.
+- Validation:
+  - `Set-Location C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal; C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase3_transport_tile_perf.py -q --color=no` -> `5 passed`.
+  - `Set-Location apps/web; $env:CI='1'; .\node_modules\.bin\vitest.cmd run --config vitest.config.ts src/features/app/FindIdealApp.test.tsx --reporter=dot --no-color` -> `10 passed`.
+  - `Invoke-RestMethod 'http://localhost:8000/transport/safety-incidents?bbox=-46.72,-23.62,-46.58,-23.48&zoom=10'` -> `324` features; primeira feature com `point_count=1513` e `id=cluster:10:-5831:-2941`.
+- Follow-up optimization:
+  - a agregacao de clusters de seguranca em low zoom saiu de Python e foi para SQL em `apps/api/src/api/routes/transport.py`, removendo o gargalo principal do endpoint de viewport.
+  - depois disso, o caminho low zoom foi reduzido novamente para duas fases: agrega primeiro e busca detalhes apenas dos singletons, evitando classificar todas as ocorrencias do bbox quando o mapa ainda esta agrupado.
+  - validacao runtime apos rebuild da API:
+    - helper interno `_query_public_safety_feature_collection(...)` no container `api` caiu para `427.61 ms` no bbox `-46.72,-23.62,-46.58,-23.48` com `zoom=10`.
+    - endpoint HTTP `GET /transport/safety-incidents?...&zoom=10` caiu para `0.414 s`, `0.262 s` e `0.281 s` em tres amostras consecutivas.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-04-02 - Popular `public_safety_incidents` com o dataset SSP usado pelo mapa
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para corrigir a causa raiz no backend/dados com diff pequeno, validação reprodutivel e sem fallback silencioso.
+- Trigger: usuario reportou que os pontos de ocorrencia ainda nao apareciam no mapa e pediu verificacao se os dados de seguranca haviam sido levados para a base, usando `cods_ok/segurancaRegiao.py` como referencia da fonte.
+- Root cause identified:
+  - a UI e a rota `GET /journeys/{journey_id}/zones/{zone_fingerprint}/safety-incidents` ja estavam prontas, mas `public_safety_incidents` estava com `0` linhas;
+  - `scripts/bootstrap_m4_4_layers.py` criava a tabela e o indice GIST, mas nao populava os dados SSP/PostGIS.
+- Scope executed:
+  - `apps/api/src/modules/public_safety/ingestion.py`:
+    - nova rotina de ingestao que carrega o XLSX SSP cacheado em `data_cache/dados_criminais_<ano>.xlsx` usando o mesmo parsing de `cods_ok/segurancaRegiao.py`;
+    - valida `occurred_at`, `category`, `latitude` e `longitude`, descarta linhas invalidas e substitui de forma idempotente o recorte anual na tabela `public_safety_incidents`.
+  - `apps/api/src/modules/public_safety/__init__.py`:
+    - exporta a API publica da nova rotina de ingestao.
+  - `scripts/ingest_public_safety_postgis.py`:
+    - novo CLI para backfill/reexecucao explicita da carga SSP no PostGIS.
+  - `scripts/bootstrap_m4_4_layers.py`:
+    - agora executa a ingestao de seguranca apos o bootstrap de camadas, evitando que ambientes novos fiquem com a tabela vazia.
+  - ambiente local:
+    - instalados `openpyxl` e `pyarrow` na `.venv` para suportar leitura do XLSX/cache SSP.
+- Validation:
+  - `Set-Location "c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal"; $env:DATABASE_URL='postgresql://postgres:postgres@localhost:5432/find_ideal_estate'; C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe scripts/ingest_public_safety_postgis.py --year 2025` -> `inserted_rows=1060199`, `dropped_rows=1`.
+  - `docker compose exec -T postgres psql -U postgres -d find_ideal_estate -c "SELECT COUNT(*) AS incidents, COUNT(*) FILTER (WHERE location IS NOT NULL) AS with_location, MIN(occurred_at) AS min_occurred_at, MAX(occurred_at) AS max_occurred_at FROM public_safety_incidents;"` -> `1060199` linhas, todas com geometria, cobrindo `2025-01-01` a `2025-12-31`.
+  - `docker compose exec -T postgres psql -U postgres -d find_ideal_estate -c "SELECT category, COUNT(*) AS total FROM public_safety_incidents GROUP BY category ORDER BY total DESC LIMIT 10;"` -> categorias SSP presentes como `FURTO - OUTROS`, `LESÃO CORPORAL DOLOSA`, `ROUBO - OUTROS`, `TRÁFICO DE ENTORPECENTES`, `ESTUPRO DE VULNERÁVEL`.
+  - `Invoke-RestMethod http://localhost:8000/journeys/b8f946ed-0dd5-4e49-8298-2f32416f27bb/zones/983777e57a12cd763ea07bc028bdfc0ddb730687159efee59d3556ad6ee0ce16/safety-incidents` -> `FeatureCollection` com `196` features reais; primeira ocorrencia classificada como `robbery` a partir de `ROUBO - OUTROS`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-04-01 - Implementar camada de segurança no mapa com cor por tipo de ocorrência
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/develop-frontend/SKILL.md` para integrar a nova camada ao mapa com diff focado, coerência visual e validação dirigida.
+- Trigger: usuario reportou que a camada de segurança nao estava visivel no mapa e definiu que as cores devem ser baseadas no tipo de ocorrencia.
+- Scope executed:
+  - backend:
+    - `packages/contracts/contracts/zones.py` e `apps/api/contracts/__init__.py` receberam DTOs GeoJSON para ocorrencias de seguranca no mapa;
+    - `apps/api/src/api/routes/journeys.py` passou a expor `GET /journeys/{journey_id}/zones/{zone_fingerprint}/safety-incidents`;
+    - a rota classifica `category` em grupos canonicos (`theft`, `robbery`, `violence`, `sexual`, `drugs`, `other`) preservando o tipo bruto para tooltip/debug.
+  - frontend:
+    - `apps/web/src/api/schemas.ts` e `apps/web/src/api/client.ts` receberam o contrato e o cliente da nova FeatureCollection de seguranca;
+    - `apps/web/src/features/app/FindIdealApp.tsx` ganhou source/layers MapLibre para seguranca, toggle no menu de camadas, clusterizacao, popup por ocorrencia e legenda dos grupos canonicos;
+    - a camada e carregada por zona selecionada e respeita `config.enrichments.safety` sem fallback silencioso.
+  - testes:
+    - `apps/api/tests/test_phase1_journeys_jobs_routes.py` cobre a classificacao canonica e a nova rota de ocorrencias;
+    - `apps/web/src/features/app/FindIdealApp.test.tsx` cobre carga da source, criacao da layer e toggle de visibilidade.
+- Validation:
+  - `Set-Location "c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal"; C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase1_journeys_jobs_routes.py -q --color=no` -> `11 passed`.
+  - `Set-Location "c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/apps/web"; $env:CI='1'; .\node_modules\.bin\vitest.cmd run --config vitest.config.ts src/features/app/FindIdealApp.test.tsx --reporter=dot --no-color` -> `10 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
 ## 2026-03-29 - Corrigir erro 500 no Step 5 apos troca do cache para endereco-only
 
 - Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `WORK_LOG.md`.

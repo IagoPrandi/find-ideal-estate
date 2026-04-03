@@ -256,6 +256,29 @@ export const ListingsCollectionSchema = z.object({
   features: z.array(ListingFeatureSchema)
 });
 
+export const SafetyIncidentFeatureSchema = z.object({
+  type: z.literal("Feature"),
+  geometry: z.object({
+    type: z.literal("Point"),
+    coordinates: z.tuple([z.number(), z.number()])
+  }),
+  properties: z.object({
+    id: z.string().optional(),
+    zone_fingerprint: z.string().optional(),
+    crime_group: z.string().optional(),
+    crime_group_label: z.string().optional(),
+    crime_type: z.string().nullable().optional(),
+    occurred_at: z.string().nullable().optional(),
+    point_count: z.number().optional(),
+    point_count_abbreviated: z.string().optional()
+  }).passthrough()
+});
+
+export const SafetyIncidentsCollectionSchema = z.object({
+  type: z.literal("FeatureCollection"),
+  features: z.array(SafetyIncidentFeatureSchema)
+});
+
 export const FinalListingsJsonSchema = z.array(z.record(z.unknown()));
 
 export const PriceRollupReadSchema = z.object({
@@ -512,6 +535,8 @@ export type ListingsCollection = {
     properties: Record<string, unknown>;
   }>;
 };
+
+export type SafetyIncidentsCollection = z.output<typeof SafetyIncidentsCollectionSchema>;
 
 export type ListingsScrapePlanPlatform = z.output<typeof ListingsScrapePlanPlatformSchema>;
 export type ListingsScrapePlanResponse = z.output<typeof ListingsScrapePlanResponseSchema>;
