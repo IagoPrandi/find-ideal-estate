@@ -194,7 +194,7 @@ async def test_fetch_listing_cards_for_zone_supports_all_spatial_scope() -> None
     zone_fingerprint = f"zone-dedup-{uuid4().hex[:8]}"
     platform_listing_ids = [f"dedup-qa-{uuid4().hex[:8]}", f"dedup-zap-{uuid4().hex[:8]}"]
     fingerprint = compute_property_fingerprint(
-        address_normalized="Rua Teste Dedup, 100",
+        address_normalized="Rua Teste Dedup, Itaim Bibi, São Paulo, SP",
         lat=-23.5505,
         lon=-46.6333,
         area_m2=70,
@@ -244,7 +244,7 @@ async def test_fetch_listing_cards_for_zone_supports_all_spatial_scope() -> None
 
         await upsert_property_and_ad(
             fingerprint=fingerprint,
-            address_normalized="Rua Teste Dedup, 100",
+            address_normalized="Rua Teste Dedup, Itaim Bibi, São Paulo, SP",
             lat=-23.5505,
             lon=-46.6333,
             area_m2=70,
@@ -263,7 +263,7 @@ async def test_fetch_listing_cards_for_zone_supports_all_spatial_scope() -> None
         )
         await upsert_property_and_ad(
             fingerprint=fingerprint,
-            address_normalized="Rua Teste Dedup, 100",
+            address_normalized="Rua Teste Dedup, Itaim Bibi, São Paulo, SP",
             lat=-23.5505,
             lon=-46.6333,
             area_m2=70,
@@ -306,6 +306,11 @@ async def test_fetch_listing_cards_for_zone_supports_all_spatial_scope() -> None
         assert cards[0]["platform_variants"][1]["current_best_price"] == "3500.00"
         assert cards[0]["platform_variants"][1]["condo_fee"] == "500.00"
         assert cards[0]["platform_variants"][1]["iptu"] == "100.00"
+        assert cards[0]["neighborhood_name"] == "Itaim Bibi"
+        assert cards[0]["city_name"] == "São Paulo"
+        assert cards[0]["current_unit_price"] == pytest.approx(47.142857142857146)
+        assert cards[0]["neighborhood_median_unit_price"] == pytest.approx(47.142857142857146)
+        assert cards[0]["current_vs_neighborhood_pct"] == pytest.approx(0.0)
         assert str(cards[0]["condo_fee"]) == "450.00"
         assert str(cards[0]["iptu"]) == "90.00"
         assert str(cards[0]["second_best_price"]) == "3500.00"

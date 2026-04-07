@@ -52,6 +52,8 @@ async def _run(args: argparse.Namespace) -> dict[str, object]:
             "deleted_rows": result.deleted_rows,
             "inserted_rows": result.inserted_rows,
             "dropped_rows": result.dropped_rows,
+            "neighborhood_boundary_rows": result.neighborhood_boundary_rows,
+            "neighborhood_metric_rows": result.neighborhood_metric_rows,
             "elapsed_seconds": round(result.elapsed_seconds, 3),
         }
     finally:

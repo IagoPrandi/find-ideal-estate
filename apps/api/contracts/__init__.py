@@ -16,6 +16,17 @@ _SHARED_CONTRACTS_DIR = Path(__file__).resolve().parents[3] / "packages" / "cont
 if str(_SHARED_CONTRACTS_DIR) not in __path__:
     __path__.append(str(_SHARED_CONTRACTS_DIR))
 
+from .dashboard import (
+    DashboardDistributionBucketRead,
+    DashboardPriceHistoryPointRead,
+    DashboardRankRead,
+    DashboardSafetyHourBucketRead,
+    ZoneDashboardAnalyticsRead,
+    ZoneDashboardContextRead,
+    ZoneDashboardEnvironmentRead,
+    ZoneDashboardPriceRead,
+    ZoneDashboardSafetyRead,
+)
 from .enums import JobState, JobType, JourneyState
 from .jobs import JobCancelAccepted, JobCreate, JobEventRead, JobRead
 from .journeys import JourneyCreate, JourneyRead, JourneyReferencePoint, JourneyUpdate
@@ -45,6 +56,10 @@ from .zones import (
 __version__ = "0.1.0"
 
 __all__ = [
+    "DashboardDistributionBucketRead",
+    "DashboardPriceHistoryPointRead",
+    "DashboardRankRead",
+    "DashboardSafetyHourBucketRead",
     "JobCancelAccepted",
     "JobCreate",
     "JobEventRead",
@@ -65,6 +80,11 @@ __all__ = [
     "PropertyRead",
     "SearchAddressSuggestion",
     "TransportPointRead",
+    "ZoneDashboardAnalyticsRead",
+    "ZoneDashboardContextRead",
+    "ZoneDashboardEnvironmentRead",
+    "ZoneDashboardPriceRead",
+    "ZoneDashboardSafetyRead",
     "ZoneBadgeRead",
     "ZoneCacheStatusRead",
     "ZonePOIPointRead",

@@ -6,7 +6,10 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Path, Query, Response
 from core.db import get_engine
-from modules.public_safety import public_safety_group_case_sql, public_safety_group_label_case_sql
+from modules.public_safety import (
+    public_safety_group_case_sql,
+    public_safety_group_label_case_sql,
+)
 from modules.zones.vegetation import green_vegetation_case_sql
 from sqlalchemy import text
 from sqlalchemy.exc import ProgrammingError

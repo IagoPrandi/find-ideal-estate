@@ -1,5 +1,17 @@
 """Shared contracts package for inter-module DTOs."""
 
+from .dashboard import (
+    DashboardDistributionBucketRead,
+    DashboardPriceHistoryPointRead,
+    DashboardRankingItemRead,
+    DashboardRankRead,
+    DashboardSafetyHourBucketRead,
+    ZoneDashboardAnalyticsRead,
+    ZoneDashboardContextRead,
+    ZoneDashboardEnvironmentRead,
+    ZoneDashboardPriceRead,
+    ZoneDashboardSafetyRead,
+)
 from .enums import JobState, JobType, JourneyState
 from .jobs import JobCancelAccepted, JobCreate, JobEventRead, JobRead
 from .journeys import JourneyCreate, JourneyRead, JourneyReferencePoint, JourneyUpdate
@@ -29,6 +41,11 @@ from .zones import (
 __version__ = "0.1.0"
 
 __all__ = [
+    "DashboardDistributionBucketRead",
+    "DashboardPriceHistoryPointRead",
+    "DashboardRankingItemRead",
+    "DashboardRankRead",
+    "DashboardSafetyHourBucketRead",
     "JobCancelAccepted",
     "JobCreate",
     "JobEventRead",
@@ -49,6 +66,11 @@ __all__ = [
     "PropertyRead",
     "SearchAddressSuggestion",
     "TransportPointRead",
+    "ZoneDashboardAnalyticsRead",
+    "ZoneDashboardContextRead",
+    "ZoneDashboardEnvironmentRead",
+    "ZoneDashboardPriceRead",
+    "ZoneDashboardSafetyRead",
     "ZoneBadgeRead",
     "ZoneCacheStatusRead",
     "ZonePOIPointRead",

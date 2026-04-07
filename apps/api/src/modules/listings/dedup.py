@@ -257,6 +257,28 @@ async def fetch_listing_cards_for_zone(
                     SELECT
                         p.id AS property_id,
                         p.address_normalized,
+                        NULLIF(
+                            BTRIM(
+                                (
+                                    regexp_split_to_array(
+                                        regexp_replace(COALESCE(p.address_normalized, ''), '\\s*,\\s*', ',', 'g'),
+                                        ','
+                                    )
+                                )[2]
+                            ),
+                            ''
+                        ) AS neighborhood_name,
+                        NULLIF(
+                            BTRIM(
+                                (
+                                    regexp_split_to_array(
+                                        regexp_replace(COALESCE(p.address_normalized, ''), '\\s*,\\s*', ',', 'g'),
+                                        ','
+                                    )
+                                )[3]
+                            ),
+                            ''
+                        ) AS city_name,
                         p.location,
                         p.area_m2,
                         p.bedrooms,
@@ -271,10 +293,37 @@ async def fetch_listing_cards_for_zone(
                     FROM properties p
                     JOIN zones z ON z.fingerprint = :zone_fp
                     WHERE (p.usage_type = :usage_type OR :usage_type = 'all')
+                ),
+                property_price_context AS (
+                    SELECT
+                        zp.property_id,
+                        zp.neighborhood_name,
+                        zp.city_name,
+                        bp.price AS current_best_price,
+                        CASE
+                            WHEN zp.area_m2 IS NOT NULL AND zp.area_m2 > 0 AND bp.price IS NOT NULL THEN bp.price::DOUBLE PRECISION / zp.area_m2::DOUBLE PRECISION
+                            ELSE NULL
+                        END AS current_unit_price
+                    FROM zone_props zp
+                    JOIN ranked_prices bp ON bp.property_id = zp.property_id AND bp.price_rank = 1
+                    WHERE zp.address_normalized IS NOT NULL
+                ),
+                neighborhood_medians AS (
+                    SELECT
+                        ppc.city_name,
+                        ppc.neighborhood_name,
+                        percentile_cont(0.5) WITHIN GROUP (ORDER BY ppc.current_unit_price)::DOUBLE PRECISION AS neighborhood_median_unit_price
+                    FROM property_price_context ppc
+                    WHERE ppc.city_name IS NOT NULL
+                      AND ppc.neighborhood_name IS NOT NULL
+                      AND ppc.current_unit_price IS NOT NULL
+                    GROUP BY ppc.city_name, ppc.neighborhood_name
                 )
                 SELECT
                     zp.property_id,
                     zp.address_normalized,
+                    zp.neighborhood_name,
+                    zp.city_name,
                     zp.has_coordinates,
                     zp.inside_zone,
                     ST_Y(zp.location) AS lat,
@@ -289,6 +338,15 @@ async def fetch_listing_cards_for_zone(
                     bp.url,
                     bp.image_url,
                     bp.price          AS current_best_price,
+                    ppc.current_unit_price,
+                    nm.neighborhood_median_unit_price,
+                    CASE
+                        WHEN ppc.current_unit_price IS NOT NULL
+                         AND nm.neighborhood_median_unit_price IS NOT NULL
+                         AND nm.neighborhood_median_unit_price <> 0
+                        THEN ROUND((((ppc.current_unit_price - nm.neighborhood_median_unit_price) / nm.neighborhood_median_unit_price) * 100.0)::numeric, 2)::DOUBLE PRECISION
+                        ELSE NULL
+                    END AS current_vs_neighborhood_pct,
                     bp.condo_fee,
                     bp.iptu,
                     bp.observed_at,
@@ -330,6 +388,10 @@ async def fetch_listing_cards_for_zone(
                     )                  AS platform_variants
                 FROM zone_props zp
                 JOIN ranked_prices bp ON bp.property_id = zp.property_id AND bp.price_rank = 1
+                                LEFT JOIN property_price_context ppc ON ppc.property_id = zp.property_id
+                                LEFT JOIN neighborhood_medians nm
+                                    ON nm.city_name = ppc.city_name
+                                 AND nm.neighborhood_name = ppc.neighborhood_name
                 WHERE (:spatial_scope = 'all' OR zp.inside_zone = true)
                 ORDER BY zp.inside_zone DESC, zp.has_coordinates DESC, bp.price ASC NULLS LAST
                 """
@@ -358,6 +420,8 @@ async def fetch_listing_cards_for_zone(
                 {
                     "property_id": str(row["property_id"]),
                     "address_normalized": row["address_normalized"],
+                    "neighborhood_name": row["neighborhood_name"],
+                    "city_name": row["city_name"],
                     "lat": float(row["lat"]) if row["lat"] is not None else None,
                     "lon": float(row["lon"]) if row["lon"] is not None else None,
                     "has_coordinates": bool(row["has_coordinates"]),
@@ -377,6 +441,9 @@ async def fetch_listing_cards_for_zone(
                         for variant in (row["platform_variants"] or [])
                     ],
                     "current_best_price": str(best_price) if best_price is not None else None,
+                    "current_unit_price": float(row["current_unit_price"]) if row["current_unit_price"] is not None else None,
+                    "neighborhood_median_unit_price": float(row["neighborhood_median_unit_price"]) if row["neighborhood_median_unit_price"] is not None else None,
+                    "current_vs_neighborhood_pct": float(row["current_vs_neighborhood_pct"]) if row["current_vs_neighborhood_pct"] is not None else None,
                     "condo_fee": str(row["condo_fee"]) if row["condo_fee"] is not None else None,
                     "iptu": str(row["iptu"]) if row["iptu"] is not None else None,
                     "second_best_price": str(second_price) if second_price is not None else None,

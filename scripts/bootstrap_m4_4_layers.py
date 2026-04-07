@@ -38,6 +38,8 @@ async def main() -> int:
         print("public_safety_deleted_rows=", public_safety_result.deleted_rows)
         print("public_safety_inserted_rows=", public_safety_result.inserted_rows)
         print("public_safety_dropped_rows=", public_safety_result.dropped_rows)
+        print("public_safety_neighborhood_boundaries=", public_safety_result.neighborhood_boundary_rows)
+        print("public_safety_neighborhood_metrics=", public_safety_result.neighborhood_metric_rows)
         print("public_safety_source=", public_safety_result.source_label)
         return 0
     finally:

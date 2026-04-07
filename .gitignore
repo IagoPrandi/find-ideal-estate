@@ -63,3 +63,5 @@ __pycache__/
 # Chromium browser profiles (generated at runtime by Playwright scrapers)
 cods_ok/.profiles/
 
+data_cache/dados_criminais_*.xlsx
+data_cache/~$dados_criminais_*.xlsx

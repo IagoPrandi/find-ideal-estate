@@ -9,7 +9,9 @@
 - Never create useless files that do not improve functionality, security, or project understanding.
 - Always open **SKILLS_README.md** and use a skill to do and complete the task. You just can't use any available skill if there aren't one to task.
 -Never use fallbacks that hide issues or errors.
-
+- Always use UTF-8 portuguese language in ui and ux 
+- Always respecting spelling
+  
 ## Routing: pick skills by change scope
 
 Always open **SKILLS_README.md** and find a skill to done the task. You just can't use a available skill if there aren't one to task.

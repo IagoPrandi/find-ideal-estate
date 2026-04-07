@@ -298,10 +298,14 @@ async def enrich_zone_green(zone_id: UUID) -> dict[str, Any]:
             text(
                 """
                 SELECT COALESCE(
-                    SUM(
-                        ST_Area(
-                            ST_Intersection(z.isochrone_geom, gv.geometry)::geography
-                        )
+                    ST_Area(
+                        (
+                            ST_UnaryUnion(
+                                ST_Collect(
+                                    ST_Intersection(z.isochrone_geom, gv.geometry)
+                                )
+                            )
+                        )::geography
                     ),
                     0
                 ) AS green_area_m2
@@ -339,10 +343,14 @@ async def enrich_zone_flood(zone_id: UUID) -> dict[str, Any]:
             text(
                 """
                 SELECT COALESCE(
-                    SUM(
-                        ST_Area(
-                            ST_Intersection(z.isochrone_geom, gf.geometry)::geography
-                        )
+                    ST_Area(
+                        (
+                            ST_UnaryUnion(
+                                ST_Collect(
+                                    ST_Intersection(z.isochrone_geom, gf.geometry)
+                                )
+                            )
+                        )::geography
                     ),
                     0
                 ) AS flood_area_m2

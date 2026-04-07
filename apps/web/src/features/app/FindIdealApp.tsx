@@ -1393,7 +1393,8 @@ export function FindIdealApp() {
       const currentRequestId = requestId;
 
       try {
-        const response = await getPublicSafetyIncidentsForViewport(getMapViewportBounds(map), zoom, activeSafetyGroups);
+        const viewport = getMapViewportBounds(map);
+        const response = await getPublicSafetyIncidentsForViewport(viewport, zoom, activeSafetyGroups);
         if (cancelled || currentRequestId !== requestId) {
           return;
         }

@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
+  ArrowDownRight,
+  ArrowUpRight,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
@@ -12,45 +14,15 @@ import {
   MapIcon,
   Minus,
   ShieldX,
-  ShieldAlert,
   SlidersHorizontal,
-  Trees,
-  Droplets,
-  Building2
+  Building2,
+  X,
 } from "lucide-react";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Cell,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis
-} from "recharts";
-import { apiActionHint, getJob, getJourneyZonesList, getPriceRollups, getZoneListings, type ListingPlatformVariantRead } from "../../api/client";
+import { getJob, getZoneDashboardAnalytics, getZoneListings, type ListingCardRead, type ListingPlatformVariantRead } from "../../api/client";
 import { ListingsScrapeDiagnosticsSchema, type ListingsScrapeDiagnostics, type ListingsScrapePlatformDiagnostics } from "../../api/schemas";
 import { applyListingsPanelFilters, formatCurrencyBr, getListingDisplayPrice, getListingSelectionKey, parseFiniteNumber, resolvePlatformImageUrl, resolvePlatformUrl } from "../../lib/listingFormat";
 import { useJourneyStore, useUIStore } from "../../state";
-
-function toDistribution(values: number[]) {
-  if (values.length === 0) {
-    return [];
-  }
-  const buckets = [
-    { label: "até 3k", min: 0, max: 3000 },
-    { label: "3k-4k", min: 3000, max: 4000 },
-    { label: "4k-5k", min: 4000, max: 5000 },
-    { label: "5k-6k", min: 5000, max: 6000 },
-    { label: "6k+", min: 6000, max: Number.POSITIVE_INFINITY }
-  ];
-  return buckets.map((bucket) => ({
-    range: bucket.label,
-    count: values.filter((value) => value >= bucket.min && value < bucket.max).length
-  }));
-}
+import { Step6Dashboard } from "./Step6Dashboard";
 
 function platformLabel(value: string | null | undefined) {
   if (!value) {
@@ -147,6 +119,22 @@ function extractListingsScrapeDiagnostics(resultRef: Record<string, unknown> | n
   return parsed.success ? parsed.data : null;
 }
 
+function pickNeighborhoodPrefetchWindow(
+  items: Array<{ neighborhood_name: string; is_selected?: boolean }>,
+) {
+  if (items.length <= 9) {
+    return items;
+  }
+
+  const selectedIndex = Math.max(
+    items.findIndex((item) => item.is_selected),
+    0,
+  );
+  const start = Math.max(0, selectedIndex - 4);
+  const end = Math.min(items.length, start + 9);
+  return items.slice(Math.max(0, end - 9), end);
+}
+
 function formatPlatformVariantHint(variant: ListingPlatformVariantRead, primaryPlatform: string | null | undefined) {
   if (variant.platform === primaryPlatform) {
     return "Menor preço consolidado";
@@ -154,7 +142,91 @@ function formatPlatformVariantHint(variant: ListingPlatformVariantRead, primaryP
   return "Também encontrado nesta plataforma";
 }
 
+function formatPercentDelta(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return "Sem base";
+  }
+  return `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`;
+}
+
+function ListingAccessibilityPopover(props: {
+  open: boolean;
+  onClose: () => void;
+  popoverId: string;
+  listing: ListingCardRead | null;
+}) {
+  if (!props.open) {
+    return null;
+  }
+
+  const selectedUnitPrice = props.listing?.current_unit_price;
+  const neighborhoodDelta = props.listing?.current_vs_neighborhood_pct;
+  const neighborhoodName = props.listing?.neighborhood_name;
+  const deltaDetail = neighborhoodName
+    ? `Comparação frente à mediana de ${neighborhoodName}`
+    : "Comparação frente à mediana do bairro do imóvel";
+
+  return (
+    <div
+      id={props.popoverId}
+      role="dialog"
+      aria-modal="false"
+      aria-label="Preço do imóvel versus bairro"
+      data-testid={props.popoverId}
+      className="absolute inset-x-0 bottom-0 z-30 animate-[fadeIn_0.18s_ease-out] overflow-hidden rounded-[24px] border border-slate-200 bg-slate-100/95 shadow-2xl backdrop-blur-sm"
+      onClick={(event) => event.stopPropagation()}
+    >
+      <div className="border-b border-slate-200 bg-white/90 px-3 py-2.5">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Acessibilidade do imóvel</p>
+            <p className="mt-1 truncate text-xs font-semibold text-slate-800">Preço do imóvel versus bairro</p>
+            <p className="mt-1 truncate text-[11px] leading-snug text-slate-500">{props.listing?.address_normalized || "Endereço do anúncio indisponível"}</p>
+          </div>
+          <button
+            type="button"
+            onClick={props.onClose}
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
+            aria-label="Fechar acessibilidade do imóvel"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+
+      <div className="grid gap-2 p-2.5 md:grid-cols-2">
+        <div className="rounded-xl border border-slate-200 bg-white/95 px-2.5 py-2.5 shadow-sm">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Valor por m²</p>
+              <p className="mt-1 text-xs font-semibold text-slate-800">{formatCurrencyBr(selectedUnitPrice)}</p>
+              <p className="mt-1 text-[11px] leading-snug text-slate-500">Valor atual por m² do anúncio selecionado</p>
+            </div>
+            <div className="rounded-lg bg-pastel-violet-50 p-2 text-pastel-violet-600">
+              <Building2 className="h-3.5 w-3.5" />
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-slate-200 bg-white/95 px-2.5 py-2.5 shadow-sm">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Diferença vs bairro</p>
+              <p className="mt-1 text-xs font-semibold text-slate-800">{formatPercentDelta(neighborhoodDelta)}</p>
+              <p className="mt-1 text-[11px] leading-snug text-slate-500">{neighborhoodDelta === null || neighborhoodDelta === undefined ? "Sem base comparativa" : deltaDetail}</p>
+            </div>
+            <div className="rounded-lg bg-amber-50 p-2 text-amber-600">
+              {typeof neighborhoodDelta === "number" && neighborhoodDelta > 0 ? <ArrowUpRight className="h-3.5 w-3.5" /> : <ArrowDownRight className="h-3.5 w-3.5" />}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Step6Analysis() {
+  const queryClient = useQueryClient();
   const journeyId = useJourneyStore((state) => state.journeyId);
   const zoneFingerprint = useJourneyStore((state) => state.selectedZoneFingerprint);
   const listingsJobId = useJourneyStore((state) => state.listingsJobId);
@@ -166,12 +238,15 @@ export function Step6Analysis() {
   const activeTab = useUIStore((state) => state.activeTab);
   const setActiveTab = useUIStore((state) => state.setActiveTab);
   const listingCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const listingsPanelScrollRef = useRef<HTMLDivElement | null>(null);
   const lastScrolledListingKeyRef = useRef<string | null>(null);
   const lastProgressRunKeyRef = useRef<string | null>(null);
   const autoCollapsedProgressRunKeyRef = useRef<string | null>(null);
   const [isProgressCollapsed, setIsProgressCollapsed] = useState(false);
   const [isFiltersCollapsed, setIsFiltersCollapsed] = useState(false);
+  const [isPreparingDashboard, setIsPreparingDashboard] = useState(false);
   const [openAvailabilityPopoverKey, setOpenAvailabilityPopoverKey] = useState<string | null>(null);
+  const [openAccessibilityPopoverKey, setOpenAccessibilityPopoverKey] = useState<string | null>(null);
 
   const persistedListingsJobId = listingsJobId;
 
@@ -201,44 +276,10 @@ export function Step6Analysis() {
     }
   });
 
-  const pricesQuery = useQuery({
-    queryKey: ["zone-price-rollups", journeyId, zoneFingerprint, config.type],
-    queryFn: async () => getPriceRollups(journeyId as string, zoneFingerprint as string, config.type, 30),
-    enabled: Boolean(journeyId && zoneFingerprint)
-  });
-
-  const zonesQuery = useQuery({
-    queryKey: ["journey-zones-for-analysis", journeyId],
-    queryFn: async () => getJourneyZonesList(journeyId as string),
-    enabled: Boolean(journeyId)
-  });
-
-  const selectedZone = zonesQuery.data?.zones.find((zone) => zone.fingerprint === zoneFingerprint);
-  const showGreenMetric = selectedZone?.green_vegetation_label !== null && selectedZone?.green_vegetation_label !== undefined;
   const rawListings = listingsQuery.data?.listings || [];
   const listingsInZone = rawListings.filter((listing) => listing.inside_zone);
   const listingsOutsideZone = rawListings.filter((listing) => listing.has_coordinates && !listing.inside_zone);
   const listingsWithoutCoordinates = rawListings.filter((listing) => !listing.has_coordinates);
-  const listingPrices = rawListings
-    .map((listing) => getListingDisplayPrice(listing))
-    .filter((value): value is number => value !== null);
-  const listingUnitPrices = rawListings
-    .map((listing) => {
-      const price = getListingDisplayPrice(listing);
-      const area = typeof listing.area_m2 === "number" && listing.area_m2 > 0 ? listing.area_m2 : null;
-      if (price === null || area === null) {
-        return null;
-      }
-      return price / area;
-    })
-    .filter((value): value is number => value !== null);
-  const priceDistribution = toDistribution(listingPrices);
-  const priceHistory = (pricesQuery.data || []).map((item) => ({
-    day: new Date(item.date).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }),
-    price: parseFiniteNumber(item.median_price) || 0
-  }));
-  const medianCurrentPrice = listingPrices.length > 0 ? listingPrices.reduce((acc, value) => acc + value, 0) / listingPrices.length : null;
-  const averageUnitPrice = listingUnitPrices.length > 0 ? listingUnitPrices.reduce((acc, value) => acc + value, 0) / listingUnitPrices.length : null;
 
   const scrapeDiagnostics = extractListingsScrapeDiagnostics((listingsJobQuery.data?.result_ref as Record<string, unknown> | null | undefined) || undefined);
   const platformEntries = useMemo(() => {
@@ -284,6 +325,110 @@ export function Step6Analysis() {
     && listingsForScope.length === 0;
 
   const displayedListings = applyListingsPanelFilters(rawListings, listingsFilters);
+  const selectedDashboardListing = useMemo(
+    () => rawListings.find((listing) => getListingSelectionKey(listing) === selectedListingKey) || null,
+    [rawListings, selectedListingKey],
+  );
+  const dashboardPropertyId = useMemo(() => {
+    return selectedDashboardListing?.property_id || rawListings.find((listing) => listing.property_id)?.property_id || null;
+  }, [rawListings, selectedDashboardListing]);
+
+  async function primeDashboardAnalytics() {
+    if (!journeyId || !zoneFingerprint) {
+      return;
+    }
+
+    const zoneDashboard = await queryClient.fetchQuery({
+      queryKey: ["zone-dashboard-analytics", journeyId, zoneFingerprint, config.type, "zone"],
+      queryFn: async () => getZoneDashboardAnalytics(journeyId, zoneFingerprint, config.type),
+      staleTime: 60_000,
+    });
+
+    const safetyCity = selectedDashboardListing?.city_name || zoneDashboard.safety.selected_city || null;
+    if (safetyCity) {
+      await queryClient.prefetchQuery({
+        queryKey: ["zone-dashboard-analytics", journeyId, zoneFingerprint, config.type, "safety-city", safetyCity],
+        queryFn: async () => getZoneDashboardAnalytics(journeyId, zoneFingerprint, config.type, { cityName: safetyCity }),
+        staleTime: 60_000,
+      });
+    }
+
+    if (!dashboardPropertyId) {
+      return;
+    }
+
+    const propertyDashboard = await queryClient.fetchQuery({
+      queryKey: ["zone-dashboard-analytics", journeyId, zoneFingerprint, config.type, dashboardPropertyId],
+      queryFn: async () => getZoneDashboardAnalytics(journeyId, zoneFingerprint, config.type, dashboardPropertyId),
+      staleTime: 60_000,
+    });
+
+    const priceCity = propertyDashboard.context.city_name;
+    const rankingItems = pickNeighborhoodPrefetchWindow(propertyDashboard.price.neighborhood_unit_price_ranking || []);
+    if (!priceCity || rankingItems.length === 0) {
+      return;
+    }
+
+    await Promise.all(
+      rankingItems.map((item) =>
+        queryClient.prefetchQuery({
+          queryKey: [
+            "zone-dashboard-analytics",
+            journeyId,
+            zoneFingerprint,
+            config.type,
+            "price-filter",
+            priceCity,
+            item.neighborhood_name,
+            dashboardPropertyId,
+          ],
+          queryFn: async () => getZoneDashboardAnalytics(journeyId, zoneFingerprint, config.type, {
+            propertyId: dashboardPropertyId,
+            cityName: priceCity,
+            neighborhoodName: item.neighborhood_name,
+          }),
+          staleTime: 60_000,
+        }),
+      ),
+    );
+  }
+
+  async function handleOpenDashboardTab() {
+    if (activeTab === "dashboard") {
+      return;
+    }
+
+    setIsPreparingDashboard(true);
+    try {
+      await primeDashboardAnalytics();
+    } catch {
+      // Se o warm-up falhar, ainda abrimos a aba para exibir o estado de erro normal.
+    } finally {
+      setIsPreparingDashboard(false);
+      setActiveTab("dashboard");
+    }
+  }
+
+  useEffect(() => {
+    if (!journeyId || !zoneFingerprint) {
+      return;
+    }
+    let cancelled = false;
+
+    const warmDashboardQueries = async () => {
+      await primeDashboardAnalytics();
+    };
+
+    void warmDashboardQueries().catch(() => {
+      if (!cancelled) {
+        // Warm-up em background é oportunista; falha aqui não bloqueia a tela.
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [config.type, dashboardPropertyId, journeyId, queryClient, zoneFingerprint]);
 
   useEffect(() => {
     if (!selectedListingKey) {
@@ -293,11 +438,13 @@ export function Step6Analysis() {
     if (lastScrolledListingKeyRef.current === selectedListingKey) {
       return;
     }
+    const listContainer = listingsPanelScrollRef.current;
     const selectedCard = listingCardRefs.current[selectedListingKey];
-    if (!selectedCard) {
+    if (!selectedCard || !listContainer) {
       return;
     }
-    selectedCard.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    const targetTop = Math.max(0, selectedCard.offsetTop - listContainer.offsetTop - 12);
+    listContainer.scrollTo({ top: targetTop, behavior: "smooth" });
     lastScrolledListingKeyRef.current = selectedListingKey;
   }, [displayedListings, selectedListingKey]);
 
@@ -307,7 +454,7 @@ export function Step6Analysis() {
     }
     lastProgressRunKeyRef.current = progressRunKey;
     autoCollapsedProgressRunKeyRef.current = null;
-    setIsProgressCollapsed(false);
+    setIsProgressCollapsed((current) => (current ? false : current));
   }, [progressRunKey]);
 
   useEffect(() => {
@@ -317,17 +464,20 @@ export function Step6Analysis() {
     if (autoCollapsedProgressRunKeyRef.current === progressRunKey) {
       return;
     }
-    setIsProgressCollapsed(true);
     autoCollapsedProgressRunKeyRef.current = progressRunKey;
+    setIsProgressCollapsed((current) => (current ? current : true));
   }, [hasCompletedListingsGeneration, progressRunKey]);
 
-  function handleAvailabilityPopoverBlur(cardKey: string, event: React.FocusEvent<HTMLDivElement>) {
-    const nextFocused = event.relatedTarget;
-    if (nextFocused instanceof Node && event.currentTarget.contains(nextFocused)) {
-      return;
+  useEffect(() => {
+    function handleEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setOpenAccessibilityPopoverKey(null);
+      }
     }
-    setOpenAvailabilityPopoverKey((current) => (current === cardKey ? null : current));
-  }
+
+    window.addEventListener("keydown", handleEscape);
+    return () => window.removeEventListener("keydown", handleEscape);
+  }, []);
 
   function toggleListingsSort(sortField: "price" | "size") {
     setListingsFilters({
@@ -346,6 +496,22 @@ export function Step6Analysis() {
     }
     const ordering = listingsFilters.sortDirection === "asc" ? "crescente" : "decrescente";
     return `Ordenar por ${criterion} ${ordering}`;
+  }
+
+  function handleAvailabilityPopoverBlur(cardKey: string, event: React.FocusEvent<HTMLDivElement>) {
+    const nextFocused = event.relatedTarget;
+    if (nextFocused instanceof Node && event.currentTarget.contains(nextFocused)) {
+      return;
+    }
+    setOpenAvailabilityPopoverKey((current) => (current === cardKey ? null : current));
+  }
+
+  function handleAccessibilityPopoverBlur(cardKey: string, event: React.FocusEvent<HTMLDivElement>) {
+    const nextFocused = event.relatedTarget;
+    if (nextFocused instanceof Node && event.currentTarget.contains(nextFocused)) {
+      return;
+    }
+    setOpenAccessibilityPopoverKey((current) => (current === cardKey ? null : current));
   }
 
   return (
@@ -449,14 +615,14 @@ export function Step6Analysis() {
             <button type="button" onClick={() => setActiveTab("imoveis")} className={`pb-3 text-sm font-medium border-b-2 transition-colors ${activeTab === "imoveis" ? "border-pastel-violet-500 text-pastel-violet-600" : "border-transparent text-slate-500 hover:text-slate-700"}`}>
               Imóveis ({displayedListings.length}{displayedListings.length !== (listingsQuery.data?.total_count || 0) ? ` de ${listingsQuery.data?.total_count || 0}` : ""})
             </button>
-            <button type="button" onClick={() => setActiveTab("dashboard")} className={`pb-3 text-sm font-medium border-b-2 transition-colors ${activeTab === "dashboard" ? "border-pastel-violet-500 text-pastel-violet-600" : "border-transparent text-slate-500 hover:text-slate-700"}`}>
-              Dashboard Analítico
+            <button type="button" onClick={() => { void handleOpenDashboardTab(); }} disabled={isPreparingDashboard} className={`pb-3 text-sm font-medium border-b-2 transition-colors disabled:cursor-wait disabled:opacity-80 ${activeTab === "dashboard" ? "border-pastel-violet-500 text-pastel-violet-600" : "border-transparent text-slate-500 hover:text-slate-700"}`}>
+              {isPreparingDashboard ? "Preparando dashboard..." : "Dashboard Analítico"}
             </button>
           </div>
         </div>
       </div>
 
-      <div className="panel-scroll flex-1 overflow-y-auto p-5">
+      <div ref={listingsPanelScrollRef} className="panel-scroll flex-1 overflow-y-auto p-5">
         {activeTab === "imoveis" ? (
           <div className="space-y-4 animate-[fadeIn_0.3s_ease-out]">
             <div className="rounded-xl border border-slate-200 bg-white p-4">
@@ -764,19 +930,46 @@ export function Step6Analysis() {
                         ) : null}
                       </div>
                     ) : null}
-                    <div className="mt-auto flex gap-2 border-t border-slate-100 pt-3">
-                      <button type="button" onClick={(event) => event.stopPropagation()} className="flex-1 rounded-lg bg-slate-50 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100">
-                        Ver Acessibilidade
-                      </button>
-                      {adUrl ? (
-                        <a href={adUrl} target="_blank" rel="noreferrer" aria-label="Ver anúncio" onClick={(event) => event.stopPropagation()} className="flex w-10 items-center justify-center rounded-lg bg-pastel-violet-50 text-pastel-violet-500 transition-colors hover:bg-pastel-violet-100">
-                          <ExternalLink className="h-4 w-4" />
-                        </a>
-                      ) : (
-                        <button type="button" disabled aria-label="Anúncio indisponível" onClick={(event) => event.stopPropagation()} className="flex w-10 cursor-not-allowed items-center justify-center rounded-lg bg-slate-100 text-slate-300">
-                          <ExternalLink className="h-4 w-4" />
+                    <div
+                      className={`relative mt-auto border-t border-slate-100 pt-3 ${openAccessibilityPopoverKey === cardInstanceKey ? "z-20" : ""}`}
+                      onBlurCapture={(event) => handleAccessibilityPopoverBlur(cardInstanceKey, event)}
+                    >
+                      {openAccessibilityPopoverKey === cardInstanceKey ? (
+                        <ListingAccessibilityPopover
+                          open
+                          popoverId={`listing-accessibility-popover-${cardInstanceKey}`}
+                          listing={listing}
+                          onClose={() => setOpenAccessibilityPopoverKey((current) => (current === cardInstanceKey ? null : current))}
+                        />
+                      ) : null}
+
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          aria-haspopup="dialog"
+                          aria-expanded={openAccessibilityPopoverKey === cardInstanceKey}
+                          aria-controls={`listing-accessibility-popover-${cardInstanceKey}`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            if (listingKey) {
+                              setSelectedListingKey(listingKey);
+                            }
+                            setOpenAccessibilityPopoverKey((current) => (current === cardInstanceKey ? null : cardInstanceKey));
+                          }}
+                          className="flex-1 rounded-lg bg-slate-50 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100"
+                        >
+                          Ver Acessibilidade
                         </button>
-                      )}
+                        {adUrl ? (
+                          <a href={adUrl} target="_blank" rel="noreferrer" aria-label="Ver anúncio" onClick={(event) => event.stopPropagation()} className="flex w-10 items-center justify-center rounded-lg bg-pastel-violet-50 text-pastel-violet-500 transition-colors hover:bg-pastel-violet-100">
+                            <ExternalLink className="h-4 w-4" />
+                          </a>
+                        ) : (
+                          <button type="button" disabled aria-label="Anúncio indisponível" onClick={(event) => event.stopPropagation()} className="flex w-10 cursor-not-allowed items-center justify-center rounded-lg bg-slate-100 text-slate-300">
+                            <ExternalLink className="h-4 w-4" />
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -784,92 +977,17 @@ export function Step6Analysis() {
             })}
           </div>
         ) : (
-          <div className="space-y-6 animate-[fadeIn_0.3s_ease-out]">
-            {pricesQuery.error ? <p className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{apiActionHint(pricesQuery.error)}</p> : null}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="rounded-xl border border-slate-200 bg-white p-4">
-                <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-500">Preço Mediano</p>
-                <div className="flex items-baseline gap-2">
-                  <h3 className="text-2xl font-bold text-slate-800">{formatCurrencyBr(medianCurrentPrice)}</h3>
-                </div>
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-white p-4">
-                <p className="mb-1 text-xs font-medium uppercase tracking-wider text-slate-500">Custo / m²</p>
-                <h3 className="text-2xl font-bold text-slate-800">{averageUnitPrice ? formatCurrencyBr(averageUnitPrice) : "Sem base"}</h3>
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-slate-200 bg-white p-5">
-              <div className="mb-4 flex items-center justify-between">
-                <h4 className="text-sm font-bold text-slate-800">Evolução do Preço</h4>
-                <span className="rounded bg-slate-50 px-2 py-1 text-xs font-medium text-slate-400">Últimos 30 dias</span>
-              </div>
-              <div className="h-40 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={priceHistory}>
-                    <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="#e2e8f0" />
-                    <XAxis dataKey="day" tick={{ fontSize: 10 }} stroke="#94a3b8" />
-                    <YAxis tickFormatter={(value) => `${Math.round(value / 1000)}k`} tick={{ fontSize: 10 }} stroke="#94a3b8" />
-                    <Tooltip formatter={(value) => formatCurrencyBr(typeof value === "number" ? value : parseFiniteNumber(value))} />
-                    <Line type="monotone" dataKey="price" stroke="#9775fa" strokeWidth={2} dot={priceHistory.length <= 12} />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-
-            <div className="rounded-xl border border-slate-200 bg-white p-5">
-              <h4 className="mb-4 text-sm font-bold text-slate-800">Distribuição por faixa</h4>
-              <div className="h-40 w-full">
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={priceDistribution}>
-                    <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="#e2e8f0" />
-                    <XAxis dataKey="range" tick={{ fontSize: 10 }} stroke="#94a3b8" />
-                    <YAxis allowDecimals={false} tick={{ fontSize: 10 }} stroke="#94a3b8" />
-                    <Tooltip />
-                    <Bar dataKey="count" radius={[6, 6, 0, 0]}>
-                      {priceDistribution.map((entry) => (
-                        <Cell key={entry.range} fill="#c4b5fd" />
-                      ))}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
-            </div>
-
-            <h4 className="pt-2 text-sm font-bold text-slate-800">Indicadores da Zona</h4>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="flex items-center gap-3 rounded-lg border border-slate-100 bg-white p-3">
-                <div className="rounded-lg bg-pastel-violet-50 p-2 text-pastel-violet-600"><ShieldAlert className="h-4 w-4" /></div>
-                <div>
-                  <p className="text-xs font-medium text-slate-500">Segurança</p>
-                  <p className="text-sm font-semibold text-slate-800">{selectedZone?.safety_incidents_count ?? 0} ocorrências</p>
-                </div>
-              </div>
-              {showGreenMetric ? (
-                <div className="flex items-center gap-3 rounded-lg border border-slate-100 bg-white p-3">
-                  <div className="rounded-lg bg-emerald-50 p-2 text-emerald-600"><Trees className="h-4 w-4" /></div>
-                  <div>
-                    <p className="text-xs font-medium text-slate-500">{selectedZone?.green_vegetation_label}</p>
-                    <p className="text-sm font-semibold text-slate-800">{Math.round(selectedZone?.green_area_m2 || 0)} m²</p>
-                  </div>
-                </div>
-              ) : null}
-              <div className="flex items-center gap-3 rounded-lg border border-slate-100 bg-white p-3">
-                <div className="rounded-lg bg-emerald-50 p-2 text-emerald-600"><Droplets className="h-4 w-4" /></div>
-                <div>
-                  <p className="text-xs font-medium text-slate-500">Alagamento</p>
-                  <p className="text-sm font-semibold text-slate-800">{Math.round(selectedZone?.flood_area_m2 || 0)} m²</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-3 rounded-lg border border-slate-100 bg-white p-3">
-                <div className="rounded-lg bg-pastel-violet-50 p-2 text-pastel-violet-600"><MapIcon className="h-4 w-4" /></div>
-                <div>
-                  <p className="text-xs font-medium text-slate-500">POIs</p>
-                  <p className="text-sm font-semibold text-slate-800">{selectedZone?.poi_counts ? Object.values(selectedZone.poi_counts).reduce((acc, value) => acc + value, 0) : 0} itens</p>
-                </div>
-              </div>
-            </div>
-          </div>
+          journeyId && zoneFingerprint ? (
+            <Step6Dashboard
+              journeyId={journeyId}
+              zoneFingerprint={zoneFingerprint}
+              propertyId={dashboardPropertyId}
+              hasExplicitPropertySelection={Boolean(selectedDashboardListing?.property_id)}
+              searchType={config.type}
+              selectedPropertyNeighborhoodName={selectedDashboardListing?.neighborhood_name || null}
+              selectedPropertyCityName={selectedDashboardListing?.city_name || null}
+            />
+          ) : null
         )}
       </div>
     </div>

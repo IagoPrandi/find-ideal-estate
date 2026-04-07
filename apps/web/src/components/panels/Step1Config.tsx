@@ -263,7 +263,6 @@ export function Step1Config() {
               onChange={(event) => setConfig({ time: Number(event.target.value) })}
               className="w-full accent-pastel-violet-500"
             />
-            <p className="text-xs text-slate-400">A zona sera a propria isocrona gerada a partir do ponto principal selecionado.</p>
           </div>
         ) : (
           <div className="space-y-3">
@@ -344,7 +343,7 @@ export function Step1Config() {
 
       <div className="border-t border-slate-100 bg-white p-5">
         <button type="button" onClick={handleSubmit} disabled={isSubmitting} className="gem-primary-button w-full disabled:cursor-not-allowed disabled:opacity-60">
-          {isSubmitting ? "Criando jornada..." : isWalkingMode ? "Gerar isocrona a pe" : isDrivingMode ? "Gerar isocrona de carro" : "Encontrar pontos seed"}
+          {isSubmitting ? "Criando jornada..." : isWalkingMode ? "Gerar área acessível a pé" : isDrivingMode ? "Gerar área acessível de carro" : "Encontrar pontos de ônibus e estações próximas"}
           <ArrowRight className="h-4 w-4" />
         </button>
       </div>

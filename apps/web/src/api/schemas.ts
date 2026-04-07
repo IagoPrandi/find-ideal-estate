@@ -105,6 +105,8 @@ export const ListingCardReadBackendSchema = z.object({
   // Campos principais retornados pelo listing scraper
   property_id: z.string().nullable().optional(),
   address_normalized: z.string().nullable().optional(),
+  neighborhood_name: z.string().nullable().optional(),
+  city_name: z.string().nullable().optional(),
   area_m2: z.number().nullable().optional(),
   bedrooms: z.number().nullable().optional(),
   bathrooms: z.number().nullable().optional(),
@@ -123,6 +125,9 @@ export const ListingCardReadBackendSchema = z.object({
 
   // Preços atuais (o scraper pode retornar strings, ex: Decimal -> str)
   current_best_price: z.string().nullable().optional(),
+  current_unit_price: z.number().nullable().optional(),
+  neighborhood_median_unit_price: z.number().nullable().optional(),
+  current_vs_neighborhood_pct: z.number().nullable().optional(),
   condo_fee: z.string().nullable().optional(),
   iptu: z.string().nullable().optional(),
   second_best_price: z.string().nullable().optional(),
@@ -293,6 +298,98 @@ export const PriceRollupReadSchema = z.object({
   computed_at: z.string()
 });
 
+export const DashboardRankBackendSchema = z.object({
+  position: z.number().nullable().optional(),
+  total: z.number().optional().default(0),
+  percentile: z.number().nullable().optional(),
+  scope_label: z.string().nullable().optional(),
+  direction: z.string().nullable().optional(),
+  note: z.string().nullable().optional()
+});
+
+export const DashboardDistributionBucketBackendSchema = z.object({
+  label: z.string(),
+  count: z.number()
+});
+
+export const DashboardPriceHistoryPointBackendSchema = z.object({
+  date: z.string(),
+  property_price: z.number().nullable().optional(),
+  neighborhood_median_price: z.number().nullable().optional()
+});
+
+export const DashboardRankingItemBackendSchema = z.object({
+  position: z.number(),
+  neighborhood_name: z.string(),
+  city_name: z.string().nullable().optional(),
+  value: z.number().nullable().optional(),
+  yearly_change_pct: z.number().nullable().optional(),
+  is_selected: z.boolean().optional().default(false)
+});
+
+export const DashboardSafetyHourBucketBackendSchema = z.object({
+  hour: z.number(),
+  total_count: z.number().optional().default(0),
+  homicide_count: z.number().optional().default(0),
+  robbery_count: z.number().optional().default(0),
+  theft_count: z.number().optional().default(0)
+});
+
+export const ZoneDashboardAnalyticsBackendSchema = z.object({
+  context: z.object({
+    zone_fingerprint: z.string(),
+    property_id: z.string().nullable().optional(),
+    property_address: z.string().nullable().optional(),
+    neighborhood_name: z.string().nullable().optional(),
+    city_name: z.string().nullable().optional(),
+    state_code: z.string().nullable().optional(),
+    selected_price: z.number().nullable().optional(),
+    selected_unit_price: z.number().nullable().optional(),
+    zone_area_m2: z.number().nullable().optional()
+  }),
+  price: z.object({
+    neighborhood_median_unit_price: z.number().nullable().optional(),
+    selected_vs_neighborhood_pct: z.number().nullable().optional(),
+    neighborhood_unit_price_rank: DashboardRankBackendSchema.nullable().optional(),
+    neighborhood_unit_price_ranking: z.array(DashboardRankingItemBackendSchema).optional().default([]),
+    yearly_change_pct: z.number().nullable().optional(),
+    yearly_change_rank: DashboardRankBackendSchema.nullable().optional(),
+    history: z.array(DashboardPriceHistoryPointBackendSchema).optional().default([]),
+    price_distribution: z.array(DashboardDistributionBucketBackendSchema).optional().default([]),
+    note: z.string().nullable().optional()
+  }),
+  safety: z.object({
+    city_options: z.array(z.string()).optional().default([]),
+    selected_city: z.string().nullable().optional(),
+    ranking_scope_label: z.string().nullable().optional(),
+    ranking_scope_note: z.string().nullable().optional(),
+    rate_scale_base: z.number().nullable().optional(),
+    selected_neighborhood_name: z.string().nullable().optional(),
+    homicide_count_365d: z.number().optional().default(0),
+    homicide_density_per_km2: z.number().nullable().optional(),
+    homicide_rank: DashboardRankBackendSchema.nullable().optional(),
+    robbery_count_365d: z.number().optional().default(0),
+    robbery_density_per_km2: z.number().nullable().optional(),
+    robbery_rate_rank: DashboardRankBackendSchema.nullable().optional(),
+    robbery_rate_ranking: z.array(DashboardRankingItemBackendSchema).optional().default([]),
+    theft_count_365d: z.number().optional().default(0),
+    robbery_to_theft_ratio: z.number().nullable().optional(),
+    robbery_to_theft_rank: DashboardRankBackendSchema.nullable().optional(),
+    peak_hours: z.array(DashboardSafetyHourBucketBackendSchema).optional().default([])
+  }),
+  environment: z.object({
+    ranking_scope_label: z.string().nullable().optional(),
+    ranking_scope_note: z.string().nullable().optional(),
+    green_area_m2: z.number().nullable().optional(),
+    green_percentage: z.number().nullable().optional(),
+    green_rank: DashboardRankBackendSchema.nullable().optional(),
+    flood_area_m2: z.number().nullable().optional(),
+    flood_percentage: z.number().nullable().optional(),
+    flood_risk_label: z.string().nullable().optional(),
+    flood_rank: DashboardRankBackendSchema.nullable().optional()
+  })
+});
+
 export type PriceRollupRead = {
   id: string;
   date: string;
@@ -304,6 +401,8 @@ export type PriceRollupRead = {
   sample_count: number;
   computed_at: string;
 };
+
+export type ZoneDashboardAnalytics = z.output<typeof ZoneDashboardAnalyticsBackendSchema>;
 
 export const TransportFeatureSchema = z.object({
   type: z.literal("Feature"),

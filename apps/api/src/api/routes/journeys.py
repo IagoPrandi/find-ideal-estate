@@ -7,6 +7,7 @@ from contracts import (
     JourneyRead,
     JourneyUpdate,
     TransportPointRead,
+    ZoneDashboardAnalyticsRead,
     ZoneListResponse,
     ZoneSafetyIncidentCollectionRead,
 )
@@ -22,6 +23,7 @@ from modules.journeys.service import (
     update_journey,
 )
 from modules.public_safety import classify_public_safety_group
+from modules.dashboard.analytics import fetch_zone_dashboard_analytics
 from modules.zones.badges import build_metric_badge
 from modules.zones.vegetation import (
     extract_green_preferences,
@@ -324,3 +326,34 @@ async def list_zone_safety_incidents_endpoint(
     if journey is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Journey not found")
     return await list_zone_safety_incidents_for_journey(journey_id, zone_fingerprint)
+
+
+@router.get(
+    "/{journey_id}/zones/{zone_fingerprint}/dashboard-analytics",
+    response_model=ZoneDashboardAnalyticsRead,
+)
+async def get_zone_dashboard_analytics_endpoint(
+    journey_id: UUID,
+    zone_fingerprint: str,
+    property_id: UUID | None = None,
+    neighborhood_name: str | None = None,
+    city_name: str | None = None,
+    search_type: str = "rent",
+) -> ZoneDashboardAnalyticsRead:
+    journey = await get_journey(journey_id)
+    if journey is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Journey not found")
+
+    try:
+        payload = await fetch_zone_dashboard_analytics(
+            journey_id=journey_id,
+            zone_fingerprint=zone_fingerprint,
+            property_id=property_id,
+            neighborhood_name=neighborhood_name,
+            city_name=city_name,
+            search_type=search_type,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    return ZoneDashboardAnalyticsRead.model_validate(payload)

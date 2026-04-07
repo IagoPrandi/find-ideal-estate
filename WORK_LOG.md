@@ -1,5 +1,663 @@
 # Work Log
 
+- 2026-04-07: PRD.md, SKILLS_README.md, AGENTS.md e WORK_LOG.md reabertos antes do ajuste de UX no Step 6. O ranking agora propaga `city_name` por item e mostra a cidade em legenda discreta acima do nome do bairro.
+
+## 2026-04-07 - Corrigir densidades absurdas e otimizar filtro de cidade da seguranca
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para corrigir a origem dos outliers geométricos e remover um gargalo de consulta no ranking de seguranca sem mascarar dados ruins.
+- Trigger: o ranking de seguranca apresentava densidades sem sentido e o filtro por cidade ficava lento e mantinha a tela em atualizacao com volume excessivo.
+- Root cause identified:
+  - a ingestao SSP aceitava coordenadas invalidas como `0,0` e latitude positiva fora do envelope do estado de Sao Paulo, o que distorcia fortemente os convex hulls;
+  - alguns bairros ainda geravam hulls microscopicos com area praticamente nula, produzindo densidades astronomicas;
+  - o filtro por cidade no dashboard aplicava normalizacao SQL sobre `city_name`, impedindo o uso do indice de `public_safety_neighborhood_metrics`.
+- Scope executed:
+  - `apps/api/src/modules/public_safety/ingestion.py`:
+    - adicionados filtros para remover coordenadas `0,0` e pontos fora do envelope geografico esperado do estado de Sao Paulo.
+  - `apps/api/src/modules/public_safety/neighborhood_analytics.py`:
+    - introduzido corte minimo de `0.01 km²` para elegibilidade do hull analitico;
+    - versao da formula atualizada para recomputar a base com os novos criterios.
+  - `apps/api/src/modules/dashboard/analytics.py`:
+    - filtro por cidade do ranking passou a usar igualdade direta em `city_name`, habilitando o indice `ix_public_safety_neighborhood_metrics_robbery_density`.
+  - `apps/web/src/components/panels/Step6Dashboard.tsx`:
+    - o ranking de seguranca deixou de reaproveitar a lista anterior enquanto o filtro por cidade ainda esta carregando, evitando mostrar `18991 bairros` como dado temporariamente stale.
+  - `apps/api/tests/test_public_safety_ingestion.py`:
+    - novo teste cobrindo descarte de coordenadas SSP invalidas.
+  - banco local:
+    - ingestao SSP 2025 reexecutada para reconstruir `neighborhood_boundaries` e `public_safety_neighborhood_metrics`.
+- Validation:
+  - `python -m pytest apps/api/tests/test_public_safety_ingestion.py apps/api/tests/test_phase6_dashboard_analytics.py` -> `10 passed`.
+  - `public_safety_neighborhood_metrics` apos rebuild:
+    - `ITAPOLIS` passou a ter `14` bairros elegiveis;
+    - `ITAIM BIBI` passou de `0.0456/km²` para `38.03/km²` com `area_km2=25.7163` e `robbery_count_365d=978`.
+  - maiores densidades apos rebuild ficaram na faixa de centenas por km², nao mais na ordem de bilhoes/trilhoes por km².
+  - `EXPLAIN ANALYZE` do filtro por cidade:
+    - antes: `Seq Scan`, cerca de `41.7 ms` para `ITAPOLIS`;
+    - depois: `Index Scan`, cerca de `0.169 ms` para `ITAPOLIS`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-04-07 - Corrigir tipagem do rebuild SSP e materializar base analitica local
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para corrigir a falha real de runtime no rebuild analitico SSP sem mascarar o erro e garantir a materializacao no banco local.
+- Trigger: ao aplicar a migration e rodar `scripts/ingest_public_safety_postgis.py`, a carga falhou antes de popular `location_name_aliases` e `public_safety_neighborhood_metrics`.
+- Root cause identified:
+  - no `UNION ALL` de insercao em `location_name_aliases`, os campos `created_at` e `updated_at` eram passados sem cast explicito, e o PostgreSQL inferia `text` em vez de `timestamptz`.
+- Scope executed:
+  - `apps/api/src/modules/public_safety/neighborhood_analytics.py`:
+    - adicionado `CAST(:computed_at AS TIMESTAMPTZ)` na insercao de aliases para `created_at` e `updated_at`.
+  - banco local:
+    - aplicada a migration `20260406_0019` com `alembic upgrade head`;
+    - reexecutada a ingestao SSP 2025 para reconstruir a base analitica persistida.
+- Validation:
+  - `python -m alembic upgrade head` -> migration aplicada com sucesso.
+  - `python scripts/ingest_public_safety_postgis.py --year 2025 --cache-dir data_cache` -> sucesso.
+  - resultado da ingestao:
+    - `inserted_rows=1060199`
+    - `neighborhood_boundary_rows=18991`
+    - `neighborhood_metric_rows=18991`
+    - `elapsed_seconds=557.632`
+  - checagem no banco local:
+    - `public_safety_incidents=1060199`
+    - `neighborhood_boundaries=18991`
+    - `location_name_aliases=19627`
+    - `public_safety_neighborhood_metrics=18991`
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-04-07 - Base analitica SSP por bairro com densidade por km2 no dashboard
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para implementar a base analitica persistida a partir da SSP, manter a mudanca alinhada a boas praticas de modelagem, normalizacao e integracao backend/frontend, e evitar fallback que escondesse inconsistencias de bairro.
+- Trigger: usuario pediu uma base analitica nova a partir da SSP, com um poligono por bairro formado pelos pontos mais externos do proprio bairro, exigencia minima de 3 pontos, calculo de area, densidade de ocorrencias por km2, padronizacao de nomes de bairros e substituicao do ranking por contagem simples por ranking por densidade.
+- Root cause identified:
+  - o ranking de seguranca da etapa 6 ainda era alimentado por contagem bruta de ocorrencias em `public_safety_incidents`, sem uma base analitica persistida por bairro;
+  - as tabelas canonicas anteriores de bairros tinham sido removidas, entao nao existia mais uma camada persistida para area e densidade por bairro;
+  - havia risco de duplicidade logica por variacoes de grafia, acentuacao, pontuacao e espacamento dos nomes de bairro entre registros SSP historicos.
+- Scope executed:
+  - `apps/api/src/modules/public_safety/standardization.py`:
+    - adicionado helper SQL compartilhado para normalizar nomes de cidade e bairro com a mesma semantica usada no normalizador Python.
+  - `apps/api/src/modules/public_safety/neighborhood_analytics.py`:
+    - criado rebuild persistido da base analitica SSP por bairro;
+    - geracao de `neighborhood_boundaries` via convex hull dos pontos SSP georreferenciados por bairro e cidade, exigindo pelo menos 3 pontos distintos;
+    - calculo de `area_km2`, contagens em 365 dias e densidades por km2 para homicidio, roubo e furto;
+    - persistencia complementar de aliases em `location_name_aliases` e metricas em `public_safety_neighborhood_metrics`.
+  - `apps/api/src/modules/public_safety/ingestion.py`:
+    - ingestao SSP passou a reconstruir a base analitica persistida ao final da carga.
+  - `infra/migrations/versions/20260406_0019_public_safety_point_hulls.py`:
+    - recriadas as tabelas persistidas e indices necessarios para a nova camada analitica baseada nos pontos SSP.
+  - `apps/api/src/modules/dashboard/analytics.py`:
+    - ranking de seguranca do dashboard passou a ler `public_safety_neighborhood_metrics` em vez de contagem bruta;
+    - ordenacao trocada para `robbery_density_per_km2`;
+    - filtros e matching de bairro/cidade passaram a usar a normalizacao compartilhada.
+  - `apps/web/src/components/panels/Step6Dashboard.tsx`:
+    - rotulos, descricao, empty state e formatacao visual do ranking de seguranca atualizados para densidade por km2;
+    - mensagens de vazio passaram a explicar a necessidade minima de 3 pontos SSP georreferenciados.
+  - `apps/api/tests/test_public_safety_ingestion.py`:
+    - cobertura ampliada para padronizacao de bairro e para o helper SQL de normalizacao.
+- Validation:
+  - `python -m pytest apps/api/tests/test_public_safety_ingestion.py apps/api/tests/test_phase6_dashboard_analytics.py` -> `9 passed in 31.82s`.
+  - diagnostico dos arquivos alterados sem erros reportados pela workspace.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-04-06 - Trocar filtro de cidade da seguranca para combobox vazio por padrao
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/develop-frontend/SKILL.md` para alinhar o controle visual de cidade com o comportamento exigido pelo usuario, mantendo acessibilidade de teclado e sem fallback visual de selecao.
+- Trigger: usuario pediu que o campo de cidade do ranking de seguranca ficasse vazio por padrao e fosse uma lista combobox.
+- Root cause identified:
+  - o controle ainda era um `select` nativo, que nao atendia ao formato de combobox solicitado;
+  - a exibicao anterior nao deixava claro o estado vazio sem selecao, e ainda podia sugerir uma cidade ativa logo na abertura.
+- Scope executed:
+  - `apps/web/src/components/panels/Step6Dashboard.tsx`:
+    - `select` substituido por combobox acessivel com `role="combobox"`, filtro local e lista `listbox`;
+    - estado inicial mantido vazio ate o usuario escolher uma cidade;
+    - limpeza do campo volta o ranking para o modo geral sem filtro.
+  - `apps/web/src/components/panels/Step6Analysis.test.tsx`:
+    - fluxo de teste atualizado para validar combobox vazio por padrao e selecao pela lista.
+- Validation:
+  - pendente nesta rodada.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-04-06 - Corrigir ranking vazio e default vazio no filtro de cidade da seguranca
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/develop-frontend/SKILL.md` para corrigir o estado vazio e o controle do filtro sem mascarar o comportamento com fallback visual indevido.
+- Trigger: usuario reportou que a lista do ranking de seguranca ficou vazia e pediu que o filtro de cidade iniciasse vazio por padrao.
+- Root cause identified:
+  - o backend preenchia `selected_city` mesmo sem escolha explicita do usuario, aplicando um filtro implicito no ranking;
+  - o frontend reutilizava `selected_city` vindo da API como se fosse a selecao atual do usuario;
+  - o `select` nao tinha uma opcao vazia explicita para representar o ranking agregado sem filtro.
+- Scope executed:
+  - `apps/api/src/modules/dashboard/analytics.py`:
+    - removido o fallback automatico de cidade na leitura de seguranca quando nenhum filtro e enviado;
+    - nota explicativa atualizada para deixar claro que o ranking geral usa todas as cidades disponiveis quando o filtro esta vazio.
+  - `apps/web/src/components/panels/Step6Dashboard.tsx`:
+    - seletor de cidade passou a iniciar com opcao vazia `Todas as cidades`;
+    - a descricao e a mensagem de estado vazio agora respeitam a ausencia de filtro real do usuario.
+  - `apps/web/src/components/panels/Step6Analysis.test.tsx`:
+    - mocks e asserts atualizados para validar ranking agregado por padrao e selecao posterior por cidade.
+  - `apps/api/tests/test_phase6_dashboard_analytics.py`:
+    - contrato de exemplo alinhado ao `selected_city` nulo por padrao.
+- Validation:
+  - pendente nesta rodada.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-04-06 - Adicionar filtro por cidade e ranking segmentado na seguranca da etapa 6
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/develop-frontend/SKILL.md` para ajustar a semantica do ranking de seguranca junto com a apresentacao da lista, sem esconder a regra real em uma mudanca puramente visual.
+- Trigger: usuario pediu campo para filtrar o ranking por cidade, estrutura segmentada com dois primeiros, dois do meio ancorados no bairro predominante da zona e dois ultimos, lista com todos os bairros e valor baseado apenas na soma de ocorrencias.
+- Root cause identified:
+  - o backend ainda montava o ranking de seguranca a partir de densidade de roubo e restringia a leitura aos bairros dentro da zona, o que impedia um ranking urbano coerente por cidade;
+  - a UI da etapa 6 ainda renderizava uma lista linear com rolagem interna e sem controle explicito de cidade, contrariando o esquema aprovado;
+  - o badge da lista continuava comunicando quantidade visivel, e nao a cobertura real de bairros carregados para o ranking.
+- Scope executed:
+  - `apps/api/src/modules/dashboard/analytics.py`:
+    - ranking de seguranca alterado para agrupar todos os bairros da cidade filtrada nos ultimos 365 dias;
+    - o valor do ranking passou a ser apenas a soma de ocorrencias por bairro;
+    - o bairro predominante da zona passou a ser resolvido dentro do ranking da cidade para ancorar a janela central da UI.
+  - `apps/web/src/components/panels/Step6Dashboard.tsx`:
+    - adicionada seletor de cidade no ranking de seguranca;
+    - lista refeita para exibir janela segmentada com 2 itens do topo, 2 em torno do bairro predominante e 2 da base, com elipses entre blocos;
+    - badge ajustado para mostrar o total de bairros carregados no ranking.
+  - `apps/web/src/components/panels/Step6Analysis.test.tsx`:
+    - mocks e assertions alinhados ao ranking por contagem, filtro de cidade e janela segmentada.
+  - `apps/api/tests/test_phase6_dashboard_analytics.py`:
+    - contrato alinhado aos novos valores de ranking e ao filtro por cidade.
+- Validation:
+  - `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase6_dashboard_analytics.py` -> `5 passed`.
+  - `Set-Location apps/web; npm exec vitest run src/components/panels/Step6Analysis.test.tsx` -> `7 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-04-06 - Segunda limpeza de artefatos mortos da malha canônica de bairros
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para remover artefatos físicos e arquivos vazios ligados ao fluxo canônico já aposentado, sem mexer no histórico necessário de migrations.
+- Trigger: usuario pediu uma segunda limpeza para remover artefatos mortos do repositório ligados a `BR_bairros_CD2022`.
+- Root cause identified:
+  - apesar da remoção do fluxo canônico em código e banco, ainda restavam geopackages de bairros sem uso no repositório;
+  - também restavam um módulo vazio (`neighborhood_metrics.py`) e um teste vazio (`test_public_safety_standardization.py`) que pertenciam ao fluxo já removido.
+- Scope executed:
+  - removidos `data_cache/ibge/BR_bairros_CD2022.gpkg` e `data_cache/ibge/SP_bairros_CD2022.gpkg`;
+  - removido `apps/api/src/modules/public_safety/neighborhood_metrics.py` vazio;
+  - removido `apps/api/tests/test_public_safety_standardization.py` vazio.
+- Validation:
+  - `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_public_safety_ingestion.py` -> `3 passed`.
+  - confirmada a ausencia de `apps/api/src/modules/public_safety/neighborhood_metrics.py`, `apps/api/tests/test_public_safety_standardization.py` e de geopackages `*bairros*` em `data_cache/ibge`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-04-06 - Remover base canônica de bairros da segurança pública
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para remover a dependência canônica de bairros com o menor diff seguro e restaurar o consumo bruto e independente entre SSP e imóveis.
+- Trigger: usuario pediu que `BR_bairros_CD2022` deixasse de ser a base canônica de bairros, fosse removido do banco e que SSP e imóveis voltassem a ser consumidos a partir das próprias bases, sem relacionamento entre elas.
+- Root cause identified:
+  - o fluxo bruto de ingestão da SSP já estava preservado, mas o pacote `modules.public_safety` ainda exportava funções canônicas ligadas a um módulo vazio;
+  - a API e o frontend ainda mantinham uma rota e uma camada visual de malha de bairros de segurança dependentes da base canônica;
+  - a migration `20260405_0017` ainda criava as tabelas `neighborhood_boundaries`, `location_name_aliases` e `public_safety_neighborhood_metrics`.
+- Scope executed:
+  - `apps/api/src/modules/public_safety/__init__.py`:
+    - removidos imports e exports de métricas, aliases e resolução canônica de bairros/cidades.
+  - `apps/api/src/modules/public_safety/standardization.py`:
+    - restaurada apenas a normalização bruta de nomes de cidade e bairro para ingestão da SSP, sem qualquer relação canônica.
+  - `apps/api/src/api/routes/transport.py`:
+    - removida a rota `/transport/safety-neighborhood-boundaries`.
+  - `apps/web/src/api/client.ts`:
+    - removido o cliente de carregamento de malha de bairros de segurança.
+  - `apps/web/src/features/app/FindIdealApp.tsx`:
+    - removida a source GeoJSON e as camadas `safety-neighborhood-*`;
+    - a segurança do mapa voltou a consumir apenas ocorrências SSP no viewport.
+  - `apps/web/src/features/app/FindIdealApp.test.tsx`:
+    - regressões alinhadas para o fluxo sem malha de bairros.
+  - `infra/migrations/versions/20260406_0018_remove_public_safety_canonical_tables.py`:
+    - adicionada migration para derrubar as tabelas canônicas já aplicadas no Postgres.
+- Validation:
+  - pendente nesta rodada.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-04-05 - Corrigir ranking de bairros no dashboard de segurança
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/develop-frontend/SKILL.md` para corrigir a leitura analítica da aba de segurança sem mascarar o problema com ajuste puramente visual.
+- Trigger: usuario reportou que o dashboard de segurança estava exibindo somente um bairro no ranking.
+- Root cause identified:
+  - o backend estava preenchendo `safety.robbery_rate_ranking` com as zonas da jornada, e nao com os bairros encontrados dentro da zona selecionada;
+  - quando a jornada efetiva tinha uma unica zona relevante, a UI inevitavelmente mostrava apenas um item, embora houvesse varios bairros dentro da area analisada;
+  - o badge da lista tambem permanecia fixo em `5 visiveis`, o que reforcava uma leitura incorreta do estado real.
+- Scope executed:
+  - `apps/api/src/modules/dashboard/analytics.py`:
+    - ranking de seguranca alterado para agrupar incidentes por `neighborhood_name` dentro da zona selecionada;
+    - o ranking agora usa o escopo `Bairros na zona analisada`, preservando os cards superiores como leitura total da zona por km².
+  - `apps/web/src/components/panels/Step6Dashboard.tsx`:
+    - titulo e label da lista de seguranca ajustados para o novo escopo;
+    - `rankLabel()` deixa de mostrar `1º de 1` e o badge passa a refletir a quantidade real de itens visiveis.
+  - testes:
+    - `apps/web/src/components/panels/Step6Analysis.test.tsx` atualizado para o novo rotulo da aba de seguranca;
+    - `apps/api/tests/test_phase6_dashboard_analytics.py` alinhado ao novo `ranking_scope_label`.
+- Validation:
+    - `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase6_dashboard_analytics.py` -> `5 passed`.
+    - `npm exec vitest run src/components/panels/Step6Analysis.test.tsx` -> `7 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-04-05 - Pré-aquecer dashboard da etapa 6 e migrar segurança para densidade por km²
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `skills/best-practices/references/code-quality.md`, `skills/best-practices/references/web2-backend.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para eliminar o branco na transição entre lista e dashboard, manter o payload consistente entre backend e frontend e evitar uma métrica espacial incorreta sem base cartográfica confiável.
+- Trigger: usuario pediu que os resultados do dashboard já estivessem pré-calculados antes da troca de aba, que os cards de segurança fossem compactados sem overflow, que o card `Roubo vs furto` fosse o menor, que a unidade saísse do valor principal e que a métrica passasse a ser por km².
+- Root cause identified:
+  - a transição para `Dashboard Analítico` ainda dependia da montagem da aba para completar leituras que já poderiam estar aquecidas no cache;
+  - a apresentação de segurança continuava carregando semântica visual da rodada de `100.000`, embora a exigência tenha mudado para densidade por km²;
+  - o snapshot atual do projeto não oferece uma malha oficial confiável de bairros/distritos no fluxo analítico, então ranking por bairro em km² seria enganoso.
+- Scope executed:
+  - `apps/web/src/components/panels/Step6Analysis.tsx`:
+    - adicionada rotina explícita de warm-up do dashboard antes da troca para a aba analítica;
+    - a abertura de `Dashboard Analítico` agora aguarda o pré-aquecimento das leituras centrais para evitar estado em branco durante a transição.
+  - `apps/api/src/modules/dashboard/analytics.py`:
+    - segurança refeita para usar densidade de ocorrências por km² nas zonas persistidas da jornada;
+    - ranking e nota da seção passaram a refletir o escopo `Zonas da jornada atual`;
+    - `rate_scale_base` deixou de ser relevante e passou a retornar `None`.
+  - `packages/contracts/contracts/dashboard.py` e `apps/web/src/api/schemas.ts`:
+    - contrato e schema alinhados com `rate_scale_base` opcional/nulo.
+  - `apps/web/src/components/panels/Step6Dashboard.tsx`:
+    - valor principal dos cards de segurança passou a exibir só o número, com a unidade `por km²` apenas na legenda;
+    - o card `Roubo vs furto` ficou mais estreito e a tipografia foi comprimida para respeitar os limites;
+    - o ranking passou a usar título e rotulagem coerentes com o escopo por zona.
+  - testes:
+    - `apps/web/src/components/panels/Step6Analysis.test.tsx` atualizado para validar a transição sem branco, o texto por km² e a duplicidade esperada do valor no card e no ranking;
+    - `apps/api/tests/test_phase6_dashboard_analytics.py` alinhado ao payload por km² e ao novo escopo de segurança.
+- Validation:
+  - `Set-Location c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/apps/web; npm exec vitest run src/components/panels/Step6Analysis.test.tsx` -> `7 passed`.
+  - `Set-Location c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal; C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase6_dashboard_analytics.py` -> `5 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-04-05 - Alinhar escala de seguranca para 100 mil e corrigir rolagem interna da etapa 6
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/best-practices/SKILL.md`, `skills/best-practices/references/agent-principles.md`, `skills/best-practices/references/code-quality.md`, `skills/best-practices/references/web2-backend.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/best-practices/SKILL.md` para centralizar a configuracao da escala de seguranca no contrato da API, eliminar valores magicos na UI e corrigir o comportamento observavel da Step 6 com o menor diff seguro.
+- Trigger: usuario pediu para trocar a escala visual de `1.000` para `100.000`, sem hardcode; reduzir em 15% a fonte das metricas; remover o texto enganoso de carregamento de imovel selecionado quando nao houve selecao explicita; e impedir que a rolagem automatica das listas arraste o painel inteiro.
+- Scope executed:
+  - `apps/api/src/modules/dashboard/analytics.py`:
+    - criada a constante nomeada `SAFETY_RATE_SCALE_BASE = 100_000.0`;
+    - a nota de seguranca passou a ser derivada dinamicamente dessa escala;
+    - o payload de seguranca agora expõe `rate_scale_base` para o frontend.
+  - `packages/contracts/contracts/dashboard.py` e `apps/web/src/api/schemas.ts`:
+    - contrato e schema alinhados com `rate_scale_base`, removendo o valor magico da interface.
+  - `apps/web/src/components/panels/Step6Dashboard.tsx`:
+    - a UI passou a formatar taxas e detalhes com base em `rate_scale_base`;
+    - tipografia dos cards compactos reduzida em torno de 15%;
+    - o banner `Atualizando métricas do imóvel selecionado...` deixou de aparecer quando nao existe selecao explicita do usuario;
+    - o destaque do ranking de preco passou a usar `Bairro de referência` quando o dashboard está usando apenas um bairro base inferido;
+    - o ranking do dashboard passou a usar rolagem interna do proprio container, sem `scrollIntoView` no painel inteiro.
+  - `apps/web/src/components/panels/Step6Analysis.tsx`:
+    - a Step 6 agora diferencia imovel explicitamente selecionado de imovel de referencia para aquecimento do dashboard;
+    - a lista de imoveis passou a usar `scrollTo` no container interno em vez de `scrollIntoView` no painel.
+  - testes:
+    - `apps/web/src/components/panels/Step6Analysis.test.tsx` atualizado para a nova escala, novo rotulo e nova estrategia de rolagem;
+    - `apps/api/tests/test_phase6_dashboard_analytics.py` atualizado para validar `rate_scale_base` e os valores por `100.000`.
+- Validation:
+  - `Set-Location c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/apps/web; npm exec vitest run src/components/panels/Step6Analysis.test.tsx` -> `7 passed`.
+  - `Set-Location c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal; C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase6_dashboard_analytics.py` -> `5 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-04-05 - Fechar refatoracao visual e interativa do dashboard da etapa 6
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/develop-frontend/SKILL.md` para corrigir a hierarquia visual do dashboard, alinhar o layout de seguranca ao esquema aprovado e fazer o ranking de bairros virar filtro real da aba de preco.
+- Trigger: usuario reportou que o dashboard de imoveis continuava no layout antigo e pediu que, na seguranca, os cards ficassem na mesma linha, com fonte menor, card menor de `Roubo vs furto` e ranking ocupando a linha inteira.
+- Scope executed:
+  - `apps/web/src/components/panels/Step6Dashboard.tsx`:
+    - aba de preco refeita para usar o ranking como filtro por bairro;
+    - card isolado de oscilacao removido;
+    - oscilacao de 365 dias movida para cada item do ranking;
+    - grafico alterado para exibir apenas a serie do bairro ativo;
+    - histograma promovido para uma linha inteira;
+    - cards de seguranca reorganizados em uma unica linha, com tipografia reduzida e terceiro card mais compacto;
+    - ranking de seguranca movido para uma linha inteira abaixo dos cards.
+  - `apps/web/src/components/panels/Step6Analysis.tsx`:
+    - prefetch do dashboard expandido para aquecer consultas de bairros ao redor do bairro selecionado antes da abertura da aba analitica.
+  - `apps/web/src/components/panels/Step6Analysis.test.tsx`:
+    - regressao atualizada para validar a nova aba de preco, a oscilacao dentro do ranking e a aplicacao do filtro por clique em um bairro fora da janela inicial pre-carregada.
+- Validation:
+  - `Set-Location c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/apps/web; npm exec vitest run src/components/panels/Step6Analysis.test.tsx` -> `7 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-04-05 - Corrigir cálculo das métricas de segurança da etapa 6
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/develop-frontend/SKILL.md` para alinhar a semântica exibida na UI do dashboard com a regra de cálculo realmente desejada pelo usuário.
+- Trigger: usuario corrigiu que as métricas de segurança não devem depender de população do bairro; a taxa deve ser apenas a quantidade de ocorrências dividida por 1.000.
+- Root cause identified:
+  - o backend da segurança ainda exigia correspondência entre `neighborhood_name` e população distrital da ObservaSampa para calcular `homicide_rate_per_1000` e `robbery_rate_per_1000`;
+  - quando essa correspondência não existia, o dashboard caía em `Sem base`, embora a contagem de ocorrências já estivesse disponível.
+- Scope executed:
+  - `apps/api/src/modules/dashboard/analytics.py`:
+    - removida a dependência de população para as métricas de segurança;
+    - `homicide_rate_per_1000` e `robbery_rate_per_1000` passaram a ser calculadas como `ocorrências / 1000`;
+    - ranking e nota explicativa da seção de segurança foram alinhados à nova regra.
+  - `apps/web/src/components/panels/Step6Dashboard.tsx`:
+    - textos da UI atualizados para remover referência a habitantes;
+    - formatação da taxa ajustada para 3 casas decimais e sufixo neutro `/1.000`.
+  - testes:
+    - `apps/web/src/components/panels/Step6Analysis.test.tsx` atualizado com os novos valores e textos esperados;
+    - `apps/api/tests/test_phase6_dashboard_analytics.py` atualizado para o novo contrato esperado.
+- Validation:
+  - `Set-Location c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal; C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase6_dashboard_analytics.py` -> `5 passed`.
+  - `Set-Location c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/apps/web; npm exec vitest run src/components/panels/Step6Analysis.test.tsx` -> `7 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-04-05 - Limpar warnings da suite frontend da etapa 6
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/develop-frontend/SKILL.md` para estabilizar a infraestrutura de teste do frontend sem esconder warnings por suppressão artificial.
+- Trigger: usuario pediu para limpar os warnings remanescentes da suite frontend, principalmente os avisos de `act(...)` da `Step6Analysis` e os avisos do `ResponsiveContainer` no ambiente JSDOM.
+- Root cause identified:
+  - a suite da `Step6Analysis` ainda atualizava stores do Zustand fora de `act` em um teste específico;
+  - a própria spec fazia reset tardio das stores no `afterEach`, enquanto o componente ainda podia estar montado;
+  - o ambiente JSDOM nao entrega dimensoes reais para o `ResponsiveContainer` do Recharts, gerando warnings espurios de largura e altura negativas.
+- Scope executed:
+  - `apps/web/src/test/setup.ts`:
+    - adicionado wrapper estavel para `ResponsiveContainer` no ambiente de teste;
+    - mantido setup compartilhado sem silenciar logs genericamente.
+  - `apps/web/src/components/panels/Step6Analysis.test.tsx`:
+    - `renderWithQueryClient()` tornado assíncrono para estabilizar o bootstrap inicial das queries;
+    - removido o reset das stores no `afterEach`, preservando a limpeza no `beforeEach`;
+    - a atualização de `selectedListingKey` no teste de scroll passou a rodar dentro de `act(...)`.
+  - `apps/web/src/components/panels/Step6Analysis.tsx`:
+    - eliminados updates redundantes no estado de colapso do painel de progresso.
+- Validation:
+  - `Set-Location c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/apps/web; npm exec vitest run src/components/panels/Step6Analysis.test.tsx` -> `7 passed`, sem warnings na saída.
+  - `Set-Location c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/apps/web; npm exec vitest run src/components/panels/Step4Compare.test.tsx` -> `3 passed`.
+  - `Set-Location c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/apps/web; npm exec vitest run src/features/app/FindIdealApp.test.tsx` -> `11 passed`.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-04-05 - Transformar cards do dashboard em rankings e pré-carregar analytics da etapa 6
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/develop-frontend/SKILL.md` para refinar a UX do dashboard da etapa 6 com listas ranqueadas, carregamento antecipado e reorganização compacta do painel de segurança.
+- Trigger: usuario pediu para substituir os cards superiores de preço por uma lista de bairros com 5 itens visíveis, centralizar automaticamente o bairro do imóvel selecionado, pré-carregar o dashboard antes da navegação e reformular segurança com taxas por mil habitantes, sem `Crimes violentos`.
+- Root cause identified:
+  - a aba de preço ainda consumia espaço com cards-resumo pouco úteis após a migração do comparativo do imóvel para o pop-up do card;
+  - a aba de segurança mantinha semântica por km², incompatível com o pedido de taxa por habitante;
+  - o dashboard seguia dependendo da navegação do usuário para iniciar o fetch, aumentando a sensação de espera.
+- Scope executed:
+  - contratos e schemas:
+    - `packages/contracts/contracts/dashboard.py` e `packages/contracts/contracts/__init__.py`:
+      - adicionado `DashboardRankingItemRead`;
+      - preço passou a expor `neighborhood_unit_price_ranking`;
+      - segurança migrou para `homicide_rate_per_1000`, `robbery_rate_per_1000`, `robbery_rate_ranking` e removeu campos de `crimes violentos`.
+    - `apps/web/src/api/schemas.ts`:
+      - schema frontend alinhado com as listas ranqueadas e o novo payload de segurança.
+  - backend:
+    - `apps/api/src/modules/dashboard/analytics.py`:
+      - adicionada leitura cacheada da população distrital via `data_cache/observasampa/ObservaSampaDadosAbertosIndicadoresCSV.csv`;
+      - ranking de preço por bairro incluído no payload;
+      - segurança passou a calcular homicídio e roubo por mil habitantes com base em contagem de incidentes por bairro e população distrital compatibilizada por nome;
+      - removidos `crimes violentos` da carga e do gráfico de horários.
+  - frontend:
+    - `apps/web/src/components/panels/Step6Dashboard.tsx`:
+      - cards superiores de preço trocados por lista ranqueada com 5 bairros visíveis e destaque do bairro selecionado;
+      - painel de segurança reorganizado com cards compactos à esquerda e ranking à direita;
+      - removido `Crimes violentos` da UI e do tooltip/gráfico de horários.
+    - `apps/web/src/components/panels/Step6Analysis.tsx`:
+      - pré-fetch de analytics por zona e por imóvel adicionado para aquecer cache antes da abertura da aba `Dashboard Analítico`.
+    - `apps/web/src/components/panels/Step6Analysis.test.tsx`:
+      - mocks e asserts atualizados para o novo payload, o preload e a presença do marcador `Imóvel selecionado` na lista ranqueada.
+  - testes backend:
+    - `apps/api/tests/test_phase6_dashboard_analytics.py`:
+      - regressões adaptadas ao contrato novo de ranking e segurança por mil habitantes.
+- Validation:
+  - `Set-Location C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal; C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase6_dashboard_analytics.py` -> `5 passed`.
+  - `Set-Location C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/apps/web; npm exec vitest run src/components/panels/Step6Analysis.test.tsx` -> `7 passed`.
+  - observacao: a suite frontend continua emitindo warnings antigos de `act(...)` e avisos do `ResponsiveContainer` no ambiente de teste.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-04-05 - Transformar comparativo de acessibilidade em pop-up inline sobre o card
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/develop-frontend/SKILL.md` para alinhar a UX do comparativo de preço do imóvel com os pop-ups já existentes da aplicação, sem reintroduzir latência nem alterar a altura dos cards.
+- Trigger: usuario pediu que o pop-up de `Ver Acessibilidade` abrisse como o pop-up de vegetação, usasse tipografia compacta igual ao detalhe de anúncios duplicados e aparecesse sobre o card sem redimensioná-lo.
+- Scope executed:
+  - `apps/web/src/components/panels/Step6Analysis.tsx`:
+    - removido o modal global de acessibilidade com backdrop em tela cheia;
+    - criado um pop-up inline, absoluto dentro do rodape do card, abrindo sobre o próprio card e preservando seu tamanho;
+    - reduzida a tipografia do conteúdo para o mesmo patamar visual usado no pop-up de anúncios duplicados;
+    - mantido o fechamento por botão e por tecla `Escape`.
+  - `apps/web/src/components/panels/Step6Analysis.test.tsx`:
+    - regressão atualizada para validar o pop-up inline dentro do card do imóvel, em vez de procurar um modal global.
+- Validation:
+  - validacao pendente nesta rodada.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-04-05 - Embutir comparativo de acessibilidade no payload dos cards de imóveis
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/develop-frontend/SKILL.md` para atacar a causa raiz da lentidão do pop-up da etapa 6, movendo os dados necessários para o payload já usado pela listagem de imóveis.
+- Trigger: mesmo com preload em background, o usuario ainda percebia demora ao abrir `Ver Acessibilidade`.
+- Root cause identified:
+  - o pop-up ainda dependia de uma trilha separada de analytics por imóvel, seja no clique, seja em warm-up; isso mantinha latência adicional e estados de carregamento visíveis.
+- Scope executed:
+  - backend:
+    - `packages/contracts/contracts/listings.py`:
+      - `ListingCardRead` passou a incluir `neighborhood_name`, `city_name`, `current_unit_price`, `neighborhood_median_unit_price` e `current_vs_neighborhood_pct`.
+    - `apps/api/src/modules/listings/dedup.py`:
+      - a query de `fetch_listing_cards_for_zone()` passou a calcular o valor atual por m² do imóvel e a diferença percentual vs mediana do bairro diretamente no payload dos cards;
+      - o comparativo usa os preços ativos e a mediana por bairro/cidade no mesmo fluxo da lista de imóveis, eliminando a necessidade de uma segunda chamada por card.
+    - `apps/api/tests/test_phase5_dedup.py`:
+      - adicionada regressão sobre os novos campos de acessibilidade no payload retornado por `fetch_listing_cards_for_zone()`.
+  - frontend:
+    - `apps/web/src/api/schemas.ts`:
+      - schema de `ListingCardRead` atualizado com os novos campos opcionais.
+    - `apps/web/src/components/panels/Step6Analysis.tsx`:
+      - removida a query própria do pop-up de acessibilidade;
+      - o modal agora abre instantaneamente com os valores já presentes no card clicado.
+    - `apps/web/src/components/panels/Step6Analysis.test.tsx`:
+      - regressão ajustada para garantir que o pop-up não depende mais de `getZoneDashboardAnalytics()`.
+- Validation:
+  - `Set-Location c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal; C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/apps/api/tests/test_phase5_dedup.py` -> `14 passed`.
+  - `Set-Location c:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/apps/web; npm exec vitest run src/components/panels/Step6Analysis.test.tsx` -> `7 passed`.
+  - observacao: a suite frontend continua emitindo warnings antigos de `act(...)` e avisos do `ResponsiveContainer` no ambiente de teste, sem falha nova ligada a esta rodada.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-04-05 - Pré-carregar comparativos de acessibilidade dos imóveis no Step 6
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/develop-frontend/SKILL.md` para melhorar a responsividade percebida do Step 6 sem alterar o contrato visual do pop-up recém-adicionado.
+- Trigger: usuario pediu que o comparativo de preço do imóvel não fosse recalculado a cada clique em `Ver Acessibilidade`, e que os resultados já ficassem prontos.
+- Scope executed:
+  - `apps/web/src/components/panels/Step6Analysis.tsx`:
+    - adicionada rotina de warm-up em background para pré-carregar `dashboard-analytics` de todos os `property_id` da lista atual;
+    - o warm-up usa o cache do TanStack Query com `staleTime` ampliado e processamento em pequenos lotes para evitar explosão de requests simultâneas;
+    - o pop-up de `Ver Acessibilidade` passou a reutilizar esse cache já aquecido, em vez de depender do clique para iniciar a busca.
+  - `apps/web/src/components/panels/Step6Analysis.test.tsx`:
+    - regressão ajustada para refletir que o preload do comparativo agora acontece logo após o carregamento dos cards.
+- Validation:
+  - `Set-Location apps/web; npm exec vitest run src/components/panels/Step6Analysis.test.tsx` -> `7 passed`.
+  - observacao: a suite continua emitindo warnings antigos de `act(...)` e avisos do `ResponsiveContainer` no ambiente de teste, sem falha nova ligada a esta rodada.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-04-05 - Mover métricas do imóvel do dashboard para o pop-up do card
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/develop-frontend/SKILL.md` para ajustar a UX do Step 6 sem duplicar informação entre o card do imóvel e o dashboard analítico.
+- Trigger: usuario pediu que, ao clicar em `Ver Acessibilidade`, o card do imóvel abrisse um pop-up com valor por m² e diferença percentual vs bairro, e que esses dois cards fossem removidos do dashboard.
+- Scope executed:
+  - `apps/web/src/components/panels/Step6Analysis.tsx`:
+    - o botão `Ver Acessibilidade` agora abre um pop-up acessível (`role="dialog"`) com os dados do imóvel selecionado;
+    - o pop-up consome `getZoneDashboardAnalytics(...)` focado no `property_id` do card clicado;
+    - exibidos no pop-up:
+      - valor atual por m² do anúncio;
+      - diferença percentual em relação à mediana do bairro.
+  - `apps/web/src/components/panels/Step6Dashboard.tsx`:
+    - removidos da aba de preço os cards `Imóvel selecionado` e `Diferença vs bairro`;
+    - mantidos os cards realmente comparativos da página de preço, sem repetir a informação que agora mora no pop-up do card.
+  - `apps/web/src/components/panels/Step6Analysis.test.tsx`:
+    - adicionada regressão para abrir o pop-up e validar os dois indicadores;
+    - atualizada a regressão do dashboard para garantir que os dois cards removidos não apareçam mais.
+- Validation:
+  - `Set-Location apps/web; npm exec vitest run src/components/panels/Step6Analysis.test.tsx` -> `7 passed`.
+  - observacao: a suite continua emitindo warnings antigos de `act(...)` e avisos do `ResponsiveContainer` no ambiente de teste, sem nova falha ligada a esta rodada.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-04-05 - Corrigir dashboard analitico da etapa 6 apos rodada de uso real
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `DASHBOARD.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/develop-frontend/SKILL.md` para fechar uma rodada de refinamento com correcao funcional no backend espacial e ajustes de UX/performance no dashboard da etapa 6.
+- Trigger: usuario reportou cinco problemas no uso real do dashboard:
+  - percentual de area verde incorreto;
+  - tooltip do grafico de horario de maior risco fora de portugues;
+  - recarga lenta ao trocar o imovel selecionado;
+  - ranking do bairro sem deixar claro se `1º` significava mais caro ou mais barato;
+  - filtro de cidade desnecessario na tela de seguranca.
+- Root cause identified:
+  - `apps/api/src/modules/zones/enrichment.py` persistia `green_area_m2` com `SUM(ST_Area(ST_Intersection(...)))`, somando intersecoes sobrepostas da camada de vegetacao e inflando a area acima da area real da zona;
+  - `apps/api/src/modules/dashboard/analytics.py` reaproveitava esse valor persistido sem corrigir a sobreposicao;
+  - `apps/web/src/components/panels/Step6Dashboard.tsx` fazia uma unica query dependente de `propertyId`, recarregando todas as secoes quando o usuario trocava apenas o imovel;
+  - a UI ainda mantinha o seletor de cidade da primeira versao e deixava o sentido do ranking de preco implicito demais.
+- Scope executed:
+  - backend:
+    - `apps/api/src/modules/dashboard/analytics.py`:
+      - a rota voltou a ler `green_area_m2` e `flood_area_m2` persistidos para preservar performance no dashboard;
+      - a correcao geometrica foi movida para a etapa de persistencia e para um backfill pontual da zona usada no dashboard real.
+    - `apps/api/src/modules/zones/enrichment.py`:
+      - `enrich_zone_green()` passou a persistir area verde sem dupla contagem para futuras zonas enriquecidas;
+      - `enrich_zone_flood()` recebeu o mesmo tratamento para evitar a mesma classe de erro na camada de inundacao.
+  - frontend:
+    - `apps/web/src/components/panels/Step6Dashboard.tsx`:
+      - o dashboard foi dividido em duas queries: uma estavel por zona e outra especifica do imovel apenas para a pagina de preco;
+      - a troca de imovel agora preserva os dados anteriores e mostra apenas um estado leve de atualizacao, em vez de resetar o dashboard inteiro;
+      - removido o filtro de cidade da pagina de seguranca;
+      - tooltip do grafico `Horarios de maior risco` refeito em portugues;
+      - texto do ranking de bairro e da oscilacao anual passou a explicitar o significado de `1º`.
+    - `apps/web/src/components/panels/Step6Analysis.test.tsx`:
+      - ajustada regressao para refletir as duas chamadas de analytics e a remocao do combobox de cidade.
+- Validation:
+  - `Set-Location C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal; C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase6_dashboard_analytics.py` -> `5 passed`.
+  - `Set-Location apps/web; npm exec vitest run src/components/panels/Step6Analysis.test.tsx` -> `6 passed`.
+  - `docker compose exec -T postgres psql -U postgres -d find_ideal_estate -tAc "WITH ... UPDATE zones ... RETURNING ..."` -> recalculo persistido da zona `d57c222...` aplicado com `green_area_m2=2346859.12` e `flood_area_m2=0.00`.
+  - `docker compose restart api` -> API local recarregada com o backend atualizado.
+  - `GET /journeys/7ae7ea59-5584-41ae-94fe-d3f955b3ec7a/zones/d57c222a6d6d8687dce16b16661a23058ac17f9cac1c3b554e0e2218ae955aba/dashboard-analytics?search_type=rent` -> `200`, com `environment.green_percentage=69.73` e `environment.green_area_m2=2346859.12`.
+  - observacao: a suite frontend continua com warnings antigos de `act(...)` e avisos do `ResponsiveContainer` no ambiente de teste, sem falha nova ligada a esta rodada.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-04-03 - Persistir cidade e bairro na base de seguranca para o dashboard
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `DASHBOARD.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/develop-frontend/SKILL.md` como skill principal, porque a correcao nasce de uma exigencia funcional do dashboard e precisou alinhar backend, contrato de dados e mensagem exibida na UI.
+- Trigger: usuario corrigiu que a base de seguranca possui colunas referentes a bairro e cidade e sinalizou que `public.geosampa_bus_corridors.tx_municipio` nao e a base correta.
+- Root cause identified:
+  - a tabela persistida `public_safety_incidents` realmente estava sem cidade/bairro no banco local;
+  - a ingestao em `apps/api/src/modules/public_safety/ingestion.py` descartava tudo que nao fosse data, categoria e coordenadas, entao mesmo que o XLSX trouxesse municipio/bairro esses campos nao chegavam ao PostGIS;
+  - por isso o dashboard de seguranca so conseguia trabalhar com recorte espacial por zona.
+- Scope executed:
+  - `apps/api/src/modules/public_safety/ingestion.py`:
+    - adicionada deteccao de coluna de cidade e bairro no dataframe de origem;
+    - a carga agora persiste `city_name` e `neighborhood_name` em `public_safety_incidents` quando esses campos existirem na fonte;
+    - `_ensure_public_safety_table()` passou a garantir as duas colunas e o indice `(city_name, neighborhood_name, occurred_at)`.
+  - `infra/migrations/versions/20260403_0016_public_safety_city_neighborhood.py`:
+    - criada migration para adicionar `city_name` e `neighborhood_name` a `public_safety_incidents`.
+  - `apps/api/src/modules/dashboard/analytics.py`:
+    - o dashboard agora usa `city_name`/`neighborhood_name` da base de seguranca quando disponiveis para compor o filtro de cidade e o ranking de `roubo vs furto` por bairro;
+    - mantida observacao explicita de que taxa por km² ainda depende de denominador territorial oficial por bairro.
+  - testes:
+    - `apps/api/tests/test_public_safety_ingestion.py`: regressao para garantir preservacao de cidade/bairro na preparacao dos incidentes;
+    - `apps/api/tests/test_phase6_dashboard_analytics.py`: suite mantida verde com o contrato do dashboard.
+- Validation:
+  - `Set-Location C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal; $env:DATABASE_URL='postgresql://postgres:postgres@localhost:5432/find_ideal_estate'; C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m alembic upgrade head` -> migration `20260403_0016` aplicada com sucesso.
+  - `Set-Location C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal; C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_public_safety_ingestion.py apps/api/tests/test_phase6_dashboard_analytics.py -q --color=no` -> `7 passed`.
+- Backfill executed:
+  - `Set-Location C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal; $env:DATABASE_URL='postgresql://postgres:postgres@localhost:5432/find_ideal_estate'; C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe scripts/ingest_public_safety_postgis.py --year 2025 --cache-dir data_cache` -> `deleted_rows=1060199`, `inserted_rows=1060199`, `dropped_rows=1`, `elapsed_seconds=346.567`.
+  - cobertura apos reingestao: `city_name=1060199` linhas preenchidas, `neighborhood_name=1043743` linhas preenchidas.
+  - amostra de bairros apos carga: `CENTRO`, `Centro`, `RURAL`, `PINHEIROS`, `BELA VISTA`.
+  - `docker compose restart api` executado para recarregar a API local com schema e dados novos.
+- Notes:
+  - o backfill local foi concluido; os comparativos do dashboard agora ja podem consumir `city_name` e `neighborhood_name` reais da base de seguranca persistida.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
+## 2026-04-03 - Refazer dashboard analitico da etapa 6 em tres paginas
+
+- Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `DASHBOARD.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
+- Skill used:
+  - `skills/develop-frontend/SKILL.md` para redesenhar o dashboard mantendo a linguagem visual existente, reduzir acoplamento no componente da etapa 6 e garantir estados/metricas claros por pagina.
+- Trigger: usuario pediu para refazer o dashboard analitico, dividindo-o em tres partes navegaveis por abas de pagina, preservando o padrao estetico atual e puxando os dados das bases de dados.
+- Scope executed:
+  - backend:
+    - `packages/contracts/contracts/dashboard.py` e `apps/api/contracts/__init__.py`:
+      - adicionado contrato compartilhado de analytics do dashboard (contexto, preco, seguranca e ambiente).
+    - `apps/api/src/modules/dashboard/analytics.py`:
+      - criado servico dedicado para montar o payload do dashboard a partir do banco;
+      - comparacao de preco do imovel selecionado vs bairro inferido de `properties.address_normalized`;
+      - ranking de valor por m2 e ranking de oscilacao do bairro em 365 dias;
+      - histograma de preco da zona a partir dos anuncios ativos persistidos;
+      - metricas de seguranca e ambiente da zona com ranking entre zonas da jornada atual;
+      - horario de maior risco por tipo de ocorrencia.
+    - `apps/api/src/api/routes/journeys.py`:
+      - adicionado `GET /journeys/{journey_id}/zones/{zone_fingerprint}/dashboard-analytics`.
+    - `apps/api/tests/test_phase6_dashboard_analytics.py`:
+      - adicionados testes de parsing de endereco, ranking, risco de alagamento e contrato da nova rota.
+  - frontend:
+    - `apps/web/src/api/schemas.ts` e `apps/web/src/api/client.ts`:
+      - adicionado schema zod e client da nova rota de analytics do dashboard.
+    - `apps/web/src/components/panels/Step6Dashboard.tsx`:
+      - criado componente dedicado para o dashboard em tres paginas internas:
+        - `Preco e valor`;
+        - `Seguranca`;
+        - `Vegetacao e alagamento`.
+      - mantido o padrao visual em cards brancos/slate com realces pastel ja usados na pagina.
+    - `apps/web/src/components/panels/Step6Analysis.tsx`:
+      - o dashboard antigo foi removido e substituido pelo novo componente, mantendo a aba principal `Dashboard Analitico` ao lado de `Imoveis`.
+    - `apps/web/src/components/panels/Step6Analysis.test.tsx`:
+      - atualizados mocks da API e adicionada regressao para navegar entre as tres paginas do dashboard.
+- Notes:
+  - a base atual nao possui camada oficial de bairro/distrito no PostGIS e `public_safety_incidents` nao carrega cidade/bairro; por isso, o dashboard faz comparacao exata por bairro apenas em preco (inferido dos enderecos persistidos) e explicita no UI que seguranca/ambiente usam ranking entre zonas da jornada atual.
+- Validation:
+  - `Set-Location C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal; C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase6_dashboard_analytics.py -q --color=no` -> `5 passed`.
+  - `Set-Location C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/apps/web; $env:CI='1'; .\node_modules\.bin\vitest.cmd run --config vitest.config.ts src/components/panels/Step6Analysis.test.tsx --reporter=dot --no-color` -> `6 passed`.
+  - observacao: a suite frontend continua emitindo warnings antigos de `act(...)` e avisos do `ResponsiveContainer` no ambiente de teste, mas sem falha nova.
+- Progress Tracker:
+  - Nenhum milestone do PRD foi marcado como concluido nesta rodada (aguarda confirmacao explicita do responsavel).
+
 ## 2026-04-03 - Restaurar implementação da camada de segurança no mapa
 
 - Docs opened: `PRD.md`, `SKILLS_README.md`, `AGENTS.md`, `skills/develop-frontend/SKILL.md`, `WORK_LOG.md`.
@@ -5035,3 +5693,98 @@
 - Evidência resumida:
   - Verificação de transição inválida (`pending -> complete`) via `transition_to(...)` com `InvalidStateTransition`.
   - Teste automatizado `apps/api/tests/test_phase5_state_machine.py` passando (`2 passed`).
+
+## 2026-04-04 - Fase 6 segurança: normalização de cidade/bairro para analytics
+
+- Required docs opened:
+  - `AGENTS.md`
+  - `PRD.md`
+  - `SKILLS_README.md`
+- Skill used:
+  - `skills/best-practices/SKILL.md`
+
+- Scope executed (delta):
+  - `apps/api/src/modules/public_safety/ingestion.py` atualizado com canonização de `city_name` e `neighborhood_name` na ingestão (trim, remoção de acentos, colapso de espaços e upper-case).
+  - `apps/api/tests/test_public_safety_ingestion.py` atualizado para validar o formato canônico persistido e cobrir a função de normalização.
+  - Backfill SQL aplicado em `public_safety_incidents` para consolidar imediatamente os valores já persistidos sem reingestão completa.
+
+- Verification executed:
+  - `pytest apps/api/tests/test_public_safety_ingestion.py apps/api/tests/test_phase6_dashboard_analytics.py -q --color=no` -> `8 passed`.
+  - Verificação pós-backfill em PostgreSQL:
+    - `Centro` -> `0` linhas.
+    - `CENTRO` -> `74381` linhas.
+    - `neighborhood_name <> upper(neighborhood_name)` -> `0` linhas.
+
+- Progress Tracker:
+  - Observação da Fase 6 atualizada no `PRD.md` para refletir persistência e normalização de cidade/bairro na base de segurança.
+  - Nenhuma milestone foi marcada como concluída; política de confirmação explícita preservada.
+
+## 2026-04-04 - Fase 6 dashboard: navegação interna no padrão das abas da etapa
+
+- Required docs opened:
+  - `AGENTS.md`
+  - `PRD.md`
+  - `SKILLS_README.md`
+- Skill used:
+  - `skills/develop-frontend/SKILL.md`
+
+- Scope executed (delta):
+  - `apps/web/src/components/panels/Step6Dashboard.tsx` refatorado para remover o bloco introdutório e adotar navegação interna com o mesmo padrão visual das abas `Imóveis` / `Dashboard Analítico`.
+  - Layout das páginas internas ajustado para no máximo 2 cards por linha.
+  - Gráficos e blocos visuais principais empilhados em linhas únicas para evitar composição lateral concorrente.
+  - `apps/web/src/components/panels/Step6Analysis.test.tsx` atualizado para validar a ausência do hero informativo antigo.
+
+- Verification executed:
+  - `vitest run --config vitest.config.ts src/components/panels/Step6Analysis.test.tsx --reporter=dot --no-color` -> `6 passed`.
+  - Warnings antigos de `act(...)` e `ResponsiveContainer` no ambiente de teste permaneceram sem regressão funcional.
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluída; política de confirmação explícita preservada.
+
+## 2026-04-04 - Fase 6 dashboard: correção de 500 na rota analytics
+
+- Required docs opened:
+  - `AGENTS.md`
+  - `PRD.md`
+  - `SKILLS_README.md`
+- Skill used:
+  - `skills/best-practices/SKILL.md`
+
+- Scope executed (delta):
+  - `apps/api/src/modules/dashboard/analytics.py` corrigido para restaurar `_SAFETY_SCOPE_NOTE` e `_JOURNEY_SCOPE_NOTE` como strings válidas.
+  - A falha vinha de constantes vazias interpretadas como tupla, quebrando a validação Pydantic em `ZoneDashboardAnalyticsRead`.
+  - Serviço `api` recriado no Docker após encontrar container em estado zumbi durante o restart.
+
+- Verification executed:
+  - Chamada real validada: `/journeys/953bae36-4597-4b7f-8ce1-1b06799bbd7b/zones/b64dc58ce30bc308f13454205f735f875d6ff302654438d72dfa347ec138c796/dashboard-analytics?search_type=rent&property_id=9141554b-0b5f-4dbe-9c5b-f63fbb2689d2` voltou a responder JSON válido.
+  - Resumo da resposta real: `zone_fingerprint=b64dc58ce30bc308f13454205f735f875d6ff302654438d72dfa347ec138c796`, `selected_city=São Paulo`, `flood_risk_label=Muito baixo`.
+  - `pytest apps/api/tests/test_phase6_dashboard_analytics.py -q --color=no` -> `5 passed`.
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluída; política de confirmação explícita preservada.
+
+## 2026-04-04 - Fase 6 segurança: rankings do dashboard usando neighborhood_name
+
+- Required docs opened:
+  - `AGENTS.md`
+  - `PRD.md`
+  - `SKILLS_README.md`
+- Skill used:
+  - `skills/best-practices/SKILL.md`
+
+- Scope executed (delta):
+  - `apps/api/src/modules/dashboard/analytics.py` atualizado para usar `city_name` e `neighborhood_name` em todos os comparativos do dashboard de segurança que dependem de ranking.
+  - `homicide_rank`, `violent_rank` e `robbery_to_theft_rank` passaram a priorizar comparativos por bairro dentro da cidade filtrada.
+  - Adicionada normalização e resolução textual para casar cidade/bairro do imóvel (`São Paulo`, `Jardim Paulista`) com valores persistidos da base de segurança (`S.PAULO`, `JARDIM PAULISTA`).
+  - `build_rank_summary(...)` robustecido para lidar com listas contendo `None` sem derrubar a rota.
+
+- Verification executed:
+  - `pytest apps/api/tests/test_phase6_dashboard_analytics.py -q --color=no` -> `5 passed`.
+  - Chamada real validada para a rota `dashboard-analytics` com `property_id=9141554b-0b5f-4dbe-9c5b-f63fbb2689d2` retornando:
+    - `safety.ranking_scope_label = Bairros com ocorrencias em São Paulo`
+    - `safety.homicide_rank.scope_label = Bairros com ocorrencias em São Paulo`
+    - `safety.violent_rank.scope_label = Bairros com ocorrencias em São Paulo`
+    - `safety.robbery_to_theft_rank.scope_label = Bairros com ocorrencias em São Paulo`
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluída; política de confirmação explícita preservada.

@@ -58,6 +58,8 @@ class ListingCardRead(BaseModel):
     """Flattened view for UI listing cards — property + best active ad price."""
     property_id: UUID
     address_normalized: str | None = None
+    neighborhood_name: str | None = None
+    city_name: str | None = None
     lat: float | None = None
     lon: float | None = None
     has_coordinates: bool = False
@@ -70,6 +72,9 @@ class ListingCardRead(BaseModel):
 
     # best price across active listing_ads
     current_best_price: Decimal | None = None
+    current_unit_price: float | None = None
+    neighborhood_median_unit_price: float | None = None
+    current_vs_neighborhood_pct: float | None = None
     condo_fee: Decimal | None = None
     iptu: Decimal | None = None
     second_best_price: Decimal | None = None

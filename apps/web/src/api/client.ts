@@ -10,6 +10,8 @@ import {
   ListingsScrapeResponse,
   PriceRollupRead,
   PriceRollupReadSchema,
+  ZoneDashboardAnalytics,
+  ZoneDashboardAnalyticsBackendSchema,
   RunCreateResponse,
   RunStatusResponse,
   SafetyIncidentsCollection,
@@ -524,6 +526,28 @@ export async function getPriceRollups(
     `/journeys/${encodeURIComponent(journeyId)}/zones/${encodeURIComponent(zoneFingerprint)}/price-rollups?search_type=${encodeURIComponent(searchType)}&days=${days}`,
     z.array(PriceRollupReadSchema)
   )) as PriceRollupRead[];
+}
+
+export async function getZoneDashboardAnalytics(
+  journeyId: string,
+  zoneFingerprint: string,
+  searchType: string = "rent",
+  options?: {
+    propertyId?: string | null;
+    neighborhoodName?: string | null;
+    cityName?: string | null;
+  } | string | null,
+): Promise<ZoneDashboardAnalytics> {
+  const normalizedOptions = typeof options === "string"
+    ? { propertyId: options }
+    : (options || {});
+  const propertyQuery = normalizedOptions.propertyId ? `&property_id=${encodeURIComponent(normalizedOptions.propertyId)}` : "";
+  const neighborhoodQuery = normalizedOptions.neighborhoodName ? `&neighborhood_name=${encodeURIComponent(normalizedOptions.neighborhoodName)}` : "";
+  const cityQuery = normalizedOptions.cityName ? `&city_name=${encodeURIComponent(normalizedOptions.cityName)}` : "";
+  return (await requestJson(
+    `/journeys/${encodeURIComponent(journeyId)}/zones/${encodeURIComponent(zoneFingerprint)}/dashboard-analytics?search_type=${encodeURIComponent(searchType)}${propertyQuery}${neighborhoodQuery}${cityQuery}`,
+    ZoneDashboardAnalyticsBackendSchema,
+  )) as ZoneDashboardAnalytics;
 }
 
 export async function getZoneListings(

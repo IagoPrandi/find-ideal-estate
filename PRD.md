@@ -74,7 +74,7 @@ Encontrar imóvel para alugar ou comprar em São Paulo é um processo fragmentad
 | 3 | Transporte: GTFS + Valhalla + OTP | 🔄 Em progresso | — | M3.1-M3.8 concluídos; restante bloqueia Fase 4 |
 | 4 | Zonas: isócronas + enriquecimento | ✅ Concluída | 2026-03-21 | M4.1-M4.6 concluídos; frontend Etapas 3 e 4 validados |
 | 5 | Imóveis: scrapers + dedup + cache | ✅ Concluída | 2026-03-22 | M5.1–M5.7 concluídos |
-| 6 | Dashboard + relatório PDF | 🔄 Em progresso | — | M6.1-M6.2 concluídos |
+| 6 | Dashboard + relatório PDF | 🔄 Em progresso | — | M6.1-M6.2 concluídos; segurança agora usa cidade/bairro persistidos e normalizados |
 | 7 | Scheduler noturno (prewarm) | ⬜ Não iniciada | — | APScheduler, prioridades de fila |
 | 8 | Auth + planos + Stripe | ⬜ Não iniciada | — | fastapi-users, magic link, Resend |
 
