@@ -33,6 +33,11 @@ _SAFETY_ZONE_NEIGHBORHOOD_SCOPE_NOTE = (
     "Os nomes de cidade e bairro sao normalizados para evitar duplicidade por grafia e formatacao; sem filtro de cidade, a lista considera todas as cidades disponiveis."
 )
 
+_PRICE_ZONE_NEIGHBORHOOD_SCOPE_NOTE = (
+    "O ranking abaixo usa o valor medio do m² considerando apenas anuncios ativos que passam pelo recorte atual do painel de imoveis. "
+    "O escopo pode considerar apenas itens dentro da zona ou todos os imoveis carregados; com filtro de cidade, o destaque recai sobre o bairro com mais imoveis no recorte atual."
+)
+
 _OBSERVASAMPA_INDICATORS_PATH = Path(__file__).resolve().parents[5] / "data_cache" / "observasampa" / "ObservaSampaDadosAbertosIndicadoresCSV.csv"
 _OBSERVASAMPA_TOTAL_POPULATION_LABEL = "População total"
 
@@ -130,6 +135,49 @@ def classify_flood_risk(flood_percentage: float | None) -> str:
     if flood_percentage < 8:
         return "Alto"
     return "Muito alto"
+
+
+def _build_price_dashboard_filter_sql(
+    *,
+    spatial_scope: str,
+    usage_type: str,
+    min_price: float | None,
+    max_price: float | None,
+    min_size: float | None,
+    max_size: float | None,
+    price_alias: str,
+    usage_alias: str,
+    area_alias: str,
+    inside_zone_alias: str,
+) -> tuple[str, dict[str, Any]]:
+    clauses: list[str] = []
+    params: dict[str, Any] = {}
+
+    if spatial_scope == "inside_zone":
+        clauses.append(f"{inside_zone_alias} = TRUE")
+    if usage_type != "all":
+        clauses.append(f"({usage_alias} IS NULL OR {usage_alias} = :price_filter_usage_type)")
+        params["price_filter_usage_type"] = usage_type
+    if min_price is not None:
+        clauses.append(f"{price_alias} >= :price_filter_min_price")
+        params["price_filter_min_price"] = min_price
+    if max_price is not None:
+        clauses.append(f"{price_alias} <= :price_filter_max_price")
+        params["price_filter_max_price"] = max_price
+    if min_size is not None:
+        clauses.append(f"{area_alias} IS NOT NULL AND {area_alias} >= :price_filter_min_size")
+        params["price_filter_min_size"] = min_size
+    if max_size is not None:
+        clauses.append(f"{area_alias} IS NOT NULL AND {area_alias} <= :price_filter_max_size")
+        params["price_filter_max_size"] = max_size
+
+    if not clauses:
+        return "", params
+    return "\n                  AND " + "\n                  AND ".join(clauses), params
+
+
+def _price_dashboard_scope_phrase(spatial_scope: str) -> str:
+    return "dentro da zona" if spatial_scope == "inside_zone" else "no recorte atual"
 
 
 def build_rank_summary(
@@ -325,43 +373,46 @@ def _build_dashboard_ranking_items(
     value_key: str,
     higher_is_better: bool,
 ) -> list[dict[str, Any]]:
-    ranked_rows: list[dict[str, Any]] = []
-    peer_values = [
-        _safe_float(row.get(value_key))
-        for row in rows
-        if row.get("neighborhood_name")
-    ]
-    filtered_peer_values = [value for value in peer_values if value is not None]
-
+    sortable_rows: list[dict[str, Any]] = []
     for row in rows:
         neighborhood_name = row.get("neighborhood_name")
         value = _safe_float(row.get(value_key))
         if not neighborhood_name or value is None:
             continue
-
-        summary = build_rank_summary(
-            value,
-            filtered_peer_values,
-            higher_is_better=higher_is_better,
-            scope_label="",
-        )
-        ranked_rows.append(
+        sortable_rows.append(
             {
-                "position": summary["position"] if summary and summary.get("position") else len(ranked_rows) + 1,
-                "neighborhood_name": str(neighborhood_name),
                 "city_name": str(row["city_name"]) if row.get("city_name") else None,
+                "neighborhood_name": str(neighborhood_name),
                 "value": value,
                 "yearly_change_pct": _safe_float(row.get("yearly_change_pct")),
+                "listing_count": int(row.get("listing_count") or 0) if row.get("listing_count") is not None else None,
                 "is_selected": bool(row.get("is_selected")),
             }
         )
 
-    ranked_rows.sort(
+    sortable_rows.sort(
         key=lambda item: (
-            int(item.get("position") or 0),
+            -float(item["value"]) if higher_is_better else float(item["value"]),
+            _normalize_location_context_name(str(item.get("city_name") or "")) or str(item.get("city_name") or ""),
             _normalize_location_context_name(str(item.get("neighborhood_name") or "")) or str(item.get("neighborhood_name") or ""),
         )
     )
+
+    ranked_rows: list[dict[str, Any]] = []
+    previous_value: float | None = None
+    current_position = 0
+    for index, item in enumerate(sortable_rows, start=1):
+        current_value = float(item["value"])
+        if previous_value is None or current_value != previous_value:
+            current_position = index
+            previous_value = current_value
+        ranked_rows.append(
+            {
+                "position": current_position,
+                **item,
+            }
+        )
+
     return ranked_rows
 
 
@@ -372,8 +423,16 @@ async def fetch_zone_dashboard_analytics(
     property_id: UUID | None,
     neighborhood_name: str | None,
     city_name: str | None,
+    page: str | None,
     search_type: str,
+    usage_type: str,
+    spatial_scope: str,
+    min_price: float | None,
+    max_price: float | None,
+    min_size: float | None,
+    max_size: float | None,
 ) -> dict[str, Any]:
+    requested_page = page or "all"
     engine = get_engine()
     async with engine.connect() as conn:
         zone_result = await conn.execute(
@@ -397,49 +456,560 @@ async def fetch_zone_dashboard_analytics(
         if zone_row is None:
             raise ValueError("Zone not found for dashboard analytics")
 
-        selected_property_row: dict[str, Any] | None = None
-        if property_id is not None:
-            selected_property_result = await conn.execute(
+        zone_area_m2 = _safe_float(zone_row.get("zone_area_m2"))
+        requested_city: str | None = city_name.strip() if isinstance(city_name, str) and city_name.strip() else None
+        selected_neighborhood: str | None = neighborhood_name.strip() if isinstance(neighborhood_name, str) and neighborhood_name.strip() else None
+        selected_state: str | None = None
+
+        if requested_page == "ambiente":
+            journey_metrics_result = await conn.execute(
                 text(
                     """
-                    WITH latest_active_prices AS (
+                    WITH journey_zone_base AS (
                         SELECT
-                            la.property_id,
-                            MIN(snapshot.price)::DOUBLE PRECISION AS current_best_price
-                        FROM listing_ads la
-                        JOIN LATERAL (
-                            SELECT ls.price
-                            FROM listing_snapshots ls
-                            WHERE ls.listing_ad_id = la.id
-                              AND ls.price IS NOT NULL
-                              AND (ls.availability_state = 'active' OR ls.availability_state IS NULL)
-                            ORDER BY ls.observed_at DESC
-                            LIMIT 1
-                        ) snapshot ON TRUE
-                        WHERE la.is_active = TRUE
-                          AND la.advertised_usage_type = :search_type
-                        GROUP BY la.property_id
+                            z.fingerprint,
+                            COALESCE(ST_Area(z.isochrone_geom::geography), 0)::DOUBLE PRECISION AS zone_area_m2,
+                            COALESCE(z.green_area_m2, 0)::DOUBLE PRECISION AS green_area_m2,
+                            COALESCE(z.flood_area_m2, 0)::DOUBLE PRECISION AS flood_area_m2
+                        FROM journey_zones jz
+                        JOIN zones z ON z.id = jz.zone_id
+                        WHERE jz.journey_id = :journey_id
                     )
                     SELECT
-                        p.id,
-                        p.address_normalized,
-                        p.area_m2,
-                        lap.current_best_price
-                    FROM properties p
-                    LEFT JOIN latest_active_prices lap ON lap.property_id = p.id
-                    WHERE p.id = :property_id
+                        jzb.fingerprint,
+                        jzb.zone_area_m2,
+                        jzb.green_area_m2,
+                        jzb.flood_area_m2
+                    FROM journey_zone_base jzb
+                    """
+                ),
+                {"journey_id": journey_id},
+            )
+            journey_metrics = [dict(row) for row in journey_metrics_result.mappings().all()]
+
+            green_area_m2 = _safe_float(zone_row.get("green_area_m2")) or 0.0
+            flood_area_m2 = _safe_float(zone_row.get("flood_area_m2")) or 0.0
+            green_percentage = _safe_ratio(green_area_m2 * 100.0, zone_area_m2)
+            flood_percentage = _safe_ratio(flood_area_m2 * 100.0, zone_area_m2)
+
+            green_peer_values = [
+                _safe_ratio((_safe_float(row.get("green_area_m2")) or 0.0) * 100.0, _safe_float(row.get("zone_area_m2")))
+                for row in journey_metrics
+            ]
+            flood_peer_values = [
+                _safe_ratio((_safe_float(row.get("flood_area_m2")) or 0.0) * 100.0, _safe_float(row.get("zone_area_m2")))
+                for row in journey_metrics
+            ]
+
+            return {
+                "context": {
+                    "zone_fingerprint": zone_fingerprint,
+                    "neighborhood_name": selected_neighborhood,
+                    "city_name": requested_city,
+                    "state_code": selected_state,
+                    "zone_area_m2": zone_area_m2,
+                },
+                "price": {},
+                "safety": {},
+                "environment": {
+                    "ranking_scope_label": "Zonas da jornada atual",
+                    "ranking_scope_note": _JOURNEY_SCOPE_NOTE,
+                    "green_area_m2": green_area_m2,
+                    "green_percentage": green_percentage,
+                    "green_rank": build_rank_summary(
+                        green_percentage,
+                        [value for value in green_peer_values if value is not None],
+                        higher_is_better=True,
+                        scope_label="Zonas da jornada atual",
+                        note=_JOURNEY_SCOPE_NOTE,
+                    ),
+                    "flood_area_m2": flood_area_m2,
+                    "flood_percentage": flood_percentage,
+                    "flood_risk_label": classify_flood_risk(flood_percentage),
+                    "flood_rank": build_rank_summary(
+                        flood_percentage,
+                        [value for value in flood_peer_values if value is not None],
+                        higher_is_better=False,
+                        scope_label="Zonas da jornada atual",
+                        note=_JOURNEY_SCOPE_NOTE,
+                    ),
+                },
+            }
+
+        if requested_page == "seguranca":
+            safety_group_sql = public_safety_group_case_sql("psi.category")
+            normalized_category_sql = _public_safety_normalized_sql("psi.category")
+
+            peak_hours_result = await conn.execute(
+                text(
+                    f"""
+                    SELECT
+                        EXTRACT(HOUR FROM psi.occurred_at AT TIME ZONE 'America/Sao_Paulo')::INT AS hour,
+                        COUNT(*)::INT AS total_count,
+                        COALESCE(COUNT(*) FILTER (WHERE {normalized_category_sql} LIKE '%HOMIC%'), 0)::INT AS homicide_count,
+                        COALESCE(COUNT(*) FILTER (WHERE ({safety_group_sql}) = 'robbery'), 0)::INT AS robbery_count,
+                        COALESCE(COUNT(*) FILTER (WHERE ({safety_group_sql}) = 'theft'), 0)::INT AS theft_count
+                    FROM public_safety_incidents psi
+                    JOIN zones z ON z.fingerprint = :zone_fingerprint
+                    WHERE psi.location IS NOT NULL
+                      AND psi.occurrence_hour_known IS TRUE
+                      AND z.isochrone_geom IS NOT NULL
+                      AND ST_Within(psi.location, z.isochrone_geom)
+                      AND psi.occurred_at >= NOW() - INTERVAL '365 days'
+                    GROUP BY EXTRACT(HOUR FROM psi.occurred_at AT TIME ZONE 'America/Sao_Paulo')
+                    ORDER BY hour ASC
+                    """
+                ),
+                {"zone_fingerprint": zone_fingerprint},
+            )
+            peak_hours = [dict(row) for row in peak_hours_result.mappings().all()]
+
+            city_options_result = await conn.execute(
+                text(
+                    """
+                    SELECT DISTINCT city_name
+                    FROM public_safety_neighborhood_metrics
+                    WHERE NULLIF(BTRIM(city_name), '') IS NOT NULL
+                    ORDER BY city_name ASC
+                    """
+                )
+            )
+            city_options = [str(row[0]) for row in city_options_result.all() if row[0]]
+
+            dominant_safety_context_result = await conn.execute(
+                text(
+                    f"""
+                    SELECT
+                        {normalized_location_name_sql("psi.city_name")} AS city_name,
+                        {normalized_location_name_sql("psi.neighborhood_name")} AS neighborhood_name,
+                        COUNT(*)::INT AS incidents_count
+                    FROM public_safety_incidents psi
+                    JOIN zones z ON z.fingerprint = :zone_fingerprint
+                    WHERE psi.location IS NOT NULL
+                      AND z.isochrone_geom IS NOT NULL
+                      AND ST_Within(psi.location, z.isochrone_geom)
+                      AND psi.occurred_at >= NOW() - INTERVAL '365 days'
+                    GROUP BY {normalized_location_name_sql("psi.city_name")}, {normalized_location_name_sql("psi.neighborhood_name")}
+                    ORDER BY incidents_count DESC, city_name ASC NULLS LAST, neighborhood_name ASC NULLS LAST
                     LIMIT 1
                     """
                 ),
-                {"property_id": property_id, "search_type": search_type},
+                {"zone_fingerprint": zone_fingerprint},
             )
-            row = selected_property_result.mappings().first()
-            selected_property_row = dict(row) if row is not None else None
+            dominant_safety_context = dominant_safety_context_result.mappings().first()
 
-        active_prices_result = await conn.execute(
-            text(
+            dominant_safety_city_name = str(dominant_safety_context.get("city_name")) if dominant_safety_context and dominant_safety_context.get("city_name") else None
+            dominant_safety_neighborhood_name = str(dominant_safety_context.get("neighborhood_name")) if dominant_safety_context and dominant_safety_context.get("neighborhood_name") else None
+
+            safety_city_name = _resolve_location_context_match(requested_city, city_options)
+
+            selected_safety_neighborhood_name = dominant_safety_neighborhood_name
+            neighborhood_homicide_rank = None
+            homicide_density_per_km2 = None
+            selected_homicide_count_365d = 0
+            robbery_density_per_km2 = None
+            robbery_rate_rank = None
+            robbery_rate_ranking: list[dict[str, Any]] = []
+            selected_robbery_count_365d = 0
+            selected_theft_count_365d = 0
+            robbery_to_theft_ratio = None
+            neighborhood_safety_ratio_rank = None
+
+            journey_safety_result = await conn.execute(
+                text(
+                    f"""
+                    WITH journey_zone_base AS (
+                        SELECT
+                            z.fingerprint,
+                            z.isochrone_geom,
+                            COALESCE(ST_Area(z.isochrone_geom::geography), 0)::DOUBLE PRECISION AS zone_area_m2
+                        FROM journey_zones jz
+                        JOIN zones z ON z.id = jz.zone_id
+                        WHERE jz.journey_id = :journey_id
+                    ),
+                    zone_incidents AS (
+                        SELECT
+                            jzb.fingerprint,
+                            COUNT(*) FILTER (
+                                WHERE psi.occurred_at >= NOW() - INTERVAL '365 days'
+                                  AND {normalized_category_sql} LIKE '%HOMIC%'
+                            )::INT AS homicide_count_365d,
+                            COUNT(*) FILTER (
+                                WHERE psi.occurred_at >= NOW() - INTERVAL '365 days'
+                                  AND ({safety_group_sql}) = 'robbery'
+                            )::INT AS robbery_count_365d,
+                            COUNT(*) FILTER (
+                                WHERE psi.occurred_at >= NOW() - INTERVAL '365 days'
+                                  AND ({safety_group_sql}) = 'theft'
+                            )::INT AS theft_count_365d
+                        FROM journey_zone_base jzb
+                        LEFT JOIN public_safety_incidents psi
+                          ON psi.location IS NOT NULL
+                         AND jzb.isochrone_geom IS NOT NULL
+                         AND ST_Within(psi.location, jzb.isochrone_geom)
+                        GROUP BY jzb.fingerprint
+                    ),
+                    zone_context AS (
+                        SELECT
+                            jzb.fingerprint,
+                            NULLIF(BTRIM(psi.neighborhood_name), '') AS neighborhood_name,
+                            COUNT(*)::INT AS incidents_count,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY jzb.fingerprint
+                                ORDER BY COUNT(*) DESC, NULLIF(BTRIM(psi.neighborhood_name), '') ASC NULLS LAST
+                            ) AS row_num
+                        FROM journey_zone_base jzb
+                        LEFT JOIN public_safety_incidents psi
+                          ON psi.location IS NOT NULL
+                         AND jzb.isochrone_geom IS NOT NULL
+                         AND ST_Within(psi.location, jzb.isochrone_geom)
+                         AND psi.occurred_at >= NOW() - INTERVAL '365 days'
+                        GROUP BY jzb.fingerprint, NULLIF(BTRIM(psi.neighborhood_name), '')
+                    )
+                    SELECT
+                        jzb.fingerprint,
+                        jzb.zone_area_m2,
+                        COALESCE(zi.homicide_count_365d, 0)::INT AS homicide_count_365d,
+                        COALESCE(zi.robbery_count_365d, 0)::INT AS robbery_count_365d,
+                        COALESCE(zi.theft_count_365d, 0)::INT AS theft_count_365d,
+                        zc.neighborhood_name AS zone_label
+                    FROM journey_zone_base jzb
+                    LEFT JOIN zone_incidents zi ON zi.fingerprint = jzb.fingerprint
+                    LEFT JOIN zone_context zc ON zc.fingerprint = jzb.fingerprint AND zc.row_num = 1
+                    ORDER BY jzb.fingerprint ASC
+                    """
+                ),
+                {"journey_id": journey_id},
+            )
+            raw_journey_safety_rows = [dict(row) for row in journey_safety_result.mappings().all()]
+
+            journey_safety_rows: list[dict[str, Any]] = []
+            for index, row in enumerate(raw_journey_safety_rows, start=1):
+                zone_area_m2_value = _safe_float(row.get("zone_area_m2"))
+                zone_area_km2 = _safe_ratio(zone_area_m2_value, _SQUARE_METERS_PER_KM2)
+                homicide_count_value = int(row.get("homicide_count_365d") or 0)
+                robbery_count_value = int(row.get("robbery_count_365d") or 0)
+                theft_count_value = int(row.get("theft_count_365d") or 0)
+                zone_label = str(row.get("zone_label") or f"Zona {index}")
+                journey_safety_rows.append(
+                    {
+                        "fingerprint": str(row.get("fingerprint") or ""),
+                        "neighborhood_name": zone_label,
+                        "homicide_count_365d": homicide_count_value,
+                        "robbery_count_365d": robbery_count_value,
+                        "theft_count_365d": theft_count_value,
+                        "homicide_density_per_km2": _safe_ratio(float(homicide_count_value), zone_area_km2),
+                        "robbery_density_per_km2": _safe_ratio(float(robbery_count_value), zone_area_km2),
+                        "robbery_to_theft_ratio": _safe_ratio(float(robbery_count_value), float(theft_count_value)),
+                    }
+                )
+
+            selected_zone_safety_metrics = next(
+                (row for row in journey_safety_rows if row.get("fingerprint") == zone_fingerprint),
+                None,
+            )
+
+            zone_neighborhood_safety_sql = """
+                SELECT
+                    city_name,
+                    neighborhood_name,
+                    area_km2,
+                    incident_count_365d,
+                    homicide_count_365d,
+                    robbery_count_365d,
+                    theft_count_365d,
+                    homicide_density_per_km2,
+                    robbery_density_per_km2,
+                    theft_density_per_km2,
+                    robbery_to_theft_ratio
+                FROM public_safety_neighborhood_metrics
+                WHERE area_km2 > 0
+            """
+            zone_neighborhood_safety_params: dict[str, Any] = {}
+            if safety_city_name is not None:
+                zone_neighborhood_safety_sql += """
+                  AND city_name = :city_name_exact
                 """
-                WITH latest_active_prices AS (
+                zone_neighborhood_safety_params["city_name_exact"] = safety_city_name
+            zone_neighborhood_safety_sql += """
+                ORDER BY robbery_density_per_km2 DESC NULLS LAST, city_name ASC, neighborhood_name ASC
+            """
+            zone_neighborhood_safety_result = await conn.execute(
+                text(zone_neighborhood_safety_sql),
+                zone_neighborhood_safety_params,
+            )
+            raw_zone_neighborhood_safety_rows = [dict(row) for row in zone_neighborhood_safety_result.mappings().all()]
+            city_neighborhood_names = [
+                str(row["neighborhood_name"])
+                for row in raw_zone_neighborhood_safety_rows
+                if row.get("neighborhood_name")
+            ]
+            selected_safety_neighborhood_name = (
+                _resolve_location_context_match(dominant_safety_neighborhood_name, city_neighborhood_names)
+                or _resolve_location_context_match(selected_neighborhood, city_neighborhood_names)
+                or next(
+                    (
+                        str(row["neighborhood_name"])
+                        for row in raw_zone_neighborhood_safety_rows
+                        if row.get("neighborhood_name")
+                    ),
+                    dominant_safety_neighborhood_name,
+                )
+            )
+            robbery_rate_ranking = _build_dashboard_ranking_items(
+                [
+                    {
+                        "city_name": str(row["city_name"]) if row.get("city_name") else None,
+                        "neighborhood_name": str(row["neighborhood_name"]),
+                        "robbery_density_per_km2": _safe_float(row.get("robbery_density_per_km2")),
+                        "is_selected": str(row["neighborhood_name"]) == selected_safety_neighborhood_name,
+                    }
+                    for row in raw_zone_neighborhood_safety_rows
+                    if row.get("neighborhood_name")
+                ],
+                value_key="robbery_density_per_km2",
+                higher_is_better=True,
+            )
+
+            if selected_zone_safety_metrics is not None:
+                selected_homicide_count_365d = int(selected_zone_safety_metrics.get("homicide_count_365d") or 0)
+                selected_robbery_count_365d = int(selected_zone_safety_metrics.get("robbery_count_365d") or 0)
+                selected_theft_count_365d = int(selected_zone_safety_metrics.get("theft_count_365d") or 0)
+                homicide_density_per_km2 = _safe_float(selected_zone_safety_metrics.get("homicide_density_per_km2"))
+                robbery_density_per_km2 = _safe_float(selected_zone_safety_metrics.get("robbery_density_per_km2"))
+                robbery_to_theft_ratio = _safe_float(selected_zone_safety_metrics.get("robbery_to_theft_ratio"))
+
+                neighborhood_homicide_rank = build_rank_summary(
+                    homicide_density_per_km2,
+                    [_safe_float(row.get("homicide_density_per_km2")) for row in journey_safety_rows],
+                    higher_is_better=False,
+                    scope_label="Zonas da jornada atual",
+                    note=_SAFETY_SCOPE_NOTE,
+                )
+                robbery_rate_rank = build_rank_summary(
+                    robbery_density_per_km2,
+                    [_safe_float(row.get("robbery_density_per_km2")) for row in journey_safety_rows],
+                    higher_is_better=False,
+                    scope_label="Zonas da jornada atual",
+                    note=_SAFETY_SCOPE_NOTE,
+                )
+                neighborhood_safety_ratio_rank = build_rank_summary(
+                    robbery_to_theft_ratio,
+                    [_safe_float(row.get("robbery_to_theft_ratio")) for row in journey_safety_rows],
+                    higher_is_better=False,
+                    scope_label="Zonas da jornada atual",
+                    note=_SAFETY_SCOPE_NOTE,
+                )
+
+            selected_city_options = city_options or ([safety_city_name] if safety_city_name else [])
+            selected_neighborhood = selected_neighborhood or selected_safety_neighborhood_name
+
+            return {
+                "context": {
+                    "zone_fingerprint": zone_fingerprint,
+                    "neighborhood_name": selected_neighborhood,
+                    "city_name": requested_city,
+                    "state_code": selected_state,
+                    "zone_area_m2": zone_area_m2,
+                },
+                "price": {},
+                "safety": {
+                    "city_options": selected_city_options,
+                    "selected_city": safety_city_name,
+                    "ranking_scope_label": "Densidade de roubos por km² por bairro",
+                    "ranking_scope_note": _SAFETY_ZONE_NEIGHBORHOOD_SCOPE_NOTE,
+                    "rate_scale_base": None,
+                    "selected_neighborhood_name": selected_safety_neighborhood_name,
+                    "homicide_count_365d": selected_homicide_count_365d,
+                    "homicide_density_per_km2": homicide_density_per_km2,
+                    "homicide_rank": neighborhood_homicide_rank,
+                    "robbery_count_365d": selected_robbery_count_365d,
+                    "robbery_density_per_km2": robbery_density_per_km2,
+                    "robbery_rate_rank": robbery_rate_rank,
+                    "robbery_rate_ranking": robbery_rate_ranking,
+                    "theft_count_365d": selected_theft_count_365d,
+                    "robbery_to_theft_ratio": robbery_to_theft_ratio,
+                    "robbery_to_theft_rank": neighborhood_safety_ratio_rank,
+                    "peak_hours": peak_hours,
+                },
+                "environment": {},
+            }
+
+        current_price_filters_sql, current_price_filter_params = _build_price_dashboard_filter_sql(
+            spatial_scope=spatial_scope,
+            usage_type=usage_type,
+            min_price=min_price,
+            max_price=max_price,
+            min_size=min_size,
+            max_size=max_size,
+            price_alias="lap.current_best_price",
+            usage_alias="zp.usage_type",
+            area_alias="zp.area_m2",
+            inside_zone_alias="zp.inside_zone",
+        )
+
+        current_zone_prices_result = await conn.execute(
+            text(
+                _PARSED_ADDRESS_CTE
+                + f"""
+                , latest_active_prices AS (
+                    SELECT
+                        la.property_id,
+                        MIN(snapshot.price)::DOUBLE PRECISION AS current_best_price
+                    FROM listing_ads la
+                    JOIN LATERAL (
+                        SELECT ls.price
+                        FROM listing_snapshots ls
+                        WHERE ls.listing_ad_id = la.id
+                          AND ls.price IS NOT NULL
+                          AND (ls.availability_state = 'active' OR ls.availability_state IS NULL)
+                        ORDER BY ls.observed_at DESC
+                        LIMIT 1
+                    ) snapshot ON TRUE
+                    WHERE la.is_active = TRUE
+                      AND la.advertised_usage_type = :search_type
+                    GROUP BY la.property_id
+                ),
+                zone_props AS (
+                    SELECT
+                        p.id AS property_id,
+                        pa.city_name,
+                        pa.neighborhood_name,
+                        p.usage_type,
+                        p.area_m2,
+                        p.location,
+                        CASE
+                            WHEN p.location IS NULL THEN FALSE
+                            ELSE ST_Within(p.location, z.isochrone_geom)
+                        END AS inside_zone
+                    FROM properties p
+                    JOIN parsed_addresses pa ON pa.property_id = p.id
+                    JOIN zones z ON z.fingerprint = :zone_fingerprint
+                )
+                SELECT
+                    zp.property_id,
+                    zp.city_name,
+                    zp.neighborhood_name,
+                    lap.current_best_price,
+                    CASE
+                        WHEN zp.area_m2 IS NOT NULL AND zp.area_m2 > 0
+                        THEN lap.current_best_price / zp.area_m2::DOUBLE PRECISION
+                        ELSE NULL
+                    END AS unit_price
+                FROM zone_props zp
+                JOIN latest_active_prices lap ON lap.property_id = zp.property_id
+                                WHERE zp.city_name IS NOT NULL
+                  AND zp.neighborhood_name IS NOT NULL
+                                    {current_price_filters_sql}
+                """
+            ),
+                        {
+                                "search_type": search_type,
+                                "zone_fingerprint": zone_fingerprint,
+                                **current_price_filter_params,
+                        },
+        )
+        current_zone_price_rows = [dict(row) for row in current_zone_prices_result.mappings().all()]
+
+        neighborhood_history: dict[str, float | None] = {}
+        zone_history: dict[str, float | None] = {}
+        yearly_change_rank = None
+        neighborhood_average_unit_price = None
+        neighborhood_rank = None
+        neighborhood_unit_price_ranking: list[dict[str, Any]] = []
+        yearly_change_pct = None
+        selected_city: str | None = None
+        requested_city = city_name.strip() if isinstance(city_name, str) and city_name.strip() else None
+        selected_neighborhood = None
+        selected_state = None
+        zone_average_price = None
+        zone_average_unit_price = None
+        zone_yearly_change_pct = None
+        zone_active_listing_count = len(current_zone_price_rows)
+        price_city_options: list[str] = []
+        selected_neighborhood_prices: list[float] = []
+        price_group_map: dict[tuple[str, str], dict[str, Any]] = {}
+        zone_current_prices: list[float] = []
+        zone_unit_prices: list[float] = []
+        for row in current_zone_price_rows:
+            current_city_name = str(row.get("city_name") or "")
+            current_neighborhood_name = str(row.get("neighborhood_name") or "")
+            if not current_city_name or not current_neighborhood_name:
+                continue
+            current_price = _safe_float(row.get("current_best_price"))
+            unit_price = _safe_float(row.get("unit_price"))
+            price_city_options.append(current_city_name)
+            if current_price is not None:
+                zone_current_prices.append(current_price)
+            if unit_price is not None:
+                zone_unit_prices.append(unit_price)
+
+            group_key = (current_city_name, current_neighborhood_name)
+            group_entry = price_group_map.setdefault(
+                group_key,
+                {
+                    "city_name": current_city_name,
+                    "neighborhood_name": current_neighborhood_name,
+                    "listing_count": 0,
+                    "current_prices": [],
+                    "unit_prices": [],
+                },
+            )
+            group_entry["listing_count"] += 1
+            if current_price is not None:
+                group_entry["current_prices"].append(current_price)
+            if unit_price is not None:
+                group_entry["unit_prices"].append(unit_price)
+
+        zone_average_price = sum(zone_current_prices) / len(zone_current_prices) if zone_current_prices else None
+        zone_average_unit_price = sum(zone_unit_prices) / len(zone_unit_prices) if zone_unit_prices else None
+        price_city_options = sorted(set(price_city_options))
+        selected_city = _resolve_location_context_match(requested_city, price_city_options)
+
+        grouped_price_rows: list[dict[str, Any]] = []
+        for group_entry in price_group_map.values():
+            current_prices = list(group_entry.pop("current_prices"))
+            unit_prices = list(group_entry.pop("unit_prices"))
+            grouped_price_rows.append(
+                {
+                    **group_entry,
+                    "avg_price": sum(current_prices) / len(current_prices) if current_prices else None,
+                    "avg_unit_price": sum(unit_prices) / len(unit_prices) if unit_prices else None,
+                }
+            )
+
+        def _dominant_price_row(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
+            if not rows:
+                return None
+            return sorted(
+                rows,
+                key=lambda item: (
+                    -int(item.get("listing_count") or 0),
+                    str(item.get("city_name") or ""),
+                    _normalize_location_context_name(str(item.get("neighborhood_name") or ""))
+                    or str(item.get("neighborhood_name") or ""),
+                ),
+            )[0]
+
+        dominant_price_row = _dominant_price_row(grouped_price_rows)
+        filtered_grouped_price_rows = [
+            row for row in grouped_price_rows if selected_city is None or row.get("city_name") == selected_city
+        ]
+        dominant_filtered_price_row = _dominant_price_row(filtered_grouped_price_rows)
+
+        if dominant_filtered_price_row is not None:
+            selected_neighborhood = str(dominant_filtered_price_row.get("neighborhood_name") or "") or None
+            selected_state = None
+        elif dominant_price_row is not None:
+            selected_neighborhood = str(dominant_price_row.get("neighborhood_name") or "") or None
+            if selected_city is None:
+                selected_city = str(dominant_price_row.get("city_name") or "") or None
+
+        history_result = await conn.execute(
+            text(
+                _PARSED_ADDRESS_CTE
+                + f"""
+                , latest_active_prices AS (
                     SELECT
                         la.property_id,
                         MIN(snapshot.price)::DOUBLE PRECISION AS current_best_price
@@ -457,200 +1027,236 @@ async def fetch_zone_dashboard_analytics(
                       AND la.advertised_usage_type = :search_type
                     GROUP BY la.property_id
                 )
+                , zone_props AS (
+                    SELECT
+                        p.id AS property_id,
+                        pa.city_name,
+                        pa.neighborhood_name,
+                        p.usage_type,
+                        p.area_m2,
+                        CASE
+                            WHEN p.location IS NULL THEN FALSE
+                            ELSE ST_Within(p.location, z.isochrone_geom)
+                        END AS inside_zone
+                    FROM properties p
+                    JOIN parsed_addresses pa ON pa.property_id = p.id
+                    JOIN zones z ON z.fingerprint = :zone_fingerprint
+                )
+                , filtered_props AS (
+                    SELECT
+                        zp.property_id,
+                        zp.city_name,
+                        zp.neighborhood_name
+                    FROM zone_props zp
+                    JOIN latest_active_prices lap ON lap.property_id = zp.property_id
+                    WHERE zp.city_name IS NOT NULL
+                      AND zp.neighborhood_name IS NOT NULL
+                      {current_price_filters_sql}
+                )
                 SELECT
-                    p.id,
-                    p.address_normalized,
-                    p.area_m2,
-                    lap.current_best_price
-                FROM properties p
-                JOIN latest_active_prices lap ON lap.property_id = p.id
-                WHERE p.address_normalized IS NOT NULL
-                  AND p.area_m2 IS NOT NULL
-                  AND p.area_m2 > 0
+                    fp.city_name,
+                    fp.neighborhood_name,
+                    DATE(ls.observed_at) AS day,
+                    AVG(ls.price)::DOUBLE PRECISION AS average_price,
+                    COUNT(*)::INT AS sample_count
+                FROM filtered_props fp
+                JOIN listing_ads la ON la.property_id = fp.property_id
+                JOIN listing_snapshots ls ON ls.listing_ad_id = la.id
+                WHERE la.is_active = TRUE
+                  AND la.advertised_usage_type = :search_type
+                  AND ls.price IS NOT NULL
+                  AND (ls.availability_state = 'active' OR ls.availability_state IS NULL)
+                  AND ls.observed_at >= CURRENT_DATE - INTERVAL '365 days'
+                GROUP BY fp.city_name, fp.neighborhood_name, DATE(ls.observed_at)
+                ORDER BY DATE(ls.observed_at) ASC, fp.city_name ASC, fp.neighborhood_name ASC
                 """
             ),
-            {"search_type": search_type},
+            {
+                "zone_fingerprint": zone_fingerprint,
+                "search_type": search_type,
+                **current_price_filter_params,
+            },
         )
-        active_price_rows = [dict(row) for row in active_prices_result.mappings().all()]
+        history_rows = [dict(row) for row in history_result.mappings().all()]
 
-        neighborhood_history: dict[str, float | None] = {}
-        yearly_change_rank = None
-        neighborhood_median_unit_price = None
-        selected_vs_neighborhood_pct = None
-        neighborhood_rank = None
-        neighborhood_unit_price_ranking: list[dict[str, Any]] = []
-        yearly_change_pct = None
-        selected_city: str | None = city_name.strip() if isinstance(city_name, str) and city_name.strip() else None
-        selected_neighborhood: str | None = neighborhood_name.strip() if isinstance(neighborhood_name, str) and neighborhood_name.strip() else None
-        selected_state: str | None = None
-        selected_price = _safe_float(selected_property_row.get("current_best_price")) if selected_property_row else None
-        selected_area = _safe_float(selected_property_row.get("area_m2")) if selected_property_row else None
-        selected_unit_price = _safe_ratio(selected_price, selected_area)
-        property_address = selected_property_row.get("address_normalized") if selected_property_row else None
-        if isinstance(property_address, str):
-            address_parts = parse_address_components(property_address)
-            if selected_city is None:
-                selected_city = address_parts["city_name"]
-            if selected_neighborhood is None:
-                selected_neighborhood = address_parts["neighborhood_name"]
-            selected_state = address_parts["state_code"]
+        neighborhood_history_series: dict[tuple[str, str], list[tuple[str, float, int]]] = defaultdict(list)
+        zone_history_weighted: dict[str, dict[str, float]] = {}
+        for row in history_rows:
+            current_city_name = str(row.get("city_name") or "")
+            current_neighborhood_name = str(row.get("neighborhood_name") or "")
+            raw_day = row.get("day")
+            average_price = _safe_float(row.get("average_price"))
+            sample_count = int(row.get("sample_count") or 0)
+            if not current_city_name or not current_neighborhood_name or raw_day is None or average_price is None or sample_count <= 0:
+                continue
 
-        selected_neighborhood_prices: list[float] = []
+            day = raw_day.isoformat() if hasattr(raw_day, "isoformat") else str(raw_day)
+            neighborhood_history_series[(current_city_name, current_neighborhood_name)].append((day, average_price, sample_count))
+            weighted_day = zone_history_weighted.setdefault(day, {"weighted_sum": 0.0, "sample_count": 0.0})
+            weighted_day["weighted_sum"] += average_price * sample_count
+            weighted_day["sample_count"] += sample_count
 
-        if selected_city:
-            neighborhoods_in_city: dict[str, list[float]] = defaultdict(list)
-            for row in active_price_rows:
-                address_parts = parse_address_components(row.get("address_normalized"))
-                city_name = address_parts["city_name"]
-                neighborhood_name = address_parts["neighborhood_name"]
-                if city_name != selected_city or not neighborhood_name:
-                    continue
-                current_price = _safe_float(row.get("current_best_price"))
-                area_m2 = _safe_float(row.get("area_m2"))
-                unit_price = _safe_ratio(current_price, area_m2)
-                if unit_price is None:
-                    continue
-                neighborhoods_in_city[neighborhood_name].append(unit_price)
+        yearly_changes: dict[tuple[str, str], float | None] = {}
+        for history_key, series in neighborhood_history_series.items():
+            if not series:
+                continue
+            first_price = series[0][1]
+            last_price = series[-1][1]
+            if first_price > 0:
+                yearly_changes[history_key] = round(((last_price - first_price) / first_price) * 100.0, 2)
 
-            neighborhood_medians = {
-                neighborhood_name: sorted(values)[len(values) // 2]
-                for neighborhood_name, values in neighborhoods_in_city.items()
-                if values
+        zone_history = {
+            day: values["weighted_sum"] / values["sample_count"]
+            for day, values in zone_history_weighted.items()
+            if values.get("sample_count")
+        }
+        if zone_history:
+            sorted_zone_days = sorted(zone_history.keys())
+            first_zone_price = zone_history.get(sorted_zone_days[0])
+            last_zone_price = zone_history.get(sorted_zone_days[-1])
+            if first_zone_price is not None and last_zone_price is not None and first_zone_price > 0:
+                zone_yearly_change_pct = round(((last_zone_price - first_zone_price) / first_zone_price) * 100.0, 2)
+
+        selected_neighborhood_key: tuple[str, str] | None = None
+        if dominant_filtered_price_row is not None:
+            selected_neighborhood_key = (
+                str(dominant_filtered_price_row.get("city_name") or ""),
+                str(dominant_filtered_price_row.get("neighborhood_name") or ""),
+            )
+        elif dominant_price_row is not None:
+            selected_neighborhood_key = (
+                str(dominant_price_row.get("city_name") or ""),
+                str(dominant_price_row.get("neighborhood_name") or ""),
+            )
+
+        if selected_neighborhood_key is not None:
+            neighborhood_history = {
+                day: average_price
+                for day, average_price, _sample_count in neighborhood_history_series.get(selected_neighborhood_key, [])
             }
+            yearly_change_pct = yearly_changes.get(selected_neighborhood_key)
 
-            yearly_changes: dict[str, float | None] = {}
-            yearly_change_result = await conn.execute(
-                text(
-                    _PARSED_ADDRESS_CTE
-                    + """
-                    , neighborhood_daily_prices AS (
-                        SELECT
-                            pa.neighborhood_name,
-                            DATE(ls.observed_at) AS day,
-                            percentile_cont(0.5) WITHIN GROUP (ORDER BY ls.price)::DOUBLE PRECISION AS median_price
-                        FROM listing_snapshots ls
-                        JOIN listing_ads la ON la.id = ls.listing_ad_id
-                        JOIN parsed_addresses pa ON pa.property_id = la.property_id
-                        WHERE la.advertised_usage_type = :search_type
-                          AND ls.price IS NOT NULL
-                          AND ls.observed_at >= CURRENT_DATE - INTERVAL '365 days'
-                          AND pa.city_name = :city_name
-                          AND pa.neighborhood_name IS NOT NULL
-                        GROUP BY pa.neighborhood_name, DATE(ls.observed_at)
+        selected_neighborhood_prices = [
+            current_price
+            for row in current_zone_price_rows
+            for current_price in [_safe_float(row.get("current_best_price"))]
+            if current_price is not None
+            and selected_neighborhood_key is not None
+            and str(row.get("city_name") or "") == selected_neighborhood_key[0]
+            and str(row.get("neighborhood_name") or "") == selected_neighborhood_key[1]
+        ]
+
+        scope_phrase = _price_dashboard_scope_phrase(spatial_scope)
+        ranking_scope_label = (
+            f"Bairros com anuncios ativos filtrados {scope_phrase} em {selected_city}"
+            if selected_city
+            else f"Bairros com anuncios ativos filtrados {scope_phrase}"
+        )
+        neighborhood_unit_price_ranking = _build_dashboard_ranking_items(
+            [
+                {
+                    "city_name": str(row.get("city_name") or "") or None,
+                    "neighborhood_name": str(row.get("neighborhood_name") or ""),
+                    "avg_unit_price": _safe_float(row.get("avg_unit_price")),
+                    "yearly_change_pct": yearly_changes.get(
+                        (str(row.get("city_name") or ""), str(row.get("neighborhood_name") or ""))
                     ),
-                    neighborhood_swings AS (
-                        SELECT
-                            neighborhood_name,
-                            (ARRAY_AGG(median_price ORDER BY day ASC))[1] AS first_price,
-                            (ARRAY_AGG(median_price ORDER BY day DESC))[1] AS last_price
-                        FROM neighborhood_daily_prices
-                        GROUP BY neighborhood_name
-                    )
-                    SELECT
-                        neighborhood_name,
-                        ((last_price - first_price) / NULLIF(first_price, 0)) * 100.0 AS yearly_change_pct
-                    FROM neighborhood_swings
-                    WHERE first_price IS NOT NULL
-                      AND last_price IS NOT NULL
-                    """
-                ),
-                {"search_type": search_type, "city_name": selected_city},
-            )
-            yearly_changes = {
-                row["neighborhood_name"]: _safe_float(row["yearly_change_pct"])
-                for row in yearly_change_result.mappings().all()
-                if row["neighborhood_name"]
-            }
-
-            resolved_price_neighborhood_name = _resolve_location_context_match(
-                selected_neighborhood,
-                list(neighborhood_medians.keys()),
-            )
-            provisional_ranking_items = _build_dashboard_ranking_items(
-                [
-                    {
-                        "neighborhood_name": current_neighborhood_name,
-                        "unit_price": median_value,
-                        "yearly_change_pct": yearly_changes.get(current_neighborhood_name),
-                        "is_selected": False,
-                    }
-                    for current_neighborhood_name, median_value in neighborhood_medians.items()
-                ],
-                value_key="unit_price",
-                higher_is_better=False,
-            )
-            if resolved_price_neighborhood_name:
-                selected_neighborhood = resolved_price_neighborhood_name
-            elif provisional_ranking_items:
-                selected_neighborhood = str(provisional_ranking_items[0]["neighborhood_name"])
-
-            neighborhood_unit_price_ranking = _build_dashboard_ranking_items(
-                [
-                    {
-                        "neighborhood_name": current_neighborhood_name,
-                        "unit_price": median_value,
-                        "yearly_change_pct": yearly_changes.get(current_neighborhood_name),
-                        "is_selected": current_neighborhood_name == selected_neighborhood,
-                    }
-                    for current_neighborhood_name, median_value in neighborhood_medians.items()
-                ],
-                value_key="unit_price",
-                higher_is_better=False,
-            )
-
-            if selected_neighborhood and selected_neighborhood in neighborhood_medians:
-                neighborhood_median_unit_price = neighborhood_medians[selected_neighborhood]
-                if selected_unit_price is not None and neighborhood_median_unit_price:
-                    selected_vs_neighborhood_pct = round(
-                        ((selected_unit_price - neighborhood_median_unit_price) / neighborhood_median_unit_price) * 100,
-                        2,
-                    )
-                neighborhood_rank = build_rank_summary(
-                    neighborhood_median_unit_price,
-                    list(neighborhood_medians.values()),
-                    higher_is_better=False,
-                    scope_label=f"Bairros com anuncios ativos em {selected_city}",
-                )
-                yearly_change_pct = yearly_changes.get(selected_neighborhood)
-                if yearly_change_pct is not None:
-                    yearly_change_rank = build_rank_summary(
-                        yearly_change_pct,
-                        [value for value in yearly_changes.values() if value is not None],
-                        higher_is_better=False,
-                        scope_label=f"Oscilacao de preco dos bairros em {selected_city}",
-                    )
-                selected_neighborhood_prices = neighborhoods_in_city.get(selected_neighborhood, [])
-
-            if selected_neighborhood:
-                neighborhood_history_result = await conn.execute(
-                    text(
-                        _PARSED_ADDRESS_CTE
-                        + """
-                        SELECT
-                            DATE(ls.observed_at) AS day,
-                            percentile_cont(0.5) WITHIN GROUP (ORDER BY ls.price)::DOUBLE PRECISION AS neighborhood_median_price
-                        FROM listing_snapshots ls
-                        JOIN listing_ads la ON la.id = ls.listing_ad_id
-                        JOIN parsed_addresses pa ON pa.property_id = la.property_id
-                        WHERE la.advertised_usage_type = :search_type
-                          AND ls.price IS NOT NULL
-                          AND ls.observed_at >= CURRENT_DATE - INTERVAL '365 days'
-                          AND pa.city_name = :city_name
-                          AND pa.neighborhood_name = :neighborhood_name
-                        GROUP BY DATE(ls.observed_at)
-                        ORDER BY DATE(ls.observed_at)
-                        """
-                    ),
-                    {
-                        "search_type": search_type,
-                        "city_name": selected_city,
-                        "neighborhood_name": selected_neighborhood,
-                    },
-                )
-                neighborhood_history = {
-                    row["day"].isoformat(): _safe_float(row["neighborhood_median_price"])
-                    for row in neighborhood_history_result.mappings().all()
+                    "listing_count": int(row.get("listing_count") or 0),
+                    "is_selected": selected_neighborhood_key is not None
+                    and str(row.get("city_name") or "") == selected_neighborhood_key[0]
+                    and str(row.get("neighborhood_name") or "") == selected_neighborhood_key[1],
                 }
+                for row in filtered_grouped_price_rows
+                if row.get("neighborhood_name")
+            ],
+            value_key="avg_unit_price",
+            higher_is_better=False,
+        )
+
+        selected_neighborhood_row = next(
+            (
+                row
+                for row in filtered_grouped_price_rows
+                if selected_neighborhood_key is not None
+                and str(row.get("city_name") or "") == selected_neighborhood_key[0]
+                and str(row.get("neighborhood_name") or "") == selected_neighborhood_key[1]
+            ),
+            None,
+        )
+        if selected_neighborhood_row is not None:
+            neighborhood_average_unit_price = _safe_float(selected_neighborhood_row.get("avg_unit_price"))
+            neighborhood_rank = build_rank_summary(
+                neighborhood_average_unit_price,
+                [_safe_float(row.get("avg_unit_price")) for row in filtered_grouped_price_rows],
+                higher_is_better=False,
+                scope_label=ranking_scope_label,
+                note=_PRICE_ZONE_NEIGHBORHOOD_SCOPE_NOTE,
+            )
+            if yearly_change_pct is not None:
+                yearly_change_rank = build_rank_summary(
+                    yearly_change_pct,
+                    [
+                        yearly_changes.get((str(row.get("city_name") or ""), str(row.get("neighborhood_name") or "")))
+                        for row in filtered_grouped_price_rows
+                    ],
+                    higher_is_better=False,
+                    scope_label=ranking_scope_label,
+                    note=_PRICE_ZONE_NEIGHBORHOOD_SCOPE_NOTE,
+                )
+
+        price_history = [
+            {
+                "date": day,
+                "zone_average_price": zone_history.get(day),
+                "neighborhood_average_price": neighborhood_history.get(day),
+            }
+            for day in sorted(set(zone_history.keys()) | set(neighborhood_history.keys()))
+        ]
+
+        zone_area_m2 = _safe_float(zone_row.get("zone_area_m2"))
+        scope_phrase = _price_dashboard_scope_phrase(spatial_scope)
+        price_note = None
+        if zone_active_listing_count == 0:
+            price_note = f"Sem anuncios ativos {scope_phrase} para montar o dashboard de preco."
+        elif selected_city and not filtered_grouped_price_rows:
+            price_note = f"Sem anuncios ativos na cidade filtrada {scope_phrase}."
+        elif not neighborhood_unit_price_ranking:
+            price_note = f"Sem bairros suficientes com anuncios ativos {scope_phrase} para montar o ranking de preco."
+
+        if requested_page == "preco":
+            return {
+                "context": {
+                    "zone_fingerprint": zone_fingerprint,
+                    "neighborhood_name": selected_neighborhood,
+                    "city_name": selected_city,
+                    "state_code": selected_state,
+                    "zone_area_m2": zone_area_m2,
+                },
+                "price": {
+                    "city_options": price_city_options,
+                    "selected_city": selected_city,
+                    "ranking_scope_label": "Valor medio do m² por bairro",
+                    "ranking_scope_note": _PRICE_ZONE_NEIGHBORHOOD_SCOPE_NOTE,
+                    "selected_neighborhood_name": selected_neighborhood,
+                    "zone_average_price": zone_average_price,
+                    "zone_average_unit_price": zone_average_unit_price,
+                    "zone_yearly_change_pct": zone_yearly_change_pct,
+                    "zone_active_listing_count": zone_active_listing_count,
+                    "neighborhood_average_unit_price": neighborhood_average_unit_price,
+                    "neighborhood_unit_price_rank": neighborhood_rank,
+                    "neighborhood_unit_price_ranking": neighborhood_unit_price_ranking,
+                    "yearly_change_pct": yearly_change_pct,
+                    "yearly_change_rank": yearly_change_rank,
+                    "history": price_history,
+                    "price_distribution": bucket_prices(
+                        [price for price in selected_neighborhood_prices if price is not None],
+                        search_type,
+                    ),
+                    "note": price_note,
+                },
+                "safety": {},
+                "environment": {},
+            }
 
         safety_group_sql = public_safety_group_case_sql("psi.category")
         normalized_category_sql = _public_safety_normalized_sql("psi.category")
@@ -692,6 +1298,7 @@ async def fetch_zone_dashboard_analytics(
                 FROM public_safety_incidents psi
                 JOIN zones z ON z.fingerprint = :zone_fingerprint
                 WHERE psi.location IS NOT NULL
+                                    AND psi.occurrence_hour_known IS TRUE
                   AND z.isochrone_geom IS NOT NULL
                   AND ST_Within(psi.location, z.isochrone_geom)
                   AND psi.occurred_at >= NOW() - INTERVAL '365 days'
@@ -942,16 +1549,6 @@ async def fetch_zone_dashboard_analytics(
                 note=_SAFETY_SCOPE_NOTE,
             )
 
-    history_dates = sorted(neighborhood_history.keys())
-    price_history = [
-        {
-            "date": day,
-            "property_price": None,
-            "neighborhood_median_price": neighborhood_history.get(day),
-        }
-        for day in history_dates
-    ]
-
     zone_area_m2 = _safe_float(zone_row.get("zone_area_m2"))
     green_area_m2 = _safe_float(zone_row.get("green_area_m2")) or 0.0
     flood_area_m2 = _safe_float(zone_row.get("flood_area_m2")) or 0.0
@@ -968,27 +1565,26 @@ async def fetch_zone_dashboard_analytics(
     ]
 
     selected_city_options = city_options or ([safety_city_name] if safety_city_name else [])
-    price_note = None
-    if not selected_city:
-        price_note = "Selecione um imóvel com cidade e bairro identificados para liberar o filtro do dashboard de preço."
-    elif not selected_neighborhood:
-        price_note = "Não foi possível identificar um bairro com base suficiente para aplicar o filtro do dashboard de preço."
 
     return {
         "context": {
             "zone_fingerprint": zone_fingerprint,
-            "property_id": str(property_id) if property_id is not None else None,
-            "property_address": property_address,
             "neighborhood_name": selected_neighborhood,
             "city_name": selected_city,
             "state_code": selected_state,
-            "selected_price": selected_price,
-            "selected_unit_price": selected_unit_price,
             "zone_area_m2": zone_area_m2,
         },
         "price": {
-            "neighborhood_median_unit_price": neighborhood_median_unit_price,
-            "selected_vs_neighborhood_pct": selected_vs_neighborhood_pct,
+            "city_options": price_city_options,
+            "selected_city": selected_city,
+            "ranking_scope_label": "Valor medio do m² por bairro",
+            "ranking_scope_note": _PRICE_ZONE_NEIGHBORHOOD_SCOPE_NOTE,
+            "selected_neighborhood_name": selected_neighborhood,
+            "zone_average_price": zone_average_price,
+            "zone_average_unit_price": zone_average_unit_price,
+            "zone_yearly_change_pct": zone_yearly_change_pct,
+            "zone_active_listing_count": zone_active_listing_count,
+            "neighborhood_average_unit_price": neighborhood_average_unit_price,
             "neighborhood_unit_price_rank": neighborhood_rank,
             "neighborhood_unit_price_ranking": neighborhood_unit_price_ranking,
             "yearly_change_pct": yearly_change_pct,

@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import importlib.util
 import hashlib
+import re
 import sys
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, time as datetime_time, timezone
 from pathlib import Path
 from types import ModuleType
 from typing import Any, Iterable
@@ -24,6 +25,26 @@ _SAO_PAULO_MIN_LONGITUDE = -54.0
 _SAO_PAULO_MAX_LONGITUDE = -43.0
 _SAO_PAULO_MIN_LATITUDE = -26.5
 _SAO_PAULO_MAX_LATITUDE = -19.0
+_SAO_PAULO_TIMEZONE = "America/Sao_Paulo"
+_DATE_COLUMN_CANDIDATES = (
+    "DATA_OCORRENCIA_BO",
+    "DATA_OCORRENCIA",
+    "DATA_FATO",
+    "DATA_HORA_FATO",
+    "DATAHORA_FATO",
+    "DATA_DIA",
+    "DATA_REGISTRO",
+    "DATA_BO",
+    "DATA_ELABORACAO",
+    "DATA",
+)
+_TIME_COLUMN_CANDIDATES = (
+    "HORA_OCORRENCIA_BO",
+    "HORA_OCORRENCIA",
+    "HORA_FATO",
+    "HORA",
+    "HORARIO",
+)
 _NEIGHBORHOOD_COLUMN_CANDIDATES = (
     "BAIRRO",
     "BAIRRO_FATO",
@@ -129,10 +150,19 @@ def _prepare_incidents_dataframe(
     *,
     source_year: int,
 ) -> tuple[pd.DataFrame, int]:
+    date_column = _pick_occurrence_date_column(dataframe)
     city_column = _pick_city_column(dataframe)
     neighborhood_column = _pick_neighborhood_column(dataframe)
+    time_column = _pick_occurrence_time_column(dataframe)
 
-    selected_columns = ["DATA_DIA", "NATUREZA_APURADA", "LONGITUDE", "LATITUDE"]
+    if date_column is None:
+        raise PublicSafetyIngestionError(
+            "SSP dataframe does not contain a recognized date column for occurred_at"
+        )
+
+    selected_columns = [date_column, "NATUREZA_APURADA", "LONGITUDE", "LATITUDE"]
+    if time_column:
+        selected_columns.append(time_column)
     if city_column:
         selected_columns.append(city_column)
     if neighborhood_column:
@@ -140,18 +170,32 @@ def _prepare_incidents_dataframe(
 
     working = dataframe.loc[:, selected_columns].copy()
     renamed_columns = {
-        "DATA_DIA": "occurred_at",
+        date_column: "occurred_date",
         "NATUREZA_APURADA": "category",
         "LONGITUDE": "longitude",
         "LATITUDE": "latitude",
     }
+    if time_column:
+        renamed_columns[time_column] = "occurred_time"
     if city_column:
         renamed_columns[city_column] = "city_name"
     if neighborhood_column:
         renamed_columns[neighborhood_column] = "neighborhood_name"
     working = working.rename(columns=renamed_columns)
 
-    working["occurred_at"] = pd.to_datetime(working["occurred_at"], errors="coerce", utc=True).dt.floor("D")
+    occurred_dates = pd.to_datetime(working["occurred_date"], errors="coerce").dt.tz_localize(None).dt.floor("D")
+    occurred_seconds = (
+        working["occurred_time"].map(_parse_occurrence_time_to_seconds)
+        if "occurred_time" in working.columns
+        else pd.Series(0, index=working.index, dtype="float64")
+    )
+    working["occurrence_hour_known"] = occurred_seconds.notna()
+    working["occurred_at"] = occurred_dates + pd.to_timedelta(occurred_seconds.fillna(0), unit="s")
+    working["occurred_at"] = working["occurred_at"].dt.tz_localize(
+        _SAO_PAULO_TIMEZONE,
+        ambiguous="NaT",
+        nonexistent="shift_forward",
+    ).dt.tz_convert("UTC")
     working["category"] = working["category"].astype("string").str.strip()
     working["longitude"] = pd.to_numeric(working["longitude"], errors="coerce")
     working["latitude"] = pd.to_numeric(working["latitude"], errors="coerce")
@@ -195,6 +239,22 @@ def _pick_city_column(dataframe: pd.DataFrame) -> str | None:
     return None
 
 
+def _pick_occurrence_date_column(dataframe: pd.DataFrame) -> str | None:
+    normalized_map = {str(column_name).strip().upper(): str(column_name) for column_name in dataframe.columns}
+    for candidate in _DATE_COLUMN_CANDIDATES:
+        if candidate in normalized_map:
+            return normalized_map[candidate]
+    return None
+
+
+def _pick_occurrence_time_column(dataframe: pd.DataFrame) -> str | None:
+    normalized_map = {str(column_name).strip().upper(): str(column_name) for column_name in dataframe.columns}
+    for candidate in _TIME_COLUMN_CANDIDATES:
+        if candidate in normalized_map:
+            return normalized_map[candidate]
+    return None
+
+
 def _pick_neighborhood_column(dataframe: pd.DataFrame) -> str | None:
     for column_name in dataframe.columns:
         normalized = str(column_name).strip().upper()
@@ -203,8 +263,34 @@ def _pick_neighborhood_column(dataframe: pd.DataFrame) -> str | None:
     return None
 
 
+def _parse_occurrence_time_to_seconds(value: Any) -> float | None:
+    if value is None or pd.isna(value):
+        return None
+    if isinstance(value, datetime):
+        value = value.timetz().replace(tzinfo=None)
+    if isinstance(value, datetime_time):
+        return float((value.hour * 3600) + (value.minute * 60) + value.second)
+    if isinstance(value, (int, float)) and not pd.isna(value):
+        numeric_value = float(value)
+        if 0.0 <= numeric_value < 1.0:
+            return float(round(numeric_value * 24 * 3600))
+    text_value = str(value).strip()
+    if not text_value or text_value.upper() == "NULL":
+        return None
+    matched = re.fullmatch(r"(?P<hour>\d{1,2})(?::(?P<minute>\d{1,2}))?(?::(?P<second>\d{1,2}))?", text_value)
+    if matched is None:
+        return None
+    hour = int(matched.group("hour"))
+    minute = int(matched.group("minute") or 0)
+    second = int(matched.group("second") or 0)
+    if hour > 23 or minute > 59 or second > 59:
+        return None
+    return float((hour * 3600) + (minute * 60) + second)
+
+
 def _iter_incident_rows(dataframe: pd.DataFrame) -> Iterable[dict[str, Any]]:
-    for occurred_at, category, longitude, latitude, city_name, neighborhood_name in dataframe.itertuples(index=False, name=None):
+    columns = ["occurred_at", "category", "longitude", "latitude", "city_name", "neighborhood_name", "occurrence_hour_known"]
+    for occurred_at, category, longitude, latitude, city_name, neighborhood_name, occurrence_hour_known in dataframe.loc[:, columns].itertuples(index=False, name=None):
         occurred_at_value = occurred_at.to_pydatetime() if hasattr(occurred_at, "to_pydatetime") else occurred_at
         if isinstance(occurred_at_value, datetime) and occurred_at_value.tzinfo is None:
             occurred_at_value = occurred_at_value.replace(tzinfo=timezone.utc)
@@ -215,6 +301,7 @@ def _iter_incident_rows(dataframe: pd.DataFrame) -> Iterable[dict[str, Any]]:
             "latitude": float(latitude),
             "city_name": str(city_name).strip() if city_name is not pd.NA and pd.notna(city_name) else None,
             "neighborhood_name": str(neighborhood_name).strip() if neighborhood_name is not pd.NA and pd.notna(neighborhood_name) else None,
+            "occurrence_hour_known": bool(occurrence_hour_known),
         }
 
 
@@ -228,13 +315,14 @@ async def _execute_buffered_inserts(
     inserted = 0
     stmt = text(
         """
-        INSERT INTO public_safety_incidents (occurred_at, category, location, city_name, neighborhood_name)
+        INSERT INTO public_safety_incidents (occurred_at, category, location, city_name, neighborhood_name, occurrence_hour_known)
         VALUES (
             :occurred_at,
             :category,
             ST_SetSRID(ST_MakePoint(:longitude, :latitude), 4326),
             :city_name,
-            :neighborhood_name
+            :neighborhood_name,
+            :occurrence_hour_known
         )
         """
     )
@@ -266,13 +354,15 @@ async def _ensure_public_safety_table(conn: AsyncConnection) -> None:
                 category TEXT,
                 location geometry(Point, 4326),
                 city_name TEXT,
-                neighborhood_name TEXT
+                neighborhood_name TEXT,
+                occurrence_hour_known BOOLEAN NOT NULL DEFAULT FALSE
             )
             """
         )
     )
     await conn.execute(text("ALTER TABLE public_safety_incidents ADD COLUMN IF NOT EXISTS city_name TEXT"))
     await conn.execute(text("ALTER TABLE public_safety_incidents ADD COLUMN IF NOT EXISTS neighborhood_name TEXT"))
+    await conn.execute(text("ALTER TABLE public_safety_incidents ADD COLUMN IF NOT EXISTS occurrence_hour_known BOOLEAN NOT NULL DEFAULT FALSE"))
     await conn.execute(
         text(
             """

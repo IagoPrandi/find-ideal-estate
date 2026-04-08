@@ -338,11 +338,25 @@ async def get_zone_dashboard_analytics_endpoint(
     property_id: UUID | None = None,
     neighborhood_name: str | None = None,
     city_name: str | None = None,
+    page: str | None = None,
     search_type: str = "rent",
+    usage_type: str = "all",
+    spatial_scope: str = "all",
+    min_price: float | None = None,
+    max_price: float | None = None,
+    min_size: float | None = None,
+    max_size: float | None = None,
 ) -> ZoneDashboardAnalyticsRead:
     journey = await get_journey(journey_id)
     if journey is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Journey not found")
+
+    if usage_type not in {"all", "residential", "commercial"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="usage_type deve ser 'all', 'residential' ou 'commercial'")
+    if spatial_scope not in {"all", "inside_zone"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="spatial_scope deve ser 'all' ou 'inside_zone'")
+    if page is not None and page not in {"preco", "seguranca", "ambiente"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="page deve ser 'preco', 'seguranca' ou 'ambiente'")
 
     try:
         payload = await fetch_zone_dashboard_analytics(
@@ -351,7 +365,14 @@ async def get_zone_dashboard_analytics_endpoint(
             property_id=property_id,
             neighborhood_name=neighborhood_name,
             city_name=city_name,
+            page=page,
             search_type=search_type,
+            usage_type=usage_type,
+            spatial_scope=spatial_scope,
+            min_price=min_price,
+            max_price=max_price,
+            min_size=min_size,
+            max_size=max_size,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc

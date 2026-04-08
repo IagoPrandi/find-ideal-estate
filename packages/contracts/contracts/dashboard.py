@@ -26,13 +26,14 @@ class DashboardRankingItemRead(BaseModel):
     city_name: str | None = None
     value: float | None = None
     yearly_change_pct: float | None = None
+    listing_count: int | None = None
     is_selected: bool = False
 
 
 class DashboardPriceHistoryPointRead(BaseModel):
     date: str
-    property_price: float | None = None
-    neighborhood_median_price: float | None = None
+    zone_average_price: float | None = None
+    neighborhood_average_price: float | None = None
 
 
 class DashboardSafetyHourBucketRead(BaseModel):
@@ -46,19 +47,23 @@ class DashboardSafetyHourBucketRead(BaseModel):
 
 class ZoneDashboardContextRead(BaseModel):
     zone_fingerprint: str
-    property_id: UUID | None = None
-    property_address: str | None = None
     neighborhood_name: str | None = None
     city_name: str | None = None
     state_code: str | None = None
-    selected_price: float | None = None
-    selected_unit_price: float | None = None
     zone_area_m2: float | None = None
 
 
 class ZoneDashboardPriceRead(BaseModel):
-    neighborhood_median_unit_price: float | None = None
-    selected_vs_neighborhood_pct: float | None = None
+    city_options: list[str] = []
+    selected_city: str | None = None
+    ranking_scope_label: str | None = None
+    ranking_scope_note: str | None = None
+    selected_neighborhood_name: str | None = None
+    zone_average_price: float | None = None
+    zone_average_unit_price: float | None = None
+    zone_yearly_change_pct: float | None = None
+    zone_active_listing_count: int = 0
+    neighborhood_average_unit_price: float | None = None
     neighborhood_unit_price_rank: DashboardRankRead | None = None
     neighborhood_unit_price_ranking: list[DashboardRankingItemRead] = []
     yearly_change_pct: float | None = None

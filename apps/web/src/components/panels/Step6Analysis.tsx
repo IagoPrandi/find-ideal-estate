@@ -21,8 +21,11 @@ import {
 import { getJob, getZoneDashboardAnalytics, getZoneListings, type ListingCardRead, type ListingPlatformVariantRead } from "../../api/client";
 import { ListingsScrapeDiagnosticsSchema, type ListingsScrapeDiagnostics, type ListingsScrapePlatformDiagnostics } from "../../api/schemas";
 import { applyListingsPanelFilters, formatCurrencyBr, getListingDisplayPrice, getListingSelectionKey, parseFiniteNumber, resolvePlatformImageUrl, resolvePlatformUrl } from "../../lib/listingFormat";
-import { useJourneyStore, useUIStore } from "../../state";
+import { defaultListingsPanelFilters, useJourneyStore, useUIStore, type ListingsPanelFilters } from "../../state";
 import { Step6Dashboard } from "./Step6Dashboard";
+
+const DASHBOARD_ANALYTICS_STALE_TIME = 30 * 60_000;
+const DASHBOARD_ANALYTICS_GC_TIME = 60 * 60_000;
 
 function platformLabel(value: string | null | undefined) {
   if (!value) {
@@ -119,22 +122,6 @@ function extractListingsScrapeDiagnostics(resultRef: Record<string, unknown> | n
   return parsed.success ? parsed.data : null;
 }
 
-function pickNeighborhoodPrefetchWindow(
-  items: Array<{ neighborhood_name: string; is_selected?: boolean }>,
-) {
-  if (items.length <= 9) {
-    return items;
-  }
-
-  const selectedIndex = Math.max(
-    items.findIndex((item) => item.is_selected),
-    0,
-  );
-  const start = Math.max(0, selectedIndex - 4);
-  const end = Math.min(items.length, start + 9);
-  return items.slice(Math.max(0, end - 9), end);
-}
-
 function formatPlatformVariantHint(variant: ListingPlatformVariantRead, primaryPlatform: string | null | undefined) {
   if (variant.platform === primaryPlatform) {
     return "Menor preço consolidado";
@@ -147,6 +134,27 @@ function formatPercentDelta(value: number | null | undefined) {
     return "Sem base";
   }
   return `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`;
+}
+
+function hasPriceDashboardPanelFilterOverrides(filters: ListingsPanelFilters) {
+  return filters.minPrice !== defaultListingsPanelFilters.minPrice
+    || filters.maxPrice !== defaultListingsPanelFilters.maxPrice
+    || filters.usageType !== defaultListingsPanelFilters.usageType
+    || filters.spatialScope !== defaultListingsPanelFilters.spatialScope
+    || filters.minSize !== defaultListingsPanelFilters.minSize
+    || filters.maxSize !== defaultListingsPanelFilters.maxSize;
+}
+
+function buildPriceDashboardAnalyticsOptions(filters: ListingsPanelFilters, cityName: string | null = null) {
+  return {
+    cityName,
+    minPrice: filters.minPrice || null,
+    maxPrice: filters.maxPrice || null,
+    usageType: filters.usageType,
+    spatialScope: filters.spatialScope,
+    minSize: filters.minSize || null,
+    maxSize: filters.maxSize || null,
+  };
 }
 
 function ListingAccessibilityPopover(props: {
@@ -329,72 +337,109 @@ export function Step6Analysis() {
     () => rawListings.find((listing) => getListingSelectionKey(listing) === selectedListingKey) || null,
     [rawListings, selectedListingKey],
   );
-  const dashboardPropertyId = useMemo(() => {
-    return selectedDashboardListing?.property_id || rawListings.find((listing) => listing.property_id)?.property_id || null;
-  }, [rawListings, selectedDashboardListing]);
+  const hasPriceDashboardOverrides = hasPriceDashboardPanelFilterOverrides(listingsFilters);
+
+  function buildPriceDashboardQueryKey(cityName: string | null = null) {
+    return [
+      "zone-dashboard-analytics",
+      journeyId,
+      zoneFingerprint,
+      config.type,
+      "price-panel",
+      cityName || "default",
+      listingsFilters.spatialScope,
+      listingsFilters.usageType,
+      listingsFilters.minPrice || "",
+      listingsFilters.maxPrice || "",
+      listingsFilters.minSize || "",
+      listingsFilters.maxSize || "",
+    ] as const;
+  }
+
+  function buildDashboardPricePageQueryKey() {
+    return ["zone-dashboard-analytics", journeyId, zoneFingerprint, config.type, "zone", "preco"] as const;
+  }
+
+  async function fetchDashboardQueryIfMissing<T>(queryKey: readonly unknown[], queryFn: () => Promise<T>) {
+    const cached = queryClient.getQueryData<T>(queryKey);
+    if (cached !== undefined) {
+      return cached;
+    }
+    return queryClient.fetchQuery({
+      queryKey,
+      queryFn,
+      staleTime: DASHBOARD_ANALYTICS_STALE_TIME,
+      gcTime: DASHBOARD_ANALYTICS_GC_TIME,
+    });
+  }
+
+  async function prefetchDashboardQueryIfMissing<T>(queryKey: readonly unknown[], queryFn: () => Promise<T>) {
+    if (queryClient.getQueryData<T>(queryKey) !== undefined) {
+      return;
+    }
+    await queryClient.prefetchQuery({
+      queryKey,
+      queryFn,
+      staleTime: DASHBOARD_ANALYTICS_STALE_TIME,
+      gcTime: DASHBOARD_ANALYTICS_GC_TIME,
+    });
+  }
+
+  function hasDashboardBaseCache() {
+    if (!journeyId || !zoneFingerprint) {
+      return false;
+    }
+
+    const zoneQueryKey = buildDashboardPricePageQueryKey();
+    if (queryClient.getQueryData(zoneQueryKey) === undefined) {
+      return false;
+    }
+
+    if (!hasPriceDashboardOverrides) {
+      return true;
+    }
+
+    return queryClient.getQueryData(buildPriceDashboardQueryKey()) !== undefined;
+  }
 
   async function primeDashboardAnalytics() {
     if (!journeyId || !zoneFingerprint) {
       return;
     }
 
-    const zoneDashboard = await queryClient.fetchQuery({
-      queryKey: ["zone-dashboard-analytics", journeyId, zoneFingerprint, config.type, "zone"],
-      queryFn: async () => getZoneDashboardAnalytics(journeyId, zoneFingerprint, config.type),
-      staleTime: 60_000,
-    });
+    const zoneQueryKey = buildDashboardPricePageQueryKey();
 
-    const safetyCity = selectedDashboardListing?.city_name || zoneDashboard.safety.selected_city || null;
-    if (safetyCity) {
-      await queryClient.prefetchQuery({
-        queryKey: ["zone-dashboard-analytics", journeyId, zoneFingerprint, config.type, "safety-city", safetyCity],
-        queryFn: async () => getZoneDashboardAnalytics(journeyId, zoneFingerprint, config.type, { cityName: safetyCity }),
-        staleTime: 60_000,
-      });
-    }
-
-    if (!dashboardPropertyId) {
-      return;
-    }
-
-    const propertyDashboard = await queryClient.fetchQuery({
-      queryKey: ["zone-dashboard-analytics", journeyId, zoneFingerprint, config.type, dashboardPropertyId],
-      queryFn: async () => getZoneDashboardAnalytics(journeyId, zoneFingerprint, config.type, dashboardPropertyId),
-      staleTime: 60_000,
-    });
-
-    const priceCity = propertyDashboard.context.city_name;
-    const rankingItems = pickNeighborhoodPrefetchWindow(propertyDashboard.price.neighborhood_unit_price_ranking || []);
-    if (!priceCity || rankingItems.length === 0) {
-      return;
-    }
-
-    await Promise.all(
-      rankingItems.map((item) =>
-        queryClient.prefetchQuery({
-          queryKey: [
-            "zone-dashboard-analytics",
-            journeyId,
-            zoneFingerprint,
-            config.type,
-            "price-filter",
-            priceCity,
-            item.neighborhood_name,
-            dashboardPropertyId,
-          ],
-          queryFn: async () => getZoneDashboardAnalytics(journeyId, zoneFingerprint, config.type, {
-            propertyId: dashboardPropertyId,
-            cityName: priceCity,
-            neighborhoodName: item.neighborhood_name,
-          }),
-          staleTime: 60_000,
-        }),
-      ),
+    await fetchDashboardQueryIfMissing(
+      zoneQueryKey,
+      async () => getZoneDashboardAnalytics(journeyId, zoneFingerprint, config.type, { page: "preco" }),
     );
+
+    if (hasPriceDashboardOverrides) {
+      await fetchDashboardQueryIfMissing(
+        buildPriceDashboardQueryKey(),
+        async () => getZoneDashboardAnalytics(
+          journeyId,
+          zoneFingerprint,
+          config.type,
+          {
+            ...buildPriceDashboardAnalyticsOptions(listingsFilters),
+            page: "preco",
+          },
+        ),
+      );
+    }
   }
 
   async function handleOpenDashboardTab() {
     if (activeTab === "dashboard") {
+      return;
+    }
+
+    if (hasDashboardBaseCache()) {
+      setActiveTab("dashboard");
+      void primeDashboardAnalytics().catch(() => {
+        // Warm-up complementar em background nao deve bloquear a aba.
+      });
       return;
     }
 
@@ -428,7 +473,7 @@ export function Step6Analysis() {
     return () => {
       cancelled = true;
     };
-  }, [config.type, dashboardPropertyId, journeyId, queryClient, zoneFingerprint]);
+  }, [config.type, journeyId, queryClient, zoneFingerprint]);
 
   useEffect(() => {
     if (!selectedListingKey) {
@@ -981,11 +1026,8 @@ export function Step6Analysis() {
             <Step6Dashboard
               journeyId={journeyId}
               zoneFingerprint={zoneFingerprint}
-              propertyId={dashboardPropertyId}
-              hasExplicitPropertySelection={Boolean(selectedDashboardListing?.property_id)}
               searchType={config.type}
-              selectedPropertyNeighborhoodName={selectedDashboardListing?.neighborhood_name || null}
-              selectedPropertyCityName={selectedDashboardListing?.city_name || null}
+              listingsFilters={listingsFilters}
             />
           ) : null
         )}

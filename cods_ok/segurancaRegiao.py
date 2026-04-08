@@ -48,6 +48,7 @@ CITY_COL_CANDIDATES = [
 
 
 DATE_COL_CANDIDATES = [
+    "DATA_OCORRENCIA_BO",
     "DATA_FATO",
     "DATA_OCORRENCIA",
     "DATA_REGISTRO",
@@ -58,6 +59,14 @@ DATE_COL_CANDIDATES = [
     "DATA",
 ]
 
+TIME_COL_CANDIDATES = [
+    "HORA_OCORRENCIA_BO",
+    "HORA_OCORRENCIA",
+    "HORA_FATO",
+    "HORA",
+    "HORARIO",
+]
+
 # Colunas mínimas necessárias do XLSX SSP (inclui coluna de município, se existir)
 WANTED_COLS = [
     "LATITUDE",
@@ -66,6 +75,7 @@ WANTED_COLS = [
     "NOME_DELEGACIA_CIRCUNSCRICAO",
     *CITY_COL_CANDIDATES,
     *DATE_COL_CANDIDATES,
+    *TIME_COL_CANDIDATES,
 ]
 
 # =========================

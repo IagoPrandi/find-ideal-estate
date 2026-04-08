@@ -37,6 +37,17 @@ import {
 
 export const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
 
+export type ZoneDashboardAnalyticsOptions = {
+  cityName?: string | null;
+  page?: "preco" | "seguranca" | "ambiente" | null;
+  minPrice?: string | null;
+  maxPrice?: string | null;
+  usageType?: string | null;
+  spatialScope?: string | null;
+  minSize?: string | null;
+  maxSize?: string | null;
+};
+
 type RequestOptions = {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: unknown;
@@ -532,20 +543,35 @@ export async function getZoneDashboardAnalytics(
   journeyId: string,
   zoneFingerprint: string,
   searchType: string = "rent",
-  options?: {
-    propertyId?: string | null;
-    neighborhoodName?: string | null;
-    cityName?: string | null;
-  } | string | null,
+  options?: ZoneDashboardAnalyticsOptions | null,
 ): Promise<ZoneDashboardAnalytics> {
-  const normalizedOptions = typeof options === "string"
-    ? { propertyId: options }
-    : (options || {});
-  const propertyQuery = normalizedOptions.propertyId ? `&property_id=${encodeURIComponent(normalizedOptions.propertyId)}` : "";
-  const neighborhoodQuery = normalizedOptions.neighborhoodName ? `&neighborhood_name=${encodeURIComponent(normalizedOptions.neighborhoodName)}` : "";
-  const cityQuery = normalizedOptions.cityName ? `&city_name=${encodeURIComponent(normalizedOptions.cityName)}` : "";
+  const normalizedOptions = options || {};
+  const params = new URLSearchParams({
+    search_type: searchType,
+  });
+
+  const appendIfPresent = (name: string, value: string | null | undefined) => {
+    if (typeof value !== "string") {
+      return;
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return;
+    }
+    params.set(name, trimmed);
+  };
+
+  appendIfPresent("city_name", normalizedOptions.cityName);
+  appendIfPresent("page", normalizedOptions.page);
+  appendIfPresent("min_price", normalizedOptions.minPrice);
+  appendIfPresent("max_price", normalizedOptions.maxPrice);
+  appendIfPresent("usage_type", normalizedOptions.usageType);
+  appendIfPresent("spatial_scope", normalizedOptions.spatialScope);
+  appendIfPresent("min_size", normalizedOptions.minSize);
+  appendIfPresent("max_size", normalizedOptions.maxSize);
+
   return (await requestJson(
-    `/journeys/${encodeURIComponent(journeyId)}/zones/${encodeURIComponent(zoneFingerprint)}/dashboard-analytics?search_type=${encodeURIComponent(searchType)}${propertyQuery}${neighborhoodQuery}${cityQuery}`,
+    `/journeys/${encodeURIComponent(journeyId)}/zones/${encodeURIComponent(zoneFingerprint)}/dashboard-analytics?${params.toString()}`,
     ZoneDashboardAnalyticsBackendSchema,
   )) as ZoneDashboardAnalytics;
 }

@@ -25,15 +25,19 @@ import {
 } from "recharts";
 import { apiActionHint, getZoneDashboardAnalytics } from "../../api/client";
 import { formatCurrencyBr } from "../../lib/listingFormat";
+import { defaultListingsPanelFilters, type ListingsPanelFilters } from "../../state";
+
+const DASHBOARD_ANALYTICS_STALE_TIME = 30 * 60_000;
+const DASHBOARD_ANALYTICS_GC_TIME = 60 * 60_000;
+const PRICE_DASHBOARD_FILTER_DEBOUNCE_MS = 350;
 
 type DashboardPage = "preco" | "seguranca" | "ambiente";
 
 type Step6DashboardProps = {
   journeyId: string;
   zoneFingerprint: string;
-  propertyId: string | null;
-  hasExplicitPropertySelection: boolean;
   searchType: string;
+  listingsFilters: ListingsPanelFilters;
 };
 
 type DashboardRankingItem = {
@@ -42,6 +46,7 @@ type DashboardRankingItem = {
   city_name?: string | null;
   value?: number | null;
   yearly_change_pct?: number | null;
+  listing_count?: number | null;
   is_selected?: boolean;
 };
 
@@ -124,26 +129,91 @@ function formatHourLabel(hour: number) {
   return `${String(hour).padStart(2, "0")}h`;
 }
 
-function priceRankExplanation(rank: { scope_label?: string | null; direction?: string | null } | null | undefined) {
-  const base = rank?.scope_label || "Sem base";
-  if (rank?.direction === "lower_better") {
-    return `${base} · 1º = bairro mais barato por m²`;
-  }
-  if (rank?.direction === "higher_better") {
-    return `${base} · 1º = bairro mais caro por m²`;
-  }
-  return base;
+function hasPriceDashboardPanelFilterOverrides(filters: ListingsPanelFilters) {
+  return filters.minPrice !== defaultListingsPanelFilters.minPrice
+    || filters.maxPrice !== defaultListingsPanelFilters.maxPrice
+    || filters.usageType !== defaultListingsPanelFilters.usageType
+    || filters.spatialScope !== defaultListingsPanelFilters.spatialScope
+    || filters.minSize !== defaultListingsPanelFilters.minSize
+    || filters.maxSize !== defaultListingsPanelFilters.maxSize;
 }
 
-function yearlyChangeRankExplanation(rank: { scope_label?: string | null; direction?: string | null } | null | undefined) {
-  const base = rank?.scope_label || "Sem base";
-  if (rank?.direction === "lower_better") {
-    return `${base} · 1º = menor oscilação no período`;
+function buildPriceDashboardAnalyticsOptions(filters: ListingsPanelFilters, cityName: string | null = null) {
+  return {
+    cityName,
+    minPrice: filters.minPrice || null,
+    maxPrice: filters.maxPrice || null,
+    usageType: filters.usageType,
+    spatialScope: filters.spatialScope,
+    minSize: filters.minSize || null,
+    maxSize: filters.maxSize || null,
+  };
+}
+
+function arePriceDashboardFiltersEqual(left: ListingsPanelFilters, right: ListingsPanelFilters) {
+  return left.minPrice === right.minPrice
+    && left.maxPrice === right.maxPrice
+    && left.usageType === right.usageType
+    && left.spatialScope === right.spatialScope
+    && left.minSize === right.minSize
+    && left.maxSize === right.maxSize;
+}
+
+function formatFilterIntegerLabel(value: string) {
+  const numericValue = Number(value);
+  if (!Number.isFinite(numericValue)) {
+    return value;
   }
-  if (rank?.direction === "higher_better") {
-    return `${base} · 1º = maior oscilação no período`;
+  return new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 }).format(numericValue);
+}
+
+function buildPriceDashboardFilterSummary(filters: ListingsPanelFilters) {
+  const parts = [
+    filters.spatialScope === "inside_zone" ? "escopo: apenas dentro da zona" : "escopo: todos os imóveis",
+    filters.usageType === "residential"
+      ? "tipo: residencial"
+      : filters.usageType === "commercial"
+        ? "tipo: comercial"
+        : "tipo: todos",
+  ];
+
+  if (filters.minPrice && filters.maxPrice) {
+    parts.push(`preço: R$ ${formatFilterIntegerLabel(filters.minPrice)} a R$ ${formatFilterIntegerLabel(filters.maxPrice)}`);
+  } else if (filters.minPrice) {
+    parts.push(`preço: a partir de R$ ${formatFilterIntegerLabel(filters.minPrice)}`);
+  } else if (filters.maxPrice) {
+    parts.push(`preço: até R$ ${formatFilterIntegerLabel(filters.maxPrice)}`);
   }
-  return base;
+
+  if (filters.minSize && filters.maxSize) {
+    parts.push(`área: ${formatFilterIntegerLabel(filters.minSize)} a ${formatFilterIntegerLabel(filters.maxSize)} m²`);
+  } else if (filters.minSize) {
+    parts.push(`área: a partir de ${formatFilterIntegerLabel(filters.minSize)} m²`);
+  } else if (filters.maxSize) {
+    parts.push(`área: até ${formatFilterIntegerLabel(filters.maxSize)} m²`);
+  }
+
+  return parts.join(" · ");
+}
+
+function priceRankingDescription(selectedCity: string | null | undefined, scopeLabel: string | null | undefined) {
+  const scope = scopeLabel || "Valor médio do m² por bairro";
+  const cityLabel = selectedCity ? `cidade: ${selectedCity}` : "sem filtro de cidade";
+  return `${scope} · ${cityLabel} · exibição resumida com 2 do topo, 2 do entorno do bairro com mais imóveis no recorte atual e 2 da base.`;
+}
+
+function priceRankingEmptyMessage(selectedCity: string | null | undefined) {
+  if (selectedCity) {
+    return "Sem bairros com anúncios ativos na cidade selecionada dentro do recorte atual.";
+  }
+  return "Sem bairros com anúncios ativos no recorte atual para montar o ranking de preço por m².";
+}
+
+function formatListingCountInline(value: number | null | undefined) {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return "Sem amostra atual";
+  }
+  return `${formatOccurrenceCount(value)} imóveis no recorte`;
 }
 
 function safetyRankingTitle(scopeLabel: string | null | undefined) {
@@ -279,23 +349,54 @@ function MetricCard(props: {
   }[props.tone || "violet"];
 
   return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">{props.eyebrow}</p>
-          <p className="mt-2 text-2xl font-bold text-slate-800">{props.value}</p>
-          {props.detail ? <p className="mt-2 text-sm text-slate-500">{props.detail}</p> : null}
-        </div>
-        <div className={`rounded-xl p-2.5 ${toneClass}`}>{props.icon}</div>
+    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3.5 shadow-sm">
+      <div className="relative pr-14">
+        <p className="text-[10px] font-semibold uppercase leading-tight tracking-[0.16em] text-slate-500">{props.eyebrow}</p>
+        <div className={`absolute right-0 top-0 shrink-0 rounded-lg p-1.5 ${toneClass}`}>{props.icon}</div>
+        <p className="mt-1 text-[1.9rem] font-bold leading-none text-slate-800">{props.value}</p>
+        {props.detail ? <p className="mt-1.5 text-[0.95rem] leading-snug text-slate-500">{props.detail}</p> : null}
       </div>
     </div>
   );
 }
 
-export function Step6Dashboard({ journeyId, zoneFingerprint, propertyId, hasExplicitPropertySelection, searchType }: Step6DashboardProps) {
+function DashboardPriceFiltersHero(props: {
+  filters: ListingsPanelFilters;
+  activeListingCount: number | null | undefined;
+}) {
+  const summary = buildPriceDashboardFilterSummary(props.filters);
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm" data-testid="dashboard-price-filters-hero">
+      <p className="leading-relaxed">
+        <span className="font-semibold text-slate-800">Filtros aplicados:</span>
+        {` ${summary}. ${formatOccurrenceCount(props.activeListingCount)} anúncios ativos considerados no dashboard. A seleção de um anúncio não altera este recorte.`}
+      </p>
+    </div>
+  );
+}
+
+export function Step6Dashboard({ journeyId, zoneFingerprint, searchType, listingsFilters }: Step6DashboardProps) {
   const [activePage, setActivePage] = useState<DashboardPage>("preco");
-  const [selectedPriceFilter, setSelectedPriceFilter] = useState<{ neighborhoodName: string; cityName: string } | null>(null);
+  const [selectedPriceCityFilter, setSelectedPriceCityFilter] = useState<string | null>(null);
   const [selectedSafetyCityFilter, setSelectedSafetyCityFilter] = useState<string | null>(null);
+  const [debouncedPriceFilters, setDebouncedPriceFilters] = useState<ListingsPanelFilters>(listingsFilters);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedPriceFilters((current) => (
+        arePriceDashboardFiltersEqual(current, listingsFilters) ? current : listingsFilters
+      ));
+    }, PRICE_DASHBOARD_FILTER_DEBOUNCE_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [listingsFilters]);
+
+  const hasPriceFilterUpdatePending = !arePriceDashboardFiltersEqual(debouncedPriceFilters, listingsFilters);
+  const hasPriceDashboardOverrides = hasPriceDashboardPanelFilterOverrides(debouncedPriceFilters);
+  const usesFilteredPriceQuery = Boolean(selectedPriceCityFilter || hasPriceDashboardOverrides);
   const tabs: Array<{ key: DashboardPage; label: string }> = [
     { key: "preco", label: "Preço e valor" },
     { key: "seguranca", label: "Segurança" },
@@ -303,51 +404,55 @@ export function Step6Dashboard({ journeyId, zoneFingerprint, propertyId, hasExpl
   ];
 
   useEffect(() => {
-    setSelectedPriceFilter(null);
+    setSelectedPriceCityFilter(null);
     setSelectedSafetyCityFilter(null);
-  }, [journeyId, zoneFingerprint, propertyId, searchType]);
+  }, [journeyId, zoneFingerprint, searchType]);
 
   const zoneDashboardQuery = useQuery({
-    queryKey: ["zone-dashboard-analytics", journeyId, zoneFingerprint, searchType, "zone"],
-    queryFn: async () => getZoneDashboardAnalytics(journeyId, zoneFingerprint, searchType),
+    queryKey: ["zone-dashboard-analytics", journeyId, zoneFingerprint, searchType, "zone", activePage],
+    queryFn: async () => getZoneDashboardAnalytics(
+      journeyId,
+      zoneFingerprint,
+      searchType,
+      { page: activePage },
+    ),
     enabled: Boolean(journeyId && zoneFingerprint),
-    staleTime: 60_000,
+    staleTime: DASHBOARD_ANALYTICS_STALE_TIME,
+    gcTime: DASHBOARD_ANALYTICS_GC_TIME,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
   });
 
-  const basePriceDashboardQuery = useQuery({
-    queryKey: ["zone-dashboard-analytics", journeyId, zoneFingerprint, searchType, propertyId || "none"],
-    queryFn: async () => getZoneDashboardAnalytics(journeyId, zoneFingerprint, searchType, propertyId),
-    enabled: Boolean(journeyId && zoneFingerprint && propertyId && activePage === "preco"),
-    staleTime: 60_000,
-    placeholderData: keepPreviousData,
-  });
-
-  const filteredPriceDashboardQuery = useQuery({
+  const priceDashboardQuery = useQuery({
     queryKey: [
       "zone-dashboard-analytics",
       journeyId,
       zoneFingerprint,
       searchType,
-      "price-filter",
-      selectedPriceFilter?.cityName || "no-city",
-      selectedPriceFilter?.neighborhoodName || "no-neighborhood",
-      propertyId || "none",
+      "price-panel",
+      selectedPriceCityFilter || "default",
+      debouncedPriceFilters.spatialScope,
+      debouncedPriceFilters.usageType,
+      debouncedPriceFilters.minPrice || "",
+      debouncedPriceFilters.maxPrice || "",
+      debouncedPriceFilters.minSize || "",
+      debouncedPriceFilters.maxSize || "",
     ],
-    queryFn: async () =>
-      getZoneDashboardAnalytics(journeyId, zoneFingerprint, searchType, {
-        propertyId,
-        cityName: selectedPriceFilter?.cityName || null,
-        neighborhoodName: selectedPriceFilter?.neighborhoodName || null,
-      }),
-    enabled: Boolean(
-      journeyId
-        && zoneFingerprint
-        && activePage === "preco"
-        && selectedPriceFilter?.cityName
-        && selectedPriceFilter?.neighborhoodName,
+    queryFn: async () => getZoneDashboardAnalytics(
+      journeyId,
+      zoneFingerprint,
+      searchType,
+      {
+        ...buildPriceDashboardAnalyticsOptions(debouncedPriceFilters, selectedPriceCityFilter),
+        page: "preco",
+      },
     ),
-    staleTime: 60_000,
-    placeholderData: (previousData) => previousData ?? basePriceDashboardQuery.data,
+    enabled: Boolean(journeyId && zoneFingerprint && activePage === "preco" && usesFilteredPriceQuery),
+    staleTime: DASHBOARD_ANALYTICS_STALE_TIME,
+    gcTime: DASHBOARD_ANALYTICS_GC_TIME,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    placeholderData: keepPreviousData,
   });
 
   const safetyDashboardQuery = useQuery({
@@ -361,28 +466,29 @@ export function Step6Dashboard({ journeyId, zoneFingerprint, propertyId, hasExpl
     ],
     queryFn: async () => getZoneDashboardAnalytics(journeyId, zoneFingerprint, searchType, {
       cityName: selectedSafetyCityFilter,
+      page: "seguranca",
     }),
     enabled: Boolean(journeyId && zoneFingerprint && activePage === "seguranca" && selectedSafetyCityFilter),
-    staleTime: 60_000,
+    staleTime: DASHBOARD_ANALYTICS_STALE_TIME,
+    gcTime: DASHBOARD_ANALYTICS_GC_TIME,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
   });
 
   const zoneData = zoneDashboardQuery.data;
-  const basePriceData = basePriceDashboardQuery.data || zoneData;
-  const priceData = filteredPriceDashboardQuery.data || basePriceData;
+  const priceData = usesFilteredPriceQuery ? priceDashboardQuery.data : zoneData;
   const safetyData = selectedSafetyCityFilter ? safetyDashboardQuery.data : zoneData;
   const activeData = activePage === "preco"
     ? priceData
     : activePage === "seguranca"
       ? safetyData
       : zoneData;
-  const propertyNeighborhoodName = basePriceData?.context.neighborhood_name || null;
-  const propertyCityName = basePriceData?.context.city_name || null;
-  const isPriceFilterActive = Boolean(selectedPriceFilter?.neighborhoodName && selectedPriceFilter?.cityName);
   const priceHistory = useMemo(
     () =>
       (priceData?.price.history || []).map((item) => ({
         day: new Date(item.date).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" }),
-        neighborhoodPrice: item.neighborhood_median_price ?? null,
+        zoneAveragePrice: item.zone_average_price ?? null,
+        neighborhoodAveragePrice: item.neighborhood_average_price ?? null,
       })),
     [priceData?.price.history],
   );
@@ -397,25 +503,21 @@ export function Step6Dashboard({ journeyId, zoneFingerprint, propertyId, hasExpl
       })),
     [zoneData?.safety.peak_hours],
   );
-  const isInitialLoading = !activeData && (zoneDashboardQuery.isLoading || basePriceDashboardQuery.isLoading || filteredPriceDashboardQuery.isLoading);
+  const isInitialLoading = activePage === "preco"
+    ? !priceData && (zoneDashboardQuery.isLoading || priceDashboardQuery.isLoading || priceDashboardQuery.isFetching)
+    : !activeData && zoneDashboardQuery.isLoading;
   const activeError = activePage === "preco"
-    ? filteredPriceDashboardQuery.error || basePriceDashboardQuery.error || zoneDashboardQuery.error
+    ? (usesFilteredPriceQuery ? priceDashboardQuery.error || zoneDashboardQuery.error : zoneDashboardQuery.error)
     : activePage === "seguranca"
       ? safetyDashboardQuery.error || zoneDashboardQuery.error
       : zoneDashboardQuery.error;
 
-  function handlePriceRankingSelect(item: DashboardRankingItem) {
-    if (!propertyCityName) {
+  function handlePriceCityChange(nextCity: string) {
+    if (!nextCity) {
+      setSelectedPriceCityFilter(null);
       return;
     }
-    if (item.neighborhood_name === propertyNeighborhoodName) {
-      setSelectedPriceFilter(null);
-      return;
-    }
-    setSelectedPriceFilter({
-      cityName: propertyCityName,
-      neighborhoodName: item.neighborhood_name,
-    });
+    setSelectedPriceCityFilter(nextCity);
   }
 
   function handleSafetyCityChange(nextCity: string) {
@@ -455,35 +557,73 @@ export function Step6Dashboard({ journeyId, zoneFingerprint, propertyId, hasExpl
 
       {!activeData || isInitialLoading ? null : activePage === "preco" ? (
         <div className="space-y-4" data-testid="dashboard-page-preco">
-          {isPriceFilterActive && filteredPriceDashboardQuery.isFetching ? (
+          <DashboardPriceFiltersHero
+            filters={listingsFilters}
+            activeListingCount={priceData?.price.zone_active_listing_count ?? null}
+          />
+
+          {hasPriceFilterUpdatePending ? (
             <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500 shadow-sm">
-              Atualizando métricas do bairro filtrado...
+              Aplicando filtros do painel ao dashboard de imóveis...
             </div>
           ) : null}
 
-          <DashboardRankingList
+          {selectedPriceCityFilter && priceDashboardQuery.isFetching ? (
+            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500 shadow-sm">
+              Atualizando ranking da cidade selecionada...
+            </div>
+          ) : null}
+
+          <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(168px,0.62fr)] xl:items-stretch">
+            <CompactMetricCard
+              icon={<TrendingUp className="h-4 w-4" />}
+              eyebrow={listingsFilters.spatialScope === "inside_zone" ? "Preço médio na zona" : "Preço médio do recorte"}
+              value={formatCurrencyBr(priceData?.price.zone_average_price ?? null)}
+              detail={`${formatOccurrenceCount(priceData?.price.zone_active_listing_count)} anúncios ativos no recorte atual`}
+              tone="violet"
+              size="sm"
+            />
+            <CompactMetricCard
+              icon={<MapPinned className="h-4 w-4" />}
+              eyebrow="Valor médio do m²"
+              value={formatCurrencyPerSquareMeter(priceData?.price.zone_average_unit_price)}
+              detail={priceData?.price.selected_neighborhood_name
+                ? `Bairro destacado no recorte: ${priceData.price.selected_neighborhood_name}`
+                : "Sem bairro predominante no recorte atual"}
+              tone="emerald"
+              size="sm"
+            />
+            <CompactMetricCard
+              icon={<TrendingDown className="h-4 w-4" />}
+              eyebrow="Variação média 365d"
+              value={formatPercent(priceData?.price.zone_yearly_change_pct)}
+              detail="Comparação entre o primeiro e o último ponto diário da série do recorte"
+              tone="amber"
+              size="s"
+              className="xl:max-w-[190px] xl:justify-self-end"
+            />
+          </div>
+
+          <DashboardPriceRankingList
             title="Ranking do bairro"
-            description={`${priceRankExplanation(priceData?.price.neighborhood_unit_price_rank)} · clique em um bairro para atualizar o dashboard.`}
+            description={priceRankingDescription(selectedPriceCityFilter, priceData?.price.ranking_scope_label)}
             items={priceData?.price.neighborhood_unit_price_ranking || []}
+            cityOptions={priceData?.price.city_options || zoneData?.price.city_options || []}
+            selectedCity={selectedPriceCityFilter}
+            onChangeCity={handlePriceCityChange}
+            isFetching={priceDashboardQuery.isFetching}
             formatValue={formatCurrencyPerSquareMeter}
-            secondaryValueFormatter={(item) => formatYearlyChangeInline(item.yearly_change_pct)}
-            selectedLabel={(item) => {
-              if (item.neighborhood_name !== propertyNeighborhoodName) {
-                return "Filtro ativo";
-              }
-              return hasExplicitPropertySelection ? "Imóvel selecionado" : "Bairro de referência";
-            }}
-            onSelectItem={propertyCityName ? handlePriceRankingSelect : undefined}
-            emptyMessage="Sem bairros suficientes com anúncios ativos para montar o ranking de preço por m²."
+            secondaryValueFormatter={(item) => `${formatListingCountInline(item.listing_count)} · ${formatYearlyChangeInline(item.yearly_change_pct)}`}
+            selectedLabel={listingsFilters.spatialScope === "inside_zone" ? "Bairro com mais imóveis na zona" : "Bairro com mais imóveis no recorte"}
+            emptyMessage={priceDashboardQuery.isFetching ? "Atualizando ranking da cidade selecionada..." : priceRankingEmptyMessage(selectedPriceCityFilter)}
             testId="dashboard-price-ranking"
-            heightClassName="h-[320px]"
           />
 
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
-                <h4 className="text-sm font-bold text-slate-800">Preço do bairro</h4>
-                <p className="mt-1 text-xs text-slate-500">Mediana diária dos anúncios persistidos para o bairro ativo nos últimos 365 dias.</p>
+                <h4 className="text-sm font-bold text-slate-800">Preço médio ao longo do tempo</h4>
+                <p className="mt-1 text-xs text-slate-500">Série diária do recorte atual e do bairro destacado nos últimos 365 dias.</p>
               </div>
               <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">365 dias</span>
             </div>
@@ -494,7 +634,8 @@ export function Step6Dashboard({ journeyId, zoneFingerprint, propertyId, hasExpl
                   <XAxis dataKey="day" tick={{ fontSize: 10 }} stroke="#94a3b8" />
                   <YAxis tickFormatter={(value) => `${Math.round(Number(value) / 1000)}k`} tick={{ fontSize: 10 }} stroke="#94a3b8" />
                   <Tooltip formatter={(value) => formatCurrencyBr(typeof value === "number" ? value : null)} />
-                  <Line type="monotone" dataKey="neighborhoodPrice" name="Bairro" stroke="#16a34a" strokeWidth={2.5} dot={false} connectNulls />
+                  <Line type="monotone" dataKey="zoneAveragePrice" name={listingsFilters.spatialScope === "inside_zone" ? "Zona" : "Recorte"} stroke="#8b5cf6" strokeWidth={2.5} dot={false} connectNulls />
+                  <Line type="monotone" dataKey="neighborhoodAveragePrice" name="Bairro destacado" stroke="#16a34a" strokeWidth={2.5} dot={false} connectNulls />
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -503,8 +644,8 @@ export function Step6Dashboard({ journeyId, zoneFingerprint, propertyId, hasExpl
           <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
-                <h4 className="text-sm font-bold text-slate-800">Histograma do bairro</h4>
-                <p className="mt-1 text-xs text-slate-500">Distribuição do preço atual por faixa para o bairro selecionado no ranking.</p>
+                <h4 className="text-sm font-bold text-slate-800">Histograma do bairro destacado</h4>
+                <p className="mt-1 text-xs text-slate-500">Distribuição do preço atual por faixa para o bairro com mais imóveis no recorte filtrado atual.</p>
               </div>
               <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">Preço atual</span>
             </div>
@@ -531,7 +672,7 @@ export function Step6Dashboard({ journeyId, zoneFingerprint, propertyId, hasExpl
         <div className="space-y-4" data-testid="dashboard-page-seguranca">
           <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(168px,0.62fr)] xl:items-stretch">
             <CompactMetricCard
-              icon={<ShieldAlert className="h-4.5 w-4.5" />}
+              icon={<ShieldAlert className="h-4 w-4" />}
               eyebrow="Taxa de homicídio"
               value={formatDensityPerSquareKm(zoneData?.safety.homicide_density_per_km2)}
               detail={`${zoneData?.safety.homicide_count_365d || 0} homicídios · por km² · ${rankLabel(zoneData?.safety.homicide_rank)}`}
@@ -539,7 +680,7 @@ export function Step6Dashboard({ journeyId, zoneFingerprint, propertyId, hasExpl
               size="sm"
             />
             <CompactMetricCard
-              icon={<AlertTriangle className="h-4.5 w-4.5" />}
+              icon={<AlertTriangle className="h-4 w-4" />}
               eyebrow="Taxa de roubo"
               value={formatDensityPerSquareKm(zoneData?.safety.robbery_density_per_km2)}
               detail={`${zoneData?.safety.robbery_count_365d || 0} roubos · por km² · ${rankLabel(zoneData?.safety.robbery_rate_rank)}`}
@@ -681,29 +822,29 @@ function CompactMetricCard(props: {
   }[props.tone || "violet"];
   const sizeClass = props.size === "xs"
     ? {
-        container: "rounded-xl px-3 py-2.5",
-        eyebrow: "text-[8px] tracking-[0.11em]",
-        value: "mt-1 text-[clamp(0.95rem,1.45vw,1.2rem)]",
-        detail: "mt-1 text-[8.5px] leading-snug",
-        icon: "rounded-lg p-1.5",
+        container: "rounded-xl px-3 py-2",
+        content: "pr-10",
+        eyebrow: "text-[9px] tracking-[0.1em]",
+        value: "mt-0.5 text-[clamp(0.92rem,1.25vw,1.1rem)]",
+        detail: "mt-1 text-[9.5px] leading-snug",
+        icon: "rounded-md p-1",
       }
     : {
-        container: "rounded-xl px-3.5 py-3",
-        eyebrow: "text-[8px] tracking-[0.12em]",
-        value: "mt-1.5 text-[clamp(1rem,1.8vw,1.45rem)]",
-        detail: "mt-1 text-[8.5px] leading-snug",
-        icon: "rounded-lg p-2",
+        container: "rounded-xl px-3.5 py-2.5",
+        content: "pr-12",
+        eyebrow: "text-[9.5px] tracking-[0.11em]",
+        value: "mt-0.5 text-[clamp(0.98rem,1.55vw,1.32rem)]",
+        detail: "mt-1 text-[10px] leading-snug",
+        icon: "rounded-md p-1.25",
       };
 
   return (
     <div className={`${sizeClass.container} ${props.className || ""} border border-slate-200 bg-white shadow-sm`}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className={`${sizeClass.eyebrow} font-semibold uppercase text-slate-500`}>{props.eyebrow}</p>
-          <p className={`${sizeClass.value} truncate font-bold leading-none tracking-tight text-slate-800 tabular-nums`}>{props.value}</p>
-          {props.detail ? <p className={`${sizeClass.detail} text-slate-500`}>{props.detail}</p> : null}
-        </div>
-        <div className={`${sizeClass.icon} ${toneClass}`}>{props.icon}</div>
+      <div className={`relative min-w-0 ${sizeClass.content}`}>
+        <p className={`${sizeClass.eyebrow} font-semibold uppercase leading-tight text-slate-500`}>{props.eyebrow}</p>
+        <div className={`${sizeClass.icon} absolute right-0 top-0 shrink-0 ${toneClass}`}>{props.icon}</div>
+        <p className={`${sizeClass.value} font-bold leading-none tracking-tight text-slate-800 tabular-nums`}>{props.value}</p>
+        {props.detail ? <p className={`${sizeClass.detail} text-slate-500`}>{props.detail}</p> : null}
       </div>
     </div>
   );
@@ -795,6 +936,100 @@ function DashboardRankingList(props: {
   );
 }
 
+function DashboardPriceRankingList(props: {
+  title: string;
+  description: string;
+  items: DashboardRankingItem[];
+  cityOptions: string[];
+  selectedCity: string | null;
+  onChangeCity: (cityName: string) => void;
+  isFetching: boolean;
+  formatValue: (value: number | null | undefined) => string;
+  secondaryValueFormatter?: (item: DashboardRankingItem) => string | null;
+  selectedLabel?: string | ((item: DashboardRankingItem) => string | null);
+  emptyMessage: string;
+  testId: string;
+}) {
+  const entries = useMemo(() => buildSegmentedRankingEntries(props.items), [props.items]);
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm" data-testid={props.testId}>
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+        <div className="min-w-0">
+          <h4 className="text-sm font-bold text-slate-800">{props.title}</h4>
+          <p className="mt-1 text-xs text-slate-500">{props.description}</p>
+        </div>
+        <div className="flex items-center gap-2 self-start">
+          {props.isFetching ? (
+            <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-600">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Atualizando
+            </span>
+          ) : null}
+          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-600">
+            {`${props.items.length} bairros`}
+          </span>
+        </div>
+      </div>
+
+      <div className="mt-4">
+        <DashboardCityCombobox
+          label="Cidade do ranking"
+          ariaLabel="Filtrar ranking de imóveis por cidade"
+          cityOptions={props.cityOptions}
+          selectedCity={props.selectedCity}
+          onChangeCity={props.onChangeCity}
+        />
+      </div>
+
+      {entries.length === 0 ? (
+        <div className="mt-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-sm text-slate-500">{props.emptyMessage}</div>
+      ) : (
+        <div className="mt-4 space-y-2">
+          {entries.map((entry) => {
+            if (entry.type === "gap") {
+              return (
+                <div key={entry.key} className="flex justify-center py-1 text-slate-400" aria-hidden="true">
+                  <span className="text-lg leading-none">...</span>
+                </div>
+              );
+            }
+
+            const item = entry.item;
+            return (
+              <div
+                key={entry.key}
+                className={`grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-xl border px-3 py-2.5 text-left ${item.is_selected ? "border-pastel-violet-200 bg-pastel-violet-50/60" : "border-slate-200 bg-slate-50/70"}`}
+              >
+                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-xs font-semibold text-slate-600 shadow-sm">
+                  {item.position}º
+                </div>
+                <div className="min-w-0">
+                  {item.city_name ? <p className="text-[10px] font-medium uppercase tracking-[0.08em] text-slate-400">{item.city_name}</p> : null}
+                  <p className="truncate text-sm font-semibold text-slate-800">{item.neighborhood_name}</p>
+                  {item.is_selected ? (
+                    <p className="mt-0.5 text-[11px] font-medium text-pastel-violet-700">
+                      {typeof props.selectedLabel === "function"
+                        ? props.selectedLabel(item)
+                        : props.selectedLabel || "Selecionado"}
+                    </p>
+                  ) : null}
+                </div>
+                <div className="min-w-[132px] text-right">
+                  <p className="text-xs font-semibold text-slate-700">{props.formatValue(item.value)}</p>
+                  {props.secondaryValueFormatter ? (
+                    <p className="mt-0.5 text-[11px] text-slate-500">{props.secondaryValueFormatter(item)}</p>
+                  ) : null}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function DashboardSafetyRankingList(props: {
   title: string;
   description: string;
@@ -833,6 +1068,7 @@ function DashboardSafetyRankingList(props: {
       <div className="mt-4">
         <DashboardCityCombobox
           label="Cidade do ranking"
+          ariaLabel="Filtrar ranking de segurança por cidade"
           cityOptions={props.cityOptions}
           selectedCity={props.selectedCity}
           onChangeCity={props.onChangeCity}
@@ -886,6 +1122,7 @@ function DashboardSafetyRankingList(props: {
 
 function DashboardCityCombobox(props: {
   label: string;
+  ariaLabel: string;
   cityOptions: string[];
   selectedCity: string | null;
   onChangeCity: (cityName: string) => void;
@@ -945,7 +1182,7 @@ function DashboardCityCombobox(props: {
           id={inputId}
           type="text"
           role="combobox"
-          aria-label="Filtrar ranking de segurança por cidade"
+          aria-label={props.ariaLabel}
           aria-autocomplete="list"
           aria-expanded={isOpen}
           aria-controls={listboxId}

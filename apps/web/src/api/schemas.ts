@@ -314,8 +314,8 @@ export const DashboardDistributionBucketBackendSchema = z.object({
 
 export const DashboardPriceHistoryPointBackendSchema = z.object({
   date: z.string(),
-  property_price: z.number().nullable().optional(),
-  neighborhood_median_price: z.number().nullable().optional()
+  zone_average_price: z.number().nullable().optional(),
+  neighborhood_average_price: z.number().nullable().optional()
 });
 
 export const DashboardRankingItemBackendSchema = z.object({
@@ -324,6 +324,7 @@ export const DashboardRankingItemBackendSchema = z.object({
   city_name: z.string().nullable().optional(),
   value: z.number().nullable().optional(),
   yearly_change_pct: z.number().nullable().optional(),
+  listing_count: z.number().nullable().optional(),
   is_selected: z.boolean().optional().default(false)
 });
 
@@ -338,18 +339,22 @@ export const DashboardSafetyHourBucketBackendSchema = z.object({
 export const ZoneDashboardAnalyticsBackendSchema = z.object({
   context: z.object({
     zone_fingerprint: z.string(),
-    property_id: z.string().nullable().optional(),
-    property_address: z.string().nullable().optional(),
     neighborhood_name: z.string().nullable().optional(),
     city_name: z.string().nullable().optional(),
     state_code: z.string().nullable().optional(),
-    selected_price: z.number().nullable().optional(),
-    selected_unit_price: z.number().nullable().optional(),
     zone_area_m2: z.number().nullable().optional()
   }),
   price: z.object({
-    neighborhood_median_unit_price: z.number().nullable().optional(),
-    selected_vs_neighborhood_pct: z.number().nullable().optional(),
+    city_options: z.array(z.string()).optional().default([]),
+    selected_city: z.string().nullable().optional(),
+    ranking_scope_label: z.string().nullable().optional(),
+    ranking_scope_note: z.string().nullable().optional(),
+    selected_neighborhood_name: z.string().nullable().optional(),
+    zone_average_price: z.number().nullable().optional(),
+    zone_average_unit_price: z.number().nullable().optional(),
+    zone_yearly_change_pct: z.number().nullable().optional(),
+    zone_active_listing_count: z.number().optional().default(0),
+    neighborhood_average_unit_price: z.number().nullable().optional(),
     neighborhood_unit_price_rank: DashboardRankBackendSchema.nullable().optional(),
     neighborhood_unit_price_ranking: z.array(DashboardRankingItemBackendSchema).optional().default([]),
     yearly_change_pct: z.number().nullable().optional(),
