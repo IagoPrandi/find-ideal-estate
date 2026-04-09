@@ -237,7 +237,6 @@ async def find_usable_cache_for_search_location(
                 FROM zone_listing_caches zlc
                 WHERE zlc.search_location_normalized = :normalized
                   AND zlc.status IN ('complete', 'partial')
-                  AND (zlc.expires_at IS NULL OR zlc.expires_at > now())
                 ORDER BY zlc.scraped_at DESC NULLS LAST, zlc.created_at DESC
                 LIMIT 1
                 """

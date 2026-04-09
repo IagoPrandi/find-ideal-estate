@@ -54,9 +54,11 @@ describe("journey-store", () => {
       minPrice: "",
       maxPrice: "",
       usageType: "all",
-      spatialScope: "all",
+      spatialScope: "inside_zone",
       minSize: "",
-      maxSize: ""
+      maxSize: "",
+      sortField: "price",
+      sortDirection: "asc"
     });
     expect(state.selectedListingKey).toBeNull();
     expect(state.selectedPoiKey).toBeNull();
@@ -107,9 +109,11 @@ describe("journey-store", () => {
       minPrice: "",
       maxPrice: "",
       usageType: "all",
-      spatialScope: "all",
+      spatialScope: "inside_zone",
       minSize: "",
-      maxSize: ""
+      maxSize: "",
+      sortField: "price",
+      sortDirection: "asc"
     });
     expect(state.selectedListingKey).toBeNull();
     expect(state.selectedPoiKey).toBeNull();

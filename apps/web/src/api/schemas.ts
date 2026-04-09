@@ -70,6 +70,32 @@ export const JourneyZoneReadSchema = z.object({
     })
   ).nullable().optional(),
   badges: z.any().nullable().optional(),
+  journey_rankings: z.object({
+    safety: z.object({
+      position: z.number().nullable().optional(),
+      total: z.number().optional().default(0),
+      percentile: z.number().nullable().optional(),
+    }).nullable().optional(),
+    green: z.object({
+      position: z.number().nullable().optional(),
+      total: z.number().optional().default(0),
+      percentile: z.number().nullable().optional(),
+    }).nullable().optional(),
+    flood: z.object({
+      position: z.number().nullable().optional(),
+      total: z.number().optional().default(0),
+      percentile: z.number().nullable().optional(),
+    }).nullable().optional(),
+    price: z.object({
+      position: z.number().nullable().optional(),
+      total: z.number().optional().default(0),
+      percentile: z.number().nullable().optional(),
+    }).nullable().optional(),
+  }).nullable().optional(),
+  price_summary: z.object({
+    p50_price: z.number().nullable().optional(),
+    active_listing_count: z.number().optional().default(0),
+  }).nullable().optional(),
   badges_provisional: z.any().nullable().optional(),
   created_at: z.string().nullable().optional(),
   updated_at: z.string().nullable().optional()

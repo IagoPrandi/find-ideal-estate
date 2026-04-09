@@ -18,6 +18,8 @@ os.environ.setdefault("VALHALLA_URL", "http://localhost:8002")
 os.environ.setdefault("OTP_URL", "http://localhost:8080")
 
 from fastapi.testclient import TestClient  # noqa: E402
+import pytest  # noqa: E402
+from modules.listings.cache import find_usable_cache_for_search_location  # noqa: E402
 from src.main import app  # noqa: E402
 
 
@@ -54,6 +56,63 @@ def _fake_cards() -> list[dict[str, object]]:
             "observed_at": datetime.now(tz=timezone.utc).isoformat(),
         }
     ]
+
+
+def _mock_connect_engine(*, mappings_first=None):
+    class _Result:
+        def mappings(self):
+            return self
+
+        def first(self):
+            return mappings_first
+
+    class _Conn:
+        async def execute(self, *_args, **_kwargs):
+            return _Result()
+
+    class _ConnectContext:
+        async def __aenter__(self):
+            return _Conn()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class _Engine:
+        def connect(self):
+            return _ConnectContext()
+
+    return _Engine()
+
+
+@pytest.mark.anyio
+async def test_find_usable_cache_for_search_location_ignores_expired_timestamp_when_status_is_complete(monkeypatch) -> None:
+    cache_row = {
+        "id": str(uuid4()),
+        "zone_fingerprint": "zone-a",
+        "config_hash": "hash-1",
+        "search_location_normalized": "avenida brigadeiro luis antonio, jardim paulista, sao paulo, sp",
+        "status": "complete",
+        "platforms_completed": ["quintoandar", "zapimoveis"],
+        "platforms_failed": [],
+        "coverage_ratio": None,
+        "preliminary_count": 233,
+        "scraped_at": datetime.now(tz=timezone.utc) - timedelta(days=5),
+        "expires_at": datetime.now(tz=timezone.utc) - timedelta(days=4),
+        "created_at": datetime.now(tz=timezone.utc) - timedelta(days=5, minutes=5),
+    }
+
+    monkeypatch.setattr(
+        "modules.listings.cache.get_engine",
+        lambda: _mock_connect_engine(mappings_first=cache_row),
+    )
+
+    result = await find_usable_cache_for_search_location(
+        "Avenida Brigadeiro Luís Antônio, Jardim Paulista, São Paulo, SP"
+    )
+
+    assert result is not None
+    assert result["status"] == "complete"
+    assert result["search_location_normalized"] == cache_row["search_location_normalized"]
 
 
 def test_listings_search_without_address_cache_queues_new_scrape(monkeypatch) -> None:

@@ -3,30 +3,83 @@ import { AlertTriangle, Search } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { apiActionHint, createZoneEnrichmentJob, getJob, getJourneyZonesList, updateJourney } from "../../api/client";
 import { getPoiCategoryMeta, getZonePoiSelectionKey, POI_CATEGORY_ORDER, sortPoiPoints, ZonePoiPointLike, zoneNeedsPoiBackfill } from "../../domain/poi";
-import { Badge } from "../shared";
+import { formatCurrencyBr } from "../../lib/listingFormat";
 import { useJourneyStore, useUIStore } from "../../state";
 
-type BackendBadge = {
-  value?: number;
-  percentile?: number;
-  tier?: string;
+type JourneyRank = {
+  position?: number | null;
+  total?: number;
+  percentile?: number | null;
 };
 
-function tierToLevel(tier: string | undefined): "best" | "above" | "neutral" | "below" {
-  if (tier === "excellent") {
-    return "best";
+type ZoneSortKey = "travel_time" | "safety" | "green" | "flood" | "price";
+
+const SORT_OPTIONS: Array<{ key: ZoneSortKey; label: string }> = [
+  { key: "travel_time", label: "Mais rápidas" },
+  { key: "safety", label: "Mais seguras" },
+  { key: "green", label: "Mais arborizadas" },
+  { key: "flood", label: "Menor risco de alagamento" },
+  { key: "price", label: "Mais baratas" },
+];
+
+function formatRank(rank: JourneyRank | null | undefined) {
+  if (!rank?.position || !rank?.total) {
+    return "Sem base";
   }
-  if (tier === "good") {
-    return "above";
-  }
-  if (tier === "poor") {
-    return "below";
-  }
-  return "neutral";
+  return `${rank.position}º/${rank.total}`;
 }
 
-function getBadgeValue(value: BackendBadge | undefined) {
-  return tierToLevel(value?.tier);
+function getRankValue(rank: JourneyRank | null | undefined) {
+  if (!rank?.position || !rank?.total) {
+    return Number.POSITIVE_INFINITY;
+  }
+  return rank.position;
+}
+
+function getZoneSortValue(
+  zone: Awaited<ReturnType<typeof getJourneyZonesList>>["zones"][number],
+  sortKey: ZoneSortKey
+) {
+  if (sortKey === "travel_time") {
+    return zone.travel_time_minutes ?? Number.POSITIVE_INFINITY;
+  }
+  if (sortKey === "price") {
+    return zone.price_summary?.p50_price ?? Number.POSITIVE_INFINITY;
+  }
+  if (sortKey === "safety") {
+    return getRankValue(zone.journey_rankings?.safety);
+  }
+  if (sortKey === "green") {
+    return getRankValue(zone.journey_rankings?.green);
+  }
+  return getRankValue(zone.journey_rankings?.flood);
+}
+
+function ZoneMetricChip({
+  label,
+  value,
+  tone,
+  title,
+}: {
+  label: string;
+  value: string;
+  tone: "violet" | "emerald" | "amber" | "rose" | "slate";
+  title?: string;
+}) {
+  const className = {
+    violet: "border-pastel-violet-200 bg-pastel-violet-50 text-pastel-violet-700",
+    emerald: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    amber: "border-amber-200 bg-amber-50 text-amber-700",
+    rose: "border-rose-200 bg-rose-50 text-rose-700",
+    slate: "border-slate-200 bg-slate-100 text-slate-700",
+  }[tone];
+
+  return (
+    <span title={title} className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium ${className}`}>
+      <span className="font-semibold">{label}</span>
+      <span>{value}</span>
+    </span>
+  );
 }
 
 function ZonePoiList({
@@ -189,9 +242,13 @@ function ZoneCard({
   onSelect: () => void;
   onContinue: () => void;
 }) {
-  const badges = (zone.badges || {}) as Record<string, BackendBadge>;
   const showGreen = zone.green_vegetation_label !== null && zone.green_vegetation_label !== undefined;
   const poiPoints = zone.poi_points || [];
+  const priceP50 = zone.price_summary?.p50_price ?? null;
+  const priceChipValue = priceP50 != null ? formatCurrencyBr(priceP50) : "Sem base";
+  const priceTooltip = priceP50 != null
+    ? "Metade dos imóveis está abaixo desse valor e metade está acima, considerando o recorte padrão de imóveis para venda dentro da zona."
+    : undefined;
 
   return (
     <div
@@ -209,15 +266,17 @@ function ZoneCard({
       </div>
 
       <div className="mb-3 flex flex-wrap gap-2">
-        <Badge type="safety" value={getBadgeValue(badges.safety_badge)} />
-        {showGreen ? <Badge type="green" value={getBadgeValue(badges.green_badge)} /> : null}
-        <Badge type="flood" value={getBadgeValue(badges.flood_badge)} />
-        <Badge type="pois" value={getBadgeValue(badges.poi_badge)} />
+        <ZoneMetricChip label="Segurança" value={formatRank(zone.journey_rankings?.safety)} tone="emerald" />
+        {showGreen ? <ZoneMetricChip label="Verde" value={formatRank(zone.journey_rankings?.green)} tone="violet" /> : null}
+        <ZoneMetricChip label="Alagamento" value={formatRank(zone.journey_rankings?.flood)} tone="amber" />
+        <ZoneMetricChip label="Valor mediano" value={priceChipValue} tone="rose" title={priceTooltip} />
+        <ZoneMetricChip label="POIs" value={String(poiPoints.length)} tone="slate" />
       </div>
 
       <div className="mb-4 flex flex-wrap gap-3 text-xs text-slate-500">
         <span>{zone.walk_distance_meters ? `${Math.round(zone.walk_distance_meters)} m ate o seed` : "Sem distancia consolidada"}</span>
         <span>{poiPoints.length > 0 ? `${poiPoints.length} POIs mapeados` : zone.poi_counts ? `${Object.keys(zone.poi_counts).length} grupos de POIs` : "POIs pendentes"}</span>
+        <span>{zone.price_summary?.active_listing_count ? `${zone.price_summary.active_listing_count} anúncios ativos no recorte padrão` : "Sem base de valor consolidada"}</span>
         {showGreen ? <span>{zone.green_vegetation_label}</span> : null}
       </div>
 
@@ -253,6 +312,7 @@ export function Step4Compare() {
   const setMaxStep = useUIStore((state) => state.setMaxStep);
   const [poiBackfillJobId, setPoiBackfillJobId] = useState<string | null>(null);
   const [poiBackfillError, setPoiBackfillError] = useState<string | null>(null);
+  const [sortKey, setSortKey] = useState<ZoneSortKey>("travel_time");
   const poiBackfillRequestedRef = useRef<string | null>(null);
   const query = useQuery({
     queryKey: ["journey-zones", journeyId],
@@ -337,6 +397,24 @@ export function Step4Compare() {
     }
   }
 
+  const sortedZones = useMemo(() => {
+    const zones = [...(query.data?.zones || [])];
+    zones.sort((left, right) => {
+      const leftValue = getZoneSortValue(left, sortKey);
+      const rightValue = getZoneSortValue(right, sortKey);
+      if (leftValue !== rightValue) {
+        return leftValue - rightValue;
+      }
+      const leftTime = left.travel_time_minutes ?? Number.POSITIVE_INFINITY;
+      const rightTime = right.travel_time_minutes ?? Number.POSITIVE_INFINITY;
+      if (leftTime !== rightTime) {
+        return leftTime - rightTime;
+      }
+      return left.fingerprint.localeCompare(right.fingerprint, "pt-BR");
+    });
+    return zones;
+  }, [query.data?.zones, sortKey]);
+
   return (
     <div className="flex h-full flex-col animate-[fadeInRight_0.3s_ease-out]">
       <div className="border-b border-slate-100 p-5">
@@ -364,8 +442,23 @@ export function Step4Compare() {
             </span>
           </div>
         ) : null}
+        <div className="mb-3 flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+          {SORT_OPTIONS.map((option) => {
+            const isActive = option.key === sortKey;
+            return (
+              <button
+                key={option.key}
+                type="button"
+                onClick={() => setSortKey(option.key)}
+                className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors ${isActive ? "border-pastel-violet-300 bg-pastel-violet-50 text-pastel-violet-700" : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-800"}`}
+              >
+                {option.label}
+              </button>
+            );
+          })}
+        </div>
         <div className="space-y-3">
-          {query.data?.zones.map((zone) => {
+          {sortedZones.map((zone) => {
             const isSelected = selectedZoneFingerprint === zone.fingerprint;
             return (
               <ZoneCard

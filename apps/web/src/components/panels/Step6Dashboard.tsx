@@ -25,7 +25,7 @@ import {
 } from "recharts";
 import { apiActionHint, getZoneDashboardAnalytics } from "../../api/client";
 import { formatCurrencyBr } from "../../lib/listingFormat";
-import { defaultListingsPanelFilters, type ListingsPanelFilters } from "../../state";
+import { type ListingsPanelFilters } from "../../state";
 
 const DASHBOARD_ANALYTICS_STALE_TIME = 30 * 60_000;
 const DASHBOARD_ANALYTICS_GC_TIME = 60 * 60_000;
@@ -127,15 +127,6 @@ function rankHint(rank: { scope_label?: string | null; note?: string | null } | 
 
 function formatHourLabel(hour: number) {
   return `${String(hour).padStart(2, "0")}h`;
-}
-
-function hasPriceDashboardPanelFilterOverrides(filters: ListingsPanelFilters) {
-  return filters.minPrice !== defaultListingsPanelFilters.minPrice
-    || filters.maxPrice !== defaultListingsPanelFilters.maxPrice
-    || filters.usageType !== defaultListingsPanelFilters.usageType
-    || filters.spatialScope !== defaultListingsPanelFilters.spatialScope
-    || filters.minSize !== defaultListingsPanelFilters.minSize
-    || filters.maxSize !== defaultListingsPanelFilters.maxSize;
 }
 
 function buildPriceDashboardAnalyticsOptions(filters: ListingsPanelFilters, cityName: string | null = null) {
@@ -395,8 +386,6 @@ export function Step6Dashboard({ journeyId, zoneFingerprint, searchType, listing
   }, [listingsFilters]);
 
   const hasPriceFilterUpdatePending = !arePriceDashboardFiltersEqual(debouncedPriceFilters, listingsFilters);
-  const hasPriceDashboardOverrides = hasPriceDashboardPanelFilterOverrides(debouncedPriceFilters);
-  const usesFilteredPriceQuery = Boolean(selectedPriceCityFilter || hasPriceDashboardOverrides);
   const tabs: Array<{ key: DashboardPage; label: string }> = [
     { key: "preco", label: "Preço e valor" },
     { key: "seguranca", label: "Segurança" },
@@ -416,7 +405,7 @@ export function Step6Dashboard({ journeyId, zoneFingerprint, searchType, listing
       searchType,
       { page: activePage },
     ),
-    enabled: Boolean(journeyId && zoneFingerprint),
+    enabled: Boolean(journeyId && zoneFingerprint && activePage !== "preco"),
     staleTime: DASHBOARD_ANALYTICS_STALE_TIME,
     gcTime: DASHBOARD_ANALYTICS_GC_TIME,
     refetchOnMount: false,
@@ -447,7 +436,7 @@ export function Step6Dashboard({ journeyId, zoneFingerprint, searchType, listing
         page: "preco",
       },
     ),
-    enabled: Boolean(journeyId && zoneFingerprint && activePage === "preco" && usesFilteredPriceQuery),
+    enabled: Boolean(journeyId && zoneFingerprint && activePage === "preco"),
     staleTime: DASHBOARD_ANALYTICS_STALE_TIME,
     gcTime: DASHBOARD_ANALYTICS_GC_TIME,
     refetchOnMount: false,
@@ -476,7 +465,7 @@ export function Step6Dashboard({ journeyId, zoneFingerprint, searchType, listing
   });
 
   const zoneData = zoneDashboardQuery.data;
-  const priceData = usesFilteredPriceQuery ? priceDashboardQuery.data : zoneData;
+  const priceData = priceDashboardQuery.data;
   const safetyData = selectedSafetyCityFilter ? safetyDashboardQuery.data : zoneData;
   const activeData = activePage === "preco"
     ? priceData
@@ -504,10 +493,10 @@ export function Step6Dashboard({ journeyId, zoneFingerprint, searchType, listing
     [zoneData?.safety.peak_hours],
   );
   const isInitialLoading = activePage === "preco"
-    ? !priceData && (zoneDashboardQuery.isLoading || priceDashboardQuery.isLoading || priceDashboardQuery.isFetching)
+    ? !priceData && (priceDashboardQuery.isLoading || priceDashboardQuery.isFetching)
     : !activeData && zoneDashboardQuery.isLoading;
   const activeError = activePage === "preco"
-    ? (usesFilteredPriceQuery ? priceDashboardQuery.error || zoneDashboardQuery.error : zoneDashboardQuery.error)
+    ? priceDashboardQuery.error
     : activePage === "seguranca"
       ? safetyDashboardQuery.error || zoneDashboardQuery.error
       : zoneDashboardQuery.error;
@@ -772,32 +761,6 @@ export function Step6Dashboard({ journeyId, zoneFingerprint, searchType, listing
               detail={rankHint(zoneData?.environment.flood_rank)}
               tone="rose"
             />
-          </div>
-
-          <div className="space-y-5">
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Leitura verde</p>
-              <h4 className="mt-2 text-xl font-bold text-slate-800">Percentual de arborização da zona</h4>
-              <div className="mt-5 overflow-hidden rounded-full bg-slate-100">
-                <div
-                  className="h-3 rounded-full bg-gradient-to-r from-emerald-400 to-emerald-600"
-                  style={{ width: `${Math.max(4, Math.min(100, zoneData?.environment.green_percentage || 0))}%` }}
-                />
-              </div>
-              <p className="mt-3 text-sm text-slate-500">A barra mostra quanto da área útil da zona intercepta a camada ambiental carregada no PostGIS.</p>
-            </div>
-
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Leitura de alagamento</p>
-              <h4 className="mt-2 text-xl font-bold text-slate-800">Exposição qualitativa</h4>
-              <div className="mt-5 overflow-hidden rounded-full bg-slate-100">
-                <div
-                  className="h-3 rounded-full bg-gradient-to-r from-amber-300 to-amber-600"
-                  style={{ width: `${Math.max(4, Math.min(100, zoneData?.environment.flood_percentage || 0))}%` }}
-                />
-              </div>
-              <p className="mt-3 text-sm text-slate-500">{Math.round(zoneData?.environment.flood_area_m2 || 0)} m² da zona cruzam a camada de mancha de inundação hoje disponível na base.</p>
-            </div>
           </div>
         </div>
       )}

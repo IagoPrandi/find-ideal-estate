@@ -1,4 +1,5 @@
 from __future__ import annotations
+from math import isfinite
 from typing import Any
 from uuid import UUID
 
@@ -24,6 +25,7 @@ from modules.journeys.service import (
 )
 from modules.public_safety import classify_public_safety_group
 from modules.dashboard.analytics import fetch_zone_dashboard_analytics
+from modules.public_safety import public_safety_group_case_sql
 from modules.zones.badges import build_metric_badge
 from modules.zones.vegetation import (
     extract_green_preferences,
@@ -73,6 +75,52 @@ def _normalize_badges_payload(raw_badges: Any) -> dict[str, dict[str, Any]] | No
     return normalized or None
 
 
+def _safe_float(value: Any) -> float | None:
+    try:
+        numeric_value = float(value) if value is not None else None
+    except (TypeError, ValueError):
+        numeric_value = None
+    if numeric_value is None or not isfinite(numeric_value):
+        return None
+    return numeric_value
+
+
+def _safe_ratio(numerator: float | None, denominator: float | None) -> float | None:
+    if numerator is None or denominator is None or denominator <= 0:
+        return None
+    return numerator / denominator
+
+
+def _build_rank_map(values_by_key: dict[str, float | None], *, higher_is_better: bool) -> dict[str, dict[str, Any] | None]:
+    sortable_items = [
+        (key, value)
+        for key, value in values_by_key.items()
+        if value is not None and isfinite(value)
+    ]
+    sortable_items.sort(
+        key=lambda item: ((-item[1]) if higher_is_better else item[1], item[0])
+    )
+
+    total = len(sortable_items)
+    ranks: dict[str, dict[str, Any] | None] = {key: None for key in values_by_key}
+    if total == 0:
+        return ranks
+
+    previous_value: float | None = None
+    current_position = 0
+    for index, (key, value) in enumerate(sortable_items, start=1):
+        if previous_value is None or value != previous_value:
+            current_position = index
+            previous_value = value
+        ranks[key] = {
+            "position": current_position,
+            "total": total,
+            "percentile": round(((total - current_position + 1) / total) * 100.0, 2),
+        }
+
+    return ranks
+
+
 async def list_transport_points_for_journey(journey_id: UUID) -> list[TransportPointRead]:
     transport_service = get_container().transport_service()
     return await transport_service.list_transport_points_for_journey(journey_id)
@@ -96,6 +144,17 @@ async def list_zones_for_journey(journey_id: UUID) -> ZoneListResponse:
         green_enabled, green_vegetation_level = extract_green_preferences(
             snapshot_row["input_snapshot"] if snapshot_row else None
         )
+        input_snapshot = snapshot_row["input_snapshot"] if snapshot_row else None
+        search_type = str(input_snapshot.get("search_type") or "rent") if isinstance(input_snapshot, dict) else "rent"
+        if search_type not in {"rent", "sale"}:
+            search_type = "rent"
+        property_usage_type = (
+            str(input_snapshot.get("property_usage_type") or "all")
+            if isinstance(input_snapshot, dict)
+            else "all"
+        )
+        if property_usage_type not in {"all", "residential", "commercial"}:
+            property_usage_type = "all"
         green_vegetation_label = (
             get_green_vegetation_label(green_vegetation_level) if green_enabled else None
         )
@@ -132,6 +191,7 @@ async def list_zones_for_journey(journey_id: UUID) -> ZoneListResponse:
                     z.max_time_minutes AS travel_time_minutes,
                     tp.walk_distance_m AS walk_distance_meters,
                     ST_AsGeoJSON(z.isochrone_geom)::JSONB AS isochrone_geom,
+                    COALESCE(ST_Area(z.isochrone_geom::geography), 0)::DOUBLE PRECISION AS zone_area_m2,
                     {green_area_sql} AS green_area_m2,
                     z.flood_area_m2,
                     z.safety_incidents_count,
@@ -152,14 +212,149 @@ async def list_zones_for_journey(journey_id: UUID) -> ZoneListResponse:
         )
         rows = result.mappings().all()
 
+        price_summary_result = await conn.execute(
+            text(
+                """
+                WITH journey_zone_base AS (
+                    SELECT z.fingerprint, z.isochrone_geom
+                    FROM journey_zones jz
+                    JOIN zones z ON z.id = jz.zone_id
+                    WHERE jz.journey_id = :journey_id
+                      AND z.isochrone_geom IS NOT NULL
+                ),
+                latest_active_prices AS (
+                    SELECT
+                        la.property_id,
+                        MIN(snapshot.price)::DOUBLE PRECISION AS current_best_price
+                    FROM listing_ads la
+                    JOIN LATERAL (
+                        SELECT ls.price
+                        FROM listing_snapshots ls
+                        WHERE ls.listing_ad_id = la.id
+                          AND ls.price IS NOT NULL
+                          AND (ls.availability_state = 'active' OR ls.availability_state IS NULL)
+                        ORDER BY ls.observed_at DESC
+                        LIMIT 1
+                    ) snapshot ON TRUE
+                    WHERE la.is_active = TRUE
+                      AND la.advertised_usage_type = :search_type
+                    GROUP BY la.property_id
+                ),
+                zone_prices AS (
+                    SELECT
+                        jzb.fingerprint,
+                        lap.current_best_price
+                    FROM journey_zone_base jzb
+                    JOIN properties p
+                      ON p.location IS NOT NULL
+                     AND ST_Within(p.location, jzb.isochrone_geom)
+                    JOIN latest_active_prices lap ON lap.property_id = p.id
+                    WHERE (
+                        :usage_type = 'all'
+                        OR p.usage_type IS NULL
+                        OR p.usage_type = :usage_type
+                    )
+                )
+                SELECT
+                    fingerprint,
+                    percentile_cont(0.5) WITHIN GROUP (ORDER BY current_best_price)::DOUBLE PRECISION AS p50_price,
+                    COUNT(*)::INT AS active_listing_count
+                FROM zone_prices
+                GROUP BY fingerprint
+                """
+            ),
+            {
+                "journey_id": journey_id,
+                "search_type": search_type,
+                "usage_type": property_usage_type,
+            },
+        )
+        price_summary_rows = {
+            str(row["fingerprint"]): {
+                "p50_price": _safe_float(row.get("p50_price")),
+                "active_listing_count": int(row.get("active_listing_count") or 0),
+            }
+            for row in price_summary_result.mappings().all()
+        }
+
+        safety_group_sql = public_safety_group_case_sql("psi.category")
+        journey_safety_result = await conn.execute(
+            text(
+                f"""
+                WITH journey_zone_base AS (
+                    SELECT
+                        z.fingerprint,
+                        z.isochrone_geom,
+                        COALESCE(ST_Area(z.isochrone_geom::geography), 0)::DOUBLE PRECISION AS zone_area_m2
+                    FROM journey_zones jz
+                    JOIN zones z ON z.id = jz.zone_id
+                    WHERE jz.journey_id = :journey_id
+                ),
+                zone_incidents AS (
+                    SELECT
+                        jzb.fingerprint,
+                        COUNT(*) FILTER (
+                            WHERE psi.occurred_at >= NOW() - INTERVAL '365 days'
+                              AND ({safety_group_sql}) = 'robbery'
+                        )::INT AS robbery_count_365d
+                    FROM journey_zone_base jzb
+                    LEFT JOIN public_safety_incidents psi
+                      ON psi.location IS NOT NULL
+                     AND jzb.isochrone_geom IS NOT NULL
+                     AND ST_Within(psi.location, jzb.isochrone_geom)
+                    GROUP BY jzb.fingerprint
+                )
+                SELECT
+                    jzb.fingerprint,
+                    jzb.zone_area_m2,
+                    COALESCE(zi.robbery_count_365d, 0)::INT AS robbery_count_365d
+                FROM journey_zone_base jzb
+                LEFT JOIN zone_incidents zi ON zi.fingerprint = jzb.fingerprint
+                ORDER BY jzb.fingerprint ASC
+                """
+            ),
+            {"journey_id": journey_id},
+        )
+        safety_rows = [dict(row) for row in journey_safety_result.mappings().all()]
+
     zones = []
     completed_count = 0
     green_peers = [float(row["green_area_m2"] or 0.0) for row in rows if row["green_area_m2"] is not None]
+    green_percentages_by_fingerprint = {
+        str(row["fingerprint"]): _safe_ratio(
+            (_safe_float(row.get("green_area_m2")) or 0.0) * 100.0,
+            _safe_float(row.get("zone_area_m2")),
+        )
+        for row in rows
+    }
+    flood_percentages_by_fingerprint = {
+        str(row["fingerprint"]): _safe_ratio(
+            (_safe_float(row.get("flood_area_m2")) or 0.0) * 100.0,
+            _safe_float(row.get("zone_area_m2")),
+        )
+        for row in rows
+    }
+    safety_density_by_fingerprint = {
+        str(row["fingerprint"]): _safe_ratio(
+            float(int(row.get("robbery_count_365d") or 0)),
+            _safe_ratio(_safe_float(row.get("zone_area_m2")), 1_000_000.0),
+        )
+        for row in safety_rows
+    }
+    price_p50_by_fingerprint = {
+        fingerprint: summary["p50_price"]
+        for fingerprint, summary in price_summary_rows.items()
+    }
+    green_rank_map = _build_rank_map(green_percentages_by_fingerprint, higher_is_better=True)
+    flood_rank_map = _build_rank_map(flood_percentages_by_fingerprint, higher_is_better=False)
+    safety_rank_map = _build_rank_map(safety_density_by_fingerprint, higher_is_better=False)
+    price_rank_map = _build_rank_map(price_p50_by_fingerprint, higher_is_better=False)
     for row in rows:
         state = str(row["state"])
         if state == "complete":
             completed_count += 1
 
+        fingerprint = str(row["fingerprint"])
         badges = _normalize_badges_payload(row["badges"]) or {}
         if green_enabled and row["green_area_m2"] is not None:
             badges["green_badge"] = build_metric_badge(float(row["green_area_m2"] or 0.0), green_peers)
@@ -171,7 +366,7 @@ async def list_zones_for_journey(journey_id: UUID) -> ZoneListResponse:
                 "id": row["id"],
                 "journey_id": row["journey_id"],
                 "transport_point_id": row["transport_point_id"],
-                "fingerprint": row["fingerprint"],
+                "fingerprint": fingerprint,
                 "state": state,
                 "is_circle_fallback": bool(row["is_circle_fallback"]),
                 "travel_time_minutes": row["travel_time_minutes"],
@@ -185,6 +380,16 @@ async def list_zones_for_journey(journey_id: UUID) -> ZoneListResponse:
                 "poi_counts": row["poi_counts"],
                 "poi_points": row["poi_points"],
                 "badges": badges or None,
+                "journey_rankings": {
+                    "safety": safety_rank_map.get(fingerprint),
+                    "green": green_rank_map.get(fingerprint),
+                    "flood": flood_rank_map.get(fingerprint),
+                    "price": price_rank_map.get(fingerprint),
+                },
+                "price_summary": {
+                    "p50_price": price_summary_rows.get(fingerprint, {}).get("p50_price"),
+                    "active_listing_count": int(price_summary_rows.get(fingerprint, {}).get("active_listing_count") or 0),
+                },
                 "badges_provisional": bool(row["badges_provisional"]),
                 "created_at": row["created_at"],
                 "updated_at": row["updated_at"],

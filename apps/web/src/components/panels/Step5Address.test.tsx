@@ -77,6 +77,7 @@ describe("Step5Address", () => {
   });
 
   it("triggers listings search when a suggestion is selected", async () => {
+    useJourneyStore.getState().setConfig({ propertyUsageType: "commercial" });
     vi.mocked(getZoneAddressSuggestions).mockResolvedValue([
       {
         label: "Rua Guaipa, Vila Leopoldina, Sao Paulo-SP",
@@ -104,12 +105,14 @@ describe("Step5Address", () => {
     await user.click(option);
 
     await waitFor(() => {
+      expect(getListingsScrapePlan).toHaveBeenCalledWith("journey-1", "rent", "commercial");
       expect(searchZoneListings).toHaveBeenCalledWith(
         "journey-1",
         "zone-fp-1",
         expect.objectContaining({
           search_location_label: "Rua Guaipa, Vila Leopoldina, Sao Paulo-SP",
-          search_location_type: "street"
+          search_location_type: "street",
+          usage_type: "commercial",
         })
       );
     });

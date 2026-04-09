@@ -34,7 +34,7 @@ from core.db import get_engine, init_db  # noqa: E402
 from src.main import app  # noqa: E402
 from modules.jobs.service import create_job  # noqa: E402
 from sqlalchemy import text  # noqa: E402
-from api.routes.journeys import _classify_public_safety_group  # noqa: E402
+from modules.public_safety import classify_public_safety_group  # noqa: E402
 
 
 def _sample_transport_point(journey_id):
@@ -265,6 +265,16 @@ def test_get_journey_zones_returns_list_response(monkeypatch):
                     "badges": {
                         "green_badge": {"value": 1200.0, "percentile": 80.0, "tier": "excellent"}
                     },
+                    "journey_rankings": {
+                        "safety": {"position": 1, "total": 5, "percentile": 100.0},
+                        "green": {"position": 2, "total": 5, "percentile": 80.0},
+                        "flood": {"position": 3, "total": 5, "percentile": 60.0},
+                        "price": {"position": 4, "total": 5, "percentile": 40.0},
+                    },
+                    "price_summary": {
+                        "p50_price": 4200.0,
+                        "active_listing_count": 12,
+                    },
                     "badges_provisional": False,
                     "created_at": datetime.now(tz=timezone.utc).isoformat(),
                     "updated_at": datetime.now(tz=timezone.utc).isoformat(),
@@ -288,15 +298,18 @@ def test_get_journey_zones_returns_list_response(monkeypatch):
     assert body["zones"][0]["id"] == zone_id
     assert body["zones"][0]["transport_point_id"] is None
     assert body["zones"][0]["poi_points"][0]["name"] == "Colegio Centro"
+    assert body["zones"][0]["journey_rankings"]["safety"]["position"] == 1
+    assert body["zones"][0]["journey_rankings"]["price"]["total"] == 5
+    assert body["zones"][0]["price_summary"] == {"p50_price": 4200.0, "active_listing_count": 12}
 
 
 def test_classify_public_safety_group_maps_canonical_groups():
-    assert _classify_public_safety_group("Furto") == ("theft", "Furto")
-    assert _classify_public_safety_group("Roubo") == ("robbery", "Roubo")
-    assert _classify_public_safety_group("Agressao") == ("violence", "Violencia")
-    assert _classify_public_safety_group("Estupro") == ("sexual", "Violencia sexual")
-    assert _classify_public_safety_group("Trafico de drogas") == ("drugs", "Drogas")
-    assert _classify_public_safety_group("Dano") == ("other", "Outros")
+    assert classify_public_safety_group("Furto") == ("theft", "Furto")
+    assert classify_public_safety_group("Roubo") == ("robbery", "Roubo")
+    assert classify_public_safety_group("Agressao") == ("violence", "Violência")
+    assert classify_public_safety_group("Estupro") == ("sexual", "Violência sexual")
+    assert classify_public_safety_group("Trafico de drogas") == ("drugs", "Drogas")
+    assert classify_public_safety_group("Dano") == ("other", "Outros")
 
 
 def test_get_journey_zone_safety_incidents_returns_feature_collection(monkeypatch):

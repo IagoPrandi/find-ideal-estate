@@ -20,12 +20,14 @@ import {
 import { getJob, getZoneDashboardAnalytics, getZoneListings, type ListingPlatformVariantRead } from "../../api/client";
 import { ListingsScrapeDiagnosticsSchema, type ListingsScrapeDiagnostics, type ListingsScrapePlatformDiagnostics } from "../../api/schemas";
 import { applyListingsPanelFilters, formatCurrencyBr, getListingDisplayPrice, getListingSelectionKey, resolvePlatformImageUrl, resolvePlatformUrl } from "../../lib/listingFormat";
-import { defaultListingsPanelFilters, useJourneyStore, useUIStore, type ListingsPanelFilters } from "../../state";
+import { useJourneyStore, useUIStore, type ListingsPanelFilters } from "../../state";
 import { Step6Dashboard } from "./Step6Dashboard";
 
 const DASHBOARD_ANALYTICS_STALE_TIME = 30 * 60_000;
 const DASHBOARD_ANALYTICS_GC_TIME = 60 * 60_000;
 const PRICE_DASHBOARD_FILTER_DEBOUNCE_MS = 350;
+const ACTIVE_LISTINGS_JOB_STATES = new Set(["pending", "running", "retrying"]);
+const TERMINAL_LISTINGS_JOB_STATES = new Set(["completed", "failed", "cancelled", "cancelled_partial"]);
 
 function platformLabel(value: string | null | undefined) {
   if (!value) {
@@ -155,15 +157,6 @@ function arePriceDashboardFiltersEqual(left: ListingsPanelFilters, right: Listin
     && left.maxSize === right.maxSize;
 }
 
-function hasPriceDashboardPanelFilterOverrides(filters: ListingsPanelFilters) {
-  return filters.minPrice !== defaultListingsPanelFilters.minPrice
-    || filters.maxPrice !== defaultListingsPanelFilters.maxPrice
-    || filters.usageType !== defaultListingsPanelFilters.usageType
-    || filters.spatialScope !== defaultListingsPanelFilters.spatialScope
-    || filters.minSize !== defaultListingsPanelFilters.minSize
-    || filters.maxSize !== defaultListingsPanelFilters.maxSize;
-}
-
 function buildPriceDashboardAnalyticsOptions(filters: ListingsPanelFilters, cityName: string | null = null) {
   return {
     cityName,
@@ -188,6 +181,7 @@ export function Step6Analysis() {
   const config = useJourneyStore((state) => state.config);
   const activeTab = useUIStore((state) => state.activeTab);
   const setActiveTab = useUIStore((state) => state.setActiveTab);
+  const setJobIds = useJourneyStore((state) => state.setJobIds);
   const listingCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const listingsPanelScrollRef = useRef<HTMLDivElement | null>(null);
   const lastScrolledListingKeyRef = useRef<string | null>(null);
@@ -223,6 +217,14 @@ export function Step6Analysis() {
       if (!data) {
         return 5000;
       }
+      const jobId = persistedListingsJobId || data.job_id || null;
+      const cachedJob = jobId
+        ? queryClient.getQueryData<{ state?: string | null }>(["listings-job", jobId])
+        : null;
+      const cachedJobState = cachedJob?.state || null;
+      if (cachedJobState && TERMINAL_LISTINGS_JOB_STATES.has(cachedJobState) && data.freshness_status === "no_cache") {
+        return false;
+      }
       const emptyResults = (data.total_count || 0) === 0;
       return data.source === "none" || data.freshness_status === "no_cache" || emptyResults || Boolean(persistedListingsJobId) ? 5000 : false;
     }
@@ -236,7 +238,7 @@ export function Step6Analysis() {
     enabled: Boolean(effectiveListingsJobId),
     refetchInterval: (query) => {
       const state = query.state.data?.state;
-      return state === "completed" || state === "failed" || state === "cancelled" ? false : 5000;
+      return state === "completed" || state === "failed" || state === "cancelled" || state === "cancelled_partial" ? false : 5000;
     }
   });
 
@@ -246,6 +248,9 @@ export function Step6Analysis() {
   const listingsWithoutCoordinates = rawListings.filter((listing) => !listing.has_coordinates);
 
   const scrapeDiagnostics = extractListingsScrapeDiagnostics((listingsJobQuery.data?.result_ref as Record<string, unknown> | null | undefined) || undefined);
+  const listingsJobState = listingsJobQuery.data?.state || null;
+  const hasActiveListingsJob = listingsJobState ? ACTIVE_LISTINGS_JOB_STATES.has(listingsJobState) : false;
+  const hasInterruptedListingsJob = listingsJobState === "failed" || listingsJobState === "cancelled" || listingsJobState === "cancelled_partial";
   const platformEntries = useMemo(() => {
     if (!scrapeDiagnostics) {
       return [] as Array<{ platform: string; details: ListingsScrapePlatformDiagnostics }>;
@@ -264,9 +269,20 @@ export function Step6Analysis() {
     }));
   }, [scrapeDiagnostics]);
 
-  const isScraping = listingsQuery.isLoading || listingsQuery.data?.freshness_status === "no_cache" || listingsJobQuery.data?.state === "running";
+  const isScraping = listingsQuery.isLoading
+    || hasActiveListingsJob
+    || (Boolean(effectiveListingsJobId) && !listingsJobQuery.data)
+    || (listingsQuery.data?.freshness_status === "no_cache" && !hasInterruptedListingsJob && !listingsJobState);
   const diagnosticsSummary = scrapeDiagnostics?.summary;
   const overallDuration = formatDuration(scrapeDiagnostics?.total_duration_ms);
+  const freshnessStatusLabel = hasInterruptedListingsJob
+    ? (listingsJobState === "cancelled_partial" ? "Scraping interrompido" : "Scraping falhou")
+    : freshnessLabel(listingsQuery.data?.freshness_status);
+  const interruptedScrapeMessage = hasInterruptedListingsJob && listingsQuery.data?.freshness_status === "no_cache"
+    ? (listingsJobQuery.data?.error_message === "missing_heartbeat"
+      ? "O job de scraping foi interrompido antes de consolidar resultados. No ambiente local isso costuma indicar que a fila Dramatiq ficou sem worker ativo."
+      : "O job de scraping terminou sem consolidar resultados. Refaça a busca para disparar uma nova tentativa.")
+    : null;
   const progressRunKey = [
     journeyId || "no-journey",
     zoneFingerprint || "no-zone",
@@ -289,23 +305,17 @@ export function Step6Analysis() {
     && listingsForScope.length === 0;
 
   const displayedListings = applyListingsPanelFilters(rawListings, listingsFilters);
-  const hasPriceDashboardOverrides = hasPriceDashboardPanelFilterOverrides(listingsFilters);
-  const hasPriceComparisonOverrides = hasPriceDashboardPanelFilterOverrides(debouncedPriceComparisonFilters);
 
   const priceComparisonDashboardQuery = useQuery({
-    queryKey: hasPriceComparisonOverrides
-      ? buildPriceDashboardQueryKey(debouncedPriceComparisonFilters)
-      : buildDashboardPricePageQueryKey(),
+    queryKey: buildPriceDashboardQueryKey(debouncedPriceComparisonFilters),
     queryFn: async () => getZoneDashboardAnalytics(
       journeyId as string,
       zoneFingerprint as string,
       config.type,
-      hasPriceComparisonOverrides
-        ? {
-            ...buildPriceDashboardAnalyticsOptions(debouncedPriceComparisonFilters),
-            page: "preco",
-          }
-        : { page: "preco" },
+      {
+        ...buildPriceDashboardAnalyticsOptions(debouncedPriceComparisonFilters),
+        page: "preco",
+      },
     ),
     enabled: Boolean(journeyId && zoneFingerprint),
     staleTime: DASHBOARD_ANALYTICS_STALE_TIME,
@@ -332,10 +342,6 @@ export function Step6Analysis() {
     ] as const;
   }
 
-  function buildDashboardPricePageQueryKey() {
-    return ["zone-dashboard-analytics", journeyId, zoneFingerprint, config.type, "zone", "preco"] as const;
-  }
-
   async function fetchDashboardQueryIfMissing<T>(queryKey: readonly unknown[], queryFn: () => Promise<T>) {
     const cached = queryClient.getQueryData<T>(queryKey);
     if (cached !== undefined) {
@@ -354,15 +360,6 @@ export function Step6Analysis() {
       return false;
     }
 
-    const zoneQueryKey = buildDashboardPricePageQueryKey();
-    if (queryClient.getQueryData(zoneQueryKey) === undefined) {
-      return false;
-    }
-
-    if (!hasPriceDashboardOverrides) {
-      return true;
-    }
-
     return queryClient.getQueryData(buildPriceDashboardQueryKey(listingsFilters)) !== undefined;
   }
 
@@ -371,27 +368,18 @@ export function Step6Analysis() {
       return;
     }
 
-    const zoneQueryKey = buildDashboardPricePageQueryKey();
-
     await fetchDashboardQueryIfMissing(
-      zoneQueryKey,
-      async () => getZoneDashboardAnalytics(journeyId, zoneFingerprint, config.type, { page: "preco" }),
+      buildPriceDashboardQueryKey(listingsFilters),
+      async () => getZoneDashboardAnalytics(
+        journeyId,
+        zoneFingerprint,
+        config.type,
+        {
+          ...buildPriceDashboardAnalyticsOptions(listingsFilters),
+          page: "preco",
+        },
+      ),
     );
-
-    if (hasPriceDashboardOverrides) {
-      await fetchDashboardQueryIfMissing(
-        buildPriceDashboardQueryKey(listingsFilters),
-        async () => getZoneDashboardAnalytics(
-          journeyId,
-          zoneFingerprint,
-          config.type,
-          {
-            ...buildPriceDashboardAnalyticsOptions(listingsFilters),
-            page: "preco",
-          },
-        ),
-      );
-    }
   }
 
   async function handleOpenDashboardTab() {
@@ -417,6 +405,15 @@ export function Step6Analysis() {
       setActiveTab("dashboard");
     }
   }
+
+  useEffect(() => {
+    if (!hasInterruptedListingsJob) {
+      return;
+    }
+    if (persistedListingsJobId) {
+      setJobIds({ listingsJobId: null });
+    }
+  }, [hasInterruptedListingsJob, persistedListingsJobId, setJobIds]);
 
   useEffect(() => {
     if (!journeyId || !zoneFingerprint) {
@@ -524,7 +521,7 @@ export function Step6Analysis() {
               </h2>
               <p className="mt-1 flex items-center gap-2 text-sm text-slate-500">
                 <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                {freshnessLabel(listingsQuery.data?.freshness_status)}
+                {freshnessStatusLabel}
               </p>
               {listingsJobQuery.data ? (
                 <p className="mt-1 text-xs font-medium text-slate-500">
@@ -538,6 +535,15 @@ export function Step6Analysis() {
               Gerar Relatório PDF
             </button>
           </div>
+
+          {interruptedScrapeMessage ? (
+            <div className="mb-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <p>{interruptedScrapeMessage}</p>
+              </div>
+            </div>
+          ) : null}
 
           {platformEntries.length > 0 ? (
             <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm" data-testid="listings-platform-progress">

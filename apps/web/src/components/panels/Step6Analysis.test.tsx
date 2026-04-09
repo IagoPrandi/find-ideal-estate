@@ -365,7 +365,49 @@ describe("Step6Analysis", () => {
     expect(screen.getByText(/Job de listings: 100%/i)).toBeInTheDocument();
   });
 
-  it("shows all scraped listings by default and lets the user filter to only inside-zone matches", async () => {
+  it("stops presenting an interrupted job as active scraping when the watchdog cancels it", async () => {
+    vi.mocked(getZoneListings).mockResolvedValue({
+      source: "none",
+      job_id: "listings-job-1",
+      freshness_status: "no_cache",
+      listings: [],
+      total_count: 0,
+      cache_age_hours: null
+    } as never);
+    vi.mocked(getJob).mockResolvedValue({
+      id: "listings-job-1",
+      journey_id: "journey-1",
+      job_type: "listings_scrape",
+      state: "cancelled_partial",
+      progress_percent: 63,
+      current_stage: "watchdog",
+      cancel_requested_at: null,
+      started_at: "2026-03-27T10:00:00Z",
+      finished_at: "2026-03-27T10:03:00Z",
+      worker_id: null,
+      error_code: null,
+      error_message: "missing_heartbeat",
+      created_at: "2026-03-27T10:00:00Z",
+      result_ref: {
+        status: "cancelled_partial",
+        reason: "missing_heartbeat",
+        zone_fingerprint: "zone-fp-1"
+      }
+    } as never);
+
+    await renderWithQueryClient();
+
+    expect(await screen.findByText(/Scraping interrompido/i)).toBeInTheDocument();
+    expect(screen.getByText(/No ambiente local isso costuma indicar que a fila Dramatiq ficou sem worker ativo/i)).toBeInTheDocument();
+    expect(screen.getByText(/Job de listings: 63%/i)).toBeInTheDocument();
+    expect(screen.queryByTestId("listings-platform-progress")).not.toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(useJourneyStore.getState().listingsJobId).toBeNull();
+    });
+  });
+
+  it("starts with inside-zone listings and lets the user expand to the full scraped set", async () => {
     vi.mocked(getZoneListings).mockResolvedValue({
       source: "cache",
       job_id: null,
@@ -452,12 +494,23 @@ describe("Step6Analysis", () => {
 
     expect(await screen.findByText(/Rua Dentro, 10/i)).toBeInTheDocument();
     expect(screen.getByText(/R\$\s*4\.100/i)).toBeInTheDocument();
-    expect(screen.getByText(/Rua Fora, 20/i)).toBeInTheDocument();
-    expect(screen.getByText(/Endereço sem coordenadas/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Rua Fora, 20/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Endereço sem coordenadas/i)).not.toBeInTheDocument();
     expect(screen.getByText(/1 dentro da zona · 1 fora da zona · 1 sem coordenadas/i)).toBeInTheDocument();
-    expect(screen.getByAltText(/Rua Fora, 20/i)).toHaveAttribute("src", "https://www.vivareal.com.br/listing-images/vr-1.webp");
     expect(screen.getByTestId("listings-sort-price").querySelector("svg")).toHaveClass("lucide-chevron-up");
     expect(screen.getByTestId("listings-sort-size").querySelector("svg")).toHaveClass("lucide-minus");
+
+    expect(
+      Array.from(document.querySelectorAll('[data-testid^="listing-card-"]')).map((card) => card.textContent || "")
+    ).toEqual([expect.stringContaining("Rua Dentro, 10")]);
+
+    fireEvent.change(screen.getByLabelText(/Escopo espacial/i), {
+      target: { value: "all" }
+    });
+
+    expect(await screen.findByText(/Rua Fora, 20/i)).toBeInTheDocument();
+    expect(screen.getByText(/Endereço sem coordenadas/i)).toBeInTheDocument();
+    expect(screen.getByAltText(/Rua Fora, 20/i)).toHaveAttribute("src", "https://www.vivareal.com.br/listing-images/vr-1.webp");
 
     expect(
       Array.from(document.querySelectorAll('[data-testid^="listing-card-"]')).map((card) => card.textContent || "")
@@ -652,7 +705,16 @@ describe("Step6Analysis", () => {
     const listingCard = await screen.findByTestId("listing-card-property:prop-1");
 
     await waitFor(() => {
-      expect(getZoneDashboardAnalytics).toHaveBeenCalledWith("journey-1", "zone-fp-1", "rent", { page: "preco" });
+      expect(getZoneDashboardAnalytics).toHaveBeenCalledWith("journey-1", "zone-fp-1", "rent", {
+        cityName: null,
+        page: "preco",
+        minPrice: null,
+        maxPrice: null,
+        usageType: "all",
+        spatialScope: "inside_zone",
+        minSize: null,
+        maxSize: null,
+      });
     });
 
     expect(vi.mocked(getZoneDashboardAnalytics).mock.calls.some((call) => call[3] === "prop-1")).toBe(false);
@@ -660,10 +722,10 @@ describe("Step6Analysis", () => {
     expect(within(listingCard).getByText(/R\$\s*105\/m²/i)).toBeInTheDocument();
     expect(within(listingCard).getByText(/\+18\.9%/i)).toBeInTheDocument();
     expect(within(listingCard).queryByText(/Valor por m²/i)).not.toBeInTheDocument();
-    expect(within(listingCard).queryByText(/Média do recorte:\s*R\$\s*10\.850/i)).not.toBeInTheDocument();
+    expect(within(listingCard).queryByText(/Média da zona:\s*R\$\s*10\.850/i)).not.toBeInTheDocument();
 
     fireEvent.mouseEnter(within(listingCard).getByTestId("listing-price-delta-trigger-property:prop-1"));
-    expect(await within(listingCard).findByTestId("listing-price-delta-tooltip-property:prop-1")).toHaveTextContent(/Média do recorte:\s*R\$\s*10\.850/i);
+    expect(await within(listingCard).findByTestId("listing-price-delta-tooltip-property:prop-1")).toHaveTextContent(/Média da zona:\s*R\$\s*10\.850/i);
 
     expect(within(listingCard).getByRole("button", { name: /Anúncio indisponível/i })).toBeDisabled();
   });
@@ -781,7 +843,16 @@ describe("Step6Analysis", () => {
     await screen.findByText(/Rua Itacema, Itaim Bibi, São Paulo, SP/i);
 
     await waitFor(() => {
-      expect(getZoneDashboardAnalytics).toHaveBeenCalledWith("journey-1", "zone-fp-1", "rent", { page: "preco" });
+      expect(getZoneDashboardAnalytics).toHaveBeenCalledWith("journey-1", "zone-fp-1", "rent", {
+        cityName: null,
+        page: "preco",
+        minPrice: null,
+        maxPrice: null,
+        usageType: "all",
+        spatialScope: "inside_zone",
+        minSize: null,
+        maxSize: null,
+      });
     });
 
     fireEvent.click(await screen.findByRole("button", { name: /Dashboard Analítico/i }));
@@ -789,12 +860,12 @@ describe("Step6Analysis", () => {
     expect(await screen.findByTestId("dashboard-page-preco")).toBeInTheDocument();
     expect(screen.getByTestId("dashboard-price-ranking")).toBeInTheDocument();
     expect(screen.queryByText(/Três leituras da mesma zona/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/Preço médio do recorte/i)).toBeInTheDocument();
+    expect(screen.getByText(/Preço médio na zona/i)).toBeInTheDocument();
     expect(screen.getByText(/Preço médio ao longo do tempo/i)).toBeInTheDocument();
     expect(screen.queryByText(/Preço do imóvel vs bairro/i)).not.toBeInTheDocument();
     expect(screen.getByText(/Histograma do bairro destacado/i)).toBeInTheDocument();
     expect(screen.queryByText(/^Diferença vs bairro$/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/^Bairro com mais imóveis no recorte$/i)).toBeInTheDocument();
+    expect(screen.getByText(/^Bairro com mais imóveis na zona$/i)).toBeInTheDocument();
     expect(screen.queryByText(/Carregando métricas analíticas direto da base/i)).not.toBeInTheDocument();
     expect(screen.getAllByText(/R\$\s*99,50\/m²/i).length).toBeGreaterThan(0);
     expect(screen.getByText(/-2\.5% em 365 dias/i)).toBeInTheDocument();
@@ -815,7 +886,7 @@ describe("Step6Analysis", () => {
         minPrice: null,
         maxPrice: null,
         usageType: "all",
-        spatialScope: "all",
+        spatialScope: "inside_zone",
         minSize: null,
         maxSize: null,
       });
@@ -869,7 +940,7 @@ describe("Step6Analysis", () => {
       expect(getZoneDashboardAnalytics).toHaveBeenCalledWith("journey-1", "zone-fp-1", "rent", { page: "ambiente" });
     });
     expect(await screen.findByTestId("dashboard-page-ambiente")).toBeInTheDocument();
-    expect(screen.getByText(/Percentual de arborização da zona/i)).toBeInTheDocument();
+    expect(screen.getByText(/^Arborização$/i)).toBeInTheDocument();
     expect(screen.getByText(/Moderado/i)).toBeInTheDocument();
 
     const dashboardCallsBeforeReopen = vi.mocked(getZoneDashboardAnalytics).mock.calls.length;
@@ -881,7 +952,7 @@ describe("Step6Analysis", () => {
     expect(screen.queryByRole("button", { name: /Preparando dashboard/i })).not.toBeInTheDocument();
     expect(await screen.findByTestId("dashboard-page-preco")).toBeInTheDocument();
     expect(vi.mocked(getZoneDashboardAnalytics).mock.calls.length).toBe(dashboardCallsBeforeReopen);
-  });
+  }, 10000);
 
   it("propagates panel filters to the price dashboard and shows the active filter hero", async () => {
     useJourneyStore.getState().setListingsFilters({

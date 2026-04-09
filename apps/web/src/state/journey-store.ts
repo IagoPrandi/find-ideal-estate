@@ -3,6 +3,10 @@ import { create } from "zustand";
 export type SearchType = "rent" | "sale";
 export type TravelMode = "transit" | "walk" | "car";
 export type PublicTransportMode = "bus" | "rail" | "mixed";
+export type ListingsSpatialScope = "all" | "inside_zone";
+export type ListingsUsageFilter = "all" | "residential" | "commercial";
+export type ListingsSortField = "price" | "size";
+export type ListingsSortDirection = "asc" | "desc";
 export const GREEN_VEGETATION_LEVELS = ["low", "medium", "high"] as const;
 export type GreenVegetationLevel = (typeof GREEN_VEGETATION_LEVELS)[number];
 
@@ -24,6 +28,7 @@ export function getIncludedGreenVegetationLevels(level: GreenVegetationLevel): G
 
 export type JourneyConfig = {
   type: SearchType;
+  propertyUsageType: ListingsUsageFilter;
   modal: TravelMode;
   publicTransportMode: PublicTransportMode;
   time: number;
@@ -51,11 +56,6 @@ export type SelectedAddress = {
   lat: number;
   lon: number;
 };
-
-export type ListingsSpatialScope = "all" | "inside_zone";
-export type ListingsUsageFilter = "all" | "residential" | "commercial";
-export type ListingsSortField = "price" | "size";
-export type ListingsSortDirection = "asc" | "desc";
 
 export type ListingsPanelFilters = {
   minPrice: string;
@@ -111,6 +111,7 @@ type JourneyState = {
 
 const defaultConfig: JourneyConfig = {
   type: "rent",
+  propertyUsageType: "all",
   modal: "transit",
   publicTransportMode: "mixed",
   time: 30,
@@ -125,16 +126,22 @@ const defaultConfig: JourneyConfig = {
   }
 };
 
-export const defaultListingsPanelFilters: ListingsPanelFilters = {
-  minPrice: "",
-  maxPrice: "",
-  usageType: "all",
-  spatialScope: "all",
-  minSize: "",
-  maxSize: "",
-  sortField: "price",
-  sortDirection: "asc"
-};
+export function buildDefaultListingsPanelFilters(
+  config: Pick<JourneyConfig, "propertyUsageType"> = defaultConfig
+): ListingsPanelFilters {
+  return {
+    minPrice: "",
+    maxPrice: "",
+    usageType: config.propertyUsageType,
+    spatialScope: "inside_zone",
+    minSize: "",
+    maxSize: "",
+    sortField: "price",
+    sortDirection: "asc"
+  };
+}
+
+export const defaultListingsPanelFilters: ListingsPanelFilters = buildDefaultListingsPanelFilters();
 
 export const useJourneyStore = create<JourneyState>((set) => ({
   journeyId: null,
@@ -162,7 +169,7 @@ export const useJourneyStore = create<JourneyState>((set) => ({
 
       return {
         journeyId,
-        listingsFilters: defaultListingsPanelFilters,
+        listingsFilters: buildDefaultListingsPanelFilters(state.config),
         selectedListingKey: null,
         selectedPoiKey: null,
         activePoiCategory: "all",
@@ -177,7 +184,20 @@ export const useJourneyStore = create<JourneyState>((set) => ({
         listingsJobId: null
       };
     }),
-  setConfig: (updater) => set((state) => ({ config: { ...state.config, ...updater } })),
+  setConfig: (updater) =>
+    set((state) => {
+      const nextConfig = { ...state.config, ...updater };
+      const nextState: Partial<JourneyState> = { config: nextConfig };
+
+      if (updater.propertyUsageType && updater.propertyUsageType !== state.config.propertyUsageType) {
+        nextState.listingsFilters = {
+          ...state.listingsFilters,
+          usageType: updater.propertyUsageType,
+        };
+      }
+
+      return nextState;
+    }),
   setEnrichment: (key, value) =>
     set((state) => ({
       config: {
@@ -203,7 +223,7 @@ export const useJourneyStore = create<JourneyState>((set) => ({
       return {
         selectedZoneId,
         selectedZoneFingerprint,
-        listingsFilters: defaultListingsPanelFilters,
+        listingsFilters: buildDefaultListingsPanelFilters(state.config),
         selectedListingKey: null,
         selectedPoiKey: null,
         activePoiCategory: "all",
@@ -221,7 +241,7 @@ export const useJourneyStore = create<JourneyState>((set) => ({
         ...updater
       }
     })),
-  resetListingsFilters: () => set({ listingsFilters: defaultListingsPanelFilters }),
+  resetListingsFilters: () => set((state) => ({ listingsFilters: buildDefaultListingsPanelFilters(state.config) })),
   setSelectedListingKey: (selectedListingKey) => set({ selectedListingKey }),
   setSelectedPoiKey: (selectedPoiKey) => set({ selectedPoiKey }),
   setActivePoiCategory: (activePoiCategory) => set({ activePoiCategory }),
@@ -230,7 +250,7 @@ export const useJourneyStore = create<JourneyState>((set) => ({
     set({
       journeyId: null,
       config: defaultConfig,
-      listingsFilters: defaultListingsPanelFilters,
+      listingsFilters: buildDefaultListingsPanelFilters(defaultConfig),
       selectedListingKey: null,
       selectedPoiKey: null,
       activePoiCategory: "all",

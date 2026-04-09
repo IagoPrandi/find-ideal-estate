@@ -14,6 +14,30 @@ class ZoneBadgeRead(BaseModel):
     tier: str  # "excellent", "good", "fair", "poor"
 
 
+class ZoneJourneyRankRead(BaseModel):
+    """Compact ranking summary for a zone inside the current journey scope."""
+
+    position: int | None = None
+    total: int = 0
+    percentile: float | None = None
+
+
+class ZoneJourneyRankingsRead(BaseModel):
+    """Per-metric journey rankings aligned with the dashboard cards."""
+
+    safety: ZoneJourneyRankRead | None = None
+    green: ZoneJourneyRankRead | None = None
+    flood: ZoneJourneyRankRead | None = None
+    price: ZoneJourneyRankRead | None = None
+
+
+class ZonePriceSummaryRead(BaseModel):
+    """Price summary used by the zone list before the listings step."""
+
+    p50_price: float | None = None
+    active_listing_count: int = 0
+
+
 class ZonePOIPointRead(BaseModel):
     """Single POI item persisted for a zone."""
     kind: str = "poi"
@@ -46,6 +70,8 @@ class ZoneRead(BaseModel):
     poi_counts: dict[str, int] | None = None  # {"supermarket": 5, "pharmacy": 3, ...}
     poi_points: list[ZonePOIPointRead] | None = None
     badges: dict[str, ZoneBadgeRead] | None = None  # {"green_badge", "flood_badge", ...}
+    journey_rankings: ZoneJourneyRankingsRead | None = None
+    price_summary: ZonePriceSummaryRead | None = None
     badges_provisional: bool = True
     created_at: datetime
     updated_at: datetime

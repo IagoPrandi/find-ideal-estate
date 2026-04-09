@@ -23,7 +23,7 @@ describe("Step1Config", () => {
     expect(greenCheckbox).not.toBeChecked();
     expect(screen.queryByRole("button", { name: /Pouca vegetação/i })).not.toBeInTheDocument();
 
-    fireEvent.mouseEnter(greenCheckbox.closest("div") as HTMLElement);
+    fireEvent.mouseEnter(screen.getByText(/Áreas verdes/i).closest("div") as HTMLElement);
 
     expect(screen.getByRole("button", { name: /Pouca vegetação/i })).toBeVisible();
     expect(screen.getByRole("button", { name: /Média vegetação/i })).toBeVisible();
@@ -37,14 +37,16 @@ describe("Step1Config", () => {
     useJourneyStore.getState().setPickedCoord({ lat: -23.55, lon: -46.63, label: "Trabalho" });
     render(<Step1Config />);
 
-    fireEvent.mouseEnter(screen.getByRole("checkbox", { name: /Áreas verdes/i }).closest("div") as HTMLElement);
+    fireEvent.mouseEnter(screen.getByText(/Áreas verdes/i).closest("div") as HTMLElement);
     fireEvent.click(screen.getByRole("button", { name: /Muita vegetação/i }));
-    fireEvent.click(screen.getByRole("button", { name: /Encontrar pontos seed/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Comercial/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Encontrar pontos de ônibus e estações próximas/i }));
 
     await waitFor(() => {
       expect(createJourney).toHaveBeenCalledWith(
         expect.objectContaining({
           input_snapshot: expect.objectContaining({
+            property_usage_type: "commercial",
             enrichments: expect.objectContaining({
               green: true,
               green_vegetation_level: "high"
@@ -61,7 +63,7 @@ describe("Step1Config", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /A pé/i }));
     fireEvent.change(screen.getByRole("slider", { name: /Tempo de caminhada/i }), { target: { value: "25" } });
-    fireEvent.click(screen.getByRole("button", { name: /Gerar isocrona a pe/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Gerar área acessível a pé/i }));
 
     await waitFor(() => {
       expect(createJourney).toHaveBeenCalledWith(
@@ -86,7 +88,7 @@ describe("Step1Config", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Carro/i }));
     fireEvent.change(screen.getByRole("slider", { name: /Tempo de carro/i }), { target: { value: "30" } });
-    fireEvent.click(screen.getByRole("button", { name: /Gerar isocrona de carro/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Gerar área acessível de carro/i }));
 
     await waitFor(() => {
       expect(createJourney).toHaveBeenCalledWith(

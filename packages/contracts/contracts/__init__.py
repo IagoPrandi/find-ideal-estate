@@ -29,8 +29,11 @@ from .listings import (
 from .transport import TransportPointRead
 from .zones import (
     ZoneBadgeRead,
+    ZoneJourneyRankRead,
+    ZoneJourneyRankingsRead,
     ZoneListResponse,
     ZonePOIPointRead,
+    ZonePriceSummaryRead,
     ZoneRead,
     ZoneSafetyIncidentCollectionRead,
     ZoneSafetyIncidentFeatureRead,
@@ -73,7 +76,10 @@ __all__ = [
     "ZoneDashboardSafetyRead",
     "ZoneBadgeRead",
     "ZoneCacheStatusRead",
+    "ZoneJourneyRankRead",
+    "ZoneJourneyRankingsRead",
     "ZonePOIPointRead",
+    "ZonePriceSummaryRead",
     "ZoneRead",
     "ZoneListResponse",
     "ZoneSafetyIncidentCollectionRead",

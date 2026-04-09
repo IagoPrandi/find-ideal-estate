@@ -45,7 +45,7 @@ export function Step5Address() {
         search_location_label: address.label,
         search_location_type: address.locationType,
         search_type: config.type,
-        usage_type: "residential"
+        usage_type: config.propertyUsageType
       });
       setJobIds({ listingsJobId: result.job_id || null });
       setMaxStep(6);
@@ -84,7 +84,7 @@ export function Step5Address() {
     }
 
     let cancelled = false;
-    void getListingsScrapePlan(journeyId, config.type, "residential")
+    void getListingsScrapePlan(journeyId, config.type, config.propertyUsageType)
       .then((plan) => {
         if (!cancelled) {
           setScrapePlan(plan);
@@ -99,7 +99,7 @@ export function Step5Address() {
     return () => {
       cancelled = true;
     };
-  }, [config.type, journeyId, zoneFingerprint]);
+  }, [config.propertyUsageType, config.type, journeyId, zoneFingerprint]);
 
   useEffect(() => {
     if (!journeyId || !zoneFingerprint) {

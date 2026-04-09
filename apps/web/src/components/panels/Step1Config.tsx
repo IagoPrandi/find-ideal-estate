@@ -117,6 +117,7 @@ export function Step1Config() {
             label: primaryReferenceLabel || pickedCoord.label || "Ponto selecionado no mapa"
           },
           search_type: config.type,
+          property_usage_type: config.propertyUsageType,
           transport_mode: config.modal,
           public_transport_mode: config.modal === "transit" ? config.publicTransportMode : null,
           max_travel_minutes: config.time,
@@ -193,6 +194,33 @@ export function Step1Config() {
           >
             Compra
           </button>
+        </div>
+
+        <div className="space-y-3">
+          <label className="text-sm font-medium text-slate-700">Tipo de imóvel para analisar</label>
+          <div className="grid grid-cols-3 gap-2 rounded-2xl border border-slate-200 bg-white p-2">
+            <button
+              type="button"
+              onClick={() => setConfig({ propertyUsageType: "all" })}
+              className={`rounded-xl px-3 py-2 text-sm font-medium transition-all ${config.propertyUsageType === "all" ? "bg-pastel-violet-500 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}
+            >
+              Todos
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfig({ propertyUsageType: "residential" })}
+              className={`rounded-xl px-3 py-2 text-sm font-medium transition-all ${config.propertyUsageType === "residential" ? "bg-pastel-violet-500 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}
+            >
+              Residencial
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfig({ propertyUsageType: "commercial" })}
+              className={`rounded-xl px-3 py-2 text-sm font-medium transition-all ${config.propertyUsageType === "commercial" ? "bg-pastel-violet-500 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}
+            >
+              Comercial
+            </button>
+          </div>
         </div>
 
         <div className="space-y-3">
