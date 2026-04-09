@@ -6,7 +6,7 @@ import math
 from typing import Any
 
 EARTH_RADIUS_M = 6_378_137.0
-ISOCHRONE_PROXY_SEARCH_STRATEGY = "centroid_equivalent_circle"
+ISOCHRONE_PROXY_SEARCH_STRATEGY = "centroid_equivalent_circle_zone_clip"
 
 
 def _meters_to_lat_deg(meters: float) -> float:

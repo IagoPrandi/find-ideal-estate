@@ -12,6 +12,7 @@ from core.config import get_settings
 from core.db import get_engine
 from core.redis import get_redis
 from modules.pois.storage import (
+    compute_poi_fingerprint,
     compute_poi_cache_config_hash,
     get_persisted_poi_cache_payload,
     mark_poi_cache_failed,
@@ -35,6 +36,8 @@ _POI_CATEGORY_CANONICAL_IDS = {
 }
 _POI_CACHE_TTL_SECONDS = 1800
 _POI_FETCH_LIMIT = 20
+_POI_REUSE_MIN_COVERAGE_RATIO = 0.98
+_POI_REUSE_MAX_SOURCE_ZONES = 12
 
 _ZONE_POI_CONTEXT_SQL = text(
     """
@@ -55,103 +58,100 @@ _ZONE_POI_CONTEXT_SQL = text(
     """
 )
 
-_JOURNEY_ZONE_POI_CONTEXT_SQL = text(
+_JOURNEY_ZONE_POI_CONTEXT_SQL = _ZONE_POI_CONTEXT_SQL
+
+_FILTER_ZONE_POI_POINTS_SQL = text(
     """
-    WITH RECURSIVE current_zone AS (
-        SELECT
-            z.id,
-            z.fingerprint,
-            z.isochrone_geom,
-            z.created_at,
-            ST_Centroid(z.isochrone_geom) AS center_geom,
-            ST_Area(z.isochrone_geom::geography) AS area_m2,
-            z.poi_counts,
-            z.poi_points
+    WITH zone_geom AS (
+        SELECT z.isochrone_geom
         FROM zones z
         WHERE z.id = :zone_id
     ),
-    journey_zone_scope AS (
+    candidate_points AS (
+        SELECT
+            candidate.point AS point,
+            candidate.ordinality AS ordinality,
+            CAST(candidate.point ->> 'lon' AS DOUBLE PRECISION) AS lon,
+            CAST(candidate.point ->> 'lat' AS DOUBLE PRECISION) AS lat
+        FROM jsonb_array_elements(CAST(:poi_points AS JSONB)) WITH ORDINALITY AS candidate(point, ordinality)
+    )
+    SELECT candidate_points.point AS point
+    FROM candidate_points
+    JOIN zone_geom ON zone_geom.isochrone_geom IS NOT NULL
+    WHERE ST_Covers(
+        zone_geom.isochrone_geom,
+        ST_SetSRID(
+            ST_MakePoint(candidate_points.lon, candidate_points.lat),
+            4326
+        )
+    )
+    ORDER BY candidate_points.ordinality ASC
+    """
+)
+
+_REUSABLE_ZONE_POI_SOURCES_SQL = text(
+    """
+    WITH current_zone AS (
         SELECT
             z.id,
-            z.fingerprint,
             z.isochrone_geom,
-            z.created_at,
-            ST_Centroid(z.isochrone_geom) AS center_geom,
-            ST_Area(z.isochrone_geom::geography) AS area_m2,
-            z.poi_counts,
-            z.poi_points
-        FROM journey_zones jz
-        JOIN zones z ON z.id = jz.zone_id
-        WHERE jz.journey_id = :journey_id
+            ST_Area(z.isochrone_geom::geography) AS target_area_m2
+        FROM zones z
+        WHERE z.id = :zone_id
     ),
-    parent_chain AS (
+    candidate_sources AS (
         SELECT
-            cz.id,
-            cz.fingerprint,
-            cz.isochrone_geom,
-            cz.center_geom,
-            cz.created_at,
-            cz.area_m2,
-            cz.poi_counts,
-            cz.poi_points,
-            0 AS depth,
-            ARRAY[cz.id]::uuid[] AS path
-        FROM current_zone cz
-
-        UNION ALL
-
-        SELECT
-            parent.id,
-            parent.fingerprint,
-            parent.isochrone_geom,
-            parent.center_geom,
-            parent.created_at,
-            parent.area_m2,
-            parent.poi_counts,
-            parent.poi_points,
-            chain.depth + 1 AS depth,
-            chain.path || parent.id
-        FROM parent_chain chain
-        JOIN LATERAL (
-            SELECT
-                scope.id,
-                scope.fingerprint,
-                scope.isochrone_geom,
-                scope.center_geom,
-                scope.created_at,
-                scope.area_m2,
-                scope.poi_counts,
-                scope.poi_points
-            FROM journey_zone_scope scope
-            WHERE scope.id <> ALL(chain.path)
-              AND chain.center_geom IS NOT NULL
-              AND scope.center_geom IS NOT NULL
-              AND ST_Within(chain.center_geom, scope.isochrone_geom)
-            ORDER BY scope.area_m2 ASC, scope.created_at ASC, scope.id ASC
-            LIMIT 1
-        ) parent ON TRUE
-        WHERE chain.depth < 32
+            source.id AS source_zone_id,
+            source.fingerprint AS source_zone_fingerprint,
+            source.isochrone_geom AS source_geom,
+            ST_Area(source.isochrone_geom::geography) AS source_area_m2,
+            ST_Covers(source.isochrone_geom, current_zone.isochrone_geom) AS source_covers_target,
+            COALESCE(
+                ST_Area(ST_Intersection(source.isochrone_geom, current_zone.isochrone_geom)::geography)
+                / NULLIF(current_zone.target_area_m2, 0),
+                0
+            ) AS target_overlap_ratio,
+            cache.scraped_at
+        FROM current_zone
+        JOIN journey_zones jz ON jz.journey_id = :journey_id
+        JOIN zones source ON source.id = jz.zone_id
+        JOIN zone_poi_caches cache
+            ON cache.zone_fingerprint = source.fingerprint
+           AND cache.config_hash = :config_hash
+        WHERE source.id <> current_zone.id
+          AND current_zone.isochrone_geom IS NOT NULL
+          AND source.isochrone_geom IS NOT NULL
+          AND cache.status = 'complete'
+          AND (cache.expires_at IS NULL OR cache.expires_at > now())
+          AND ST_Intersects(source.isochrone_geom, current_zone.isochrone_geom)
     ),
-    poi_source AS (
-        SELECT *
-        FROM parent_chain
-        ORDER BY depth DESC
-        LIMIT 1
+    candidate_coverage AS (
+        SELECT COALESCE(
+            ST_Area(
+                ST_Intersection(
+                    current_zone.isochrone_geom,
+                    ST_UnaryUnion(ST_Collect(candidate_sources.source_geom))
+                )::geography
+            ) / NULLIF(current_zone.target_area_m2, 0),
+            0
+        ) AS coverage_ratio
+        FROM current_zone
+        JOIN candidate_sources ON TRUE
+        GROUP BY current_zone.isochrone_geom, current_zone.target_area_m2
     )
     SELECT
-        current_zone.fingerprint AS zone_fingerprint,
-        poi_source.fingerprint AS poi_source_fingerprint,
-        ST_X(poi_source.center_geom) AS lon,
-        ST_Y(poi_source.center_geom) AS lat,
-        poi_source.area_m2 AS area_m2,
-        ST_XMin(poi_source.isochrone_geom)::DOUBLE PRECISION AS xmin,
-        ST_YMin(poi_source.isochrone_geom)::DOUBLE PRECISION AS ymin,
-        ST_XMax(poi_source.isochrone_geom)::DOUBLE PRECISION AS xmax,
-        ST_YMax(poi_source.isochrone_geom)::DOUBLE PRECISION AS ymax,
-        poi_source.poi_counts AS existing_poi_counts,
-        poi_source.poi_points AS existing_poi_points
-    FROM current_zone
-    JOIN poi_source ON TRUE
+        candidate_sources.source_zone_fingerprint,
+        candidate_sources.source_covers_target,
+        candidate_sources.target_overlap_ratio,
+        COALESCE(candidate_coverage.coverage_ratio, 0) AS coverage_ratio
+    FROM candidate_sources
+    CROSS JOIN candidate_coverage
+    ORDER BY candidate_sources.source_covers_target DESC,
+             candidate_sources.target_overlap_ratio DESC,
+             candidate_sources.source_area_m2 ASC,
+             candidate_sources.scraped_at DESC NULLS LAST,
+             candidate_sources.source_zone_id ASC
+    LIMIT :max_sources
     """
 )
 
@@ -238,6 +238,7 @@ def _poi_cache_key(
         "f": zone_fingerprint,
         "cats": list(categories),
         "bbox": [round(v, 6) for v in bbox],
+        "strategy": ISOCHRONE_PROXY_SEARCH_STRATEGY,
     }
     digest = hashlib.sha256(
         json.dumps(
@@ -248,6 +249,139 @@ def _poi_cache_key(
         ).encode("utf-8")
     ).hexdigest()[:20]
     return f"zone_pois:v5:{digest}"
+
+
+def _normalize_poi_points(raw_points: Any) -> list[dict[str, Any]]:
+    if not isinstance(raw_points, list):
+        return []
+
+    normalized: list[dict[str, Any]] = []
+    for item in raw_points:
+        if not isinstance(item, dict):
+            continue
+        lat = item.get("lat")
+        lon = item.get("lon")
+        if not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
+            continue
+        normalized.append(
+            {
+                "kind": "poi",
+                "id": str(item.get("id")).strip() if item.get("id") else None,
+                "name": str(item.get("name")).strip() if item.get("name") else None,
+                "category": str(item.get("category")).strip() if item.get("category") else None,
+                "address": str(item.get("address")).strip() if item.get("address") else None,
+                "lat": float(lat),
+                "lon": float(lon),
+            }
+        )
+    return normalized
+
+
+def _count_poi_points_by_category(poi_points: list[dict[str, Any]]) -> dict[str, int]:
+    counts = {category: 0 for category in _POI_CATEGORIES}
+    for point in poi_points:
+        category = point.get("category")
+        if category in counts:
+            counts[category] += 1
+    return counts
+
+
+def _merge_poi_points(*point_groups: Any) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    seen_fingerprints: set[str] = set()
+
+    for point_group in point_groups:
+        for point in _normalize_poi_points(point_group):
+            fingerprint = compute_poi_fingerprint(
+                name=point.get("name"),
+                address=point.get("address"),
+                category=point.get("category"),
+                lat=point.get("lat"),
+                lon=point.get("lon"),
+            )
+            if fingerprint in seen_fingerprints:
+                continue
+            seen_fingerprints.add(fingerprint)
+            merged.append(point)
+
+    return merged
+
+
+async def _load_reusable_poi_source_points(
+    zone_id: UUID,
+    *,
+    journey_id: UUID | None,
+    config_hash: str,
+) -> tuple[list[dict[str, Any]], float]:
+    if journey_id is None:
+        return [], 0.0
+
+    engine = get_engine()
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            _REUSABLE_ZONE_POI_SOURCES_SQL,
+            {
+                "zone_id": zone_id,
+                "journey_id": journey_id,
+                "config_hash": config_hash,
+                "max_sources": _POI_REUSE_MAX_SOURCE_ZONES,
+            },
+        )
+        rows = result.mappings().all()
+
+    if not rows:
+        return [], 0.0
+
+    coverage_ratio = float(rows[0].get("coverage_ratio") or 0.0)
+    merged_points: list[dict[str, Any]] = []
+    missing_payload = False
+    for row in rows:
+        source_zone_fingerprint = row.get("source_zone_fingerprint")
+        if not source_zone_fingerprint:
+            continue
+        payload = await get_persisted_poi_cache_payload(str(source_zone_fingerprint), config_hash)
+        if payload is None:
+            missing_payload = True
+            continue
+        merged_points = _merge_poi_points(merged_points, payload.get("poi_points") or [])
+
+    if missing_payload:
+        coverage_ratio = 0.0
+
+    return merged_points, coverage_ratio
+
+
+async def _filter_poi_points_to_zone(
+    zone_id: UUID,
+    poi_points: Any,
+) -> list[dict[str, Any]]:
+    normalized_points = _normalize_poi_points(poi_points)
+    if not normalized_points:
+        return []
+
+    engine = get_engine()
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            _FILTER_ZONE_POI_POINTS_SQL,
+            {
+                "zone_id": zone_id,
+                "poi_points": json.dumps(normalized_points, ensure_ascii=True),
+            },
+        )
+        rows = result.mappings().all()
+
+    filtered_points: list[dict[str, Any]] = []
+    for row in rows:
+        point = row.get("point")
+        if isinstance(point, str):
+            try:
+                point = json.loads(point)
+            except json.JSONDecodeError:
+                continue
+        if isinstance(point, dict):
+            filtered_points.append(point)
+
+    return _normalize_poi_points(filtered_points)
 
 
 def _legacy_zone_payload_from_context(zone: dict[str, Any] | None) -> dict[str, Any] | None:
@@ -455,7 +589,7 @@ async def enrich_zone_pois(
         float(proxy_bbox[2]),
         float(proxy_bbox[3]),
     )
-    zone_fingerprint = str(zone["poi_source_fingerprint"] or zone["zone_fingerprint"])
+    zone_fingerprint = str(zone["zone_fingerprint"])
     config_hash = compute_poi_cache_config_hash(
         categories=_POI_CATEGORIES,
         limit_per_category=_POI_FETCH_LIMIT,
@@ -470,8 +604,8 @@ async def enrich_zone_pois(
     redis = get_redis()
     persisted_payload = await get_persisted_poi_cache_payload(zone_fingerprint, config_hash)
     if persisted_payload is not None:
-        poi_counts = persisted_payload.get("poi_counts") or {}
-        poi_points = persisted_payload.get("poi_points") or []
+        poi_points = await _filter_poi_points_to_zone(zone_id, persisted_payload.get("poi_points") or [])
+        poi_counts = _count_poi_points_by_category(poi_points)
         await redis.set(
             cache_key,
             json.dumps({"poi_counts": poi_counts, "poi_points": poi_points}, ensure_ascii=True),
@@ -481,25 +615,26 @@ async def enrich_zone_pois(
         cached = await redis.get(cache_key)
         if cached:
             cached_payload = json.loads(cached)
-            poi_counts = cached_payload.get("poi_counts") or {}
-            poi_points = cached_payload.get("poi_points") or []
-            await persist_poi_cache_payload(
-                zone_fingerprint=zone_fingerprint,
-                config_hash=config_hash,
-                poi_counts=poi_counts,
-                poi_points=poi_points,
-            )
+            poi_points = await _filter_poi_points_to_zone(zone_id, cached_payload.get("poi_points") or [])
+            poi_counts = _count_poi_points_by_category(poi_points)
         else:
+            reusable_proxy_points, reusable_coverage_ratio = await _load_reusable_poi_source_points(
+                zone_id,
+                journey_id=journey_id,
+                config_hash=config_hash,
+            )
             legacy_payload = _legacy_zone_payload_from_context(zone)
-            if legacy_payload is not None:
-                poi_counts = legacy_payload["poi_counts"]
-                poi_points = legacy_payload["poi_points"]
-                await persist_poi_cache_payload(
-                    zone_fingerprint=zone_fingerprint,
-                    config_hash=config_hash,
-                    poi_counts=poi_counts,
-                    poi_points=poi_points,
+            if reusable_proxy_points and reusable_coverage_ratio >= _POI_REUSE_MIN_COVERAGE_RATIO:
+                poi_points = await _filter_poi_points_to_zone(zone_id, reusable_proxy_points)
+                poi_counts = _count_poi_points_by_category(poi_points)
+                await redis.set(
+                    cache_key,
+                    json.dumps({"poi_counts": poi_counts, "poi_points": poi_points}, ensure_ascii=True),
+                    ex=_POI_CACHE_TTL_SECONDS,
                 )
+            elif legacy_payload is not None and not reusable_proxy_points:
+                poi_points = await _filter_poi_points_to_zone(zone_id, legacy_payload["poi_points"])
+                poi_counts = _count_poi_points_by_category(poi_points)
                 await redis.set(
                     cache_key,
                     json.dumps({"poi_counts": poi_counts, "poi_points": poi_points}, ensure_ascii=True),
@@ -507,9 +642,8 @@ async def enrich_zone_pois(
                 )
             else:
                 settings = get_settings()
-                poi_counts = {k: 0 for k in _POI_CATEGORIES}
-                poi_points: list[dict[str, Any]] = []
-                poi_entries: list[dict[str, Any]] = []
+                fetched_proxy_points: list[dict[str, Any]] = []
+                fetched_proxy_entries: list[dict[str, Any]] = []
                 zone_lon = float(zone["lon"])
                 zone_lat = float(zone["lat"])
                 current_category = None
@@ -532,12 +666,11 @@ async def enrich_zone_pois(
                             response.raise_for_status()
                             payload = response.json()
                             features = payload.get("features", [])
-                            poi_counts[category] = len(features)
                             for feature in features:
                                 point = _extract_poi_point(feature, category=category)
                                 if point is not None:
-                                    poi_points.append(point)
-                                    poi_entries.append({"point": point, "raw_payload": feature})
+                                    fetched_proxy_points.append(point)
+                                    fetched_proxy_entries.append({"point": point, "raw_payload": feature})
                 except Exception as exc:
                     await mark_poi_cache_failed(zone_fingerprint, config_hash)
                     details = ""
@@ -552,12 +685,16 @@ async def enrich_zone_pois(
                         f"POI fetch failed for zone {zone_id} while loading category {current_category}{details}"
                     ) from exc
 
+                proxy_points_for_zone = _merge_poi_points(reusable_proxy_points, fetched_proxy_points)
+                poi_points = await _filter_poi_points_to_zone(zone_id, proxy_points_for_zone)
+                poi_counts = _count_poi_points_by_category(poi_points)
+
                 await persist_poi_cache_payload(
                     zone_fingerprint=zone_fingerprint,
                     config_hash=config_hash,
-                    poi_counts=poi_counts,
-                    poi_points=poi_points,
-                    poi_entries=poi_entries,
+                    poi_counts=_count_poi_points_by_category(fetched_proxy_points),
+                    poi_points=fetched_proxy_points,
+                    poi_entries=fetched_proxy_entries,
                 )
                 await redis.set(
                     cache_key,
