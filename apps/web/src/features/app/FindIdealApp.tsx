@@ -23,6 +23,12 @@ const ZONES_SOURCE_ID = "journey-zones-source-runtime";
 const ZONE_POIS_SOURCE_ID = "journey-zone-pois-source-runtime";
 const LISTINGS_SOURCE_ID = "journey-listings-source-runtime";
 const SAFETY_SOURCE_ID = "public-safety-source-runtime";
+const PIN_INTERACTIVE_LAYER_LIST = ["transport-candidate-layer", "journey-listings-layer"] as const;
+const TRANSPORT_CANDIDATE_PIN_ICON_ID = "transport-candidate-pin-icon";
+const TRANSPORT_CANDIDATE_SELECTED_PIN_ICON_ID = "transport-candidate-pin-selected-icon";
+const LISTING_PIN_ICON_ID = "listing-pin-icon";
+const LISTING_SELECTED_PIN_ICON_ID = "listing-pin-selected-icon";
+const SELECTED_PIN_MARKER_STYLE_ID = "selected-map-pin-marker-styles";
 const POPUP_PERSIST_LAYER_LIST = [...BUS_LAYER_LIST, "zone-pois-highlight-layer", "zone-pois-layer", "safety-incident-layer"] as const;
 const LAYER_TOGGLE_BUTTON_CLASS = "pointer-events-auto flex h-8 w-8 items-center justify-center rounded-lg border border-slate-100 bg-white/95 text-slate-500 shadow-md backdrop-blur-md transition-colors hover:bg-pastel-violet-50 hover:text-pastel-violet-600";
 const PANEL_EDGE_OFFSET_PX = 16;
@@ -316,6 +322,133 @@ const createBusIcon = (fillHex: string) => {
   return { width, height, data };
 };
 
+const createEmptyStyleImage = (width: number, height: number) => ({
+  width,
+  height,
+  data: new Uint8Array(width * height * 4),
+});
+
+const drawPinPath = (context: CanvasRenderingContext2D) => {
+  context.beginPath();
+  context.moveTo(18, 43);
+  context.bezierCurveTo(17.2, 41.9, 6.2, 28.4, 6.2, 16.8);
+  context.bezierCurveTo(6.2, 9.2, 11.4, 4.2, 18, 4.2);
+  context.bezierCurveTo(24.6, 4.2, 29.8, 9.2, 29.8, 16.8);
+  context.bezierCurveTo(29.8, 28.4, 18.8, 41.9, 18, 43);
+  context.closePath();
+};
+
+const createPinIcon = (fillHex: string) => {
+  const width = 36;
+  const height = 48;
+
+  if (typeof document === "undefined" || import.meta.env.MODE === "test") {
+    return createEmptyStyleImage(width, height);
+  }
+
+  try {
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return createEmptyStyleImage(width, height);
+    }
+
+    context.clearRect(0, 0, width, height);
+    context.fillStyle = fillHex;
+    context.strokeStyle = "#ffffff";
+    context.lineWidth = 2.4;
+    context.lineJoin = "round";
+    drawPinPath(context);
+    context.fill();
+    context.stroke();
+
+    context.beginPath();
+    context.arc(18, 16.4, 6.3, 0, Math.PI * 2);
+    context.fillStyle = "rgba(255,255,255,0.98)";
+    context.fill();
+
+    const imageData = context.getImageData(0, 0, width, height);
+    return {
+      width,
+      height,
+      data: new Uint8Array(imageData.data),
+    };
+  } catch {
+    return createEmptyStyleImage(width, height);
+  }
+};
+
+const getPinSvgMarkup = (fillHex: string) => `
+  <svg width="36" height="48" viewBox="0 0 36 48" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <path d="M18 43C17.2 41.9 6.2 28.4 6.2 16.8C6.2 9.2 11.4 4.2 18 4.2C24.6 4.2 29.8 9.2 29.8 16.8C29.8 28.4 18.8 41.9 18 43Z" fill="${fillHex}" stroke="#ffffff" stroke-width="2.4" stroke-linejoin="round"/>
+    <circle cx="18" cy="16.4" r="6.3" fill="rgba(255,255,255,0.98)"/>
+  </svg>
+`;
+
+const ensureSelectedPinMarkerStyles = () => {
+  if (typeof document === "undefined" || document.getElementById(SELECTED_PIN_MARKER_STYLE_ID)) {
+    return;
+  }
+
+  const style = document.createElement("style");
+  style.id = SELECTED_PIN_MARKER_STYLE_ID;
+  style.textContent = `
+    @keyframes selected-map-pin-bounce {
+      0%, 100% { transform: translateY(0) scale(1.08); }
+      32% { transform: translateY(-7px) scale(1.14); }
+      68% { transform: translateY(-2px) scale(1.11); }
+    }
+
+    .selected-map-pin-root {
+      pointer-events: none;
+      transform: translateY(2px);
+    }
+
+    .selected-map-pin-bounce {
+      animation: selected-map-pin-bounce 1.15s ease-in-out infinite;
+      filter: drop-shadow(0 10px 14px rgba(15, 23, 42, 0.22));
+      transform-origin: center bottom;
+    }
+  `;
+  document.head.appendChild(style);
+};
+
+const createSelectedPinMarkerElement = (fillHex: string, kind: "listing" | "transport") => {
+  ensureSelectedPinMarkerStyles();
+
+  const root = document.createElement("div");
+  root.className = "selected-map-pin-root";
+  root.dataset.selectedPinKind = kind;
+
+  const inner = document.createElement("div");
+  inner.className = "selected-map-pin-bounce";
+  inner.innerHTML = getPinSvgMarkup(fillHex);
+
+  root.appendChild(inner);
+  return root;
+};
+
+const removeMarker = (marker: maplibregl.Marker | null) => {
+  marker?.remove();
+  return null;
+};
+
+const buildSelectedPinMarker = (
+  map: maplibregl.Map,
+  coordinates: [number, number],
+  fillHex: string,
+  kind: "listing" | "transport"
+) => {
+  return new maplibregl.Marker({
+    anchor: "bottom",
+    element: createSelectedPinMarkerElement(fillHex, kind),
+  })
+    .setLngLat(coordinates)
+    .addTo(map);
+};
+
 const createPoiIcon = (fillHex: string, category: string) => {
   const width = 24;
   const height = 24;
@@ -520,6 +653,8 @@ export function FindIdealApp() {
   const layerMenuButtonRef = useRef<HTMLButtonElement | null>(null);
   const busPopupRef = useRef<maplibregl.Popup | null>(null);
   const pickedMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const selectedTransportMarkerRef = useRef<maplibregl.Marker | null>(null);
+  const selectedListingMarkerRef = useRef<maplibregl.Marker | null>(null);
   const [isMapReady, setIsMapReady] = useState(false);
   const [mapError, setMapError] = useState<string | null>(null);
   const [isLayerMenuOpen, setIsLayerMenuOpen] = useState(false);
@@ -527,6 +662,7 @@ export function FindIdealApp() {
   const [safetyGroupVisibility, setSafetyGroupVisibility] = useState<Record<SafetyGroupKey, boolean>>(DEFAULT_SAFETY_GROUP_VISIBILITY);
   const [isolatedSafetyGroup, setIsolatedSafetyGroup] = useState<SafetyGroupKey | null>(null);
   const [visibleSequentialLayerGroupIndex, setVisibleSequentialLayerGroupIndex] = useState(-1);
+  const [transportCandidatePoints, setTransportCandidatePoints] = useState<Array<{ id: string; lon: number; lat: number; name?: string | null; route_count: number; source: string; external_id?: string | null }>>([]);
   const [selectedZonePoiState, setSelectedZonePoiState] = useState<{ zoneFingerprint: string | null; poiPoints: ZonePoiPointLike[] }>({
     zoneFingerprint: null,
     poiPoints: []
@@ -691,6 +827,18 @@ export function FindIdealApp() {
       }
       if (!map.hasImage("bus-terminal-icon")) {
         map.addImage("bus-terminal-icon", createBusIcon("#f97316"));
+      }
+      if (!map.hasImage(TRANSPORT_CANDIDATE_PIN_ICON_ID)) {
+        map.addImage(TRANSPORT_CANDIDATE_PIN_ICON_ID, createPinIcon("#64748b"));
+      }
+      if (!map.hasImage(TRANSPORT_CANDIDATE_SELECTED_PIN_ICON_ID)) {
+        map.addImage(TRANSPORT_CANDIDATE_SELECTED_PIN_ICON_ID, createPinIcon("#845ef7"));
+      }
+      if (!map.hasImage(LISTING_PIN_ICON_ID)) {
+        map.addImage(LISTING_PIN_ICON_ID, createPinIcon("#845ef7"));
+      }
+      if (!map.hasImage(LISTING_SELECTED_PIN_ICON_ID)) {
+        map.addImage(LISTING_SELECTED_PIN_ICON_ID, createPinIcon("#5b21b6"));
       }
       for (const category of ["school", "supermarket", "pharmacy", "park", "restaurant", "gym", "default"] as const) {
         const meta = getPoiCategoryMeta(category === "default" ? undefined : category);
@@ -898,14 +1046,17 @@ export function FindIdealApp() {
 
       map.addLayer({
         id: "transport-candidate-layer",
-        type: "circle",
+        type: "symbol",
         source: TRANSPORT_CANDIDATES_SOURCE_ID,
+        layout: {
+          "icon-image": ["case", ["boolean", ["get", "selected"], false], TRANSPORT_CANDIDATE_SELECTED_PIN_ICON_ID, TRANSPORT_CANDIDATE_PIN_ICON_ID],
+          "icon-size": ["interpolate", ["linear"], ["zoom"], 9, 0.48, 12, 0.58, 15, 0.7],
+          "icon-anchor": "bottom",
+          "icon-allow-overlap": true,
+          "icon-ignore-placement": true,
+        },
         paint: {
-          "circle-radius": ["case", ["boolean", ["get", "selected"], false], 8, 5],
-          "circle-color": ["case", ["boolean", ["get", "selected"], false], "#845ef7", "#64748b"],
-          "circle-stroke-color": "#ffffff",
-          "circle-stroke-width": 2,
-          "circle-opacity": 0.92,
+          "icon-opacity": ["case", ["boolean", ["get", "selected"], false], 0.001, 0.97],
         },
       });
 
@@ -1054,14 +1205,17 @@ export function FindIdealApp() {
 
       map.addLayer({
         id: "journey-listings-layer",
-        type: "circle",
+        type: "symbol",
         source: LISTINGS_SOURCE_ID,
+        layout: {
+          "icon-image": ["case", ["boolean", ["get", "selected"], false], LISTING_SELECTED_PIN_ICON_ID, LISTING_PIN_ICON_ID],
+          "icon-size": ["interpolate", ["linear"], ["zoom"], 9, 0.46, 12, 0.56, 15, 0.68],
+          "icon-anchor": "bottom",
+          "icon-allow-overlap": true,
+          "icon-ignore-placement": true,
+        },
         paint: {
-          "circle-radius": ["case", ["boolean", ["get", "selected"], false], 8, 5],
-          "circle-color": ["case", ["boolean", ["get", "selected"], false], "#5b21b6", "#845ef7"],
-          "circle-stroke-color": "#ffffff",
-          "circle-stroke-width": ["case", ["boolean", ["get", "selected"], false], 2.2, 1.5],
-          "circle-opacity": 0.94,
+          "icon-opacity": ["case", ["boolean", ["get", "selected"], false], 0.001, 0.98],
         },
       });
 
@@ -1270,6 +1424,14 @@ export function FindIdealApp() {
           });
         }
 
+        const clickedPinFeatures = map.queryRenderedFeatures(event.point, {
+          layers: [...PIN_INTERACTIVE_LAYER_LIST],
+        });
+        if (clickedPinFeatures.length === 0) {
+          setSelectedTransportId(null);
+          setSelectedListingKey(null);
+        }
+
         const activePopup = busPopupRef.current;
         if (!activePopup) return;
 
@@ -1326,6 +1488,12 @@ export function FindIdealApp() {
     return () => {
       busPopupRef.current?.remove();
       busPopupRef.current = null;
+      pickedMarkerRef.current?.remove();
+      pickedMarkerRef.current = null;
+      selectedTransportMarkerRef.current?.remove();
+      selectedTransportMarkerRef.current = null;
+      selectedListingMarkerRef.current?.remove();
+      selectedListingMarkerRef.current = null;
       map.remove();
     };
   }, [setPickedCoord, setSelectedListingKey, setSelectedPoiKey, setSelectedTransportId, setSelectedZone]);
@@ -1362,6 +1530,28 @@ export function FindIdealApp() {
 
     map.easeTo({ center: [pickedCoord.lon, pickedCoord.lat], duration: 600, zoom: Math.max(map.getZoom(), 13) });
   }, [isMapReady, pickedCoord]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isMapReady || step < 2 || !layerVisibility.transportCandidates || !selectedTransportId) {
+      selectedTransportMarkerRef.current = removeMarker(selectedTransportMarkerRef.current);
+      return;
+    }
+
+    const selectedPoint = transportCandidatePoints.find((point) => point.id === selectedTransportId);
+    if (!selectedPoint) {
+      selectedTransportMarkerRef.current = removeMarker(selectedTransportMarkerRef.current);
+      return;
+    }
+
+    selectedTransportMarkerRef.current = removeMarker(selectedTransportMarkerRef.current);
+    selectedTransportMarkerRef.current = buildSelectedPinMarker(
+      map,
+      [selectedPoint.lon, selectedPoint.lat],
+      "#845ef7",
+      "transport"
+    );
+  }, [isMapReady, layerVisibility.transportCandidates, selectedTransportId, step, transportCandidatePoints]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -1431,12 +1621,14 @@ export function FindIdealApp() {
 
     async function syncTransportCandidates() {
       if (!journeyId || step < 2 || config.modal === "walk" || config.modal === "car") {
+        setTransportCandidatePoints([]);
         setGeoJsonSourceData(activeMap, TRANSPORT_CANDIDATES_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
         return;
       }
 
       const points = await getJourneyTransportPoints(journeyId);
       if (!cancelled) {
+        setTransportCandidatePoints(points);
         setGeoJsonSourceData(
           activeMap,
           TRANSPORT_CANDIDATES_SOURCE_ID,
@@ -1447,6 +1639,7 @@ export function FindIdealApp() {
 
     void syncTransportCandidates().catch(() => {
       if (!cancelled) {
+        setTransportCandidatePoints([]);
         setGeoJsonSourceData(activeMap, TRANSPORT_CANDIDATES_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
       }
     });
@@ -1544,6 +1737,38 @@ export function FindIdealApp() {
 
     map.easeTo({ center: [selectedPoint.lon, selectedPoint.lat], duration: 600, zoom: Math.max(map.getZoom(), 15) });
   }, [activePoiCategory, isMapReady, selectedPoiKey, selectedZonePoiState, step]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isMapReady) {
+      return;
+    }
+
+    if (!layerVisibility.listings || !selectedListingKey || step < 6) {
+      selectedListingMarkerRef.current = removeMarker(selectedListingMarkerRef.current);
+      return;
+    }
+
+    const selectedListing = filteredMapListings.find((listing) => {
+      if (typeof listing.lat !== "number" || typeof listing.lon !== "number") {
+        return false;
+      }
+      return getListingSelectionKey(listing) === selectedListingKey;
+    });
+
+    if (!selectedListing || typeof selectedListing.lat !== "number" || typeof selectedListing.lon !== "number") {
+      selectedListingMarkerRef.current = removeMarker(selectedListingMarkerRef.current);
+      return;
+    }
+
+    selectedListingMarkerRef.current = removeMarker(selectedListingMarkerRef.current);
+    selectedListingMarkerRef.current = buildSelectedPinMarker(
+      map,
+      [selectedListing.lon, selectedListing.lat],
+      "#5b21b6",
+      "listing"
+    );
+  }, [filteredMapListings, isMapReady, layerVisibility.listings, selectedListingKey, step]);
 
   useEffect(() => {
     const map = mapRef.current;

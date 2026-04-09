@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   ArrowDownRight,
@@ -16,16 +16,16 @@ import {
   ShieldX,
   SlidersHorizontal,
   Building2,
-  X,
 } from "lucide-react";
-import { getJob, getZoneDashboardAnalytics, getZoneListings, type ListingCardRead, type ListingPlatformVariantRead } from "../../api/client";
+import { getJob, getZoneDashboardAnalytics, getZoneListings, type ListingPlatformVariantRead } from "../../api/client";
 import { ListingsScrapeDiagnosticsSchema, type ListingsScrapeDiagnostics, type ListingsScrapePlatformDiagnostics } from "../../api/schemas";
-import { applyListingsPanelFilters, formatCurrencyBr, getListingDisplayPrice, getListingSelectionKey, parseFiniteNumber, resolvePlatformImageUrl, resolvePlatformUrl } from "../../lib/listingFormat";
+import { applyListingsPanelFilters, formatCurrencyBr, getListingDisplayPrice, getListingSelectionKey, resolvePlatformImageUrl, resolvePlatformUrl } from "../../lib/listingFormat";
 import { defaultListingsPanelFilters, useJourneyStore, useUIStore, type ListingsPanelFilters } from "../../state";
 import { Step6Dashboard } from "./Step6Dashboard";
 
 const DASHBOARD_ANALYTICS_STALE_TIME = 30 * 60_000;
 const DASHBOARD_ANALYTICS_GC_TIME = 60 * 60_000;
+const PRICE_DASHBOARD_FILTER_DEBOUNCE_MS = 350;
 
 function platformLabel(value: string | null | undefined) {
   if (!value) {
@@ -136,6 +136,25 @@ function formatPercentDelta(value: number | null | undefined) {
   return `${value >= 0 ? "+" : ""}${value.toFixed(1)}%`;
 }
 
+function calculatePercentDelta(currentValue: number | null | undefined, baseValue: number | null | undefined) {
+  if (typeof currentValue !== "number" || !Number.isFinite(currentValue)) {
+    return null;
+  }
+  if (typeof baseValue !== "number" || !Number.isFinite(baseValue) || baseValue <= 0) {
+    return null;
+  }
+  return ((currentValue - baseValue) / baseValue) * 100;
+}
+
+function arePriceDashboardFiltersEqual(left: ListingsPanelFilters, right: ListingsPanelFilters) {
+  return left.minPrice === right.minPrice
+    && left.maxPrice === right.maxPrice
+    && left.usageType === right.usageType
+    && left.spatialScope === right.spatialScope
+    && left.minSize === right.minSize
+    && left.maxSize === right.maxSize;
+}
+
 function hasPriceDashboardPanelFilterOverrides(filters: ListingsPanelFilters) {
   return filters.minPrice !== defaultListingsPanelFilters.minPrice
     || filters.maxPrice !== defaultListingsPanelFilters.maxPrice
@@ -155,82 +174,6 @@ function buildPriceDashboardAnalyticsOptions(filters: ListingsPanelFilters, city
     minSize: filters.minSize || null,
     maxSize: filters.maxSize || null,
   };
-}
-
-function ListingAccessibilityPopover(props: {
-  open: boolean;
-  onClose: () => void;
-  popoverId: string;
-  listing: ListingCardRead | null;
-}) {
-  if (!props.open) {
-    return null;
-  }
-
-  const selectedUnitPrice = props.listing?.current_unit_price;
-  const neighborhoodDelta = props.listing?.current_vs_neighborhood_pct;
-  const neighborhoodName = props.listing?.neighborhood_name;
-  const deltaDetail = neighborhoodName
-    ? `Comparação frente à mediana de ${neighborhoodName}`
-    : "Comparação frente à mediana do bairro do imóvel";
-
-  return (
-    <div
-      id={props.popoverId}
-      role="dialog"
-      aria-modal="false"
-      aria-label="Preço do imóvel versus bairro"
-      data-testid={props.popoverId}
-      className="absolute inset-x-0 bottom-0 z-30 animate-[fadeIn_0.18s_ease-out] overflow-hidden rounded-[24px] border border-slate-200 bg-slate-100/95 shadow-2xl backdrop-blur-sm"
-      onClick={(event) => event.stopPropagation()}
-    >
-      <div className="border-b border-slate-200 bg-white/90 px-3 py-2.5">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Acessibilidade do imóvel</p>
-            <p className="mt-1 truncate text-xs font-semibold text-slate-800">Preço do imóvel versus bairro</p>
-            <p className="mt-1 truncate text-[11px] leading-snug text-slate-500">{props.listing?.address_normalized || "Endereço do anúncio indisponível"}</p>
-          </div>
-          <button
-            type="button"
-            onClick={props.onClose}
-            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700"
-            aria-label="Fechar acessibilidade do imóvel"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
-        </div>
-      </div>
-
-      <div className="grid gap-2 p-2.5 md:grid-cols-2">
-        <div className="rounded-xl border border-slate-200 bg-white/95 px-2.5 py-2.5 shadow-sm">
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Valor por m²</p>
-              <p className="mt-1 text-xs font-semibold text-slate-800">{formatCurrencyBr(selectedUnitPrice)}</p>
-              <p className="mt-1 text-[11px] leading-snug text-slate-500">Valor atual por m² do anúncio selecionado</p>
-            </div>
-            <div className="rounded-lg bg-pastel-violet-50 p-2 text-pastel-violet-600">
-              <Building2 className="h-3.5 w-3.5" />
-            </div>
-          </div>
-        </div>
-
-        <div className="rounded-xl border border-slate-200 bg-white/95 px-2.5 py-2.5 shadow-sm">
-          <div className="flex items-start justify-between gap-2">
-            <div className="min-w-0">
-              <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">Diferença vs bairro</p>
-              <p className="mt-1 text-xs font-semibold text-slate-800">{formatPercentDelta(neighborhoodDelta)}</p>
-              <p className="mt-1 text-[11px] leading-snug text-slate-500">{neighborhoodDelta === null || neighborhoodDelta === undefined ? "Sem base comparativa" : deltaDetail}</p>
-            </div>
-            <div className="rounded-lg bg-amber-50 p-2 text-amber-600">
-              {typeof neighborhoodDelta === "number" && neighborhoodDelta > 0 ? <ArrowUpRight className="h-3.5 w-3.5" /> : <ArrowDownRight className="h-3.5 w-3.5" />}
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 export function Step6Analysis() {
@@ -254,9 +197,22 @@ export function Step6Analysis() {
   const [isFiltersCollapsed, setIsFiltersCollapsed] = useState(false);
   const [isPreparingDashboard, setIsPreparingDashboard] = useState(false);
   const [openAvailabilityPopoverKey, setOpenAvailabilityPopoverKey] = useState<string | null>(null);
-  const [openAccessibilityPopoverKey, setOpenAccessibilityPopoverKey] = useState<string | null>(null);
+  const [openPriceDeltaTooltipKey, setOpenPriceDeltaTooltipKey] = useState<string | null>(null);
+  const [debouncedPriceComparisonFilters, setDebouncedPriceComparisonFilters] = useState<ListingsPanelFilters>(listingsFilters);
 
   const persistedListingsJobId = listingsJobId;
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedPriceComparisonFilters((current) => (
+        arePriceDashboardFiltersEqual(current, listingsFilters) ? current : listingsFilters
+      ));
+    }, PRICE_DASHBOARD_FILTER_DEBOUNCE_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [listingsFilters]);
 
   const listingsQuery = useQuery({
     queryKey: ["zone-listings", journeyId, zoneFingerprint, config.type, "all"],
@@ -333,13 +289,33 @@ export function Step6Analysis() {
     && listingsForScope.length === 0;
 
   const displayedListings = applyListingsPanelFilters(rawListings, listingsFilters);
-  const selectedDashboardListing = useMemo(
-    () => rawListings.find((listing) => getListingSelectionKey(listing) === selectedListingKey) || null,
-    [rawListings, selectedListingKey],
-  );
   const hasPriceDashboardOverrides = hasPriceDashboardPanelFilterOverrides(listingsFilters);
+  const hasPriceComparisonOverrides = hasPriceDashboardPanelFilterOverrides(debouncedPriceComparisonFilters);
 
-  function buildPriceDashboardQueryKey(cityName: string | null = null) {
+  const priceComparisonDashboardQuery = useQuery({
+    queryKey: hasPriceComparisonOverrides
+      ? buildPriceDashboardQueryKey(debouncedPriceComparisonFilters)
+      : buildDashboardPricePageQueryKey(),
+    queryFn: async () => getZoneDashboardAnalytics(
+      journeyId as string,
+      zoneFingerprint as string,
+      config.type,
+      hasPriceComparisonOverrides
+        ? {
+            ...buildPriceDashboardAnalyticsOptions(debouncedPriceComparisonFilters),
+            page: "preco",
+          }
+        : { page: "preco" },
+    ),
+    enabled: Boolean(journeyId && zoneFingerprint),
+    staleTime: DASHBOARD_ANALYTICS_STALE_TIME,
+    gcTime: DASHBOARD_ANALYTICS_GC_TIME,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    placeholderData: keepPreviousData,
+  });
+
+  function buildPriceDashboardQueryKey(filters: ListingsPanelFilters, cityName: string | null = null) {
     return [
       "zone-dashboard-analytics",
       journeyId,
@@ -347,12 +323,12 @@ export function Step6Analysis() {
       config.type,
       "price-panel",
       cityName || "default",
-      listingsFilters.spatialScope,
-      listingsFilters.usageType,
-      listingsFilters.minPrice || "",
-      listingsFilters.maxPrice || "",
-      listingsFilters.minSize || "",
-      listingsFilters.maxSize || "",
+      filters.spatialScope,
+      filters.usageType,
+      filters.minPrice || "",
+      filters.maxPrice || "",
+      filters.minSize || "",
+      filters.maxSize || "",
     ] as const;
   }
 
@@ -366,18 +342,6 @@ export function Step6Analysis() {
       return cached;
     }
     return queryClient.fetchQuery({
-      queryKey,
-      queryFn,
-      staleTime: DASHBOARD_ANALYTICS_STALE_TIME,
-      gcTime: DASHBOARD_ANALYTICS_GC_TIME,
-    });
-  }
-
-  async function prefetchDashboardQueryIfMissing<T>(queryKey: readonly unknown[], queryFn: () => Promise<T>) {
-    if (queryClient.getQueryData<T>(queryKey) !== undefined) {
-      return;
-    }
-    await queryClient.prefetchQuery({
       queryKey,
       queryFn,
       staleTime: DASHBOARD_ANALYTICS_STALE_TIME,
@@ -399,7 +363,7 @@ export function Step6Analysis() {
       return true;
     }
 
-    return queryClient.getQueryData(buildPriceDashboardQueryKey()) !== undefined;
+    return queryClient.getQueryData(buildPriceDashboardQueryKey(listingsFilters)) !== undefined;
   }
 
   async function primeDashboardAnalytics() {
@@ -416,7 +380,7 @@ export function Step6Analysis() {
 
     if (hasPriceDashboardOverrides) {
       await fetchDashboardQueryIfMissing(
-        buildPriceDashboardQueryKey(),
+        buildPriceDashboardQueryKey(listingsFilters),
         async () => getZoneDashboardAnalytics(
           journeyId,
           zoneFingerprint,
@@ -513,17 +477,6 @@ export function Step6Analysis() {
     setIsProgressCollapsed((current) => (current ? current : true));
   }, [hasCompletedListingsGeneration, progressRunKey]);
 
-  useEffect(() => {
-    function handleEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setOpenAccessibilityPopoverKey(null);
-      }
-    }
-
-    window.addEventListener("keydown", handleEscape);
-    return () => window.removeEventListener("keydown", handleEscape);
-  }, []);
-
   function toggleListingsSort(sortField: "price" | "size") {
     setListingsFilters({
       sortField,
@@ -551,12 +504,12 @@ export function Step6Analysis() {
     setOpenAvailabilityPopoverKey((current) => (current === cardKey ? null : current));
   }
 
-  function handleAccessibilityPopoverBlur(cardKey: string, event: React.FocusEvent<HTMLDivElement>) {
+  function handlePriceDeltaTooltipBlur(cardKey: string, event: React.FocusEvent<HTMLDivElement>) {
     const nextFocused = event.relatedTarget;
     if (nextFocused instanceof Node && event.currentTarget.contains(nextFocused)) {
       return;
     }
-    setOpenAccessibilityPopoverKey((current) => (current === cardKey ? null : current));
+    setOpenPriceDeltaTooltipKey((current) => (current === cardKey ? null : current));
   }
 
   return (
@@ -823,6 +776,21 @@ export function Step6Analysis() {
               const listingKey = getListingSelectionKey(listing);
               const cardInstanceKey = listingKey || `${listing.platform || "platform"}:${listing.platform_listing_id || index}`;
               const price = getListingDisplayPrice(listing);
+              const regionAveragePrice = priceComparisonDashboardQuery.data?.price.zone_average_price ?? null;
+              const priceDeltaVsRegion = calculatePercentDelta(price, regionAveragePrice);
+              const unitPriceLabel = typeof listing.current_unit_price === "number" && Number.isFinite(listing.current_unit_price)
+                ? `${formatCurrencyBr(listing.current_unit_price)}/m²`
+                : "m² sem base";
+              const priceDeltaTone = typeof priceDeltaVsRegion !== "number"
+                ? "text-slate-500"
+                : priceDeltaVsRegion > 0
+                  ? "text-rose-600"
+                  : priceDeltaVsRegion < 0
+                    ? "text-emerald-600"
+                    : "text-slate-600";
+              const priceDeltaDetail = typeof regionAveragePrice === "number"
+                ? `${debouncedPriceComparisonFilters.spatialScope === "inside_zone" ? "Média da zona" : "Média do recorte"}: ${formatCurrencyBr(regionAveragePrice)}`
+                : "Média da região indisponível";
               const adUrl = resolvePlatformUrl(listing.url, listing.platform);
               const imageUrl = resolvePlatformImageUrl(listing.image_url, listing.platform);
               const platformVariants = listing.platform_variants || [];
@@ -893,14 +861,54 @@ export function Step6Analysis() {
                     </div>
                   </div>
                   <div className="flex flex-1 flex-col p-4">
-                    <div className="mb-1 flex items-start justify-between gap-3">
-                      <div>
+                    <div className="mb-1 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(190px,224px)] sm:items-start">
+                      <div className="min-w-0">
                         <p className="text-sm text-slate-500">{config.type === "rent" ? "Locação" : "Compra"}</p>
                         {(listing.platforms_available || []).length > 1 ? (
                           <p className="text-xs text-slate-400">Menor preço em {platformLabel(listing.platform)}</p>
                         ) : null}
                       </div>
-                      <h3 className="text-xl font-bold text-slate-800">{formatCurrencyBr(price)}</h3>
+                      <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3 shadow-sm">
+                        <div className="grid grid-cols-[minmax(0,1fr)_auto] grid-rows-[auto_auto] gap-x-5 gap-y-1">
+                          <p className="self-start text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">Preço atual</p>
+                          <div
+                            className={`relative flex items-start justify-end self-start ${openPriceDeltaTooltipKey === cardInstanceKey ? "z-10" : ""}`}
+                            onMouseEnter={() => setOpenPriceDeltaTooltipKey(cardInstanceKey)}
+                            onMouseLeave={() => setOpenPriceDeltaTooltipKey((current) => (current === cardInstanceKey ? null : current))}
+                            onFocusCapture={() => setOpenPriceDeltaTooltipKey(cardInstanceKey)}
+                            onBlurCapture={(event) => handlePriceDeltaTooltipBlur(cardInstanceKey, event)}
+                          >
+                            <button
+                              type="button"
+                              data-testid={`listing-price-delta-trigger-${cardInstanceKey}`}
+                              aria-describedby={openPriceDeltaTooltipKey === cardInstanceKey ? `listing-price-delta-tooltip-${cardInstanceKey}` : undefined}
+                              aria-label={priceDeltaDetail}
+                              onClick={(event) => event.stopPropagation()}
+                              onKeyDown={(event) => event.stopPropagation()}
+                              className={`inline-flex items-center gap-1 rounded-md px-1 py-0.5 text-[0.9rem] font-semibold leading-none ${priceDeltaTone}`}
+                            >
+                              {typeof priceDeltaVsRegion === "number" ? (
+                                priceDeltaVsRegion > 0 ? <ArrowUpRight className="h-4 w-4" /> : <ArrowDownRight className="h-4 w-4" />
+                              ) : null}
+                              <span>{formatPercentDelta(priceDeltaVsRegion)}</span>
+                            </button>
+                            {openPriceDeltaTooltipKey === cardInstanceKey && typeof regionAveragePrice === "number" ? (
+                              <div
+                                id={`listing-price-delta-tooltip-${cardInstanceKey}`}
+                                role="tooltip"
+                                data-testid={`listing-price-delta-tooltip-${cardInstanceKey}`}
+                                className="absolute right-0 top-[calc(100%+0.4rem)] max-w-[220px] rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-left text-[11px] text-slate-600 shadow-lg"
+                              >
+                                {priceDeltaDetail}
+                              </div>
+                            ) : null}
+                          </div>
+                          <h3 className="self-end text-xl font-bold leading-tight text-slate-800">{formatCurrencyBr(price)}</h3>
+                          <div className="flex items-end justify-end self-end text-right">
+                            <span className="text-[0.8rem] font-semibold leading-none text-slate-700">{unitPriceLabel}</span>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                     <h4 className="mb-2 text-sm font-medium text-slate-700">{listing.address_normalized || "Endereço não informado"}</h4>
                     <div className="mb-4 flex flex-wrap items-center gap-4 text-sm text-slate-600">
@@ -975,46 +983,31 @@ export function Step6Analysis() {
                         ) : null}
                       </div>
                     ) : null}
-                    <div
-                      className={`relative mt-auto border-t border-slate-100 pt-3 ${openAccessibilityPopoverKey === cardInstanceKey ? "z-20" : ""}`}
-                      onBlurCapture={(event) => handleAccessibilityPopoverBlur(cardInstanceKey, event)}
-                    >
-                      {openAccessibilityPopoverKey === cardInstanceKey ? (
-                        <ListingAccessibilityPopover
-                          open
-                          popoverId={`listing-accessibility-popover-${cardInstanceKey}`}
-                          listing={listing}
-                          onClose={() => setOpenAccessibilityPopoverKey((current) => (current === cardInstanceKey ? null : current))}
-                        />
-                      ) : null}
-
-                      <div className="flex gap-2">
+                    <div className="mt-auto border-t border-slate-100 pt-3">
+                      {adUrl ? (
+                        <a
+                          href={adUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          aria-label="Abrir página do anúncio"
+                          onClick={(event) => event.stopPropagation()}
+                          className="flex w-full items-center justify-center gap-2 rounded-lg bg-pastel-violet-50 px-3 py-2.5 text-sm font-medium text-pastel-violet-600 transition-colors hover:bg-pastel-violet-100"
+                        >
+                          <span>Abrir página do anúncio</span>
+                          <ExternalLink className="h-4 w-4" />
+                        </a>
+                      ) : (
                         <button
                           type="button"
-                          aria-haspopup="dialog"
-                          aria-expanded={openAccessibilityPopoverKey === cardInstanceKey}
-                          aria-controls={`listing-accessibility-popover-${cardInstanceKey}`}
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            if (listingKey) {
-                              setSelectedListingKey(listingKey);
-                            }
-                            setOpenAccessibilityPopoverKey((current) => (current === cardInstanceKey ? null : cardInstanceKey));
-                          }}
-                          className="flex-1 rounded-lg bg-slate-50 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100"
+                          disabled
+                          aria-label="Anúncio indisponível"
+                          onClick={(event) => event.stopPropagation()}
+                          className="flex w-full cursor-not-allowed items-center justify-center gap-2 rounded-lg bg-slate-100 px-3 py-2.5 text-sm font-medium text-slate-400"
                         >
-                          Ver Acessibilidade
+                          <span>Anúncio indisponível</span>
+                          <ExternalLink className="h-4 w-4" />
                         </button>
-                        {adUrl ? (
-                          <a href={adUrl} target="_blank" rel="noreferrer" aria-label="Ver anúncio" onClick={(event) => event.stopPropagation()} className="flex w-10 items-center justify-center rounded-lg bg-pastel-violet-50 text-pastel-violet-500 transition-colors hover:bg-pastel-violet-100">
-                            <ExternalLink className="h-4 w-4" />
-                          </a>
-                        ) : (
-                          <button type="button" disabled aria-label="Anúncio indisponível" onClick={(event) => event.stopPropagation()} className="flex w-10 cursor-not-allowed items-center justify-center rounded-lg bg-slate-100 text-slate-300">
-                            <ExternalLink className="h-4 w-4" />
-                          </button>
-                        )}
-                      </div>
+                      )}
                     </div>
                   </div>
                 </div>

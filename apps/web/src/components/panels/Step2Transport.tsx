@@ -252,7 +252,6 @@ export function Step2Transport() {
       <div className="border-b border-slate-100 p-5">
         <h2 className="text-xl font-semibold tracking-tight text-slate-800">Transporte</h2>
         <p className="text-sm text-slate-500">Selecione o ponto de transporte usado como seed da geração de zonas.</p>
-        {config.modal === "transit" && config.publicTransportMode === "bus" ? <p className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">No modo Ônibus, a lista continua mostrando os pontos urbanos do entorno. A geração de zonas ainda depende da cobertura GTFS perto do seed escolhido.</p> : null}
       </div>
 
       <div className="panel-scroll flex-1 overflow-y-auto bg-slate-50/50 p-4">
@@ -313,7 +312,7 @@ export function Step2Transport() {
 
       <div className="border-t border-slate-100 bg-white p-5">
         <button type="button" onClick={handleAdvance} disabled={!selectedTransportId} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-3 text-sm font-medium text-white transition-all hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400">
-          Confirmar ponto seed
+          Confirmar ponto de referência
           <MapIcon className="h-4 w-4" />
         </button>
       </div>

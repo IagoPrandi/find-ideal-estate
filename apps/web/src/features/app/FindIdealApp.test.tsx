@@ -8,6 +8,7 @@ import { getBusLineDetails, getBusStopDetails, getJourneyTransportPoints, getJou
 const mapEaseToMock = vi.fn();
 const mapSetLayoutPropertyMock = vi.fn();
 const mapSetFilterMock = vi.fn();
+const mapQueryRenderedFeaturesMock = vi.fn(() => []);
 let lastPopupHtml = "";
 const mapLayerClickHandlers: Record<string, (event: any) => void> = {};
 const mapEventHandlers: Record<string, Array<(event?: any) => void>> = {};
@@ -15,6 +16,7 @@ const loadedSourceIds = new Set<string>();
 const mapAddedLayers: Array<Record<string, any>> = [];
 const mapSourceData: Record<string, unknown> = {};
 const mapSourceDefinitions: Record<string, Record<string, any>> = {};
+const mapCreatedMarkers: Array<{ options: Record<string, any> | undefined }> = [];
 
 function emitMapEvent(event: string, payload?: any) {
   for (const handler of mapEventHandlers[event] || []) {
@@ -61,6 +63,9 @@ vi.mock("maplibre-gl", () => {
   }
 
   class MockMarker {
+    constructor(options?: Record<string, any>) {
+      mapCreatedMarkers.push({ options });
+    }
     setLngLat() {
       return this;
     }
@@ -153,7 +158,7 @@ vi.mock("maplibre-gl", () => {
       return this;
     }
     queryRenderedFeatures() {
-      return [];
+      return mapQueryRenderedFeaturesMock();
     }
     getCanvas() {
       return { style: { cursor: "" } };
@@ -204,11 +209,14 @@ describe("FindIdealApp", () => {
     mapEaseToMock.mockReset();
     mapSetLayoutPropertyMock.mockReset();
     mapSetFilterMock.mockReset();
+    mapQueryRenderedFeaturesMock.mockReset();
+    mapQueryRenderedFeaturesMock.mockReturnValue([]);
     lastPopupHtml = "";
     Object.keys(mapLayerClickHandlers).forEach((key) => delete mapLayerClickHandlers[key]);
     Object.keys(mapEventHandlers).forEach((key) => delete mapEventHandlers[key]);
     loadedSourceIds.clear();
     mapAddedLayers.length = 0;
+    mapCreatedMarkers.length = 0;
     Object.keys(mapSourceData).forEach((key) => delete mapSourceData[key]);
     Object.keys(mapSourceDefinitions).forEach((key) => delete mapSourceDefinitions[key]);
 
@@ -299,6 +307,59 @@ describe("FindIdealApp", () => {
     });
 
     expect(useJourneyStore.getState().selectedListingKey).toBe("property:prop-1");
+  });
+
+  it("renders transport and listing points as pin symbols and animates the selected listing pin", async () => {
+    renderWithQueryClient();
+
+    await waitFor(() => {
+      expect(mapAddedLayers.find((layer) => layer.id === "transport-candidate-layer")?.type).toBe("symbol");
+      expect(mapAddedLayers.find((layer) => layer.id === "journey-listings-layer")?.type).toBe("symbol");
+    });
+
+    await act(async () => {
+      useJourneyStore.getState().setSelectedListingKey("property:prop-1");
+    });
+
+    await waitFor(() => {
+      expect(mapCreatedMarkers.some((marker) => marker.options?.anchor === "bottom" && marker.options?.element?.dataset?.selectedPinKind === "listing")).toBe(true);
+    });
+  });
+
+  it("clears selected transport and listing pins when the user clicks outside the pin hit area", async () => {
+    useJourneyStore.setState((state) => ({
+      ...state,
+      selectedTransportId: "transport-1",
+      selectedListingKey: "property:prop-1",
+    }));
+    vi.mocked(getJourneyTransportPoints).mockResolvedValue([
+      {
+        id: "transport-1",
+        lon: -46.69,
+        lat: -23.51,
+        name: "Parada A",
+        route_count: 3,
+        source: "gtfs_stop",
+        external_id: "stop-1",
+      }
+    ] as never);
+
+    renderWithQueryClient();
+
+    await waitFor(() => {
+      expect(mapEventHandlers.click?.length).toBeGreaterThan(0);
+    });
+
+    await act(async () => {
+      emitMapEvent("click", {
+        point: { x: 24, y: 24 },
+        lngLat: { lat: -23.52, lng: -46.68 },
+        originalEvent: { target: document.body }
+      });
+    });
+
+    expect(useJourneyStore.getState().selectedTransportId).toBeNull();
+    expect(useJourneyStore.getState().selectedListingKey).toBeNull();
   });
 
   it("loads transport points first, then lines, then green areas and finally flood areas", async () => {

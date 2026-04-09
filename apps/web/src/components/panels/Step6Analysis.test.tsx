@@ -600,7 +600,7 @@ describe("Step6Analysis", () => {
     expect(within(popover).getByRole("link", { name: /Abrir anúncio na QuintoAndar/i })).toHaveAttribute("href", "https://www.quintoandar.com.br/imovel/qa-1");
   });
 
-  it("opens the accessibility popup from the listing card with unit price and neighborhood delta", async () => {
+  it("renders the price metrics inline in the listing card", async () => {
     vi.mocked(getZoneListings).mockResolvedValue({
       source: "cache",
       job_id: null,
@@ -656,24 +656,16 @@ describe("Step6Analysis", () => {
     });
 
     expect(vi.mocked(getZoneDashboardAnalytics).mock.calls.some((call) => call[3] === "prop-1")).toBe(false);
+    expect(within(listingCard).queryByRole("button", { name: /Ver Acessibilidade/i })).not.toBeInTheDocument();
+    expect(within(listingCard).getByText(/R\$\s*105\/m²/i)).toBeInTheDocument();
+    expect(within(listingCard).getByText(/\+18\.9%/i)).toBeInTheDocument();
+    expect(within(listingCard).queryByText(/Valor por m²/i)).not.toBeInTheDocument();
+    expect(within(listingCard).queryByText(/Média do recorte:\s*R\$\s*10\.850/i)).not.toBeInTheDocument();
 
-    const preClickCallCount = vi.mocked(getZoneDashboardAnalytics).mock.calls.length;
-    fireEvent.click(within(listingCard).getByRole("button", { name: /Ver Acessibilidade/i }));
+    fireEvent.mouseEnter(within(listingCard).getByTestId("listing-price-delta-trigger-property:prop-1"));
+    expect(await within(listingCard).findByTestId("listing-price-delta-tooltip-property:prop-1")).toHaveTextContent(/Média do recorte:\s*R\$\s*10\.850/i);
 
-    expect(vi.mocked(getZoneDashboardAnalytics).mock.calls).toHaveLength(preClickCallCount);
-
-    const popover = await within(listingCard).findByTestId("listing-accessibility-popover-property:prop-1");
-    expect(within(popover).getByText(/Valor por m²/i)).toBeInTheDocument();
-    expect(within(popover).getByText(/Diferença vs bairro/i)).toBeInTheDocument();
-    expect(within(popover).getByText(/R\$\s*105/i)).toBeInTheDocument();
-    expect(within(popover).getByText(/\+5\.3%/i)).toBeInTheDocument();
-    expect(within(popover).getByText(/Comparação frente à mediana de Itaim Bibi/i)).toBeInTheDocument();
-
-    fireEvent.click(within(popover).getByRole("button", { name: /Fechar acessibilidade do imóvel/i }));
-
-    await waitFor(() => {
-      expect(within(listingCard).queryByTestId("listing-accessibility-popover-property:prop-1")).not.toBeInTheDocument();
-    });
+    expect(within(listingCard).getByRole("button", { name: /Anúncio indisponível/i })).toBeDisabled();
   });
 
   it("scrolls the matching card into view when the map selects a listing", async () => {
