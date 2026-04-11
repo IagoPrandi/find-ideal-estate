@@ -266,6 +266,7 @@ async def _persist_listings(
     listings: list[dict[str, Any]],
     platform: str,
     search_type: str,
+    search_location_normalized: str,
 ) -> int:
     """Upsert all listings. Returns count persisted."""
     count = 0
@@ -309,7 +310,10 @@ async def _persist_listings(
             price=price,
             condo_fee=condo_fee,
             iptu=iptu,
-            raw_payload=listing,
+            raw_payload={
+                **listing,
+                "search_location_normalized": search_location_normalized,
+            },
         )
         count += 1
     return count
@@ -616,7 +620,12 @@ async def _listings_scrape_step(job_id: UUID) -> None:
             )
 
             try:
-                n = await _persist_listings(listings, platform, search_type)
+                n = await _persist_listings(
+                    listings,
+                    platform,
+                    search_type,
+                    search_location_normalized,
+                )
             except Exception as exc:  # noqa: BLE001
                 platforms_failed.append(platform)
                 persist_finished_at = _utcnow()

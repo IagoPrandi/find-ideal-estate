@@ -187,11 +187,18 @@ async def fetch_listing_cards_for_zone(
     platforms: list[str],
     observed_since: Any | None = None,
     spatial_scope: str = "inside_zone",
+    search_location_normalized: str | None = None,
 ) -> list[dict[str, Any]]:
     """
-    Return flattened listing cards for the given zone fingerprint.
-    Supports either only listings inside the selected zone or the broader set
-    of scraped listings, including items without coordinates.
+        Return flattened listing cards for the given zone fingerprint.
+
+        The loaded set is the union of:
+            - active listings already known for properties inside the selected zone;
+            - active listings observed in the latest direct-search batch for the zone.
+
+        This keeps the panel grounded on the zone inventory already persisted in the
+        database while still exposing direct-search results that may fall outside the
+        polygon or still lack coordinates.
     """
     engine = get_engine()
 
@@ -258,10 +265,26 @@ async def fetch_listing_cards_for_zone(
                       AND la.platform = ANY(:platforms)
                       AND (la.advertised_usage_type = :search_type OR la.advertised_usage_type IS NULL)
                       AND (ls.availability_state = 'active' OR ls.availability_state IS NULL)
-                                            AND (
-                                                CAST(:observed_since AS TIMESTAMPTZ) IS NULL
-                                                OR ls.observed_at >= CAST(:observed_since AS TIMESTAMPTZ)
-                                            )
+                ),
+                recent_search_properties AS (
+                    SELECT DISTINCT la.property_id
+                    FROM listing_ads la
+                    JOIN listing_snapshots ls ON ls.listing_ad_id = la.id
+                    WHERE la.is_active = true
+                      AND la.platform = ANY(:platforms)
+                      AND (la.advertised_usage_type = :search_type OR la.advertised_usage_type IS NULL)
+                      AND (ls.availability_state = 'active' OR ls.availability_state IS NULL)
+                      AND (
+                            (
+                                :has_search_location = TRUE
+                                AND ls.raw_payload->>'search_location_normalized' = :search_location_normalized
+                            )
+                            OR (
+                                CAST(:observed_since AS TIMESTAMPTZ) IS NOT NULL
+                                AND COALESCE(ls.raw_payload->>'search_location_normalized', '') = ''
+                                AND ls.observed_at >= CAST(:observed_since AS TIMESTAMPTZ)
+                            )
+                        )
                 ),
                 zone_props AS (
                     SELECT
@@ -398,12 +421,14 @@ async def fetch_listing_cards_for_zone(
                           AND bp2.platform_rank = 1
                     )                  AS platform_variants
                 FROM zone_props zp
+                                LEFT JOIN recent_search_properties rsp ON rsp.property_id = zp.property_id
                 JOIN ranked_prices bp ON bp.property_id = zp.property_id AND bp.price_rank = 1
                                 LEFT JOIN property_price_context ppc ON ppc.property_id = zp.property_id
                                 LEFT JOIN neighborhood_medians nm
                                     ON nm.city_name = ppc.city_name
                                  AND nm.neighborhood_name = ppc.neighborhood_name
-                WHERE (:spatial_scope = 'all' OR zp.inside_zone = true)
+                                WHERE (zp.inside_zone = true OR rsp.property_id IS NOT NULL)
+                                    AND (:spatial_scope = 'all' OR zp.inside_zone = true)
                 ORDER BY zp.inside_zone DESC, zp.has_coordinates DESC, bp.total_price ASC NULLS LAST
                 """
             ),
@@ -414,6 +439,8 @@ async def fetch_listing_cards_for_zone(
                 "search_type": search_type,
                 "observed_since": observed_since,
                 "spatial_scope": spatial_scope,
+                "has_search_location": bool(search_location_normalized),
+                "search_location_normalized": search_location_normalized,
             },
         )
 

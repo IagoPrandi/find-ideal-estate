@@ -487,35 +487,39 @@ async def get_zone_listings(
         raise HTTPException(status_code=400, detail="spatial_scope deve ser 'inside_zone' ou 'all'")
 
     latest_search = await get_latest_search_request_for_zone(journey_id, zone_fingerprint)
-    cache = await get_cache_record(
-        latest_search["search_location_normalized"] if latest_search else None
+    latest_search_location = (
+        str(latest_search["search_location_normalized"])
+        if latest_search and latest_search.get("search_location_normalized")
+        else None
     )
+    cache = await get_cache_record(latest_search_location)
+    usable_cache = cache if cache and cache_is_usable(cache) else None
 
-    if not cache or not cache_is_usable(cache):
-        active_job_id = await _find_active_listings_job_id(
-            journey_id,
-            zone_fingerprint=zone_fingerprint,
-            search_location_normalized=(
-                str(latest_search["search_location_normalized"]) if latest_search else None
-            ),
-        )
-        return ListingsRequestResult(
-            source="none",
-            job_id=active_job_id,
-            freshness_status="no_cache",
-            listings=[],
-            total_count=0,
-        )
-
-    display_platforms = _cache_display_platforms(cache, canonical_platforms)
+    display_platforms = _cache_display_platforms(usable_cache, canonical_platforms)
     listing_cards_raw = await fetch_listing_cards_for_zone(
         zone_fingerprint=zone_fingerprint,
         search_type=search_type,
         usage_type=usage_type,
         platforms=display_platforms,
-        observed_since=cache.get("created_at"),
+        observed_since=usable_cache.get("created_at") if usable_cache else None,
         spatial_scope=spatial_scope,
+        search_location_normalized=latest_search_location,
     )
+
+    if usable_cache is None:
+        active_job_id = await _find_active_listings_job_id(
+            journey_id,
+            zone_fingerprint=zone_fingerprint,
+            search_location_normalized=latest_search_location,
+        )
+        return ListingsRequestResult(
+            source="none",
+            job_id=active_job_id,
+            freshness_status="no_cache",
+            listings=listing_cards_raw,  # type: ignore[arg-type]
+            total_count=len(listing_cards_raw),
+        )
+
     age_hours = cache_age_hours(cache)
     freshness = "fresh"
 

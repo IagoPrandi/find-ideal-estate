@@ -193,10 +193,13 @@ async def test_fetch_listing_cards_for_zone_supports_all_spatial_scope() -> None
 
     zone_fingerprint = f"zone-dedup-{uuid4().hex[:8]}"
     platform_listing_ids = [f"dedup-qa-{uuid4().hex[:8]}", f"dedup-zap-{uuid4().hex[:8]}"]
+    base_lat = -22.3215
+    base_lon = -45.1843
+    address_label = "Rua Teste Dedup, Bairro Dedup QA, Cidade Dedup, SP"
     fingerprint = compute_property_fingerprint(
-        address_normalized="Rua Teste Dedup, Itaim Bibi, São Paulo, SP",
-        lat=-23.5505,
-        lon=-46.6333,
+        address_normalized=address_label,
+        lat=base_lat,
+        lon=base_lon,
         area_m2=70,
         bedrooms=2,
     )
@@ -238,15 +241,15 @@ async def test_fetch_listing_cards_for_zone_supports_all_spatial_scope() -> None
                 ),
                 {
                     "fingerprint": zone_fingerprint,
-                    "polygon_wkt": "POLYGON((-46.64 -23.56, -46.62 -23.56, -46.62 -23.54, -46.64 -23.54, -46.64 -23.56))",
+                    "polygon_wkt": f"POLYGON(({base_lon - 0.01} {base_lat - 0.01}, {base_lon + 0.01} {base_lat - 0.01}, {base_lon + 0.01} {base_lat + 0.01}, {base_lon - 0.01} {base_lat + 0.01}, {base_lon - 0.01} {base_lat - 0.01}))",
                 },
             )
 
         await upsert_property_and_ad(
             fingerprint=fingerprint,
-            address_normalized="Rua Teste Dedup, Itaim Bibi, São Paulo, SP",
-            lat=-23.5505,
-            lon=-46.6333,
+            address_normalized=address_label,
+            lat=base_lat,
+            lon=base_lon,
             area_m2=70,
             bedrooms=2,
             bathrooms=2,
@@ -263,9 +266,9 @@ async def test_fetch_listing_cards_for_zone_supports_all_spatial_scope() -> None
         )
         await upsert_property_and_ad(
             fingerprint=fingerprint,
-            address_normalized="Rua Teste Dedup, Itaim Bibi, São Paulo, SP",
-            lat=-23.5505,
-            lon=-46.6333,
+            address_normalized=address_label,
+            lat=base_lat,
+            lon=base_lon,
             area_m2=70,
             bedrooms=2,
             bathrooms=2,
@@ -306,8 +309,8 @@ async def test_fetch_listing_cards_for_zone_supports_all_spatial_scope() -> None
         assert cards[0]["platform_variants"][1]["current_best_price"] == "3300.00"
         assert cards[0]["platform_variants"][1]["condo_fee"] == "800.00"
         assert cards[0]["platform_variants"][1]["iptu"] == "90.00"
-        assert cards[0]["neighborhood_name"] == "Itaim Bibi"
-        assert cards[0]["city_name"] == "São Paulo"
+        assert cards[0]["neighborhood_name"] == "Bairro Dedup QA"
+        assert cards[0]["city_name"] == "Cidade Dedup"
         assert cards[0]["current_unit_price"] == pytest.approx(58.57142857142857)
         assert cards[0]["neighborhood_median_unit_price"] == pytest.approx(58.57142857142857)
         assert cards[0]["current_vs_neighborhood_pct"] == pytest.approx(0.0)
@@ -322,6 +325,238 @@ async def test_fetch_listing_cards_for_zone_supports_all_spatial_scope() -> None
                 platform_listing_ids=platform_listing_ids,
                 zone_fingerprint=zone_fingerprint,
             )
+        await close_db()
+
+
+@pytest.mark.anyio
+async def test_fetch_listing_cards_for_zone_all_scope_limits_outside_zone_to_recent_direct_search() -> None:
+    init_db(os.environ["DATABASE_URL"])
+
+    zone_fingerprint = f"zone-dedup-{uuid4().hex[:8]}"
+    inside_listing_id = f"inside-{uuid4().hex[:8]}"
+    direct_listing_id = f"direct-{uuid4().hex[:8]}"
+    unrelated_listing_id = f"outside-{uuid4().hex[:8]}"
+    inside_lat = -22.4315
+    inside_lon = -45.2843
+    direct_lat = -22.4715
+    direct_lon = -45.3243
+    unrelated_lat = -22.5115
+    unrelated_lon = -45.3643
+    inside_fingerprint = compute_property_fingerprint(
+        address_normalized="Rua Dentro, Itaim Bibi, São Paulo, SP",
+        lat=inside_lat,
+        lon=inside_lon,
+        area_m2=70,
+        bedrooms=2,
+    )
+    direct_fingerprint = compute_property_fingerprint(
+        address_normalized="Rua Fora, Vila Olímpia, São Paulo, SP",
+        lat=direct_lat,
+        lon=direct_lon,
+        area_m2=65,
+        bedrooms=2,
+    )
+    unrelated_fingerprint = compute_property_fingerprint(
+        address_normalized="Rua Distante, Moema, São Paulo, SP",
+        lat=unrelated_lat,
+        lon=unrelated_lon,
+        area_m2=55,
+        bedrooms=1,
+    )
+    direct_search_location = "rua fora, vila olimpia, sao paulo, sp"
+    unrelated_search_location = "rua distante, moema, sao paulo, sp"
+    observed_since = datetime.now(timezone.utc) - timedelta(minutes=10)
+    schema_ready = False
+
+    async def _cleanup() -> None:
+        engine = get_engine()
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    """
+                    DELETE FROM listing_snapshots
+                    WHERE listing_ad_id IN (
+                        SELECT id FROM listing_ads WHERE platform_listing_id = ANY(:platform_listing_ids)
+                    )
+                    """
+                ),
+                {"platform_listing_ids": [inside_listing_id, direct_listing_id, unrelated_listing_id]},
+            )
+            await conn.execute(
+                text("DELETE FROM listing_ads WHERE platform_listing_id = ANY(:platform_listing_ids)"),
+                {"platform_listing_ids": [inside_listing_id, direct_listing_id, unrelated_listing_id]},
+            )
+            await conn.execute(
+                text("DELETE FROM properties WHERE fingerprint = ANY(:fingerprints)"),
+                {"fingerprints": [inside_fingerprint, direct_fingerprint, unrelated_fingerprint]},
+            )
+            await conn.execute(
+                text("DELETE FROM zones WHERE fingerprint = :zone_fingerprint"),
+                {"zone_fingerprint": zone_fingerprint},
+            )
+
+    try:
+        schema_ready = await _phase5_schema_ready()
+        if not schema_ready:
+            pytest.skip("Phase 5 schema not migrated. Run alembic upgrade head.")
+
+        await _cleanup()
+
+        engine = get_engine()
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    """
+                    INSERT INTO zones (
+                        fingerprint,
+                        modal,
+                        max_time_minutes,
+                        radius_meters,
+                        isochrone_geom,
+                        state
+                    ) VALUES (
+                        :fingerprint,
+                        'transit',
+                        30,
+                        1200,
+                        ST_GeomFromText(:polygon_wkt, 4326),
+                        'complete'
+                    )
+                    """
+                ),
+                {
+                    "fingerprint": zone_fingerprint,
+                    "polygon_wkt": f"POLYGON(({inside_lon - 0.01} {inside_lat - 0.01}, {inside_lon + 0.01} {inside_lat - 0.01}, {inside_lon + 0.01} {inside_lat + 0.01}, {inside_lon - 0.01} {inside_lat + 0.01}, {inside_lon - 0.01} {inside_lat - 0.01}))",
+                },
+            )
+
+        await upsert_property_and_ad(
+            fingerprint=inside_fingerprint,
+            address_normalized="Rua Dentro, Itaim Bibi, São Paulo, SP",
+            lat=inside_lat,
+            lon=inside_lon,
+            area_m2=70,
+            bedrooms=2,
+            bathrooms=2,
+            parking=1,
+            usage_type="residential",
+            platform="quintoandar",
+            platform_listing_id=inside_listing_id,
+            url="https://example.org/quintoandar/inside",
+            advertised_usage_type="rent",
+            price=Decimal("3500"),
+            condo_fee=Decimal("500"),
+            iptu=Decimal("100"),
+            raw_payload={"image_url": "https://example.org/inside.jpg"},
+        )
+        await upsert_property_and_ad(
+            fingerprint=direct_fingerprint,
+            address_normalized="Rua Fora, Vila Olímpia, São Paulo, SP",
+            lat=direct_lat,
+            lon=direct_lon,
+            area_m2=65,
+            bedrooms=2,
+            bathrooms=2,
+            parking=1,
+            usage_type="residential",
+            platform="zapimoveis",
+            platform_listing_id=direct_listing_id,
+            url="https://example.org/zap/direct",
+            advertised_usage_type="rent",
+            price=Decimal("4200"),
+            condo_fee=Decimal("300"),
+            iptu=Decimal("50"),
+            raw_payload={
+                "image_url": "https://example.org/direct.jpg",
+                "search_location_normalized": direct_search_location,
+            },
+        )
+        await upsert_property_and_ad(
+            fingerprint=unrelated_fingerprint,
+            address_normalized="Rua Distante, Moema, São Paulo, SP",
+            lat=unrelated_lat,
+            lon=unrelated_lon,
+            area_m2=55,
+            bedrooms=1,
+            bathrooms=1,
+            parking=0,
+            usage_type="residential",
+            platform="vivareal",
+            platform_listing_id=unrelated_listing_id,
+            url="https://example.org/vr/outside",
+            advertised_usage_type="rent",
+            price=Decimal("3000"),
+            condo_fee=Decimal("200"),
+            iptu=Decimal("25"),
+            raw_payload={
+                "image_url": "https://example.org/outside.jpg",
+                "search_location_normalized": unrelated_search_location,
+            },
+        )
+
+        engine = get_engine()
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    """
+                    UPDATE listing_snapshots
+                    SET observed_at = :observed_at
+                    WHERE listing_ad_id IN (
+                        SELECT id FROM listing_ads WHERE platform_listing_id = ANY(:listing_ids)
+                    )
+                    """
+                ),
+                {
+                    "observed_at": datetime.now(timezone.utc) - timedelta(minutes=5),
+                    "listing_ids": [direct_listing_id, unrelated_listing_id],
+                },
+            )
+            await conn.execute(
+                text(
+                    """
+                    UPDATE listing_snapshots
+                    SET observed_at = :observed_at
+                    WHERE listing_ad_id IN (
+                        SELECT id FROM listing_ads WHERE platform_listing_id = :listing_id
+                    )
+                    """
+                ),
+                {
+                    "observed_at": datetime.now(timezone.utc) - timedelta(hours=2),
+                    "listing_id": inside_listing_id,
+                },
+            )
+
+        cards = await fetch_listing_cards_for_zone(
+            zone_fingerprint=zone_fingerprint,
+            search_type="rent",
+            usage_type="residential",
+            platforms=["quintoandar", "zapimoveis", "vivareal"],
+            observed_since=observed_since,
+            spatial_scope="all",
+            search_location_normalized=direct_search_location,
+        )
+
+        addresses = {card["address_normalized"] for card in cards}
+        assert "Rua Dentro, Itaim Bibi, São Paulo, SP" in addresses
+        assert "Rua Fora, Vila Olímpia, São Paulo, SP" in addresses
+        assert "Rua Distante, Moema, São Paulo, SP" not in addresses
+
+        cards_inside_only = await fetch_listing_cards_for_zone(
+            zone_fingerprint=zone_fingerprint,
+            search_type="rent",
+            usage_type="residential",
+            platforms=["quintoandar", "zapimoveis", "vivareal"],
+            observed_since=None,
+            spatial_scope="all",
+            search_location_normalized=None,
+        )
+
+        inside_only_addresses = {card["address_normalized"] for card in cards_inside_only}
+        assert inside_only_addresses == {"Rua Dentro, Itaim Bibi, São Paulo, SP"}
+    finally:
+        if schema_ready:
+            await _cleanup()
         await close_db()
 
 

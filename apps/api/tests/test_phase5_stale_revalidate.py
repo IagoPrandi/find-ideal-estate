@@ -398,6 +398,7 @@ def test_get_zone_listings_uses_cache_completed_platforms(monkeypatch) -> None:
     assert response.json()["listings"][0]["lon"] == -46.727
     assert fetch_calls[0]["platforms"] == ["quintoandar"]
     assert fetch_calls[0]["observed_since"] == cache["created_at"]
+    assert fetch_calls[0]["search_location_normalized"] == _payload()["search_location_normalized"]
 
 
 def test_get_zone_listings_reuses_latest_search_address_cache_across_zones(monkeypatch) -> None:
@@ -454,6 +455,7 @@ def test_get_zone_listings_reuses_latest_search_address_cache_across_zones(monke
     assert fetch_calls[0]["zone_fingerprint"] == "zone-a"
     assert fetch_calls[0]["platforms"] == ["quintoandar"]
     assert fetch_calls[0]["observed_since"] == reused_cache["created_at"]
+    assert fetch_calls[0]["search_location_normalized"] == _payload()["search_location_normalized"]
 
 
 def test_get_zone_listings_supports_all_spatial_scope(monkeypatch) -> None:
@@ -515,6 +517,7 @@ def test_get_zone_listings_supports_all_spatial_scope(monkeypatch) -> None:
     assert body["listings"][0]["inside_zone"] is False
     assert body["listings"][0]["has_coordinates"] is False
     assert fetch_calls[0]["spatial_scope"] == "all"
+    assert fetch_calls[0]["search_location_normalized"] == _payload()["search_location_normalized"]
 
 
 def test_listings_search_cache_miss_returns_job_id(monkeypatch) -> None:
@@ -669,11 +672,18 @@ def test_get_zone_listings_no_cache_exposes_active_job_id(monkeypatch) -> None:
         del zone_fingerprint, search_location_normalized
         return active_job_id
 
+    async def _fake_fetch_listing_cards_for_zone(**_kwargs):
+        return []
+
     monkeypatch.setattr("api.routes.listings.get_platform_registry", lambda: _Registry())
     monkeypatch.setattr("api.routes.listings.get_cache_record", _fake_get_cache_record)
     monkeypatch.setattr("api.routes.listings.get_latest_search_request_for_zone", _fake_latest_search)
     monkeypatch.setattr("api.routes.listings.cache_is_usable", _fake_cache_is_usable)
     monkeypatch.setattr("api.routes.listings._find_active_listings_job_id", _fake_find_active_job)
+    monkeypatch.setattr(
+        "api.routes.listings.fetch_listing_cards_for_zone",
+        _fake_fetch_listing_cards_for_zone,
+    )
 
     journey_id = uuid4()
     with TestClient(app) as client:
@@ -686,6 +696,59 @@ def test_get_zone_listings_no_cache_exposes_active_job_id(monkeypatch) -> None:
     assert body["source"] == "none"
     assert body["job_id"] == str(active_job_id)
     assert body["freshness_status"] == "no_cache"
+
+
+def test_get_zone_listings_no_cache_still_returns_zone_inventory(monkeypatch) -> None:
+    fetch_calls: list[dict[str, object]] = []
+
+    class _Registry:
+        def default_free_platforms(self):
+            return ["quintoandar", "zapimoveis"]
+
+        def resolve_names(self, names):
+            return list(names)
+
+    async def _fake_get_cache_record(_normalized):
+        return None
+
+    async def _fake_latest_search(_journey_id, _zone_fp):
+        return {"search_location_normalized": _payload()["search_location_normalized"]}
+
+    def _fake_cache_is_usable(record):
+        return bool(record)
+
+    async def _fake_find_active_job(_journey_id, zone_fingerprint=None, search_location_normalized=None):
+        del zone_fingerprint, search_location_normalized
+        return None
+
+    async def _fake_fetch_listing_cards_for_zone(**kwargs):
+        fetch_calls.append(kwargs)
+        return _fake_cards()
+
+    monkeypatch.setattr("api.routes.listings.get_platform_registry", lambda: _Registry())
+    monkeypatch.setattr("api.routes.listings.get_cache_record", _fake_get_cache_record)
+    monkeypatch.setattr("api.routes.listings.get_latest_search_request_for_zone", _fake_latest_search)
+    monkeypatch.setattr("api.routes.listings.cache_is_usable", _fake_cache_is_usable)
+    monkeypatch.setattr("api.routes.listings._find_active_listings_job_id", _fake_find_active_job)
+    monkeypatch.setattr(
+        "api.routes.listings.fetch_listing_cards_for_zone",
+        _fake_fetch_listing_cards_for_zone,
+    )
+
+    journey_id = uuid4()
+    with TestClient(app) as client:
+        response = client.get(
+            f"/journeys/{journey_id}/zones/zone-a/listings?search_type=rent&usage_type=residential"
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source"] == "none"
+    assert body["freshness_status"] == "no_cache"
+    assert body["total_count"] == 1
+    assert body["listings"][0]["address_normalized"] == "Rua Guaipa, 100"
+    assert fetch_calls[0]["observed_since"] is None
+    assert fetch_calls[0]["search_location_normalized"] == _payload()["search_location_normalized"]
 
 
 def test_listings_search_normalizes_address_before_active_job_lookup(monkeypatch) -> None:
