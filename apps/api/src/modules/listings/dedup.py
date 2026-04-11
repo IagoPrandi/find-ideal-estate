@@ -232,15 +232,25 @@ async def fetch_listing_cards_for_zone(
                         ls.price,
                         ls.condo_fee,
                         ls.iptu,
+                        CASE
+                            WHEN ls.price IS NULL THEN NULL
+                            ELSE COALESCE(ls.price, 0) + COALESCE(ls.condo_fee, 0) + COALESCE(ls.iptu, 0)
+                        END AS total_price,
                         ls.raw_payload->>'image_url' AS image_url,
                         ls.observed_at,
                         ROW_NUMBER() OVER (
                             PARTITION BY la.property_id
-                            ORDER BY ls.price ASC NULLS LAST, ls.observed_at DESC
+                            ORDER BY CASE
+                                WHEN ls.price IS NULL THEN NULL
+                                ELSE COALESCE(ls.price, 0) + COALESCE(ls.condo_fee, 0) + COALESCE(ls.iptu, 0)
+                            END ASC NULLS LAST, ls.observed_at DESC
                         ) AS price_rank,
                         ROW_NUMBER() OVER (
                             PARTITION BY la.property_id, la.platform
-                            ORDER BY ls.price ASC NULLS LAST, ls.observed_at DESC
+                            ORDER BY CASE
+                                WHEN ls.price IS NULL THEN NULL
+                                ELSE COALESCE(ls.price, 0) + COALESCE(ls.condo_fee, 0) + COALESCE(ls.iptu, 0)
+                            END ASC NULLS LAST, ls.observed_at DESC
                         ) AS platform_rank
                     FROM listing_ads la
                     JOIN listing_snapshots ls ON ls.listing_ad_id = la.id
@@ -299,9 +309,9 @@ async def fetch_listing_cards_for_zone(
                         zp.property_id,
                         zp.neighborhood_name,
                         zp.city_name,
-                        bp.price AS current_best_price,
+                        bp.total_price AS current_total_price,
                         CASE
-                            WHEN zp.area_m2 IS NOT NULL AND zp.area_m2 > 0 AND bp.price IS NOT NULL THEN bp.price::DOUBLE PRECISION / zp.area_m2::DOUBLE PRECISION
+                            WHEN zp.area_m2 IS NOT NULL AND zp.area_m2 > 0 AND bp.total_price IS NOT NULL THEN bp.total_price::DOUBLE PRECISION / zp.area_m2::DOUBLE PRECISION
                             ELSE NULL
                         END AS current_unit_price
                     FROM zone_props zp
@@ -338,6 +348,7 @@ async def fetch_listing_cards_for_zone(
                     bp.url,
                     bp.image_url,
                     bp.price          AS current_best_price,
+                    bp.total_price    AS current_total_price,
                     ppc.current_unit_price,
                     nm.neighborhood_median_unit_price,
                     CASE
@@ -380,7 +391,7 @@ async def fetch_listing_cards_for_zone(
                                 'iptu', bp2.iptu,
                                 'observed_at', bp2.observed_at
                             )
-                            ORDER BY bp2.price ASC NULLS LAST, bp2.observed_at DESC, bp2.platform
+                            ORDER BY bp2.total_price ASC NULLS LAST, bp2.observed_at DESC, bp2.platform
                         )
                         FROM ranked_prices bp2
                         WHERE bp2.property_id = zp.property_id
@@ -393,7 +404,7 @@ async def fetch_listing_cards_for_zone(
                                     ON nm.city_name = ppc.city_name
                                  AND nm.neighborhood_name = ppc.neighborhood_name
                 WHERE (:spatial_scope = 'all' OR zp.inside_zone = true)
-                ORDER BY zp.inside_zone DESC, zp.has_coordinates DESC, bp.price ASC NULLS LAST
+                ORDER BY zp.inside_zone DESC, zp.has_coordinates DESC, bp.total_price ASC NULLS LAST
                 """
             ),
             {
@@ -411,9 +422,10 @@ async def fetch_listing_cards_for_zone(
             platform_count = row["platform_count"] or 1
             second_price = row["second_best_price"]
             best_price = row["current_best_price"]
+            best_total_price = row["current_total_price"]
             dup_badge = None
-            if platform_count >= 2 and best_price is not None:
-                price_fmt = f"R$ {int(best_price):,}".replace(",", ".")
+            if platform_count >= 2 and best_total_price is not None:
+                price_fmt = f"R$ {int(best_total_price):,}".replace(",", ".")
                 dup_badge = f"Disponível em {platform_count} plataformas · menor: {price_fmt}"
 
             cards.append(

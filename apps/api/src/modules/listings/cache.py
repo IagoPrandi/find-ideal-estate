@@ -53,7 +53,7 @@ async def get_cache_record(
                 SELECT id, zone_fingerprint, config_hash, search_location_normalized, status,
                        platforms_completed, platforms_failed,
                        coverage_ratio, preliminary_count,
-                       scraped_at, expires_at, created_at
+                      scraped_at, last_prewarmed_at, expires_at, created_at
                 FROM zone_listing_caches
                 WHERE search_location_normalized = :normalized
                 ORDER BY created_at DESC
@@ -177,6 +177,26 @@ async def transition_cache_status(
         )
 
 
+async def mark_cache_prewarmed(
+    cache_id: UUID,
+    *,
+    prewarmed_at: datetime | None = None,
+) -> None:
+    timestamp = prewarmed_at or datetime.now(tz=timezone.utc)
+    engine = get_engine()
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                """
+                UPDATE zone_listing_caches
+                SET last_prewarmed_at = :prewarmed_at
+                WHERE id = :cache_id
+                """
+            ),
+            {"cache_id": cache_id, "prewarmed_at": timestamp},
+        )
+
+
 async def find_partial_hit_from_overlapping_zone(
     zone_fingerprint: str,
     config_hash: str,
@@ -193,7 +213,7 @@ async def find_partial_hit_from_overlapping_zone(
                 SELECT zlc.id, zlc.zone_fingerprint, zlc.config_hash,
                        zlc.status, zlc.platforms_completed, zlc.platforms_failed,
                        zlc.coverage_ratio, zlc.preliminary_count,
-                       zlc.scraped_at, zlc.expires_at, zlc.created_at
+                      zlc.scraped_at, zlc.last_prewarmed_at, zlc.expires_at, zlc.created_at
                 FROM zone_listing_caches zlc
                 JOIN zones src ON src.fingerprint = :zone_fp
                 JOIN zones alt ON alt.fingerprint = zlc.zone_fingerprint
@@ -233,7 +253,7 @@ async def find_usable_cache_for_search_location(
                        zlc.search_location_normalized,
                        zlc.status, zlc.platforms_completed, zlc.platforms_failed,
                        zlc.coverage_ratio, zlc.preliminary_count,
-                       zlc.scraped_at, zlc.expires_at, zlc.created_at
+                      zlc.scraped_at, zlc.last_prewarmed_at, zlc.expires_at, zlc.created_at
                 FROM zone_listing_caches zlc
                 WHERE zlc.search_location_normalized = :normalized
                   AND zlc.status IN ('complete', 'partial')

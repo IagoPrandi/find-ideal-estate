@@ -46,12 +46,12 @@ export function MapLegend({
         {stopsLoading && layerVisibility.busStops ? <p className="text-slate-500">Carregando paradas...</p> : null}
         {layerVisibility.flood ? (
           <div className="flex items-center gap-2">
-            <div className="h-3.5 w-3.5 rounded border border-purple-700/30 bg-purple-600/50" /> Risco de Cheia
+            <div className="h-3.5 w-3.5 rounded border border-purple-700/30 bg-purple-600/50" /> Risco de alagamento
           </div>
         ) : null}
         {layerVisibility.green ? (
           <div className="flex items-center gap-2">
-            <div className="h-3.5 w-3.5 rounded border border-green-600/30 bg-green-500/50" /> Área Verde
+            <div className="h-3.5 w-3.5 rounded border border-green-600/30 bg-green-500/50" /> Áreas verdes
           </div>
         ) : null}
         {layerVisibility.routes && hasRouteData ? (
@@ -66,32 +66,32 @@ export function MapLegend({
         ) : null}
         {layerVisibility.busStops ? (
           <div className="flex items-center gap-2">
-            <div className="h-3.5 w-3.5 rounded-full border border-white bg-blue-600" /> Paradas/estações
+            <div className="h-3.5 w-3.5 rounded-full border border-white bg-blue-600" /> Paradas e estações
           </div>
         ) : null}
         {layerVisibility.busStops && originalSeedPoint ? (
           <div className="flex items-center gap-2">
-            <div className="h-3.5 w-3.5 rounded-full border border-white bg-red-700" /> Seed original
+            <div className="h-3.5 w-3.5 rounded-full border border-white bg-red-700" /> Ponto original
           </div>
         ) : null}
         {layerVisibility.busStops && zoneSeedPoints.length > 0 ? (
           <div className="flex items-center gap-2">
-            <div className="h-3.5 w-3.5 rounded-full border border-white bg-orange-600" /> Seeds das zonas
+            <div className="h-3.5 w-3.5 rounded-full border border-white bg-orange-600" /> Pontos das zonas
           </div>
         ) : null}
         {layerVisibility.busStops && zoneDownstreamPoints.length > 0 ? (
           <div className="flex items-center gap-2">
-            <div className="h-3.5 w-3.5 rounded-full border border-white bg-violet-600" /> Downstream das zonas
+            <div className="h-3.5 w-3.5 rounded-full border border-white bg-violet-600" /> Pontos de conexão das zonas
           </div>
         ) : null}
         {layerVisibility.busStops && zoneDetailData?.seed_transport_point ? (
           <div className="flex items-center gap-2">
-            <div className="h-3.5 w-3.5 rounded-full border border-white bg-red-600" /> Seed (ponto principal)
+            <div className="h-3.5 w-3.5 rounded-full border border-white bg-red-600" /> Ponto principal
           </div>
         ) : null}
         {layerVisibility.busStops && zoneDetailData?.downstream_transport_point ? (
           <div className="flex items-center gap-2">
-            <div className="h-3.5 w-3.5 rounded-full border border-white bg-violet-600" /> Downstream da zona
+            <div className="h-3.5 w-3.5 rounded-full border border-white bg-violet-600" /> Ponto de conexão da zona
           </div>
         ) : null}
         {activeStep === 2 && layerVisibility.transportCandidates ? (

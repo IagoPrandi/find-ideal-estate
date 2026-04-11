@@ -22,7 +22,7 @@ export function AddressSearchBar({ value, onChange, onSubmit, containerStyle }: 
           id="map-search"
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          placeholder="Endereço ou bairro..."
+          placeholder="Busque um endereço ou bairro"
           className="w-full border-none bg-transparent text-sm font-medium text-slate-700 outline-none placeholder:text-slate-400"
         />
         <button type="submit" className="ml-2 text-sm font-bold text-pastel-violet-600">

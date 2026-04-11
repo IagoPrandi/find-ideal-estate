@@ -194,80 +194,73 @@ class QuintoAndarScraper(ScraperBase):
 
     async def scrape(self) -> list[dict[str, Any]]:
         self._check_robots("/imoveis/")
+        return await self._scrape_once_in_fresh_context()
 
-        try:
-            from playwright.async_api import async_playwright
-        except ImportError as exc:
-            raise RuntimeError(
-                "playwright package is required for QuintoAndarScraper. "
-                "Install it with: pip install playwright && playwright install chromium"
-            ) from exc
-
+    async def _scrape_with_context(self, context: Any) -> list[dict[str, Any]]:
         listings: list[dict[str, Any]] = []
         intercepted_payloads: list[dict[str, Any]] = []
         search_templates: list[dict[str, Any]] = []
 
-        async with async_playwright() as pw:
-            context = await self._open_browser_context(pw)
-            page = await context.new_page()
+        page = await context.new_page()
 
-            async def _capture_response(response: Any) -> None:
-                url = response.url
-                req = response.request
-                if (
-                    "quintoandar.com.br" in url
-                    and req.method.upper() == "POST"
-                    and "/house-listing-search/" in url
-                    and "/search" in url
-                    and "/coordinates" not in url
-                    and "/count" not in url
-                ):
-                    try:
-                        body = None
-                        post_data = req.post_data
-                        if isinstance(post_data, str) and post_data.strip():
-                            body = json.loads(post_data)
-                        headers = dict(getattr(req, "headers", {}) or {})
-                        if isinstance(body, dict) and isinstance(headers, dict):
-                            search_templates.append(
-                                {
-                                    "url": url,
-                                    "headers": {
-                                        str(k): str(v)
-                                        for k, v in headers.items()
-                                        if isinstance(k, str) and isinstance(v, str)
-                                    },
-                                    "body": body,
-                                }
-                            )
-                    except Exception:
-                        pass
-                if (
-                    "quintoandar.com.br" in url
-                    and (
-                        "/search" in url
-                        or "client-api" in url
-                        or "/houses/" in url
-                        or "search-result" in url
-                    )
-                    and response.status == 200
-                ):
-                    try:
-                        body = await response.json()
-                        intercepted_payloads.append(body)
-                    except Exception:
-                        pass
+        async def _capture_response(response: Any) -> None:
+            url = response.url
+            req = response.request
+            if (
+                "quintoandar.com.br" in url
+                and req.method.upper() == "POST"
+                and "/house-listing-search/" in url
+                and "/search" in url
+                and "/coordinates" not in url
+                and "/count" not in url
+            ):
+                try:
+                    body = None
+                    post_data = req.post_data
+                    if isinstance(post_data, str) and post_data.strip():
+                        body = json.loads(post_data)
+                    headers = dict(getattr(req, "headers", {}) or {})
+                    if isinstance(body, dict) and isinstance(headers, dict):
+                        search_templates.append(
+                            {
+                                "url": url,
+                                "headers": {
+                                    str(k): str(v)
+                                    for k, v in headers.items()
+                                    if isinstance(k, str) and isinstance(v, str)
+                                },
+                                "body": body,
+                            }
+                        )
+                except Exception:
+                    pass
+            if (
+                "quintoandar.com.br" in url
+                and (
+                    "/search" in url
+                    or "client-api" in url
+                    or "/houses/" in url
+                    or "search-result" in url
+                )
+                and response.status == 200
+            ):
+                try:
+                    body = await response.json()
+                    intercepted_payloads.append(body)
+                except Exception:
+                    pass
 
-            page.on("response", _capture_response)
+        page.on("response", _capture_response)
 
-            target_url = _build_quintoandar_scrape_url(
-                self.search_address,
-                self.search_type,
-            )
-            configured_start = self._configured_start_urls()
-            if configured_start and not self.search_address.strip():
-                target_url = configured_start[0]
+        target_url = _build_quintoandar_scrape_url(
+            self.search_address,
+            self.search_type,
+        )
+        configured_start = self._configured_start_urls()
+        if configured_start and not self.search_address.strip():
+            target_url = configured_start[0]
 
+        try:
             await page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
             try:
                 await page.wait_for_load_state("networkidle", timeout=15000)
@@ -353,7 +346,8 @@ class QuintoAndarScraper(ScraperBase):
                 """
             )
 
-            await context.close()
+        finally:
+            await page.close()
 
         for payload in intercepted_payloads:
             extracted = _extract_from_quintoandar_payload(payload, self.search_type)

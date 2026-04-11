@@ -22,6 +22,14 @@ class Settings(BaseSettings):
     otp_url: str
     platforms_yaml_path: str | None = None
     dramatiq_broker: str = "stub"
+    local_inline_job_types: str | None = None
+    enable_listings_prewarm_scheduler: bool = True
+    listings_prewarm_cron_hour: int = 3
+    listings_prewarm_cron_minute: int = 0
+    listings_prewarm_lookback_hours: int = 24
+    listings_prewarm_limit: int = 100
+    listings_prewarm_max_address_duration_seconds: int = 210
+    internal_api_token: str | None = None
     r2_bucket: str | None = None
     s3_bucket: str | None = None
     resend_api_key: str | None = None

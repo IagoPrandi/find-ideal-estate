@@ -40,7 +40,7 @@ describe("Step1Config", () => {
     fireEvent.mouseEnter(screen.getByText(/Áreas verdes/i).closest("div") as HTMLElement);
     fireEvent.click(screen.getByRole("button", { name: /Muita vegetação/i }));
     fireEvent.click(screen.getByRole("button", { name: /Comercial/i }));
-    fireEvent.click(screen.getByRole("button", { name: /Encontrar pontos de ônibus e estações próximas/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Encontrar pontos de transporte próximos/i }));
 
     await waitFor(() => {
       expect(createJourney).toHaveBeenCalledWith(

@@ -5,6 +5,9 @@ import { useJourneyStore, useUIStore } from "../../state";
 
 type StageMode = "idle" | "generation" | "enrichment" | "finalizing";
 
+const JOB_POLL_INTERVAL_MS = 1000;
+const FINALIZING_TRANSITION_DELAY_MS = 150;
+
 export function Step3Zones() {
   const journeyId = useJourneyStore((state) => state.journeyId);
   const config = useJourneyStore((state) => state.config);
@@ -130,7 +133,7 @@ export function Step3Zones() {
       void tick();
       intervalRef.current = window.setInterval(() => {
         void tick();
-      }, 3000);
+      }, JOB_POLL_INTERVAL_MS);
     });
   }
 
@@ -147,7 +150,7 @@ export function Step3Zones() {
     }
 
     if (!isDirectIsochroneMode && !selectedTransportId) {
-      setError("Selecione um ponto seed na etapa anterior antes de gerar as zonas.");
+      setError("Selecione um ponto de transporte na etapa anterior antes de gerar as zonas.");
       return;
     }
 
@@ -222,7 +225,7 @@ export function Step3Zones() {
         if (!cancelledRef.current) {
           goToStep(4);
         }
-      }, 400);
+      }, FINALIZING_TRANSITION_DELAY_MS);
     } catch (caughtError) {
       clearPolling();
       setStageMode("idle");
@@ -251,7 +254,7 @@ export function Step3Zones() {
     <div className="flex h-full flex-col animate-[fadeInRight_0.3s_ease-out]">
       <div className="border-b border-slate-100 p-5">
         <h2 className="text-xl font-semibold tracking-tight text-slate-800">{isDirectIsochroneMode ? "Gerar área acessível" : "Gerar zonas"}</h2>
-        <p className="text-sm text-slate-500">{isWalkingMode ? "No modo a pe, a zona e uma unica área acessível gerada a partir do ponto principal selecionado." : isDrivingMode ? "No modo carro, a zona e uma única área acessível gerada a partir do ponto principal selecionado." : "Ajuste os parâmetros da busca e gere as zonas a partir do ponto escolhido."}</p>
+        <p className="text-sm text-slate-500">{isWalkingMode ? "No modo a pé, a zona é uma única área acessível gerada a partir do ponto principal selecionado." : isDrivingMode ? "No modo carro, a zona é uma única área acessível gerada a partir do ponto principal selecionado." : "Ajuste os parâmetros da busca e gere as zonas a partir do ponto de transporte escolhido."}</p>
       </div>
 
       <div className="panel-scroll flex-1 overflow-y-auto bg-slate-50/50 p-4">
@@ -262,7 +265,7 @@ export function Step3Zones() {
               <div className="absolute inset-0 rounded-2xl border-4 border-pastel-violet-200 opacity-20 animate-ping" />
             </div>
             <h3 className="mb-2 text-xl font-semibold text-slate-800">{stageMode === "finalizing" ? "Concluindo preparação" : "Processando zonas"}</h3>
-            <p className="mb-8 max-w-xs text-sm text-slate-500">{stageMode === "generation" ? (isWalkingMode ? "Gerando a área acessível a pé a partir do ponto principal selecionado." : isDrivingMode ? "Gerando a área acessível de carro a partir do ponto principal selecionado." : "Executando a geração das zonas candidatas a partir do seed selecionado.") : stageMode === "enrichment" ? "Calculando camadas urbanas e consolidando comparações da etapa seguinte." : "Salvando o estado final da jornada para abrir a comparação."}</p>
+            <p className="mb-8 max-w-xs text-sm text-slate-500">{stageMode === "generation" ? (isWalkingMode ? "Gerando a área acessível a pé a partir do ponto principal selecionado." : isDrivingMode ? "Gerando a área acessível de carro a partir do ponto principal selecionado." : "Executando a geração das zonas candidatas a partir do ponto de transporte selecionado.") : stageMode === "enrichment" ? "Calculando camadas urbanas e consolidando a comparação da etapa seguinte." : "Salvando o estado final da jornada para abrir a comparação."}</p>
 
             <div className="w-full max-w-xs space-y-2">
               <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
@@ -275,14 +278,14 @@ export function Step3Zones() {
             </div>
 
             <button type="button" onClick={() => goToStep(isDirectIsochroneMode ? 1 : 2)} className="mt-8 text-sm font-medium text-slate-400 transition-colors hover:text-rose-600">
-              {isDirectIsochroneMode ? "Voltar para a configuração" : "Voltar para o seed"}
+              {isDirectIsochroneMode ? "Voltar para a configuração" : "Voltar para o ponto de transporte"}
             </button>
           </div>
         ) : (
           <div className="space-y-4">
-            {!isDirectIsochroneMode && !selectedTransportId ? <p className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Escolha um ponto seed na etapa de transporte antes de gerar as zonas.</p> : null}
-            {isWalkingMode ? <p className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">A busca a pé não depende de seed de transporte. O backend vai gerar uma única área acessível usando o tempo de caminhada definido na configuração.</p> : null}
-            {isDrivingMode ? <p className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">A busca de carro não depende de seed de transporte. O backend vai gerar uma única área acessível usando o tempo de carro definido na configuração.</p> : null}
+            {!isDirectIsochroneMode && !selectedTransportId ? <p className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Escolha um ponto de transporte na etapa anterior antes de gerar as zonas.</p> : null}
+            {isWalkingMode ? <p className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">A busca a pé não depende de um ponto de transporte. O sistema vai gerar uma única área acessível usando o tempo de caminhada definido na configuração.</p> : null}
+            {isDrivingMode ? <p className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">A busca de carro não depende de um ponto de transporte. O sistema vai gerar uma única área acessível usando o tempo de carro definido na configuração.</p> : null}
             {error ? <p className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}
 
             <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -342,7 +345,7 @@ export function Step3Zones() {
                       onChange={(event) => setConfig({ zoneRadiusMeters: Number(event.target.value) })}
                       className="w-full accent-pastel-violet-500"
                     />
-                    <p className="text-xs text-slate-400">Define o raio-base usado para consolidar a zona ao redor do seed selecionado.</p>
+                    <p className="text-xs text-slate-400">Define o raio-base usado para consolidar a zona ao redor do ponto de transporte selecionado.</p>
                   </div>
                 </div>
               )}

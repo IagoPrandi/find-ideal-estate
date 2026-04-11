@@ -162,6 +162,38 @@ describe("Step4Compare", () => {
     expect(within(poiList).queryByText("Mercado Azul")).not.toBeInTheDocument();
   });
 
+  it("keeps the imóveis CTA fixed in the panel and only enables it after zone selection", async () => {
+    useJourneyStore.setState((state) => ({
+      ...state,
+      selectedZoneId: null,
+      selectedZoneFingerprint: null
+    }));
+
+    renderWithQueryClient();
+
+    const continueButton = await screen.findByTestId("step4-continue-button");
+    const zoneCard = await screen.findByTestId("zone-card-zone-1");
+
+    expect(continueButton).toBeDisabled();
+    expect(screen.getByText(/Selecione uma zona para habilitar a busca de imóveis\./i)).toBeInTheDocument();
+
+    fireEvent.click(zoneCard);
+
+    await waitFor(() => {
+      expect(updateJourney).toHaveBeenCalledWith("journey-1", {
+        selected_zone_id: "zone-1",
+        last_completed_step: 4
+      });
+      expect(continueButton).toBeEnabled();
+    });
+
+    fireEvent.click(continueButton);
+
+    expect(useUIStore.getState().step).toBe(5);
+    expect(useUIStore.getState().maxStep).toBe(5);
+    expect(screen.getByText(/Zona zone-fp- selecionada para a busca de imóveis\./i)).toBeInTheDocument();
+  });
+
   it("scrolls to a POI selected from the map and keeps it highlighted in the panel", async () => {
     renderWithQueryClient();
 

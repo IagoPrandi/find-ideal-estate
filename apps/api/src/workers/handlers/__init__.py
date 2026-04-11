@@ -1,6 +1,6 @@
 """Dramatiq handlers package."""
 
-from . import enrichment, listings, transport, zones
+from . import enrichment, listings, prewarm, transport, zones
 
-__all__ = ["enrichment", "listings", "transport", "zones"]
+__all__ = ["enrichment", "listings", "prewarm", "transport", "zones"]
 

@@ -276,7 +276,7 @@ async def test_fetch_listing_cards_for_zone_supports_all_spatial_scope() -> None
             url="https://example.org/zap/dedup",
             advertised_usage_type="rent",
             price=Decimal("3300"),
-            condo_fee=Decimal("450"),
+            condo_fee=Decimal("800"),
             iptu=Decimal("90"),
             raw_payload={"image_url": "https://example.org/zap.jpg"},
         )
@@ -291,29 +291,30 @@ async def test_fetch_listing_cards_for_zone_supports_all_spatial_scope() -> None
         )
 
         assert len(cards) == 1
-        assert cards[0]["platform"] == "zapimoveis"
+        assert cards[0]["platform"] == "quintoandar"
         assert cards[0]["inside_zone"] is True
         assert cards[0]["has_coordinates"] is True
         assert cards[0]["platforms_available"] == ["quintoandar", "zapimoveis"]
-        assert [variant["platform"] for variant in cards[0]["platform_variants"]] == ["zapimoveis", "quintoandar"]
-        assert cards[0]["platform_variants"][0]["platform_listing_id"] == platform_listing_ids[1]
-        assert cards[0]["platform_variants"][0]["url"] == "https://example.org/zap/dedup"
-        assert cards[0]["platform_variants"][0]["current_best_price"] == "3300.00"
-        assert cards[0]["platform_variants"][0]["condo_fee"] == "450.00"
-        assert cards[0]["platform_variants"][0]["iptu"] == "90.00"
-        assert cards[0]["platform_variants"][1]["platform_listing_id"] == platform_listing_ids[0]
-        assert cards[0]["platform_variants"][1]["url"] == "https://example.org/quintoandar/dedup"
-        assert cards[0]["platform_variants"][1]["current_best_price"] == "3500.00"
-        assert cards[0]["platform_variants"][1]["condo_fee"] == "500.00"
-        assert cards[0]["platform_variants"][1]["iptu"] == "100.00"
+        assert [variant["platform"] for variant in cards[0]["platform_variants"]] == ["quintoandar", "zapimoveis"]
+        assert cards[0]["platform_variants"][0]["platform_listing_id"] == platform_listing_ids[0]
+        assert cards[0]["platform_variants"][0]["url"] == "https://example.org/quintoandar/dedup"
+        assert cards[0]["platform_variants"][0]["current_best_price"] == "3500.00"
+        assert cards[0]["platform_variants"][0]["condo_fee"] == "500.00"
+        assert cards[0]["platform_variants"][0]["iptu"] == "100.00"
+        assert cards[0]["platform_variants"][1]["platform_listing_id"] == platform_listing_ids[1]
+        assert cards[0]["platform_variants"][1]["url"] == "https://example.org/zap/dedup"
+        assert cards[0]["platform_variants"][1]["current_best_price"] == "3300.00"
+        assert cards[0]["platform_variants"][1]["condo_fee"] == "800.00"
+        assert cards[0]["platform_variants"][1]["iptu"] == "90.00"
         assert cards[0]["neighborhood_name"] == "Itaim Bibi"
         assert cards[0]["city_name"] == "São Paulo"
-        assert cards[0]["current_unit_price"] == pytest.approx(47.142857142857146)
-        assert cards[0]["neighborhood_median_unit_price"] == pytest.approx(47.142857142857146)
+        assert cards[0]["current_unit_price"] == pytest.approx(58.57142857142857)
+        assert cards[0]["neighborhood_median_unit_price"] == pytest.approx(58.57142857142857)
         assert cards[0]["current_vs_neighborhood_pct"] == pytest.approx(0.0)
-        assert str(cards[0]["condo_fee"]) == "450.00"
-        assert str(cards[0]["iptu"]) == "90.00"
-        assert str(cards[0]["second_best_price"]) == "3500.00"
+        assert str(cards[0]["condo_fee"]) == "500.00"
+        assert str(cards[0]["iptu"]) == "100.00"
+        assert str(cards[0]["second_best_price"]) == "3300.00"
+        assert cards[0]["duplication_badge"] == "Disponível em 2 plataformas · menor: R$ 4.100"
     finally:
         if schema_ready:
             await _cleanup_fetch_listing_cards_rows(

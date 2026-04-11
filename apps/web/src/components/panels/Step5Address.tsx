@@ -144,19 +144,19 @@ export function Step5Address() {
   return (
     <div className="flex h-full flex-col animate-[fadeInUp_0.3s_ease-out]">
       <div className="border-b border-slate-100 p-5">
-        <h2 className="text-xl font-semibold tracking-tight text-slate-800">Refinar Busca</h2>
-        <p className="text-sm text-slate-500">Escolha um logradouro ou ponto contido no polígono da zona selecionada.</p>
+        <h2 className="text-xl font-semibold tracking-tight text-slate-800">Refinar busca</h2>
+        <p className="text-sm text-slate-500">Escolha uma rua, avenida ou ponto localizado dentro da zona selecionada.</p>
       </div>
 
       <div className="panel-scroll flex-1 space-y-6 overflow-y-auto p-5">
         <div className="flex items-start gap-3 rounded-xl border border-pastel-violet-100 bg-pastel-violet-50 p-4 text-sm text-pastel-violet-800">
           <Info className="mt-0.5 h-5 w-5 shrink-0 text-pastel-violet-500" />
-          <p>Ao clicar no campo, a lista mostra as ruas encontradas dentro da zona selecionada. Se quiser, digite para filtrar essa lista.</p>
+          <p>Ao clicar no campo, a lista mostra os endereços encontrados dentro da zona selecionada. Se preferir, digite para filtrar a lista.</p>
         </div>
 
         {scrapePlan ? (
           <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600 shadow-sm">
-            <p className="font-medium text-slate-800">Paginação prevista do webscraping: {scrapePlan.total_pages} páginas</p>
+            <p className="font-medium text-slate-800">Paginação estimada do scraping web: {scrapePlan.total_pages} páginas</p>
             <p className="mt-1 text-xs text-slate-500">
               {scrapePlan.platforms.map((item) => `${item.platform}: ${item.max_pages}`).join(" • ")}
             </p>
@@ -164,7 +164,7 @@ export function Step5Address() {
         ) : null}
 
         <div className="space-y-2">
-          <label htmlFor={inputId} className="text-sm font-medium text-slate-700">Endereço alvo na zona</label>
+          <label htmlFor={inputId} className="text-sm font-medium text-slate-700">Endereço de busca na zona</label>
           <div className="relative">
             <MapPin className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input
@@ -224,12 +224,12 @@ export function Step5Address() {
                   setIsDropdownOpen(false);
                 }
               }}
-              placeholder="Clique para ver ou digite para filtrar as ruas da zona"
+              placeholder="Clique para ver ou digite para filtrar os endereços da zona"
               className="w-full rounded-xl border border-slate-300 bg-white py-3 pl-10 pr-4 shadow-sm outline-none transition-all focus:border-pastel-violet-400 focus:ring-2 focus:ring-pastel-violet-400"
             />
             {isDropdownOpen ? (
               <div className="absolute left-0 right-0 top-[calc(100%+0.5rem)] z-20 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_18px_48px_rgba(15,23,42,0.16)] animate-[fadeInDown_0.18s_ease-out]">
-                {loadingSuggestions ? <p className="px-4 py-3 text-xs text-slate-400">Carregando ruas da zona...</p> : null}
+                {loadingSuggestions ? <p className="px-4 py-3 text-xs text-slate-400">Carregando endereços da zona...</p> : null}
 
                 {!loadingSuggestions && suggestions.length > 0 ? (
                   <div id={listboxId} role="listbox" className="max-h-72 overflow-y-auto py-1" data-testid="zone-street-suggestions">
@@ -252,7 +252,7 @@ export function Step5Address() {
                 ) : null}
 
                 {!loadingSuggestions && suggestions.length === 0 ? (
-                  <p className="px-4 py-3 text-xs text-slate-500">Nenhuma rua encontrada dentro da zona selecionada.</p>
+                  <p className="px-4 py-3 text-xs text-slate-500">Nenhum endereço encontrado dentro da zona selecionada.</p>
                 ) : null}
               </div>
             ) : null}
@@ -266,7 +266,7 @@ export function Step5Address() {
 
       <div className="border-t border-slate-100 bg-white p-5">
         <button type="button" onClick={handleSubmit} disabled={!selectedAddress || submitting} className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-3 text-sm font-medium text-white transition-all hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400">
-          {submitting ? "Enfileirando busca..." : "Iniciar scraping e ver resultados"}
+          {submitting ? "Iniciando busca..." : "Iniciar busca e ver resultados"}
           <ArrowRight className="h-4 w-4" />
         </button>
       </div>

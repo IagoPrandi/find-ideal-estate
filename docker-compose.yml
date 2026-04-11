@@ -11,7 +11,10 @@ services:
       DB_POOL_SIZE: ${DB_POOL_SIZE:-20}
       DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-20}
       DB_POOL_TIMEOUT_SECONDS: ${DB_POOL_TIMEOUT_SECONDS:-60}
-      START_DRAMATIQ_WORKERS_IN_PROCESS: "1"
+      DRAMATIQ_BROKER: ${DRAMATIQ_BROKER:-redis}
+      INTERNAL_API_TOKEN: ${INTERNAL_API_TOKEN:-local-dev-internal-token}
+      LOCAL_INLINE_JOB_TYPES: ${LOCAL_INLINE_JOB_TYPES:-default}
+      START_DRAMATIQ_WORKERS_IN_PROCESS: "0"
       REDIS_URL: redis://redis:6379/0
       MAPTILER_API_KEY: ${MAPTILER_API_KEY:-local-dev-key}
       VALHALLA_URL: ${VALHALLA_URL:-http://host.docker.internal:8002}
@@ -39,6 +42,108 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
+
+  worker:
+    profiles: ["manual-general-worker"]
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/find_ideal_estate
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-20}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-20}
+      DB_POOL_TIMEOUT_SECONDS: ${DB_POOL_TIMEOUT_SECONDS:-60}
+      DRAMATIQ_BROKER: ${DRAMATIQ_BROKER:-redis}
+      REDIS_URL: redis://redis:6379/0
+      MAPTILER_API_KEY: ${MAPTILER_API_KEY:-local-dev-key}
+      VALHALLA_URL: ${VALHALLA_URL:-http://host.docker.internal:8002}
+      OTP_URL: ${OTP_URL:-http://otp:8080}
+      DISPLAY: ":99"
+      WORKER_QUEUES: "${WORKER_QUEUES:-transport,zones,enrichment,scrape_http,deduplication,reports}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./apps:/app/apps
+      - ./packages:/app/packages
+      - ./infra:/app/infra
+      - ./alembic.ini:/app/alembic.ini:ro
+      - ./platforms.yaml:/app/platforms.yaml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    shm_size: "1gb"
+    command: ["python", "-m", "workers.runner"]
+
+  worker-scrape-browser:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/find_ideal_estate
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-20}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-20}
+      DB_POOL_TIMEOUT_SECONDS: ${DB_POOL_TIMEOUT_SECONDS:-60}
+      DRAMATIQ_BROKER: ${DRAMATIQ_BROKER:-redis}
+      REDIS_URL: redis://redis:6379/0
+      MAPTILER_API_KEY: ${MAPTILER_API_KEY:-local-dev-key}
+      VALHALLA_URL: ${VALHALLA_URL:-http://host.docker.internal:8002}
+      OTP_URL: ${OTP_URL:-http://otp:8080}
+      DISPLAY: ":99"
+      WORKER_QUEUES: scrape_browser
+      WORKER_INIT_RUNTIME_ON_START: "0"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./apps:/app/apps
+      - ./packages:/app/packages
+      - ./infra:/app/infra
+      - ./alembic.ini:/app/alembic.ini:ro
+      - ./platforms.yaml:/app/platforms.yaml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    shm_size: "1gb"
+    command: ["python", "-m", "workers.runner"]
+
+  worker-prewarm:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/find_ideal_estate
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-20}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-20}
+      DB_POOL_TIMEOUT_SECONDS: ${DB_POOL_TIMEOUT_SECONDS:-60}
+      DRAMATIQ_BROKER: ${DRAMATIQ_BROKER:-redis}
+      REDIS_URL: redis://redis:6379/0
+      MAPTILER_API_KEY: ${MAPTILER_API_KEY:-local-dev-key}
+      VALHALLA_URL: ${VALHALLA_URL:-http://host.docker.internal:8002}
+      OTP_URL: ${OTP_URL:-http://otp:8080}
+      DISPLAY: ":99"
+      WORKER_QUEUES: prewarm
+      WORKER_INIT_RUNTIME_ON_START: "0"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./apps:/app/apps
+      - ./packages:/app/packages
+      - ./infra:/app/infra
+      - ./alembic.ini:/app/alembic.ini:ro
+      - ./platforms.yaml:/app/platforms.yaml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    shm_size: "1gb"
+    command: ["python", "-m", "workers.runner"]
 
   postgres:
     image: postgis/postgis:16-3.4

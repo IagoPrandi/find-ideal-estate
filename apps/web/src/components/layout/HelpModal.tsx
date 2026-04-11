@@ -38,8 +38,8 @@ export function HelpModal({ open, onClose }: HelpModalProps) {
           Fluxo guiado pelo PRD
         </h2>
         <p className="mt-3 text-sm leading-relaxed text-slate-500">
-          Defina um ponto de referência no mapa, configure tempo e raio, encontre transportes elegíveis e siga a jornada até a
-          comparação final de imóveis e dashboard da zona.
+          Defina um ponto de referência no mapa, configure o tempo e o raio, encontre opções de transporte elegíveis e siga a jornada até a
+          comparação final de imóveis e o dashboard da zona.
         </p>
         <div className="mt-4 space-y-3 rounded-2xl border border-slate-200/80 bg-slate-50/80 p-4 text-sm text-slate-600">
           <p><strong className="text-slate-900">Etapa 1:</strong> ponto principal, critérios e enriquecimentos.</p>

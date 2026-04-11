@@ -225,10 +225,10 @@ async def list_zones_for_journey(journey_id: UUID) -> ZoneListResponse:
                 latest_active_prices AS (
                     SELECT
                         la.property_id,
-                        MIN(snapshot.price)::DOUBLE PRECISION AS current_best_price
+                                                MIN(COALESCE(snapshot.price, 0) + COALESCE(snapshot.condo_fee, 0) + COALESCE(snapshot.iptu, 0))::DOUBLE PRECISION AS current_total_price
                     FROM listing_ads la
                     JOIN LATERAL (
-                        SELECT ls.price
+                                                SELECT ls.price, ls.condo_fee, ls.iptu
                         FROM listing_snapshots ls
                         WHERE ls.listing_ad_id = la.id
                           AND ls.price IS NOT NULL
@@ -243,7 +243,7 @@ async def list_zones_for_journey(journey_id: UUID) -> ZoneListResponse:
                 zone_prices AS (
                     SELECT
                         jzb.fingerprint,
-                        lap.current_best_price
+                        lap.current_total_price
                     FROM journey_zone_base jzb
                     JOIN properties p
                       ON p.location IS NOT NULL
@@ -257,7 +257,7 @@ async def list_zones_for_journey(journey_id: UUID) -> ZoneListResponse:
                 )
                 SELECT
                     fingerprint,
-                    percentile_cont(0.5) WITHIN GROUP (ORDER BY current_best_price)::DOUBLE PRECISION AS p50_price,
+                    percentile_cont(0.5) WITHIN GROUP (ORDER BY current_total_price)::DOUBLE PRECISION AS p50_price,
                     COUNT(*)::INT AS active_listing_count
                 FROM zone_prices
                 GROUP BY fingerprint

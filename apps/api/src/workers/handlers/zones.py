@@ -90,7 +90,9 @@ async def _zone_generation_step(job_id: UUID) -> None:
 @dramatiq.actor(queue_name=QUEUE_ZONES)
 def zone_generation_actor(job_id: str) -> None:
     parsed_job_id = UUID(job_id)
-    asyncio.run(
+    from workers.runner import run_worker_coroutine
+
+    run_worker_coroutine(
         run_job_with_retry(
             parsed_job_id,
             JobType.ZONE_GENERATION,

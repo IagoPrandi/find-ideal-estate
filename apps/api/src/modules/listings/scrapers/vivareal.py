@@ -472,74 +472,68 @@ class VivaRealScraper(ScraperBase):
 
     async def scrape(self) -> list[dict[str, Any]]:
         self._check_robots("/imoveis-para-alugar/")
+        return await self._scrape_once_in_fresh_context()
 
-        try:
-            from playwright.async_api import async_playwright
-        except ImportError as exc:
-            raise RuntimeError(
-                "playwright package is required for VivaRealScraper."
-            ) from exc
-
+    async def _scrape_with_context(self, context: Any) -> list[dict[str, Any]]:
         intercepted_payloads: list[dict[str, Any]] = []
         glue_urls: set[str] = set()
         live_glue_headers: dict[str, str] = {}
         last_listings_url: str | None = None
 
-        async with async_playwright() as pw:
-            context = await self._open_browser_context(pw)
-            await context.set_extra_http_headers(
-                {
-                    "x-domain": "www.vivareal.com.br",
-                    "referer": "https://www.vivareal.com.br/",
-                    "accept-language": "pt-BR,pt;q=0.9,en;q=0.8",
-                }
-            )
-            page = await context.new_page()
+        await context.set_extra_http_headers(
+            {
+                "x-domain": "www.vivareal.com.br",
+                "referer": "https://www.vivareal.com.br/",
+                "accept-language": "pt-BR,pt;q=0.9,en;q=0.8",
+            }
+        )
+        page = await context.new_page()
 
-            async def _glue_route_handler(route: Any) -> None:
-                req = route.request
-                url_raw = req.url
-                parts = urlsplit(url_raw)
-                query = dict(parse_qsl(parts.query, keep_blank_values=True))
-                inc = str(query.get("includeFields") or "")
-                if "totalCount" in inc and "listings" not in inc.lower():
-                    tweaked = _tweak_glue_listings_url(url_raw, size=36, from_=0)
-                    await route.continue_(url=tweaked)
-                    return
-                await route.continue_()
+        async def _glue_route_handler(route: Any) -> None:
+            req = route.request
+            url_raw = req.url
+            parts = urlsplit(url_raw)
+            query = dict(parse_qsl(parts.query, keep_blank_values=True))
+            inc = str(query.get("includeFields") or "")
+            if "totalCount" in inc and "listings" not in inc.lower():
+                tweaked = _tweak_glue_listings_url(url_raw, size=36, from_=0)
+                await route.continue_(url=tweaked)
+                return
+            await route.continue_()
 
-            await page.route("**/glue-api.vivareal.com/v2/listings**", _glue_route_handler)
+        await page.route("**/glue-api.vivareal.com/v2/listings**", _glue_route_handler)
 
-            async def _capture_response(response: Any) -> None:
-                nonlocal last_listings_url
-                url = response.url
-                if _is_glue_listings_url(url) and response.status == 200:
-                    glue_urls.add(url)
-                    last_listings_url = url
-                    try:
-                        req_headers = await response.request.all_headers()
-                        if isinstance(req_headers, dict):
-                            for key, value in req_headers.items():
-                                if isinstance(key, str) and isinstance(value, str):
-                                    live_glue_headers[key] = value
-                    except Exception:
-                        pass
-                    try:
-                        body = await response.json()
-                        if _is_street_scope_listings_url(url):
-                            intercepted_payloads.append(body)
-                    except Exception:
-                        pass
+        async def _capture_response(response: Any) -> None:
+            nonlocal last_listings_url
+            url = response.url
+            if _is_glue_listings_url(url) and response.status == 200:
+                glue_urls.add(url)
+                last_listings_url = url
+                try:
+                    req_headers = await response.request.all_headers()
+                    if isinstance(req_headers, dict):
+                        for key, value in req_headers.items():
+                            if isinstance(key, str) and isinstance(value, str):
+                                live_glue_headers[key] = value
+                except Exception:
+                    pass
+                try:
+                    body = await response.json()
+                    if _is_street_scope_listings_url(url):
+                        intercepted_payloads.append(body)
+                except Exception:
+                    pass
 
-            page.on("response", _capture_response)
+        page.on("response", _capture_response)
 
-            configured_start = self._configured_start_urls()
-            target_url = (
-                configured_start[0]
-                if configured_start
-                else ("https://www.vivareal.com.br/aluguel/sp/sao-paulo/" if self.search_type == "rent" else "https://www.vivareal.com.br/venda/sp/sao-paulo/")
-            )
+        configured_start = self._configured_start_urls()
+        target_url = (
+            configured_start[0]
+            if configured_start
+            else ("https://www.vivareal.com.br/aluguel/sp/sao-paulo/" if self.search_type == "rent" else "https://www.vivareal.com.br/venda/sp/sao-paulo/")
+        )
 
+        try:
             await page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
             try:
                 await page.wait_for_load_state("networkidle", timeout=15000)
@@ -665,7 +659,9 @@ class VivaRealScraper(ScraperBase):
                         except Exception:
                             break
 
-            await context.close()
+        finally:
+            await page.unroute("**/glue-api.vivareal.com/v2/listings**", _glue_route_handler)
+            await page.close()
 
         listings: list[dict[str, Any]] = []
         for payload in intercepted_payloads:

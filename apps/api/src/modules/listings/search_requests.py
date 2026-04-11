@@ -99,25 +99,65 @@ async def get_prewarm_targets(
         rows = await conn.execute(
             text(
                 """
+                WITH demand AS (
+                    SELECT
+                        search_location_normalized,
+                        search_location_label,
+                        search_location_type,
+                        search_type,
+                        usage_type,
+                        platforms_hash,
+                        COUNT(*)          AS demand_count,
+                        MAX(requested_at) AS last_requested_at
+                    FROM listing_search_requests
+                    WHERE requested_at >= :since
+                    GROUP BY
+                        search_location_normalized,
+                        search_location_label,
+                        search_location_type,
+                        search_type,
+                        usage_type,
+                        platforms_hash
+                )
                 SELECT
-                    search_location_normalized,
-                    search_location_label,
-                    search_location_type,
-                    search_type,
-                    usage_type,
-                    platforms_hash,
-                    COUNT(*)          AS demand_count,
-                    MAX(requested_at) AS last_requested_at
-                FROM listing_search_requests
-                WHERE requested_at >= :since
-                GROUP BY
-                    search_location_normalized,
-                    search_location_label,
-                    search_location_type,
-                    search_type,
-                    usage_type,
-                    platforms_hash
-                ORDER BY demand_count DESC, last_requested_at DESC
+                    d.search_location_normalized,
+                    d.search_location_label,
+                    d.search_location_type,
+                    d.search_type,
+                    d.usage_type,
+                    d.platforms_hash,
+                    d.demand_count,
+                    d.last_requested_at,
+                    recent.zone_fingerprint,
+                    zlc.status AS cache_status,
+                    COALESCE(
+                        EXTRACT(EPOCH FROM (
+                            now() - COALESCE(
+                                zlc.last_prewarmed_at,
+                                zlc.scraped_at,
+                                zlc.created_at
+                            )
+                        )) / 3600.0,
+                        1000000000.0
+                    ) AS cache_age_hours,
+                    zlc.last_prewarmed_at,
+                    zlc.scraped_at
+                FROM demand d
+                JOIN LATERAL (
+                    SELECT lsr.zone_fingerprint
+                    FROM listing_search_requests lsr
+                    WHERE lsr.search_location_normalized = d.search_location_normalized
+                      AND lsr.search_location_label = d.search_location_label
+                      AND lsr.search_location_type = d.search_location_type
+                      AND lsr.search_type = d.search_type
+                      AND lsr.usage_type = d.usage_type
+                      AND lsr.platforms_hash = d.platforms_hash
+                    ORDER BY lsr.requested_at DESC
+                    LIMIT 1
+                ) recent ON TRUE
+                LEFT JOIN zone_listing_caches zlc
+                  ON zlc.search_location_normalized = d.search_location_normalized
+                ORDER BY demand_count DESC, last_requested_at DESC, cache_age_hours DESC
                 LIMIT :limit
                 """
             ),

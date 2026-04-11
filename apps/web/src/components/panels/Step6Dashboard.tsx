@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -66,13 +66,6 @@ function formatPlainPercent(value: number | null | undefined) {
     return "Sem base";
   }
   return `${value.toFixed(1)}%`;
-}
-
-function formatRate(value: number | null | undefined) {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return "Sem base";
-  }
-  return `${value.toFixed(2)}/km²`;
 }
 
 function formatDensityPerSquareKm(value: number | null | undefined) {
@@ -537,7 +530,7 @@ export function Step6Dashboard({ journeyId, zoneFingerprint, searchType, listing
       {isInitialLoading ? (
         <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-5 text-sm text-slate-600 shadow-sm">
           <Loader2 className="h-4 w-4 animate-spin text-pastel-violet-500" />
-          Carregando métricas analíticas direto da base...
+          Carregando métricas analíticas diretamente da base...
         </div>
       ) : null}
       {activeError && !activeData ? (
@@ -553,7 +546,7 @@ export function Step6Dashboard({ journeyId, zoneFingerprint, searchType, listing
 
           {hasPriceFilterUpdatePending ? (
             <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-500 shadow-sm">
-              Aplicando filtros do painel ao dashboard de imóveis...
+              Aplicando os filtros do painel ao dashboard de imóveis...
             </div>
           ) : null}
 
@@ -588,7 +581,7 @@ export function Step6Dashboard({ journeyId, zoneFingerprint, searchType, listing
               value={formatPercent(priceData?.price.zone_yearly_change_pct)}
               detail="Comparação entre o primeiro e o último ponto diário da série do recorte"
               tone="amber"
-              size="s"
+              size="sm"
               className="xl:max-w-[190px] xl:justify-self-end"
             />
           </div>
@@ -678,7 +671,7 @@ export function Step6Dashboard({ journeyId, zoneFingerprint, searchType, listing
             />
             <CompactMetricCard
               icon={<TrendingDown className="h-4 w-4" />}
-              eyebrow="Roubo vs furto"
+              eyebrow="Relação roubo/furto"
               value={formatRatio(zoneData?.safety.robbery_to_theft_ratio)}
               detail={`${zoneData?.safety.robbery_count_365d || 0} roubos · ${zoneData?.safety.theft_count_365d || 0} furtos`}
               tone="violet"
@@ -788,113 +781,31 @@ function CompactMetricCard(props: {
         container: "rounded-xl px-3 py-2",
         content: "pr-10",
         eyebrow: "text-[9px] tracking-[0.1em]",
-        value: "mt-0.5 text-[clamp(0.92rem,1.25vw,1.1rem)]",
-        detail: "mt-1 text-[9.5px] leading-snug",
+        value: "text-[clamp(1rem,1.45vw,1.28rem)]",
+        detail: "mt-auto text-[9.5px] leading-snug",
         icon: "rounded-md p-1",
       }
     : {
         container: "rounded-xl px-3.5 py-2.5",
         content: "pr-12",
         eyebrow: "text-[9.5px] tracking-[0.11em]",
-        value: "mt-0.5 text-[clamp(0.98rem,1.55vw,1.32rem)]",
-        detail: "mt-1 text-[10px] leading-snug",
+        value: "text-[clamp(1rem,1.45vw,1.28rem)]",
+        detail: "mt-auto text-[10px] leading-snug",
         icon: "rounded-md p-1.25",
       };
 
   return (
-    <div className={`${sizeClass.container} ${props.className || ""} border border-slate-200 bg-white shadow-sm`}>
-      <div className={`relative min-w-0 ${sizeClass.content}`}>
-        <p className={`${sizeClass.eyebrow} font-semibold uppercase leading-tight text-slate-500`}>{props.eyebrow}</p>
-        <div className={`${sizeClass.icon} absolute right-0 top-0 shrink-0 ${toneClass}`}>{props.icon}</div>
-        <p className={`${sizeClass.value} font-bold leading-none tracking-tight text-slate-800 tabular-nums`}>{props.value}</p>
+    <div className={`${sizeClass.container} ${props.className || ""} flex h-full min-h-[148px] border border-slate-200 bg-white shadow-sm`}>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className={`relative min-w-0 ${sizeClass.content}`}>
+          <p className={`${sizeClass.eyebrow} font-semibold uppercase leading-tight text-slate-500`}>{props.eyebrow}</p>
+          <div className={`${sizeClass.icon} absolute right-0 top-0 shrink-0 ${toneClass}`}>{props.icon}</div>
+        </div>
+        <div className="flex flex-1 items-center">
+          <p className={`${sizeClass.value} w-full text-center font-bold leading-none tracking-tight text-slate-800 tabular-nums`}>{props.value}</p>
+        </div>
         {props.detail ? <p className={`${sizeClass.detail} text-slate-500`}>{props.detail}</p> : null}
       </div>
-    </div>
-  );
-}
-
-function DashboardRankingList(props: {
-  title: string;
-  description: string;
-  items: DashboardRankingItem[];
-  formatValue: (value: number | null | undefined) => string;
-  secondaryValueFormatter?: (item: DashboardRankingItem) => string | null;
-  selectedLabel?: string | ((item: DashboardRankingItem) => string | null);
-  onSelectItem?: (item: DashboardRankingItem) => void;
-  emptyMessage: string;
-  testId: string;
-  heightClassName?: string;
-}) {
-  const listContainerRef = useRef<HTMLDivElement | null>(null);
-  const itemRefs = useRef<Record<string, HTMLButtonElement | null>>({});
-  const selectedItem = props.items.find((item) => item.is_selected);
-
-  useEffect(() => {
-    if (!selectedItem) {
-      return;
-    }
-    const listContainer = listContainerRef.current;
-    const node = itemRefs.current[selectedItem.neighborhood_name];
-    if (!node || !listContainer) {
-      return;
-    }
-    const targetTop = Math.max(0, node.offsetTop - (listContainer.clientHeight / 2) + (node.clientHeight / 2));
-    listContainer.scrollTo({ top: targetTop, behavior: "auto" });
-  }, [selectedItem?.neighborhood_name, props.items]);
-
-  return (
-    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm" data-testid={props.testId}>
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h4 className="text-sm font-bold text-slate-800">{props.title}</h4>
-          <p className="mt-1 text-xs text-slate-500">{props.description}</p>
-        </div>
-        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-600">
-          {`${props.items.length} no ranking`}
-        </span>
-      </div>
-
-      {props.items.length === 0 ? (
-        <div className="mt-4 rounded-xl border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-sm text-slate-500">{props.emptyMessage}</div>
-      ) : (
-        <div ref={listContainerRef} className={`mt-4 overflow-y-auto pr-1 ${props.heightClassName || "h-[290px]"}`}>
-          <div className="space-y-2">
-            {props.items.map((item) => (
-              <button
-                key={`${item.position}-${item.neighborhood_name}`}
-                type="button"
-                onClick={() => props.onSelectItem?.(item)}
-                ref={(node) => {
-                  itemRefs.current[item.neighborhood_name] = node;
-                }}
-                className={`grid w-full grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors ${item.is_selected ? "border-pastel-violet-200 bg-pastel-violet-50/60" : "border-slate-200 bg-slate-50/70"} ${props.onSelectItem ? "hover:border-pastel-violet-200 hover:bg-pastel-violet-50/40" : "cursor-default"}`}
-                disabled={!props.onSelectItem}
-              >
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white text-xs font-semibold text-slate-600 shadow-sm">
-                  {item.position}º
-                </div>
-                <div className="min-w-0">
-                  {item.city_name ? <p className="text-[10px] font-medium uppercase tracking-[0.08em] text-slate-400">{item.city_name}</p> : null}
-                  <p className="truncate text-sm font-semibold text-slate-800">{item.neighborhood_name}</p>
-                  {item.is_selected ? (
-                    <p className="mt-0.5 text-[11px] font-medium text-pastel-violet-700">
-                      {typeof props.selectedLabel === "function"
-                        ? props.selectedLabel(item)
-                        : props.selectedLabel || "Selecionado"}
-                    </p>
-                  ) : null}
-                </div>
-                <div className="min-w-[110px] text-right">
-                  <p className="text-xs font-semibold text-slate-700">{props.formatValue(item.value)}</p>
-                  {props.secondaryValueFormatter ? (
-                    <p className="mt-0.5 text-[11px] text-slate-500">{props.secondaryValueFormatter(item)}</p>
-                  ) : null}
-                </div>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

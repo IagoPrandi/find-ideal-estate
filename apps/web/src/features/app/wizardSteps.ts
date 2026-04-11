@@ -13,11 +13,11 @@ export const WIZARD_STEPS: {
   Icon: LucideIcon;
 }[] = [
   { id: 1, title: "Configuração", desc: "Parâmetros e ponto principal", Icon: Settings2 },
-  { id: 2, title: "Origem", desc: "Ponto de transporte", Icon: Train },
+  { id: 2, title: "Transporte", desc: "Escolha do ponto-base", Icon: Train },
   { id: 3, title: "Zonas", desc: "Geração e processamento", Icon: RefreshCw },
-  { id: 4, title: "Comparação", desc: "Selecionar e detalhar zona", Icon: Layers },
+  { id: 4, title: "Comparação", desc: "Selecionar e detalhar a zona", Icon: Layers },
   { id: 5, title: "Endereço", desc: "Buscar imóveis na zona", Icon: MapPinned },
-  { id: 6, title: "Análise", desc: "Imóveis e dashboard", Icon: BarChart3 }
+  { id: 6, title: "Análise", desc: "Imóveis e painel analítico", Icon: BarChart3 }
 ];
 
 export function getVisibleWizardSteps(modal: TravelMode) {

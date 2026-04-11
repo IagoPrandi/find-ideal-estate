@@ -131,6 +131,54 @@ def test_listings_step_reopens_cache_after_lock_contention(monkeypatch) -> None:
     assert published_events[0][1]["payload_json"]["source"] == "cache_reopen"
 
 
+def test_listings_scrape_actor_initializes_runtime_in_same_loop(monkeypatch) -> None:
+    calls: list[tuple[str, object]] = []
+
+    async def _fake_run_job_with_retry(job_id, job_type, stage, execute_step):
+        calls.append(
+            (
+                "run_job_with_retry",
+                {
+                    "job_id": job_id,
+                    "job_type": job_type,
+                    "stage": stage,
+                    "execute_step": execute_step,
+                },
+            )
+        )
+
+    class _FakeContainer:
+        pass
+
+    fake_container = _FakeContainer()
+
+    monkeypatch.setattr(listings_handler, "run_job_with_retry", _fake_run_job_with_retry)
+    monkeypatch.setitem(
+        sys.modules,
+        "workers.runner",
+        type(
+            "_RunnerModule",
+            (),
+            {
+                "init_worker_runtime": staticmethod(
+                    lambda: calls.append(("init_worker_runtime", None)) or fake_container
+                ),
+                "shutdown_worker_runtime": staticmethod(
+                    lambda container: calls.append(("shutdown_worker_runtime", container))
+                    or asyncio.sleep(0)
+                ),
+            },
+        )(),
+    )
+
+    listings_handler.listings_scrape_actor("00000000-0000-0000-0000-000000000123")
+
+    assert calls[0] == ("init_worker_runtime", None)
+    assert calls[1][0] == "run_job_with_retry"
+    assert calls[1][1]["stage"] == "listings_scrape"
+    assert calls[2] == ("shutdown_worker_runtime", fake_container)
+
+
 def test_listings_step_force_refresh_bypasses_usable_cache(monkeypatch) -> None:
     job_id = uuid4()
     stage_messages: list[str] = []

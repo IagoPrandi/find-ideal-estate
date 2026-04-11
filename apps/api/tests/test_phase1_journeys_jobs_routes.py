@@ -32,7 +32,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 import pytest  # noqa: E402
 from core.db import get_engine, init_db  # noqa: E402
 from src.main import app  # noqa: E402
-from modules.jobs.service import create_job  # noqa: E402
+from modules.jobs.service import create_job, get_job, update_job_execution_state  # noqa: E402
 from sqlalchemy import text  # noqa: E402
 from modules.public_safety import classify_public_safety_group  # noqa: E402
 
@@ -194,6 +194,54 @@ def test_cancel_job_returns_accepted(monkeypatch):
 
     assert response.status_code == 202
     assert response.json()["status"] == "accepted"
+
+
+def test_trigger_manual_prewarm_requires_internal_token(monkeypatch):
+    monkeypatch.setattr(
+        "api.routes.internal.get_settings",
+        lambda: SimpleNamespace(internal_api_token="segredo"),
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/internal/listings/prewarm/manual",
+            json={"addresses": ["Rua Botucatu, Vila Mariana, Sao Paulo, SP"]},
+        )
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Token interno ausente ou invalido"
+
+
+def test_trigger_manual_prewarm_enqueues_job_with_valid_token(monkeypatch):
+    sample = _sample_job().model_copy(update={"job_type": JobType.LISTINGS_PREWARM})
+
+    monkeypatch.setattr(
+        "api.routes.internal.get_settings",
+        lambda: SimpleNamespace(internal_api_token="segredo"),
+    )
+
+    async def _enqueue(addresses, **kwargs):
+        assert addresses == ["Rua Botucatu, Vila Mariana, Sao Paulo, SP"]
+        assert kwargs["max_address_duration_seconds"] == 210
+        return sample.id
+
+    async def _get_job(job_id):
+        assert job_id == sample.id
+        return sample
+
+    monkeypatch.setattr("api.routes.internal.enqueue_manual_listings_prewarm", _enqueue)
+    monkeypatch.setattr("api.routes.internal.get_job", _get_job)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/internal/listings/prewarm/manual",
+            headers={"Authorization": "Bearer segredo"},
+            json={"addresses": ["Rua Botucatu, Vila Mariana, Sao Paulo, SP"]},
+        )
+
+    assert response.status_code == 202
+    assert response.json()["id"] == str(sample.id)
+    assert response.json()["job_type"] == JobType.LISTINGS_PREWARM.value
 
 
 def test_get_journey_transport_points_returns_enriched_list(monkeypatch):
@@ -452,4 +500,120 @@ async def test_create_job_reuses_existing_active_job_for_same_journey_and_type(m
     finally:
         async with engine.begin() as conn:
             await conn.execute(text("DELETE FROM jobs WHERE journey_id = :journey_id"), {"journey_id": journey_id})
+            await conn.execute(text("DELETE FROM journeys WHERE id = :journey_id"), {"journey_id": journey_id})
+
+
+@pytest.mark.anyio
+async def test_update_job_execution_state_records_stage_metrics(monkeypatch):
+    init_db(os.environ["DATABASE_URL"])
+    engine = get_engine()
+    journey_id = uuid4()
+    job_id = uuid4()
+
+    async with engine.begin() as conn:
+        await conn.execute(text("DELETE FROM jobs WHERE id = :job_id"), {"job_id": job_id})
+        await conn.execute(text("DELETE FROM journeys WHERE id = :journey_id"), {"journey_id": journey_id})
+        await conn.execute(text("INSERT INTO journeys (id) VALUES (:journey_id)"), {"journey_id": journey_id})
+        await conn.execute(
+            text(
+                """
+                INSERT INTO jobs (id, journey_id, job_type, state, progress_percent, current_stage, result_ref)
+                VALUES (:job_id, :journey_id, 'transport_search', 'pending', 0, NULL, '{}'::jsonb)
+                """
+            ),
+            {"job_id": job_id, "journey_id": journey_id},
+        )
+
+    try:
+        await update_job_execution_state(
+            job_id,
+            state=JobState.RUNNING,
+            current_stage="transport_search",
+            progress_percent=10,
+            mark_started=True,
+        )
+        await update_job_execution_state(
+            job_id,
+            current_stage="transport_search",
+            progress_percent=100,
+        )
+        await update_job_execution_state(
+            job_id,
+            state=JobState.COMPLETED,
+            current_stage="transport_search",
+            progress_percent=100,
+            mark_finished=True,
+        )
+
+        job = await get_job(job_id)
+        assert job is not None
+        assert isinstance(job.result_ref, dict)
+
+        job_metrics = job.result_ref["job_metrics"]
+        stage_metrics = job.result_ref["stage_metrics"]["transport_search"]
+
+        assert job_metrics["state"] == JobState.COMPLETED.value
+        assert "started_at" in job_metrics
+        assert "completed_at" in job_metrics
+        assert int(job_metrics["duration_ms"]) >= 0
+        assert stage_metrics["state"] == JobState.COMPLETED.value
+        assert stage_metrics["progress_percent"] == 100
+        assert "started_at" in stage_metrics
+        assert "completed_at" in stage_metrics
+        assert int(stage_metrics["duration_ms"]) >= 0
+    finally:
+        async with engine.begin() as conn:
+            await conn.execute(text("DELETE FROM jobs WHERE id = :job_id"), {"job_id": job_id})
+            await conn.execute(text("DELETE FROM journeys WHERE id = :journey_id"), {"journey_id": journey_id})
+
+
+@pytest.mark.anyio
+async def test_update_job_execution_state_merges_stage_metrics_with_existing_result_ref(monkeypatch):
+    init_db(os.environ["DATABASE_URL"])
+    engine = get_engine()
+    journey_id = uuid4()
+    job_id = uuid4()
+
+    async with engine.begin() as conn:
+        await conn.execute(text("DELETE FROM jobs WHERE id = :job_id"), {"job_id": job_id})
+        await conn.execute(text("DELETE FROM journeys WHERE id = :journey_id"), {"journey_id": journey_id})
+        await conn.execute(text("INSERT INTO journeys (id) VALUES (:journey_id)"), {"journey_id": journey_id})
+        await conn.execute(
+            text(
+                """
+                INSERT INTO jobs (id, journey_id, job_type, state, progress_percent, current_stage, result_ref)
+                VALUES (
+                    :job_id,
+                    :journey_id,
+                    'listings_scrape',
+                    'running',
+                    0,
+                    'listings_scrape',
+                    CAST(:result_ref AS JSONB)
+                )
+                """
+            ),
+            {
+                "job_id": job_id,
+                "journey_id": journey_id,
+                "result_ref": '{"scrape_diagnostics": {"status": "pending"}}',
+            },
+        )
+
+    try:
+        await update_job_execution_state(
+            job_id,
+            current_stage="listings_scrape",
+            progress_percent=25,
+        )
+
+        job = await get_job(job_id)
+        assert job is not None
+        assert isinstance(job.result_ref, dict)
+        assert job.result_ref["scrape_diagnostics"]["status"] == "pending"
+        assert job.result_ref["stage_metrics"]["listings_scrape"]["progress_percent"] == 25
+        assert "duration_ms" in job.result_ref["stage_metrics"]["listings_scrape"]
+    finally:
+        async with engine.begin() as conn:
+            await conn.execute(text("DELETE FROM jobs WHERE id = :job_id"), {"job_id": job_id})
             await conn.execute(text("DELETE FROM journeys WHERE id = :journey_id"), {"journey_id": journey_id})

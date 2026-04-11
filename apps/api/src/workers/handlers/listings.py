@@ -776,11 +776,18 @@ async def _listings_scrape_step(job_id: UUID) -> None:
 @dramatiq.actor(queue_name=QUEUE_SCRAPE_BROWSER)
 def listings_scrape_actor(job_id: str) -> None:
     parsed_job_id = UUID(job_id)
-    asyncio.run(
-        run_job_with_retry(
-            parsed_job_id,
-            JobType.LISTINGS_SCRAPE,
-            stage="listings_scrape",
-            execute_step=lambda: _listings_scrape_step(parsed_job_id),
-        )
-    )
+    from workers.runner import init_worker_runtime, shutdown_worker_runtime
+
+    async def _run() -> None:
+        container = init_worker_runtime()
+        try:
+            await run_job_with_retry(
+                parsed_job_id,
+                JobType.LISTINGS_SCRAPE,
+                stage="listings_scrape",
+                execute_step=lambda: _listings_scrape_step(parsed_job_id),
+            )
+        finally:
+            await shutdown_worker_runtime(container)
+
+    asyncio.run(_run())

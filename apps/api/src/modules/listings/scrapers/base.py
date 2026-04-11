@@ -12,6 +12,7 @@ import sys
 import threading
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
@@ -295,6 +296,8 @@ class ScraperBase(ABC):
         self.search_address = search_address
         self.search_type = search_type  # 'rent' | 'sale'
         self.platform_config = platform_config or {}
+        self._playwright_manager: Any | None = None
+        self._browser_context: Any | None = None
 
     def _mode_key(self) -> str:
         return "buy" if self.search_type == "sale" else "rent"
@@ -557,6 +560,80 @@ class ScraperBase(ABC):
             raise ScraperDisallowedError(
                 f"robots.txt on {self.base_url} disallows path: {path}"
             )
+
+    def _get_async_playwright(self):
+        try:
+            from playwright.async_api import async_playwright
+        except ImportError as exc:
+            raise RuntimeError(
+                "playwright package is required for listings scrapers. "
+                "Install it with: pip install playwright && playwright install chromium"
+            ) from exc
+        return async_playwright
+
+    async def _run_with_fresh_browser_context(
+        self,
+        executor: Callable[[Any], Awaitable[Any]],
+    ) -> Any:
+        async_playwright = self._get_async_playwright()
+        async with async_playwright() as pw:
+            context = await self._open_browser_context(pw)
+            try:
+                return await executor(context)
+            finally:
+                await context.close()
+
+    async def _scrape_once_in_fresh_context(self) -> list[dict[str, Any]]:
+        return await self._run_with_fresh_browser_context(self._scrape_with_context)
+
+    async def start_session(self) -> None:
+        if self._browser_context is not None:
+            return
+
+        async_playwright = self._get_async_playwright()
+        playwright_manager = await async_playwright().start()
+        try:
+            browser_context = await self._open_browser_context(playwright_manager)
+        except Exception:
+            await playwright_manager.stop()
+            raise
+
+        self._playwright_manager = playwright_manager
+        self._browser_context = browser_context
+
+    async def close_session(self) -> None:
+        browser_context = self._browser_context
+        playwright_manager = self._playwright_manager
+        self._browser_context = None
+        self._playwright_manager = None
+
+        if browser_context is not None:
+            try:
+                await browser_context.close()
+            except Exception:
+                pass
+
+        if playwright_manager is not None:
+            try:
+                await playwright_manager.stop()
+            except Exception:
+                pass
+
+    async def scrape_in_session(self, search_address: str) -> list[dict[str, Any]]:
+        if self._browser_context is None:
+            raise RuntimeError("Browser session not started")
+
+        previous_search_address = self.search_address
+        self.search_address = search_address
+        try:
+            return await self._scrape_with_context(self._browser_context)
+        finally:
+            self.search_address = previous_search_address
+
+    @abstractmethod
+    async def _scrape_with_context(self, context: Any) -> list[dict[str, Any]]:
+        """Perform the actual scraping using an already-open browser context."""
+        ...
 
     @abstractmethod
     async def scrape(self) -> list[dict[str, Any]]:

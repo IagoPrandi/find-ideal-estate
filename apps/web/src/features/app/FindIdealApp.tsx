@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Eye, EyeOff, Layers } from "lucide-react";
+import { ChevronDown, Eye, EyeOff, Layers } from "lucide-react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { API_BASE, getBusLineDetails, getBusStopDetails, getJourneyTransportPoints, getJourneyZonesList, getPublicSafetyIncidentsForViewport, getTransportStopDetails, getZoneListings } from "../../api/client";
@@ -31,8 +31,6 @@ const LISTING_SELECTED_PIN_ICON_ID = "listing-pin-selected-icon";
 const SELECTED_PIN_MARKER_STYLE_ID = "selected-map-pin-marker-styles";
 const POPUP_PERSIST_LAYER_LIST = [...BUS_LAYER_LIST, "zone-pois-highlight-layer", "zone-pois-layer", "safety-incident-layer"] as const;
 const LAYER_TOGGLE_BUTTON_CLASS = "pointer-events-auto flex h-8 w-8 items-center justify-center rounded-lg border border-slate-100 bg-white/95 text-slate-500 shadow-md backdrop-blur-md transition-colors hover:bg-pastel-violet-50 hover:text-pastel-violet-600";
-const PANEL_EDGE_OFFSET_PX = 16;
-const LEGEND_PANEL_GAP_PX = 12;
 
 const ZONE_COLOR_PALETTE = [
   { fill: "#bfdbfe", outline: "#2563eb", label: "#1d4ed8" },
@@ -75,6 +73,17 @@ type MapOverlayLayerKey =
   | "flood"
   | "green";
 
+type LayerLegendMarkerKind = "line" | "dot" | "fill" | "pin";
+
+type LayerLegendItem = {
+  id: string;
+  label: string;
+  markerKind: LayerLegendMarkerKind;
+  color: string;
+  borderColor?: string;
+  dashed?: boolean;
+};
+
 type SequentialLayerGroupKey = "transportPoints" | "transportLines" | "green" | "flood";
 
 type SequentialLayerSettings = {
@@ -101,14 +110,62 @@ const MAP_LAYER_MENU_ITEMS: Array<{ key: MapOverlayLayerKey; label: string }> = 
   { key: "metro", label: "Linhas de metrô" },
   { key: "train", label: "Linhas de trem" },
   { key: "busStops", label: "Paradas e terminais" },
-  { key: "transportCandidates", label: "Pontos etapa 2" },
+  { key: "transportCandidates", label: "Pontos da etapa 2" },
   { key: "zones", label: "Zonas" },
   { key: "pois", label: "POIs da zona" },
   { key: "listings", label: "Imóveis" },
   { key: "safety", label: "Segurança" },
   { key: "flood", label: "Alagamento" },
-  { key: "green", label: "Área verde" },
+  { key: "green", label: "Áreas verdes" },
 ];
+
+const DEFAULT_LAYER_LEGEND_EXPANSION = Object.fromEntries(
+  MAP_LAYER_MENU_ITEMS.map((item) => [item.key, false])
+) as Record<MapOverlayLayerKey, boolean>;
+
+const BASE_LAYER_LEGEND_ITEMS: Record<Exclude<MapOverlayLayerKey, "safety">, LayerLegendItem[]> = {
+  routes: [
+    { id: "routes-bus", label: "Traçado do ônibus", markerKind: "line", color: "#845ef7", dashed: true },
+  ],
+  metro: [
+    { id: "metro-line", label: "Linha de metrô", markerKind: "line", color: "#e11d48" },
+  ],
+  train: [
+    { id: "train-line", label: "Linha de trem", markerKind: "line", color: "#0f766e" },
+  ],
+  busStops: [
+    { id: "bus-stop", label: "Ponto", markerKind: "dot", color: "#845ef7" },
+    { id: "bus-terminal", label: "Terminal", markerKind: "dot", color: "#f97316" },
+    { id: "metro-station", label: "Estação de metrô", markerKind: "dot", color: "#e11d48" },
+    { id: "train-station", label: "Estação de trem", markerKind: "dot", color: "#0f766e" },
+  ],
+  transportCandidates: [
+    { id: "transport-candidate", label: "Disponível", markerKind: "pin", color: "#64748b" },
+    { id: "transport-candidate-selected", label: "Selecionado", markerKind: "pin", color: "#845ef7" },
+  ],
+  zones: [
+    { id: "zone-default", label: "Zona", markerKind: "fill", color: "rgba(148,163,184,0.26)", borderColor: "#64748b" },
+    { id: "zone-selected", label: "Selecionada", markerKind: "fill", color: "rgba(124,58,237,0.28)", borderColor: "#6d28d9" },
+  ],
+  pois: [
+    { id: "poi-school", label: getPoiCategoryMeta("school").singularLabel, markerKind: "dot", color: getPoiCategoryMeta("school").color },
+    { id: "poi-supermarket", label: getPoiCategoryMeta("supermarket").singularLabel, markerKind: "dot", color: getPoiCategoryMeta("supermarket").color },
+    { id: "poi-pharmacy", label: getPoiCategoryMeta("pharmacy").singularLabel, markerKind: "dot", color: getPoiCategoryMeta("pharmacy").color },
+    { id: "poi-park", label: getPoiCategoryMeta("park").singularLabel, markerKind: "dot", color: getPoiCategoryMeta("park").color },
+    { id: "poi-restaurant", label: getPoiCategoryMeta("restaurant").singularLabel, markerKind: "dot", color: getPoiCategoryMeta("restaurant").color },
+    { id: "poi-gym", label: getPoiCategoryMeta("gym").singularLabel, markerKind: "dot", color: getPoiCategoryMeta("gym").color },
+  ],
+  listings: [
+    { id: "listing-default", label: "Imóvel", markerKind: "pin", color: "#845ef7" },
+    { id: "listing-selected", label: "Selecionado", markerKind: "pin", color: "#5b21b6" },
+  ],
+  flood: [
+    { id: "flood-fill", label: "Mancha de alagamento", markerKind: "fill", color: "rgba(55,138,221,0.24)", borderColor: "#378add" },
+  ],
+  green: [
+    { id: "green-fill", label: "Cobertura vegetal", markerKind: "fill", color: "rgba(106,159,43,0.24)", borderColor: "#6a9f2b" },
+  ],
+};
 
 const SEQUENTIAL_LAYER_GROUPS: Array<{ key: SequentialLayerGroupKey; sourceId: string }> = [
   { key: "transportPoints", sourceId: "transport-stops-source" },
@@ -598,7 +655,7 @@ const popupContent = (title: string, name: string, busCountLabel: string, buses:
   const listSection =
     buses.length > 0
       ? `<ul style="margin:0; padding-left:16px; max-height:140px; overflow:auto; font-size:12px; color:#334155;">${listItems}</ul>`
-      : '<p style="margin:0; font-size:12px; color:#64748b;">Dados de linhas indisponíveis para esta feição.</p>';
+      : '<p style="margin:0; font-size:12px; color:#64748b;">Dados de linhas indisponíveis para este ponto.</p>';
   return `
     <div style="font-family: system-ui, -apple-system, Segoe UI, sans-serif; min-width: 220px;">
       <p style="margin:0 0 4px; font-size:11px; letter-spacing:0.06em; text-transform:uppercase; color:#64748b;">${escapeHtml(title)}</p>
@@ -615,7 +672,7 @@ const popupLoadingContent = (title: string, name: string) => `
   <div style="font-family: system-ui, -apple-system, Segoe UI, sans-serif; min-width: 220px;">
     <p style="margin:0 0 4px; font-size:11px; letter-spacing:0.06em; text-transform:uppercase; color:#64748b;">${escapeHtml(title)}</p>
     <p style="margin:0 0 10px; font-size:13px; font-weight:700; color:#0f172a;">${escapeHtml(name)}</p>
-    <p style="margin:0; font-size:12px; color:#64748b;">Carregando linhas identificadas...</p>
+    <p style="margin:0; font-size:12px; color:#64748b;">Carregando linhas encontradas...</p>
   </div>
 `;
 
@@ -623,7 +680,7 @@ const poiPopupContent = (name: string, categoryLabel: string, address: string | 
   <div style="font-family: system-ui, -apple-system, Segoe UI, sans-serif; min-width: 220px;">
     <p style="margin:0 0 4px; font-size:11px; letter-spacing:0.06em; text-transform:uppercase; color:#64748b;">${escapeHtml(categoryLabel)}</p>
     <p style="margin:0 0 8px; font-size:13px; font-weight:700; color:#0f172a;">${escapeHtml(name)}</p>
-    ${address ? `<p style="margin:0; font-size:12px; color:#475569;">${escapeHtml(address)}</p>` : '<p style="margin:0; font-size:12px; color:#64748b;">Endereco indisponivel.</p>'}
+    ${address ? `<p style="margin:0; font-size:12px; color:#475569;">${escapeHtml(address)}</p>` : '<p style="margin:0; font-size:12px; color:#64748b;">Endereço indisponível.</p>'}
   </div>
 `;
 
@@ -646,6 +703,51 @@ const safetyPopupContent = (crimeType: string, crimeGroupLabel: string, occurred
   </div>
 `;
 
+function renderLegendMarker(item: LayerLegendItem) {
+  if (item.markerKind === "line") {
+    return (
+      <span
+        className={`block w-4 border-t-2 ${item.dashed ? "border-dashed" : ""}`}
+        style={{ borderColor: item.color }}
+        aria-hidden="true"
+      />
+    );
+  }
+
+  if (item.markerKind === "fill") {
+    return (
+      <span
+        className="block h-2.5 w-2.5 rounded-[4px] border"
+        style={{ backgroundColor: item.color, borderColor: item.borderColor || item.color }}
+        aria-hidden="true"
+      />
+    );
+  }
+
+  if (item.markerKind === "pin") {
+    return (
+      <span className="relative block h-3.5 w-2.5" aria-hidden="true">
+        <span
+          className="absolute left-1/2 top-0 h-2.5 w-2.5 -translate-x-1/2 rounded-full border border-white/90 shadow-sm"
+          style={{ backgroundColor: item.color }}
+        />
+        <span
+          className="absolute left-1/2 top-[7px] h-1.5 w-1.5 -translate-x-1/2 rotate-45 border-b border-r border-white/90"
+          style={{ backgroundColor: item.color }}
+        />
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className="block h-2.5 w-2.5 rounded-full border border-white/90 shadow-sm"
+      style={{ backgroundColor: item.color }}
+      aria-hidden="true"
+    />
+  );
+}
+
 export function FindIdealApp() {
   const mapContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -659,8 +761,10 @@ export function FindIdealApp() {
   const [mapError, setMapError] = useState<string | null>(null);
   const [isLayerMenuOpen, setIsLayerMenuOpen] = useState(false);
   const [layerVisibility, setLayerVisibility] = useState<Record<MapOverlayLayerKey, boolean>>(DEFAULT_LAYER_VISIBILITY);
+  const [expandedLayerLegends, setExpandedLayerLegends] = useState<Record<MapOverlayLayerKey, boolean>>(DEFAULT_LAYER_LEGEND_EXPANSION);
   const [safetyGroupVisibility, setSafetyGroupVisibility] = useState<Record<SafetyGroupKey, boolean>>(DEFAULT_SAFETY_GROUP_VISIBILITY);
   const [isolatedSafetyGroup, setIsolatedSafetyGroup] = useState<SafetyGroupKey | null>(null);
+  const [safetyGroupVisibilityBeforeIsolation, setSafetyGroupVisibilityBeforeIsolation] = useState<Record<SafetyGroupKey, boolean> | null>(null);
   const [visibleSequentialLayerGroupIndex, setVisibleSequentialLayerGroupIndex] = useState(-1);
   const [transportCandidatePoints, setTransportCandidatePoints] = useState<Array<{ id: string; lon: number; lat: number; name?: string | null; route_count: number; source: string; external_id?: string | null }>>([]);
   const [selectedZonePoiState, setSelectedZonePoiState] = useState<{ zoneFingerprint: string | null; poiPoints: ZonePoiPointLike[] }>({
@@ -668,8 +772,6 @@ export function FindIdealApp() {
     poiPoints: []
   });
   const step = useUIStore((state) => state.step);
-  const isPanelCollapsed = useUIStore((state) => state.isCollapsed);
-  const panelWidth = useUIStore((state) => state.panelWidth);
   const pickedCoord = useJourneyStore((state) => state.pickedCoord);
   const setPickedCoord = useJourneyStore((state) => state.setPickedCoord);
   const journeyId = useJourneyStore((state) => state.journeyId);
@@ -698,19 +800,42 @@ export function FindIdealApp() {
     }));
   }
 
+  function toggleLayerLegendExpansion(key: MapOverlayLayerKey) {
+    setExpandedLayerLegends((current) => ({
+      ...current,
+      [key]: !current[key],
+    }));
+  }
+
   function toggleSafetyGroupVisibility(groupKey: SafetyGroupKey) {
     setSafetyGroupVisibility((current) => {
-      const nextVisibility = !current[groupKey];
+      const baseVisibility = safetyGroupVisibilityBeforeIsolation ?? current;
+      const nextVisibility = !baseVisibility[groupKey];
       return {
-        ...current,
+        ...baseVisibility,
         [groupKey]: nextVisibility,
       };
     });
-    setIsolatedSafetyGroup((current) => (current === groupKey ? null : current));
+    setIsolatedSafetyGroup(null);
+    setSafetyGroupVisibilityBeforeIsolation(null);
   }
 
   function toggleSafetyGroupIsolation(groupKey: SafetyGroupKey) {
-    setIsolatedSafetyGroup((current) => (current === groupKey ? null : groupKey));
+    if (isolatedSafetyGroup === groupKey) {
+      setSafetyGroupVisibility(safetyGroupVisibilityBeforeIsolation ?? DEFAULT_SAFETY_GROUP_VISIBILITY);
+      setIsolatedSafetyGroup(null);
+      setSafetyGroupVisibilityBeforeIsolation(null);
+      return;
+    }
+
+    setSafetyGroupVisibilityBeforeIsolation(safetyGroupVisibility);
+    setSafetyGroupVisibility(
+      SAFETY_GROUP_KEYS.reduce<Record<SafetyGroupKey, boolean>>((accumulator, key) => {
+        accumulator[key] = key === groupKey;
+        return accumulator;
+      }, { ...DEFAULT_SAFETY_GROUP_VISIBILITY })
+    );
+    setIsolatedSafetyGroup(groupKey);
   }
 
   useEffect(() => {
@@ -784,19 +909,12 @@ export function FindIdealApp() {
     [listingsFilters, listingsQuery.data?.listings]
   );
 
-  const activeSafetyGroups = useMemo(() => {
-    if (isolatedSafetyGroup) {
-      return [isolatedSafetyGroup];
-    }
-    return SAFETY_GROUP_KEYS.filter((groupKey) => safetyGroupVisibility[groupKey]);
-  }, [isolatedSafetyGroup, safetyGroupVisibility]);
+  const activeSafetyGroups = useMemo(
+    () => SAFETY_GROUP_KEYS.filter((groupKey) => safetyGroupVisibility[groupKey]),
+    [safetyGroupVisibility]
+  );
 
   const activeSafetyGroupsKey = activeSafetyGroups.join(",");
-
-  const safetyLegendStyle = {
-    bottom: PANEL_EDGE_OFFSET_PX,
-    left: isPanelCollapsed ? PANEL_EDGE_OFFSET_PX : PANEL_EDGE_OFFSET_PX + panelWidth + LEGEND_PANEL_GAP_PX,
-  };
 
   useEffect(() => {
     if (!mapContainerRef.current) return;
@@ -1858,61 +1976,90 @@ export function FindIdealApp() {
   return (
     <main className="relative h-screen w-full overflow-hidden">
       <div ref={mapContainerRef} className="h-full w-full" aria-label="Mapa principal" />
-      {layerVisibility.safety && config.enrichments.safety ? (
-        <div className="pointer-events-auto absolute z-40 rounded-xl border border-slate-200 bg-white/95 px-4 py-3 shadow-lg backdrop-blur-md" style={safetyLegendStyle}>
-          <p className="mb-2 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Tipos de ocorrência</p>
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs text-slate-700">
-            {SAFETY_GROUP_META.map((item) => (
-              <div key={item.key} className="flex items-center justify-between gap-3 rounded-lg px-1 py-0.5">
-                <div className="flex min-w-0 items-center gap-2">
-                  <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />
-                  <span className={`${isolatedSafetyGroup === item.key || safetyGroupVisibility[item.key] ? "text-slate-700" : "text-slate-400 line-through"}`}>{item.label}</span>
-                </div>
-                <div className="flex items-center justify-end gap-1.5">
-                  <button
-                    type="button"
-                    aria-label={`${safetyGroupVisibility[item.key] ? "Ocultar" : "Mostrar"} ${item.label}`}
-                    aria-pressed={!safetyGroupVisibility[item.key]}
-                    onClick={() => toggleSafetyGroupVisibility(item.key)}
-                    className={`flex h-7 w-7 items-center justify-center rounded-md border transition ${safetyGroupVisibility[item.key] ? "border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700" : "border-rose-200 bg-rose-50 text-rose-500 hover:border-rose-300 hover:text-rose-600"}`}
-                  >
-                    {safetyGroupVisibility[item.key] ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
-                  </button>
-                  <button
-                    type="button"
-                    aria-label={`${isolatedSafetyGroup === item.key ? "Mostrar todas as categorias novamente" : `Mostrar apenas ${item.label}`}`}
-                    aria-pressed={isolatedSafetyGroup === item.key}
-                    onClick={() => toggleSafetyGroupIsolation(item.key)}
-                    className={`flex h-7 w-7 items-center justify-center rounded-md border transition ${isolatedSafetyGroup === item.key ? "border-pastel-violet-300 bg-pastel-violet-50 text-pastel-violet-700" : "border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700"}`}
-                  >
-                    <span className="relative block h-3.5 w-3.5 rounded-[0.35rem] border border-current">
-                      <span className="absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" />
-                    </span>
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : null}
       <div className="pointer-events-none absolute bottom-14 right-4 z-40 flex flex-col items-end gap-2">
         {isLayerMenuOpen ? (
           <div
             ref={layerMenuRef}
-            className="pointer-events-auto w-56 rounded-xl border border-slate-200 bg-white/95 p-3 shadow-lg backdrop-blur-md"
+            className="pointer-events-auto flex max-h-[min(72vh,38rem)] w-[21rem] flex-col overflow-hidden rounded-[1.75rem] border border-slate-200 bg-white/95 shadow-xl backdrop-blur-md"
           >
-            <p className="mb-3 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Camadas do mapa</p>
-            <div className="space-y-2">
+            <p className="px-4 pb-2 pt-4 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Camadas do mapa</p>
+            <div className="panel-scroll min-h-0 overflow-y-auto pb-2">
               {MAP_LAYER_MENU_ITEMS.map((item) => (
-                <label key={item.key} className="flex cursor-pointer items-center gap-2.5 text-sm text-slate-700">
-                  <input
-                    type="checkbox"
-                    checked={layerVisibility[item.key]}
-                    onChange={() => toggleLayerVisibility(item.key)}
-                    className="h-4 w-4 rounded accent-pastel-violet-500"
-                  />
-                  <span>{item.label}</span>
-                </label>
+                <div key={item.key} className="border-t border-slate-200/80 first:border-t-0">
+                  <div className="flex items-center gap-2 px-4 py-2.5">
+                    <label className="flex min-w-0 flex-1 cursor-pointer items-center gap-2.5 text-[13px] font-medium text-slate-700">
+                      <input
+                        type="checkbox"
+                        checked={layerVisibility[item.key]}
+                        onChange={() => toggleLayerVisibility(item.key)}
+                        className="h-4 w-4 rounded accent-pastel-violet-500"
+                      />
+                      <span className={`min-w-0 break-words whitespace-normal leading-snug ${layerVisibility[item.key] ? "text-slate-700" : "text-slate-400"}`}>{item.label}</span>
+                    </label>
+                    <button
+                      type="button"
+                      aria-label={`${expandedLayerLegends[item.key] ? "Recolher" : "Expandir"} legenda de ${item.label}`}
+                      aria-expanded={expandedLayerLegends[item.key]}
+                      onClick={() => toggleLayerLegendExpansion(item.key)}
+                      className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 transition hover:border-slate-300 hover:text-slate-700"
+                    >
+                      <ChevronDown className={`h-3.5 w-3.5 transition-transform ${expandedLayerLegends[item.key] ? "rotate-180" : "rotate-0"}`} />
+                    </button>
+                  </div>
+                  {expandedLayerLegends[item.key] ? (
+                    <div className="border-t border-slate-200/80 bg-slate-50/70 px-4 py-2.5">
+                      {item.key === "safety" ? (
+                        <div>
+                          <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Tipos de ocorrência</p>
+                          <div className={`grid gap-1.5 ${SAFETY_GROUP_META.length > 1 ? "grid-cols-2" : "grid-cols-1"}`}>
+                            {SAFETY_GROUP_META.map((safetyItem) => {
+                              const isSafetyItemVisible = safetyGroupVisibility[safetyItem.key];
+                              return (
+                                <div key={safetyItem.key} className="flex items-center justify-between gap-1.5 rounded-lg border border-slate-200/80 bg-white/85 px-2 py-1.5 text-[11px] text-slate-700 shadow-sm">
+                                  <div className="flex min-w-0 items-center gap-1.5">
+                                    <span className="inline-block h-2 w-2 rounded-full" style={{ backgroundColor: safetyItem.color }} />
+                                    <span className={`min-w-0 break-words whitespace-normal leading-snug ${isSafetyItemVisible ? "text-slate-700" : "text-slate-400 line-through"}`}>{safetyItem.label}</span>
+                                  </div>
+                                  <div className="flex items-center justify-end gap-1">
+                                    <button
+                                      type="button"
+                                      aria-label={`${safetyGroupVisibility[safetyItem.key] ? "Ocultar" : "Mostrar"} ${safetyItem.label}`}
+                                      aria-pressed={!safetyGroupVisibility[safetyItem.key]}
+                                      onClick={() => toggleSafetyGroupVisibility(safetyItem.key)}
+                                      className={`flex h-5 w-5 items-center justify-center rounded-md border transition ${safetyGroupVisibility[safetyItem.key] ? "border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700" : "border-rose-200 bg-rose-50 text-rose-500 hover:border-rose-300 hover:text-rose-600"}`}
+                                    >
+                                      {safetyGroupVisibility[safetyItem.key] ? <Eye className="h-3 w-3" /> : <EyeOff className="h-3 w-3" />}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      aria-label={`${isolatedSafetyGroup === safetyItem.key ? "Mostrar todas as categorias novamente" : `Mostrar apenas ${safetyItem.label}`}`}
+                                      aria-pressed={isolatedSafetyGroup === safetyItem.key}
+                                      onClick={() => toggleSafetyGroupIsolation(safetyItem.key)}
+                                      className={`flex h-5 w-5 items-center justify-center rounded-md border transition ${isolatedSafetyGroup === safetyItem.key ? "border-pastel-violet-300 bg-pastel-violet-50 text-pastel-violet-700" : "border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-700"}`}
+                                    >
+                                      <span className="relative block h-3 w-3 rounded-[0.3rem] border border-current">
+                                        <span className="absolute left-1/2 top-1/2 h-1.5 w-1.5 -translate-x-1/2 -translate-y-1/2 rounded-full bg-current" />
+                                      </span>
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className={`grid gap-1.5 ${BASE_LAYER_LEGEND_ITEMS[item.key].length > 2 ? "grid-cols-2" : "grid-cols-1"}`}>
+                          {BASE_LAYER_LEGEND_ITEMS[item.key].map((legendItem) => (
+                            <div key={legendItem.id} className="flex items-center gap-1.5 rounded-lg border border-slate-200/80 bg-white/85 px-2 py-1.5 text-[11px] text-slate-600 shadow-sm">
+                              {renderLegendMarker(legendItem)}
+                              <span className="min-w-0 break-words whitespace-normal leading-snug">{legendItem.label}</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
               ))}
             </div>
           </div>

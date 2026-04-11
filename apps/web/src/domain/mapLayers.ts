@@ -19,6 +19,6 @@ export const MAP_LAYER_INFO: Record<MapLayerKey, { label: string; color: string 
   flood: { label: "Alagamento", color: "#7c3aed" },
   green: { label: "Área verde", color: "#16a34a" },
   pois: { label: "POIs", color: "#d97706" },
-  transportCandidates: { label: "Pontos etapa 2", color: "#ea580c" },
-  transportRadius: { label: "Raio de busca etapa 2", color: "#0ea5e9" }
+  transportCandidates: { label: "Pontos da etapa 2", color: "#ea580c" },
+  transportRadius: { label: "Raio de busca da etapa 2", color: "#0ea5e9" }
 };

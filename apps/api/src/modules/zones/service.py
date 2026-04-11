@@ -19,6 +19,21 @@ from sqlalchemy import text
 logger = logging.getLogger(__name__)
 _ESTIMATED_WALKING_SPEED_METERS_PER_MINUTE = 80
 _ESTIMATED_DRIVING_SPEED_METERS_PER_MINUTE = 500
+_FIND_EXISTING_ZONES_BY_FINGERPRINT_SQL = text(
+    """
+    SELECT id, fingerprint
+    FROM zones
+    WHERE fingerprint = ANY(CAST(:fingerprints AS TEXT[]))
+    """
+)
+_UPSERT_JOURNEY_ZONES_SQL = text(
+    """
+    INSERT INTO journey_zones (journey_id, zone_id, transport_point_id)
+    VALUES (:journey_id, :zone_id, :transport_point_id)
+    ON CONFLICT (journey_id, zone_id) DO UPDATE
+    SET transport_point_id = EXCLUDED.transport_point_id
+    """
+)
 
 
 def _is_direct_isochrone_modal(modal: str) -> bool:
@@ -508,12 +523,10 @@ class ZoneService:
             public_transport_mode=public_transport_mode,
         )
 
-        zones = []
-        async with engine.begin() as conn:
-            await _clear_journey_zone_links(conn, journey_id)
-
-            for candidate in candidate_zones:
-                fingerprint = compute_candidate_zone_fingerprint(
+        candidate_entries = [
+            (
+                candidate,
+                compute_candidate_zone_fingerprint(
                     seed_lat=float(lat),
                     seed_lon=float(lon),
                     legacy_zone_id=candidate.logical_id,
@@ -523,39 +536,42 @@ class ZoneService:
                     radius_meters=radius_meters,
                     max_time_minutes=max_time_minutes,
                     dataset_version=dataset_version_id,
-                )
+                ),
+            )
+            for candidate in candidate_zones
+        ]
 
+        zones = []
+        async with engine.begin() as conn:
+            await _clear_journey_zone_links(conn, journey_id)
+
+            existing_by_fingerprint: dict[str, UUID] = {}
+            fingerprints = [fingerprint for _, fingerprint in candidate_entries]
+            if fingerprints:
                 existing_result = await conn.execute(
-                    text(
-                        """
-                        SELECT id
-                        FROM zones
-                        WHERE fingerprint = :fingerprint
-                        LIMIT 1
-                        """
-                    ),
-                    {"fingerprint": fingerprint},
+                    _FIND_EXISTING_ZONES_BY_FINGERPRINT_SQL,
+                    {"fingerprints": fingerprints},
                 )
-                existing = existing_result.mappings().first()
-                if existing is not None:
-                    await conn.execute(
-                        text(
-                            """
-                            INSERT INTO journey_zones (journey_id, zone_id, transport_point_id)
-                            VALUES (:journey_id, :zone_id, :transport_point_id)
-                            ON CONFLICT (journey_id, zone_id) DO UPDATE
-                            SET transport_point_id = EXCLUDED.transport_point_id
-                            """
-                        ),
+                existing_by_fingerprint = {
+                    str(row["fingerprint"]): row["id"]
+                    for row in existing_result.mappings().all()
+                }
+
+            association_payloads: list[dict[str, Any]] = []
+
+            for candidate, fingerprint in candidate_entries:
+                existing_zone_id = existing_by_fingerprint.get(fingerprint)
+                if existing_zone_id is not None:
+                    association_payloads.append(
                         {
                             "journey_id": journey_id,
-                            "zone_id": existing["id"],
+                            "zone_id": existing_zone_id,
                             "transport_point_id": transport_point_id,
-                        },
+                        }
                     )
                     zones.append(
                         ZoneGenerationOutcome(
-                            zone_id=existing["id"],
+                            zone_id=existing_zone_id,
                             fingerprint=fingerprint,
                             reused=True,
                         )
@@ -605,20 +621,12 @@ class ZoneService:
                     },
                 )
                 created = insert_result.mappings().one()
-                await conn.execute(
-                    text(
-                        """
-                        INSERT INTO journey_zones (journey_id, zone_id, transport_point_id)
-                        VALUES (:journey_id, :zone_id, :transport_point_id)
-                        ON CONFLICT (journey_id, zone_id) DO UPDATE
-                        SET transport_point_id = EXCLUDED.transport_point_id
-                        """
-                    ),
+                association_payloads.append(
                     {
                         "journey_id": journey_id,
                         "zone_id": created["id"],
                         "transport_point_id": transport_point_id,
-                    },
+                    }
                 )
                 zones.append(
                     ZoneGenerationOutcome(
@@ -627,6 +635,9 @@ class ZoneService:
                         reused=False,
                     )
                 )
+
+            if association_payloads:
+                await conn.execute(_UPSERT_JOURNEY_ZONES_SQL, association_payloads)
 
         return {
             "zones": zones,

@@ -57,13 +57,14 @@ def _parse_bedrooms(value: Any) -> int | None:
 
 def infer_listing_usage_type_from_url(listing_url: Any, bedrooms: Any) -> str:
     normalized_url = _normalize_url(listing_url)
+    bedroom_count = _parse_bedrooms(bedrooms)
+
     if normalized_url:
         if any(keyword in normalized_url for keyword in COMMERCIAL_KEYWORDS):
             return "commercial"
-        if any(keyword in normalized_url for keyword in RESIDENTIAL_KEYWORDS):
-            return "residential"
-
-    bedroom_count = _parse_bedrooms(bedrooms)
     if bedroom_count is None or bedroom_count <= 0:
         return "commercial"
+    if normalized_url:
+        if any(keyword in normalized_url for keyword in RESIDENTIAL_KEYWORDS):
+            return "residential"
     return "residential"

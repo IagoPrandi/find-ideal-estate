@@ -61,7 +61,7 @@ describe("Step5Address", () => {
     const user = userEvent.setup();
     render(<Step5Address />);
 
-    const input = screen.getByLabelText("Endereço alvo na zona");
+    const input = screen.getByLabelText("Endereço de busca na zona");
 
     await user.click(input);
 
@@ -69,7 +69,7 @@ describe("Step5Address", () => {
       expect(getZoneAddressSuggestions).toHaveBeenCalledWith("journey-1", "zone-fp-1", "");
     });
 
-    expect(screen.getByText(/Paginação prevista do webscraping: 12 páginas/i)).toBeInTheDocument();
+    expect(screen.getByText(/Paginação estimada do scraping web: 12 páginas/i)).toBeInTheDocument();
 
     expect(screen.getByTestId("zone-street-suggestions")).toBeInTheDocument();
     expect(screen.getByRole("option", { name: /Rua Schilling/i })).toBeInTheDocument();
@@ -98,7 +98,7 @@ describe("Step5Address", () => {
     const user = userEvent.setup();
     render(<Step5Address />);
 
-    const input = screen.getByLabelText("Endereço alvo na zona");
+    const input = screen.getByLabelText("Endereço de busca na zona");
     await user.click(input);
 
     const option = await screen.findByRole("option", { name: /Rua Guaipa/i });

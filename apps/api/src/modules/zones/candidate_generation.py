@@ -149,7 +149,9 @@ def _buffer_candidate(candidate: PointCandidate, radius_meters: int) -> Candidat
 _BUS_DOWNSTREAM_SQL = text(
     """
     WITH reference AS (
-        SELECT ST_SetSRID(ST_MakePoint(CAST(:seed_lon AS DOUBLE PRECISION), CAST(:seed_lat AS DOUBLE PRECISION)), 4326) AS geom
+        SELECT
+            ST_SetSRID(ST_MakePoint(CAST(:seed_lon AS DOUBLE PRECISION), CAST(:seed_lat AS DOUBLE PRECISION)), 4326) AS geom,
+            CAST(:seed_max_distance_meters AS DOUBLE PRECISION) / 111320.0 AS radius_deg
     ),
     nearby_origins AS (
         SELECT
@@ -157,7 +159,8 @@ _BUS_DOWNSTREAM_SQL = text(
             ST_Distance(s.location::geography, reference.geom::geography) AS distance_m
         FROM gtfs_stops s
         CROSS JOIN reference
-        WHERE ST_DWithin(s.location::geography, reference.geom::geography, CAST(:seed_max_distance_meters AS DOUBLE PRECISION))
+        WHERE s.location && ST_Expand(reference.geom, reference.radius_deg)
+          AND ST_DWithin(s.location::geography, reference.geom::geography, CAST(:seed_max_distance_meters AS DOUBLE PRECISION))
     ),
     origin_times_raw AS (
         SELECT
@@ -317,7 +320,8 @@ async def _load_bus_candidates(
     dedupe_radius_meters: float,
 ) -> list[PointCandidate]:
     engine = get_engine()
-    async with engine.connect() as conn:
+    async with engine.begin() as conn:
+        await conn.execute(text("SET LOCAL jit = off"))
         availability_result = await conn.execute(_BUS_DATASET_AVAILABILITY_SQL)
         availability = availability_result.mappings().one()
         if (

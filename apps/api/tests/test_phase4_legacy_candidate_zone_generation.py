@@ -23,9 +23,10 @@ from src.modules.zones.service import ZoneService  # noqa: E402
 
 
 class _FakeMappings:
-	def __init__(self, *, first_row=None, one_row=None):
+	def __init__(self, *, first_row=None, one_row=None, all_rows=None):
 		self._first_row = first_row
 		self._one_row = one_row
+		self._all_rows = list(all_rows or [])
 
 	def first(self):
 		return self._first_row
@@ -35,10 +36,13 @@ class _FakeMappings:
 			raise RuntimeError("Expected one row")
 		return self._one_row
 
+	def all(self):
+		return list(self._all_rows)
+
 
 class _FakeResult:
-	def __init__(self, *, first_row=None, one_row=None):
-		self._mappings = _FakeMappings(first_row=first_row, one_row=one_row)
+	def __init__(self, *, first_row=None, one_row=None, all_rows=None):
+		self._mappings = _FakeMappings(first_row=first_row, one_row=one_row, all_rows=all_rows)
 
 	def mappings(self):
 		return self._mappings
@@ -53,6 +57,7 @@ class _FakeConn:
 		self.cleared_selected_zone = False
 		self.insert_zone_params = []
 		self.association_params = []
+		self.find_existing_zone_calls = 0
 
 	async def execute(self, statement, params):
 		sql = str(statement)
@@ -65,12 +70,19 @@ class _FakeConn:
 			self.cleared_selected_zone = True
 			return _FakeResult()
 		if "FROM zones" in sql and "fingerprint = :fingerprint" in sql:
-			return _FakeResult(first_row=self.existing_zone_rows.pop(0))
+			first_row = self.existing_zone_rows.pop(0) if self.existing_zone_rows else None
+			return _FakeResult(first_row=first_row)
+		if "FROM zones" in sql and "fingerprint = ANY" in sql:
+			self.find_existing_zone_calls += 1
+			return _FakeResult(all_rows=self.existing_zone_rows)
 		if "INSERT INTO zones" in sql:
 			self.insert_zone_params.append(params)
 			return _FakeResult(one_row={"id": self.created_zone_ids.pop(0)})
 		if "INSERT INTO journey_zones" in sql:
-			self.association_params.append(params)
+			if isinstance(params, list):
+				self.association_params.extend(params)
+			else:
+				self.association_params.append(params)
 			return _FakeResult()
 		raise AssertionError(f"Unexpected SQL executed: {sql}")
 
@@ -119,9 +131,20 @@ def test_zone_service_generates_zones_from_legacy_candidates(monkeypatch) -> Non
 		"lat": -23.55052,
 		"lon": -46.63331,
 	}
+	reused_fingerprint = zone_service_module.compute_candidate_zone_fingerprint(
+		seed_lat=-23.55052,
+		seed_lon=-46.63331,
+		legacy_zone_id="candidate-rail-1",
+		mode="rail",
+		source_point_id="station-1",
+		travel_time_minutes=22.2,
+		radius_meters=900,
+		max_time_minutes=35,
+		dataset_version="11111111-1111-1111-1111-111111111111",
+	)
 	fake_conn = _FakeConn(
 		context_row=context_row,
-		existing_zone_rows=[None, {"id": reused_zone_id}],
+		existing_zone_rows=[{"id": reused_zone_id, "fingerprint": reused_fingerprint}],
 		created_zone_ids=[created_zone_id],
 	)
 	helper_calls = []
@@ -171,6 +194,7 @@ def test_zone_service_generates_zones_from_legacy_candidates(monkeypatch) -> Non
 	assert helper_calls[0]["public_transport_mode"] == "rail"
 	assert fake_conn.deleted_previous_associations is True
 	assert fake_conn.cleared_selected_zone is True
+	assert fake_conn.find_existing_zone_calls == 1
 	assert len(fake_conn.insert_zone_params) == 1
 	assert fake_conn.insert_zone_params[0]["transport_point_id"] == selected_transport_point_id
 	assert fake_conn.insert_zone_params[0]["modal"] == "bus"

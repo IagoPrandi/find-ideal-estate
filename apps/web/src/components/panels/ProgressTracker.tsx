@@ -59,8 +59,8 @@ export function ProgressTracker({ currentStep, maxStep, isCollapsed, onStepClick
         type="button"
         onClick={onToggleCollapse}
         className="ml-3 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-slate-100 text-slate-500 transition-colors hover:bg-pastel-violet-50 hover:text-pastel-violet-600"
-        title={isCollapsed ? "Expandir painel" : "Recolher painel"}
-        aria-label={isCollapsed ? "Expandir painel" : "Recolher painel"}
+        title={isCollapsed ? "Expandir painel" : "Minimizar painel"}
+        aria-label={isCollapsed ? "Expandir painel" : "Minimizar painel"}
       >
         {isCollapsed ? <ChevronDown className="h-5 w-5" /> : <ChevronUp className="h-5 w-5" />}
       </button>

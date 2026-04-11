@@ -64,6 +64,7 @@ def test_rail_sql_templates_match_materialized_geosampa_schema() -> None:
     trem_line_sql = _TREM_LINES_SQL.text
 
     assert "nearby_origins" in bus_sql
+    assert "s.location && ST_Expand(reference.geom, reference.radius_deg)" in bus_sql
     assert "ST_DWithin(s.location::geography, reference.geom::geography" in bus_sql
     assert "DISTINCT ON (origin_stop_id, trip_id)" in bus_sql
     assert "seed_area.stop_id = candidate.stop_id" in bus_sql

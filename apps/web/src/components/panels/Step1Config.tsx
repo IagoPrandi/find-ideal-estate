@@ -17,7 +17,7 @@ const PUBLIC_TRANSPORT_OPTIONS = [
   },
   {
     id: "mixed",
-    label: "Ônibus+Trem/Metrô",
+    label: "Ônibus + trem/metrô",
     Icon: Blend,
   },
 ] as const;
@@ -143,21 +143,21 @@ export function Step1Config() {
   return (
     <div className="flex h-full w-full min-w-0 flex-col animate-[fadeIn_0.3s_ease-out]">
       <div className="border-b border-slate-100 p-5">
-        <h2 className="text-xl font-semibold tracking-tight text-slate-800">Configurar Busca</h2>
+        <h2 className="text-xl font-semibold tracking-tight text-slate-800">Configurar busca</h2>
         <p className="mt-1 text-sm text-slate-500">Defina o perfil da jornada e escolha o ponto principal diretamente no mapa.</p>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+      <div className="panel-scroll min-h-0 flex-1 overflow-y-auto bg-slate-50/50 px-5 py-5">
         <div className="space-y-6">
         <div className="space-y-3">
-          <label className="text-sm font-medium text-slate-700">Ponto de Referência Principal</label>
+          <label className="text-sm font-medium text-slate-700">Ponto de referência principal</label>
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
             <div className="flex items-start gap-3">
               <div className="rounded-xl bg-pastel-violet-50 p-2 text-pastel-violet-600">
                 <MapPin className="h-5 w-5" />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-slate-700">Clique no mapa para definir o ponto.</p>
+                <p className="text-sm font-medium text-slate-700">Clique no mapa para definir o ponto principal.</p>
                 <p className="mt-1 text-xs text-slate-500">
                   {pickedCoord
                     ? `Selecionado: ${pickedCoord.lat.toFixed(5)}, ${pickedCoord.lon.toFixed(5)}`
@@ -173,7 +173,7 @@ export function Step1Config() {
               type="text"
               value={primaryReferenceLabel}
               onChange={(event) => setPrimaryReferenceLabel(event.target.value)}
-              placeholder="Ex.: Trabalho, escola ou referência"
+              placeholder="Ex.: trabalho, escola ou ponto de referência"
               className="gem-input pl-10"
             />
           </div>
@@ -311,8 +311,8 @@ export function Step1Config() {
           </div>
         )}
 
-        <div className="space-y-3 border-t border-slate-100 pt-2">
-          <label className="text-sm font-medium text-slate-700">Analisar nas zonas</label>
+        <section aria-labelledby="zone-analysis-heading" className="space-y-3 border-t border-slate-100 pt-2">
+          <h3 id="zone-analysis-heading" className="text-sm font-medium text-slate-700">Análises nas zonas</h3>
           <div className="grid grid-cols-2 gap-3">
             {renderZoneToggleCard(zoneToggleCards[0])}
             <div
@@ -363,7 +363,7 @@ export function Step1Config() {
             {renderZoneToggleCard(zoneToggleCards[1])}
             {renderZoneToggleCard(zoneToggleCards[2])}
           </div>
-        </div>
+        </section>
 
         {error ? <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p> : null}
         </div>
@@ -371,7 +371,7 @@ export function Step1Config() {
 
       <div className="border-t border-slate-100 bg-white p-5">
         <button type="button" onClick={handleSubmit} disabled={isSubmitting} className="gem-primary-button w-full disabled:cursor-not-allowed disabled:opacity-60">
-          {isSubmitting ? "Criando jornada..." : isWalkingMode ? "Gerar área acessível a pé" : isDrivingMode ? "Gerar área acessível de carro" : "Encontrar pontos de ônibus e estações próximas"}
+          {isSubmitting ? "Criando jornada..." : isWalkingMode ? "Gerar área acessível a pé" : isDrivingMode ? "Gerar área acessível de carro" : "Encontrar pontos de transporte próximos"}
           <ArrowRight className="h-4 w-4" />
         </button>
       </div>

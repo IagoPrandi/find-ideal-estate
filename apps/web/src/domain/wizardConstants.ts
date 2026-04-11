@@ -14,7 +14,7 @@ export const INTEREST_CATEGORIES = [
   "Mercado",
   "Restaurante",
   "Farmácia",
-  "Pin livre"
+  "Ponto livre"
 ] as const;
 
 export const ZONE_RADIUS_MIN_M = 300;

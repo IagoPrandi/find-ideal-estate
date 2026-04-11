@@ -291,13 +291,13 @@ describe("Step6Analysis", () => {
     expect(progressPanel).toBeInTheDocument();
     expect(progressGrid.className).toContain("grid-cols-1");
     expect(within(progressPanel).getByText(/Progresso por plataforma/i)).toBeInTheDocument();
-    expect(screen.getByText(/Job de listings: 67%/i)).toBeInTheDocument();
+    expect(screen.getByText(/Busca de imóveis:\s*67%/i)).toBeInTheDocument();
     expect(within(progressPanel).getByText(/^QuintoAndar$/i)).toBeInTheDocument();
     expect(within(progressPanel).getByText(/^VivaReal$/i)).toBeInTheDocument();
     expect(within(progressPanel).getByText(/^ZapImóveis$/i)).toBeInTheDocument();
     expect(within(progressPanel).getByText(/^Concluída$/i)).toBeInTheDocument();
-    expect(within(progressPanel).getByText(/Raspando agora nesta plataforma/i)).toBeInTheDocument();
-    expect(within(progressPanel).getByText(/96 anúncios raspados no worker/i)).toBeInTheDocument();
+    expect(within(progressPanel).getByText(/Buscando anúncios nesta plataforma agora\./i)).toBeInTheDocument();
+    expect(within(progressPanel).getByText(/96 anúncios processados até agora/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /recolher progresso do scraping/i })).toHaveAttribute("aria-expanded", "true");
 
     await waitFor(() => {
@@ -361,8 +361,8 @@ describe("Step6Analysis", () => {
     expect(screen.getByRole("button", { name: /recolher progresso do scraping/i })).toHaveAttribute("aria-expanded", "true");
     expect(within(progressPanel).getByText(/^QuintoAndar$/i)).toBeInTheDocument();
     expect(screen.getByText(/Resultado consolidado/i)).toBeInTheDocument();
-    expect(screen.getByText(/raspou 210 anúncios, mas nenhum permaneceu elegível para esta busca após os filtros do backend/i)).toBeInTheDocument();
-    expect(screen.getByText(/Job de listings: 100%/i)).toBeInTheDocument();
+    expect(screen.getByText(/A busca terminou e encontrou 210 anúncios, mas nenhum permaneceu elegível após os filtros da busca\. Tente outra rua ou outra zona\./i)).toBeInTheDocument();
+    expect(screen.getByText(/Busca de imóveis:\s*100%/i)).toBeInTheDocument();
   });
 
   it("stops presenting an interrupted job as active scraping when the watchdog cancels it", async () => {
@@ -399,7 +399,7 @@ describe("Step6Analysis", () => {
 
     expect(await screen.findByText(/Scraping interrompido/i)).toBeInTheDocument();
     expect(screen.getByText(/No ambiente local isso costuma indicar que a fila Dramatiq ficou sem worker ativo/i)).toBeInTheDocument();
-    expect(screen.getByText(/Job de listings: 63%/i)).toBeInTheDocument();
+    expect(screen.getByText(/Busca de imóveis:\s*63%/i)).toBeInTheDocument();
     expect(screen.queryByTestId("listings-platform-progress")).not.toBeInTheDocument();
 
     await waitFor(() => {
@@ -667,7 +667,7 @@ describe("Step6Analysis", () => {
           neighborhood_name: "Itaim Bibi",
           city_name: "São Paulo",
           current_best_price: "11000",
-          current_unit_price: 104.76,
+          current_unit_price: 122.86,
           neighborhood_median_unit_price: 99.5,
           current_vs_neighborhood_pct: 5.29,
           condo_fee: "1500",
@@ -710,16 +710,15 @@ describe("Step6Analysis", () => {
         page: "preco",
         minPrice: null,
         maxPrice: null,
-        usageType: "all",
+        usageType: "residential",
         spatialScope: "inside_zone",
         minSize: null,
         maxSize: null,
       });
     });
 
-    expect(vi.mocked(getZoneDashboardAnalytics).mock.calls.some((call) => call[3] === "prop-1")).toBe(false);
     expect(within(listingCard).queryByRole("button", { name: /Ver Acessibilidade/i })).not.toBeInTheDocument();
-    expect(within(listingCard).getByText(/R\$\s*105\/m²/i)).toBeInTheDocument();
+    expect(within(listingCard).getByText(/R\$\s*123\/m²/i)).toBeInTheDocument();
     expect(within(listingCard).getByText(/\+18\.9%/i)).toBeInTheDocument();
     expect(within(listingCard).queryByText(/Valor por m²/i)).not.toBeInTheDocument();
     expect(within(listingCard).queryByText(/Média da zona:\s*R\$\s*10\.850/i)).not.toBeInTheDocument();
@@ -848,14 +847,14 @@ describe("Step6Analysis", () => {
         page: "preco",
         minPrice: null,
         maxPrice: null,
-        usageType: "all",
+        usageType: "residential",
         spatialScope: "inside_zone",
         minSize: null,
         maxSize: null,
       });
     });
 
-    fireEvent.click(await screen.findByRole("button", { name: /Dashboard Analítico/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /Dashboard analítico/i }));
 
     expect(await screen.findByTestId("dashboard-page-preco")).toBeInTheDocument();
     expect(screen.getByTestId("dashboard-price-ranking")).toBeInTheDocument();
@@ -885,7 +884,7 @@ describe("Step6Analysis", () => {
         page: "preco",
         minPrice: null,
         maxPrice: null,
-        usageType: "all",
+        usageType: "residential",
         spatialScope: "inside_zone",
         minSize: null,
         maxSize: null,
@@ -947,7 +946,7 @@ describe("Step6Analysis", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Imóveis/i }));
     expect(await screen.findByText(/Rua Itacema, Itaim Bibi, São Paulo, SP/i)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: /Dashboard Analítico/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Dashboard analítico/i }));
 
     expect(screen.queryByRole("button", { name: /Preparando dashboard/i })).not.toBeInTheDocument();
     expect(await screen.findByTestId("dashboard-page-preco")).toBeInTheDocument();
@@ -1007,7 +1006,7 @@ describe("Step6Analysis", () => {
 
     await renderWithQueryClient();
 
-    fireEvent.click(await screen.findByRole("button", { name: /Dashboard Analítico/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /Dashboard analítico/i }));
 
     await waitFor(() => {
       expect(vi.mocked(getZoneDashboardAnalytics).mock.calls).toContainEqual([

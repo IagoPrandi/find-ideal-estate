@@ -157,7 +157,7 @@ function ZonePoiList({
   }, [isZoneSelected, selectedPoiKey, visiblePoints]);
 
   if (poiPoints.length === 0) {
-    return <p className="text-xs text-slate-500">POIs detalhados ainda nao foram carregados para esta zona.</p>;
+    return <p className="text-xs text-slate-500">Os POIs detalhados ainda não foram carregados para esta zona.</p>;
   }
 
   return (
@@ -235,12 +235,10 @@ function ZoneCard({
   zone,
   isSelected,
   onSelect,
-  onContinue,
 }: {
   zone: Awaited<ReturnType<typeof getJourneyZonesList>>["zones"][number];
   isSelected: boolean;
   onSelect: () => void;
-  onContinue: () => void;
 }) {
   const showGreen = zone.green_vegetation_label !== null && zone.green_vegetation_label !== undefined;
   const poiPoints = zone.poi_points || [];
@@ -252,6 +250,7 @@ function ZoneCard({
 
   return (
     <div
+      data-testid={`zone-card-${zone.id}`}
       className={`cursor-pointer rounded-xl border bg-white p-4 shadow-sm transition-all hover:shadow-md ${isSelected ? "border-pastel-violet-400 ring-1 ring-pastel-violet-400" : "border-slate-200"}`}
       onClick={onSelect}
     >
@@ -259,9 +258,9 @@ function ZoneCard({
         <h3 className="text-sm font-semibold text-slate-800">{`Zona ${zone.fingerprint.slice(0, 8)}`}</h3>
         <div className="flex items-center gap-1.5">
           {zone.is_circle_fallback ? (
-            <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700" title="Zona circular (Valhalla indisponivel)">~circulo</span>
+            <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700" title="Zona circular aproximada porque o serviço de rotas está indisponível.">Círculo aproximado</span>
           ) : null}
-          <span className="rounded bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600">Ate {zone.travel_time_minutes ?? "--"}m</span>
+          <span className="rounded bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600">Até {zone.travel_time_minutes ?? "--"} min</span>
         </div>
       </div>
 
@@ -274,7 +273,7 @@ function ZoneCard({
       </div>
 
       <div className="mb-4 flex flex-wrap gap-3 text-xs text-slate-500">
-        <span>{zone.walk_distance_meters ? `${Math.round(zone.walk_distance_meters)} m ate o seed` : "Sem distancia consolidada"}</span>
+        <span>{zone.walk_distance_meters ? `${Math.round(zone.walk_distance_meters)} m até o ponto de transporte` : "Sem distância consolidada"}</span>
         <span>{poiPoints.length > 0 ? `${poiPoints.length} POIs mapeados` : zone.poi_counts ? `${Object.keys(zone.poi_counts).length} grupos de POIs` : "POIs pendentes"}</span>
         <span>{zone.price_summary?.active_listing_count ? `${zone.price_summary.active_listing_count} anúncios ativos no recorte padrão` : "Sem base de valor consolidada"}</span>
         {showGreen ? <span>{zone.green_vegetation_label}</span> : null}
@@ -284,22 +283,6 @@ function ZoneCard({
         <p className="mb-3 text-xs font-bold uppercase tracking-[0.14em] text-slate-500">POIs da zona</p>
         <ZonePoiList poiPoints={poiPoints} zoneFingerprint={zone.fingerprint} isZoneSelected={isSelected} onInteract={onSelect} />
       </div>
-
-      {isSelected ? (
-        <div className="mt-4 border-t border-slate-100 pt-3 animate-[fadeIn_0.2s_ease-out]">
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              onContinue();
-            }}
-            className="flex w-full items-center justify-center gap-2 rounded-lg bg-pastel-violet-500 px-4 py-2 text-sm font-medium text-white transition-all hover:bg-pastel-violet-600"
-          >
-            Procurar Imoveis nesta Zona
-            <Search className="h-4 w-4" />
-          </button>
-        </div>
-      ) : null}
     </div>
   );
 }
@@ -378,7 +361,7 @@ export function Step4Compare() {
 
     if (state === "failed" || state === "cancelled") {
       setPoiBackfillJobId(null);
-      setPoiBackfillError(poiBackfillJobQuery.data?.error_message || "A atualizacao automatica dos POIs falhou.");
+      setPoiBackfillError(poiBackfillJobQuery.data?.error_message || "A atualização automática dos POIs falhou.");
     }
   }, [poiBackfillJobId, poiBackfillJobQuery.data?.error_message, poiBackfillJobQuery.data?.state, query]);
 
@@ -415,14 +398,27 @@ export function Step4Compare() {
     return zones;
   }, [query.data?.zones, sortKey]);
 
+  const selectedZone = useMemo(
+    () => sortedZones.find((zone) => zone.fingerprint === selectedZoneFingerprint) ?? null,
+    [selectedZoneFingerprint, sortedZones]
+  );
+
+  function handleContinue() {
+    if (!selectedZone) {
+      return;
+    }
+    setMaxStep(5);
+    goToStep(5);
+  }
+
   return (
     <div className="flex h-full flex-col animate-[fadeInRight_0.3s_ease-out]">
       <div className="border-b border-slate-100 p-5">
         <div className="mb-1 flex items-center justify-between">
-          <h2 className="text-xl font-semibold tracking-tight text-slate-800">Zonas Encontradas</h2>
+          <h2 className="text-xl font-semibold tracking-tight text-slate-800">Zonas encontradas</h2>
           <span className="rounded-md bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-700">Concluído</span>
         </div>
-        <p className="text-sm text-slate-500">Compare as zonas pela viagem e pelos indicadores enriquecidos.</p>
+        <p className="text-sm text-slate-500">Compare as zonas pelo tempo de viagem e pelos indicadores enriquecidos.</p>
       </div>
 
       <div className="panel-scroll flex-1 overflow-y-auto bg-slate-50/50 p-4">
@@ -438,7 +434,7 @@ export function Step4Compare() {
           <div className="mb-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 animate-[fadeIn_0.3s_ease-out]">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
             <span>
-              <strong>Roteamento indisponível.</strong> As zonas foram calculadas como círculos aproximados (Valhalla offline). Os limites podem diferir da isócrona real de deslocamento.
+              <strong>Serviço de rotas indisponível.</strong> As zonas foram calculadas como círculos aproximados. Os limites podem diferir da isócrona real de deslocamento.
             </span>
           </div>
         ) : null}
@@ -466,14 +462,26 @@ export function Step4Compare() {
                 zone={zone}
                 isSelected={isSelected}
                 onSelect={() => void handleSelect(zone.id, zone.fingerprint)}
-                onContinue={() => {
-                  setMaxStep(5);
-                  goToStep(5);
-                }}
               />
             );
           })}
         </div>
+      </div>
+
+      <div className="border-t border-slate-100 bg-white p-4">
+        <div className="mb-3 min-h-5 text-xs font-medium text-slate-500">
+          {selectedZone ? `Zona ${selectedZone.fingerprint.slice(0, 8)} selecionada para a busca de imóveis.` : "Selecione uma zona para habilitar a busca de imóveis."}
+        </div>
+        <button
+          type="button"
+          data-testid="step4-continue-button"
+          onClick={handleContinue}
+          disabled={!selectedZone}
+          className="flex w-full items-center justify-center gap-2 rounded-lg bg-pastel-violet-500 px-4 py-3 text-sm font-medium text-white transition-all hover:bg-pastel-violet-600 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400"
+        >
+          Buscar imóveis na zona selecionada
+          <Search className="h-4 w-4" />
+        </button>
       </div>
     </div>
   );

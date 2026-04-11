@@ -842,7 +842,7 @@ async def fetch_zone_dashboard_analytics(
             max_price=max_price,
             min_size=min_size,
             max_size=max_size,
-            price_alias="lap.current_best_price",
+            price_alias="lap.current_total_price",
             usage_alias="zp.usage_type",
             area_alias="zp.area_m2",
             inside_zone_alias="zp.inside_zone",
@@ -855,10 +855,10 @@ async def fetch_zone_dashboard_analytics(
                 , latest_active_prices AS (
                     SELECT
                         la.property_id,
-                        MIN(snapshot.price)::DOUBLE PRECISION AS current_best_price
+                                                MIN(COALESCE(snapshot.price, 0) + COALESCE(snapshot.condo_fee, 0) + COALESCE(snapshot.iptu, 0))::DOUBLE PRECISION AS current_total_price
                     FROM listing_ads la
                     JOIN LATERAL (
-                        SELECT ls.price
+                                                SELECT ls.price, ls.condo_fee, ls.iptu
                         FROM listing_snapshots ls
                         WHERE ls.listing_ad_id = la.id
                           AND ls.price IS NOT NULL
@@ -890,10 +890,10 @@ async def fetch_zone_dashboard_analytics(
                     zp.property_id,
                     zp.city_name,
                     zp.neighborhood_name,
-                    lap.current_best_price,
+                    lap.current_total_price,
                     CASE
                         WHEN zp.area_m2 IS NOT NULL AND zp.area_m2 > 0
-                        THEN lap.current_best_price / zp.area_m2::DOUBLE PRECISION
+                        THEN lap.current_total_price / zp.area_m2::DOUBLE PRECISION
                         ELSE NULL
                     END AS unit_price
                 FROM zone_props zp
@@ -936,7 +936,7 @@ async def fetch_zone_dashboard_analytics(
             current_neighborhood_name = str(row.get("neighborhood_name") or "")
             if not current_city_name or not current_neighborhood_name:
                 continue
-            current_price = _safe_float(row.get("current_best_price"))
+            current_price = _safe_float(row.get("current_total_price"))
             unit_price = _safe_float(row.get("unit_price"))
             price_city_options.append(current_city_name)
             if current_price is not None:
@@ -1012,10 +1012,10 @@ async def fetch_zone_dashboard_analytics(
                 , latest_active_prices AS (
                     SELECT
                         la.property_id,
-                        MIN(snapshot.price)::DOUBLE PRECISION AS current_best_price
+                                                MIN(COALESCE(snapshot.price, 0) + COALESCE(snapshot.condo_fee, 0) + COALESCE(snapshot.iptu, 0))::DOUBLE PRECISION AS current_total_price
                     FROM listing_ads la
                     JOIN LATERAL (
-                        SELECT ls.price
+                                                SELECT ls.price, ls.condo_fee, ls.iptu
                         FROM listing_snapshots ls
                         WHERE ls.listing_ad_id = la.id
                           AND ls.price IS NOT NULL
@@ -1057,7 +1057,7 @@ async def fetch_zone_dashboard_analytics(
                     fp.city_name,
                     fp.neighborhood_name,
                     DATE(ls.observed_at) AS day,
-                    AVG(ls.price)::DOUBLE PRECISION AS average_price,
+                    AVG(COALESCE(ls.price, 0) + COALESCE(ls.condo_fee, 0) + COALESCE(ls.iptu, 0))::DOUBLE PRECISION AS average_price,
                     COUNT(*)::INT AS sample_count
                 FROM filtered_props fp
                 JOIN listing_ads la ON la.property_id = fp.property_id
@@ -1139,7 +1139,7 @@ async def fetch_zone_dashboard_analytics(
         selected_neighborhood_prices = [
             current_price
             for row in current_zone_price_rows
-            for current_price in [_safe_float(row.get("current_best_price"))]
+            for current_price in [_safe_float(row.get("current_total_price"))]
             if current_price is not None
             and selected_neighborhood_key is not None
             and str(row.get("city_name") or "") == selected_neighborhood_key[0]

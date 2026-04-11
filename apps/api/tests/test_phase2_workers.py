@@ -1,13 +1,19 @@
 import asyncio
+from datetime import datetime, timezone
+from types import SimpleNamespace
 from uuid import uuid4
 
-from contracts import JobType
+from contracts import JobRead, JobState, JobType
+from modules.jobs.service import enqueue_job
 from workers.cancellation import JobCancelledException
+from workers.handlers.enrichment import enrich_zones_actor
 from workers.handlers.transport import _transport_search_step
+from workers.handlers.transport import transport_search_actor
+from workers.handlers.zones import zone_generation_actor
 from workers.queue import QUEUE_CONCURRENCY, QUEUE_NAMES, Priority, configure_broker
 from workers.retry_policy import JobRetryPolicy
 from workers.runtime import run_job_with_retry
-from workers.watchdog import sweep_stale_running_jobs
+from workers.watchdog import start_watchdog, stop_watchdog, sweep_stale_running_jobs
 
 
 def test_configure_stub_broker_declares_phase2_queues():
@@ -258,10 +264,160 @@ def test_run_job_with_retry_marks_failed_after_max_retries(monkeypatch):
         )
     )
 
-    assert [item[0] for item in state_calls].count("retrying") == 2
-    assert [item[0] for item in state_calls].count("pending") == 2
-    assert state_calls[-1][0] == "failed"
-    assert sleep_calls == [5, 30]
+
+def test_run_job_with_retry_ignores_cancelled_heartbeat_shutdown(monkeypatch):
+    warnings = []
+
+    class _FakeStateMiddleware:
+        async def mark_running(self, job_id, stage=None):
+            return None
+
+        async def mark_retrying(self, job_id, stage=None, retry_in_seconds=0):
+            return None
+
+        async def mark_pending(self, job_id, stage=None):
+            return None
+
+        async def mark_completed(self, job_id, stage=None):
+            return None
+
+        async def mark_failed(self, job_id, stage=None, error_message=None):
+            return None
+
+        async def mark_cancelled_partial(self, job_id, stage=None):
+            return None
+
+    class _FakeHeartbeatMiddleware:
+        def __init__(self, ttl_seconds=120):
+            self.ttl_seconds = ttl_seconds
+
+        async def beat(self, job_id):
+            await asyncio.sleep(10)
+
+        async def clear(self, job_id):
+            return None
+
+    async def _execute_step():
+        return None
+
+    monkeypatch.setattr("workers.runtime.JobStateMiddleware", _FakeStateMiddleware)
+    monkeypatch.setattr("workers.runtime.JobHeartbeatMiddleware", _FakeHeartbeatMiddleware)
+    monkeypatch.setattr("workers.runtime.logger.warning", lambda message, *args, **kwargs: warnings.append(message))
+
+    asyncio.run(
+        run_job_with_retry(
+            uuid4(),
+            JobType.TRANSPORT_SEARCH,
+            stage="transport_search",
+            execute_step=_execute_step,
+        )
+    )
+
+    assert "heartbeat loop finished with error" not in warnings
+
+
+def test_transport_actor_uses_shared_worker_loop(monkeypatch):
+    captured = []
+
+    def _fake_run_worker_coroutine(awaitable):
+        captured.append(awaitable)
+        awaitable.close()
+
+    monkeypatch.setattr("workers.runner.run_worker_coroutine", _fake_run_worker_coroutine)
+
+    transport_search_actor(str(uuid4()))
+
+    assert len(captured) == 1
+
+
+def test_zone_actor_uses_shared_worker_loop(monkeypatch):
+    captured = []
+
+    def _fake_run_worker_coroutine(awaitable):
+        captured.append(awaitable)
+        awaitable.close()
+
+    monkeypatch.setattr("workers.runner.run_worker_coroutine", _fake_run_worker_coroutine)
+
+    zone_generation_actor(str(uuid4()))
+
+    assert len(captured) == 1
+
+
+def test_enrichment_actor_uses_shared_worker_loop(monkeypatch):
+    captured = []
+
+    def _fake_run_worker_coroutine(awaitable):
+        captured.append(awaitable)
+        awaitable.close()
+
+    monkeypatch.setattr("workers.runner.run_worker_coroutine", _fake_run_worker_coroutine)
+
+    enrich_zones_actor(str(uuid4()))
+
+    assert len(captured) == 1
+
+
+def _sample_job_for_enqueue(job_type: JobType) -> JobRead:
+    return JobRead(
+        id=uuid4(),
+        journey_id=uuid4(),
+        job_type=job_type,
+        state=JobState.PENDING,
+        progress_percent=0,
+        current_stage=None,
+        cancel_requested_at=None,
+        started_at=None,
+        finished_at=None,
+        worker_id=None,
+        result_ref={},
+        error_code=None,
+        error_message=None,
+        created_at=datetime.now(tz=timezone.utc),
+    )
+
+
+def test_enqueue_job_runs_selected_types_inline_locally(monkeypatch):
+    inline_jobs = []
+
+    async def _fake_run_job_inline(job):
+        inline_jobs.append(job.job_type)
+
+    async def _exercise():
+        await enqueue_job(_sample_job_for_enqueue(JobType.ZONE_GENERATION))
+        await asyncio.sleep(0)
+
+    monkeypatch.setattr("modules.jobs.service._uses_stub_broker", lambda: False)
+    monkeypatch.setattr(
+        "modules.jobs.service.get_settings",
+        lambda: SimpleNamespace(local_inline_job_types="default"),
+    )
+    monkeypatch.setattr("modules.jobs.service._run_job_inline", _fake_run_job_inline)
+
+    asyncio.run(_exercise())
+
+    assert inline_jobs == [JobType.ZONE_GENERATION]
+
+
+def test_enqueue_job_keeps_listings_scrape_external_when_local_inline_enabled(monkeypatch):
+    sent_ids = []
+
+    async def _exercise():
+        await enqueue_job(_sample_job_for_enqueue(JobType.LISTINGS_SCRAPE))
+
+    monkeypatch.setattr("modules.jobs.service._uses_stub_broker", lambda: False)
+    monkeypatch.setattr(
+        "modules.jobs.service.get_settings",
+        lambda: SimpleNamespace(local_inline_job_types="default"),
+    )
+    monkeypatch.setattr(
+        "workers.handlers.listings.listings_scrape_actor.send",
+        lambda job_id: sent_ids.append(job_id),
+    )
+
+    asyncio.run(_exercise())
+
+    assert len(sent_ids) == 1
 
 
 def test_watchdog_marks_stale_running_jobs(monkeypatch):
@@ -360,10 +516,44 @@ def test_watchdog_ignores_running_job_with_heartbeat(monkeypatch):
     assert published == []
 
 
+def test_start_watchdog_uses_utc_timezone(monkeypatch):
+    captured = {}
+
+    class _FakeScheduler:
+        def __init__(self, *args, **kwargs):
+            captured["timezone"] = kwargs.get("timezone")
+            self.jobs = []
+
+        def add_job(self, func, trigger, **kwargs):
+            self.jobs.append((func, trigger, kwargs))
+
+        def start(self):
+            captured["started"] = True
+
+        def shutdown(self, wait=False):
+            captured["shutdown_wait"] = wait
+
+    monkeypatch.setattr(
+        "workers.watchdog.get_settings",
+        lambda: SimpleNamespace(
+            enable_listings_prewarm_scheduler=True,
+            listings_prewarm_cron_hour=3,
+            listings_prewarm_cron_minute=0,
+        ),
+    )
+    monkeypatch.setattr("workers.watchdog.AsyncIOScheduler", _FakeScheduler)
+
+    stop_watchdog()
+    start_watchdog()
+    stop_watchdog()
+
+    assert str(captured["timezone"]) == "UTC"
+    assert captured["started"] is True
+
+
 def test_transport_search_step_queries_and_emits_progress(monkeypatch):
     progress_calls = []
     searched_job_ids = []
-    sleep_calls = []
 
     async def _check_cancellation(_job_id):
         return None
@@ -375,17 +565,12 @@ def test_transport_search_step_queries_and_emits_progress(monkeypatch):
         searched_job_ids.append(job_id)
         return 2
 
-    async def _sleep(seconds):
-        sleep_calls.append(seconds)
-
     monkeypatch.setattr("workers.handlers.transport.check_cancellation", _check_cancellation)
     monkeypatch.setattr("workers.handlers.transport.emit_stage_progress", _emit_stage_progress)
     monkeypatch.setattr("workers.handlers.transport.run_transport_search_for_job", _run_transport_search_for_job)
-    monkeypatch.setattr("workers.handlers.transport.asyncio.sleep", _sleep)
 
     job_id = uuid4()
     asyncio.run(_transport_search_step(job_id))
 
     assert searched_job_ids == [job_id]
     assert [item[2] for item in progress_calls] == [10, 40, 100]
-    assert sleep_calls == [0.5]

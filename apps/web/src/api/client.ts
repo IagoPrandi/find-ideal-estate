@@ -66,7 +66,7 @@ export class ApiError extends Error {
 
 function legacyRunNotSupported(action: string): never {
   throw new ApiError(
-    `${action} usa contrato legado de run e ainda nao foi migrado para journey/jobs nesta tela.`,
+    `${action} usa o contrato legado de run e ainda não foi migrado para journey/jobs nesta tela.`,
     501,
     false
   );
@@ -91,8 +91,8 @@ async function requestJson<T>(path: string, schema: ZodSchema<T>, options: Reque
       body: options.body ? JSON.stringify(options.body) : undefined
     });
   } catch {
-    throw new ApiError(
-      "Nao foi possivel conectar com a API. Verifique se o backend esta ativo e se CORS/rede estao configurados.",
+      throw new ApiError(
+        "Não foi possível conectar com a API. Verifique se o backend está ativo e se CORS/rede estão configurados.",
       0,
       true
     );
@@ -105,7 +105,7 @@ async function requestJson<T>(path: string, schema: ZodSchema<T>, options: Reque
       data = JSON.parse(text);
     } catch {
       throw new ApiError(
-        "A API respondeu com payload invalido (esperado JSON).",
+        "A API respondeu com payload inválido (era esperado JSON).",
         response.status || 500,
         false
       );
@@ -344,7 +344,7 @@ export async function getZoneDetail(runId: string, zoneUid: string): Promise<Zon
   const zones = await requestJson(`/journeys/${runId}/zones`, JourneyZonesListResponseSchema);
   const zone = zones.zones.find((item) => item.fingerprint === zoneUid);
   if (!zone) {
-    throw new ApiError("Zona nao encontrada na jornada atual.", 404, false);
+    throw new ApiError("Zona não encontrada na jornada atual.", 404, false);
   }
 
   return {

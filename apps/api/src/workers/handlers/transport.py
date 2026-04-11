@@ -34,7 +34,6 @@ async def _transport_search_step(job_id: UUID) -> None:
         progress_percent=40,
         message="Querying transport points near reference",
     )
-    await asyncio.sleep(0.5)
     await run_transport_search_for_job(job_id)
 
     await check_cancellation(job_id)
@@ -49,7 +48,9 @@ async def _transport_search_step(job_id: UUID) -> None:
 @dramatiq.actor(queue_name=QUEUE_TRANSPORT)
 def transport_search_actor(job_id: str) -> None:
     parsed_job_id = UUID(job_id)
-    asyncio.run(
+    from workers.runner import run_worker_coroutine
+
+    run_worker_coroutine(
         run_job_with_retry(
             parsed_job_id,
             JobType.TRANSPORT_SEARCH,

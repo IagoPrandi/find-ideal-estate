@@ -7,10 +7,12 @@ from uuid import UUID
 
 from contracts import TransportPointRead
 from core.db import get_engine
+from modules.jobs.service import update_job_execution_state
 from sqlalchemy import text
 from sqlalchemy.engine import RowMapping
 
 _WALKING_SPEED_M_PER_SEC = 1.25
+_METERS_PER_DEGREE_LAT = 111_320.0
 
 _JOB_JOURNEY_CONTEXT_SQL = text(
     """
@@ -124,32 +126,54 @@ def _build_transport_search_sql(source_tokens: set[str]) -> str:
     include_metro = "metro" in source_tokens
     include_trem = "trem" in source_tokens
 
+    cte_parts: list[str] = []
     selects: list[str] = []
     if include_bus:
-        selects.append(
+        cte_parts.append(
             """
-            SELECT
-                'gtfs_stop'::text AS source,
-                s.stop_id::text AS external_id,
-                s.stop_name::text AS name,
-                ST_Y(s.location) AS lat,
-                ST_X(s.location) AS lon,
-                ST_Distance(s.location::geography, ref.ref_point::geography) AS walk_distance_m,
-                COALESCE(route_agg.route_count, 0) AS route_count,
-                COALESCE(route_agg.route_ids, ARRAY[]::text[]) AS route_ids,
-                ARRAY['bus']::text[] AS modal_types
-            FROM gtfs_stops s
-            CROSS JOIN ref
-            LEFT JOIN (
+            nearby_gtfs_stops AS (
+                SELECT
+                    s.stop_id,
+                    s.stop_name,
+                    s.location,
+                    ST_Y(s.location) AS lat,
+                    ST_X(s.location) AS lon,
+                    ST_Distance(s.location::geography, ref.ref_point::geography) AS walk_distance_m
+                FROM gtfs_stops s
+                CROSS JOIN ref
+                WHERE s.location && ST_Expand(ref.ref_point, ref.radius_deg)
+                  AND ST_DWithin(s.location::geography, ref.ref_point::geography, ref.radius_m)
+            )
+            """
+        )
+        cte_parts.append(
+            """
+            nearby_gtfs_route_agg AS (
                 SELECT
                     st.stop_id,
                     COUNT(DISTINCT t.route_id) AS route_count,
                     ARRAY_AGG(DISTINCT t.route_id) FILTER (WHERE t.route_id IS NOT NULL) AS route_ids
                 FROM gtfs_stop_times st
                 JOIN gtfs_trips t ON t.trip_id = st.trip_id
+                JOIN nearby_gtfs_stops nearby ON nearby.stop_id = st.stop_id
                 GROUP BY st.stop_id
-            ) route_agg ON route_agg.stop_id = s.stop_id
-            WHERE ST_DWithin(s.location::geography, ref.ref_point::geography, ref.radius_m)
+            )
+            """
+        )
+        selects.append(
+            """
+            SELECT
+                'gtfs_stop'::text AS source,
+                s.stop_id::text AS external_id,
+                s.stop_name::text AS name,
+                s.lat,
+                s.lon,
+                s.walk_distance_m,
+                COALESCE(route_agg.route_count, 0) AS route_count,
+                COALESCE(route_agg.route_ids, ARRAY[]::text[]) AS route_ids,
+                ARRAY['bus']::text[] AS modal_types
+            FROM nearby_gtfs_stops s
+            LEFT JOIN nearby_gtfs_route_agg route_agg ON route_agg.stop_id = s.stop_id
             """
         )
         selects.append(
@@ -157,16 +181,24 @@ def _build_transport_search_sql(source_tokens: set[str]) -> str:
             SELECT
                 'geosampa_bus_stop'::text AS source,
                 md5(ST_AsEWKB(g.geometry)::text) AS external_id,
-                COALESCE(NULLIF(g.nm_ponto_onibus, ''), 'Ponto de ônibus')::text AS name,
-                ST_Y(ST_PointOnSurface(g.geometry)) AS lat,
-                ST_X(ST_PointOnSurface(g.geometry)) AS lon,
-                ST_Distance(ST_PointOnSurface(g.geometry)::geography, ref.ref_point::geography) AS walk_distance_m,
+                g.name,
+                ST_Y(g.point_geom) AS lat,
+                ST_X(g.point_geom) AS lon,
+                ST_Distance(g.point_geom::geography, ref.ref_point::geography) AS walk_distance_m,
                 0 AS route_count,
                 ARRAY[]::text[] AS route_ids,
                 ARRAY['bus']::text[] AS modal_types
-            FROM geosampa_bus_stops g
+            FROM (
+                SELECT
+                    g.geometry,
+                    COALESCE(NULLIF(g.nm_ponto_onibus, ''), 'Ponto de ônibus')::text AS name,
+                    ST_PointOnSurface(g.geometry) AS point_geom
+                FROM geosampa_bus_stops g
+                CROSS JOIN ref
+                WHERE g.geometry && ST_Expand(ref.ref_point, ref.radius_deg)
+            ) g
             CROSS JOIN ref
-            WHERE ST_DWithin(ST_PointOnSurface(g.geometry)::geography, ref.ref_point::geography, ref.radius_m)
+            WHERE ST_DWithin(g.point_geom::geography, ref.ref_point::geography, ref.radius_m)
             """
         )
         selects.append(
@@ -174,16 +206,24 @@ def _build_transport_search_sql(source_tokens: set[str]) -> str:
             SELECT
                 'geosampa_bus_terminal'::text AS source,
                 md5(ST_AsEWKB(g.geometry)::text) AS external_id,
-                COALESCE(NULLIF(g.nm_terminal, ''), 'Terminal de ônibus')::text AS name,
-                ST_Y(ST_PointOnSurface(g.geometry)) AS lat,
-                ST_X(ST_PointOnSurface(g.geometry)) AS lon,
-                ST_Distance(ST_PointOnSurface(g.geometry)::geography, ref.ref_point::geography) AS walk_distance_m,
+                g.name,
+                ST_Y(g.point_geom) AS lat,
+                ST_X(g.point_geom) AS lon,
+                ST_Distance(g.point_geom::geography, ref.ref_point::geography) AS walk_distance_m,
                 0 AS route_count,
                 ARRAY[]::text[] AS route_ids,
                 ARRAY['bus']::text[] AS modal_types
-            FROM geosampa_bus_terminals g
+            FROM (
+                SELECT
+                    g.geometry,
+                    COALESCE(NULLIF(g.nm_terminal, ''), 'Terminal de ônibus')::text AS name,
+                    ST_PointOnSurface(g.geometry) AS point_geom
+                FROM geosampa_bus_terminals g
+                CROSS JOIN ref
+                WHERE g.geometry && ST_Expand(ref.ref_point, ref.radius_deg)
+            ) g
             CROSS JOIN ref
-            WHERE ST_DWithin(ST_PointOnSurface(g.geometry)::geography, ref.ref_point::geography, ref.radius_m)
+            WHERE ST_DWithin(g.point_geom::geography, ref.ref_point::geography, ref.radius_m)
             """
         )
     if include_metro:
@@ -192,16 +232,24 @@ def _build_transport_search_sql(source_tokens: set[str]) -> str:
             SELECT
                 'geosampa_metro_station'::text AS source,
                 md5(ST_AsEWKB(g.geometry)::text) AS external_id,
-                COALESCE(NULLIF(g.nm_estacao_metro_trem, ''), 'Estação de metrô')::text AS name,
-                ST_Y(ST_PointOnSurface(g.geometry)) AS lat,
-                ST_X(ST_PointOnSurface(g.geometry)) AS lon,
-                ST_Distance(ST_PointOnSurface(g.geometry)::geography, ref.ref_point::geography) AS walk_distance_m,
+                g.name,
+                ST_Y(g.point_geom) AS lat,
+                ST_X(g.point_geom) AS lon,
+                ST_Distance(g.point_geom::geography, ref.ref_point::geography) AS walk_distance_m,
                 0 AS route_count,
                 ARRAY[]::text[] AS route_ids,
                 ARRAY['metro']::text[] AS modal_types
-            FROM geosampa_metro_stations g
+            FROM (
+                SELECT
+                    g.geometry,
+                    COALESCE(NULLIF(g.nm_estacao_metro_trem, ''), 'Estação de metrô')::text AS name,
+                    ST_PointOnSurface(g.geometry) AS point_geom
+                FROM geosampa_metro_stations g
+                CROSS JOIN ref
+                WHERE g.geometry && ST_Expand(ref.ref_point, ref.radius_deg)
+            ) g
             CROSS JOIN ref
-            WHERE ST_DWithin(ST_PointOnSurface(g.geometry)::geography, ref.ref_point::geography, ref.radius_m)
+            WHERE ST_DWithin(g.point_geom::geography, ref.ref_point::geography, ref.radius_m)
             """
         )
     if include_trem:
@@ -210,16 +258,24 @@ def _build_transport_search_sql(source_tokens: set[str]) -> str:
             SELECT
                 'geosampa_trem_station'::text AS source,
                 md5(ST_AsEWKB(g.geometry)::text) AS external_id,
-                COALESCE(NULLIF(g.nm_estacao_metro_trem, ''), 'Estação de trem')::text AS name,
-                ST_Y(ST_PointOnSurface(g.geometry)) AS lat,
-                ST_X(ST_PointOnSurface(g.geometry)) AS lon,
-                ST_Distance(ST_PointOnSurface(g.geometry)::geography, ref.ref_point::geography) AS walk_distance_m,
+                g.name,
+                ST_Y(g.point_geom) AS lat,
+                ST_X(g.point_geom) AS lon,
+                ST_Distance(g.point_geom::geography, ref.ref_point::geography) AS walk_distance_m,
                 0 AS route_count,
                 ARRAY[]::text[] AS route_ids,
                 ARRAY['train']::text[] AS modal_types
-            FROM geosampa_trem_stations g
+            FROM (
+                SELECT
+                    g.geometry,
+                    COALESCE(NULLIF(g.nm_estacao_metro_trem, ''), 'Estação de trem')::text AS name,
+                    ST_PointOnSurface(g.geometry) AS point_geom
+                FROM geosampa_trem_stations g
+                CROSS JOIN ref
+                WHERE g.geometry && ST_Expand(ref.ref_point, ref.radius_deg)
+            ) g
             CROSS JOIN ref
-            WHERE ST_DWithin(ST_PointOnSurface(g.geometry)::geography, ref.ref_point::geography, ref.radius_m)
+            WHERE ST_DWithin(g.point_geom::geography, ref.ref_point::geography, ref.radius_m)
             """
         )
 
@@ -247,8 +303,11 @@ def _build_transport_search_sql(source_tokens: set[str]) -> str:
     WITH ref AS (
         SELECT
             ST_SetSRID(ST_MakePoint(CAST(:ref_lon AS DOUBLE PRECISION), CAST(:ref_lat AS DOUBLE PRECISION)), 4326) AS ref_point,
-            CAST(:radius_m AS DOUBLE PRECISION) AS radius_m
+            CAST(:radius_m AS DOUBLE PRECISION) AS radius_m,
+            CAST(:radius_m AS DOUBLE PRECISION) / {_METERS_PER_DEGREE_LAT} AS radius_deg
     )
+    {',' if cte_parts else ''}
+    {', '.join(cte_parts)}
     SELECT
         source,
         external_id,
@@ -289,7 +348,9 @@ def _row_to_transport_point(row: RowMapping) -> TransportPointRead:
 
 async def run_transport_search_for_job(job_id: UUID) -> int:
     engine = get_engine()
+    job_result_ref: dict[str, Any] | None = None
     async with engine.begin() as conn:
+        await conn.execute(text("SET LOCAL jit = off"))
         context_result = await conn.execute(_JOB_JOURNEY_CONTEXT_SQL, {"job_id": job_id})
         context_row = context_result.mappings().first()
         if context_row is None:
@@ -334,6 +395,48 @@ async def run_transport_search_for_job(job_id: UUID) -> int:
                 effective_radius_m = relaxed_radius_m
                 used_relaxed_radius = True
 
+        await conn.execute(
+            text(
+                """
+                UPDATE journeys
+                SET selected_transport_point_id = NULL,
+                    selected_zone_id = NULL,
+                    updated_at = now()
+                WHERE id = :journey_id
+                """
+            ),
+            {"journey_id": journey_id},
+        )
+        await conn.execute(
+            text(
+                """
+                UPDATE journey_zones
+                SET transport_point_id = NULL
+                WHERE journey_id = :journey_id
+                  AND transport_point_id IN (
+                      SELECT id
+                      FROM transport_points
+                      WHERE journey_id = :journey_id
+                  )
+                """
+            ),
+            {"journey_id": journey_id},
+        )
+        await conn.execute(
+            text(
+                """
+                UPDATE zones
+                SET transport_point_id = NULL
+                WHERE journey_id = :journey_id
+                  AND transport_point_id IN (
+                      SELECT id
+                      FROM transport_points
+                      WHERE journey_id = :journey_id
+                  )
+                """
+            ),
+            {"journey_id": journey_id},
+        )
         await conn.execute(text("DELETE FROM transport_points WHERE journey_id = :journey_id"), {"journey_id": journey_id})
 
         if rows:
@@ -384,26 +487,15 @@ async def run_transport_search_for_job(job_id: UUID) -> int:
                 payload,
             )
 
-        await conn.execute(
-            text(
-                """
-                UPDATE jobs
-                SET result_ref = CAST(:result_ref AS JSONB)
-                WHERE id = :job_id
-                """
-            ),
-            {
-                "job_id": job_id,
-                "result_ref": json.dumps(
-                    {
-                        "transport_points_count": len(rows),
-                        "source_filter": sorted(source_tokens),
-                        "radius_m": effective_radius_m,
-                        "used_relaxed_radius": used_relaxed_radius,
-                    }
-                ),
-            },
-        )
+        job_result_ref = {
+            "transport_points_count": len(rows),
+            "source_filter": sorted(source_tokens),
+            "radius_m": effective_radius_m,
+            "used_relaxed_radius": used_relaxed_radius,
+        }
+
+    if job_result_ref is not None:
+        await update_job_execution_state(job_id, result_ref=job_result_ref)
 
     return len(rows)
 

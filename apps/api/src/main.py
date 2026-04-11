@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 
 from api.routes.geocode import router as geocode_router
 from api.routes.health import router as health_router
+from api.routes.internal import router as internal_router
 from api.routes.jobs import router as jobs_router
 from api.routes.journeys import router as journeys_router
 from api.routes.listings import router as listings_router
@@ -79,6 +80,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(health_router)
+app.include_router(internal_router)
 app.include_router(geocode_router)
 app.include_router(transport_router)
 app.include_router(journeys_router)

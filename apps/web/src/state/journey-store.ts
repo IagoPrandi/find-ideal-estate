@@ -111,15 +111,15 @@ type JourneyState = {
 
 const defaultConfig: JourneyConfig = {
   type: "rent",
-  propertyUsageType: "all",
+  propertyUsageType: "residential",
   modal: "transit",
-  publicTransportMode: "mixed",
+  publicTransportMode: "bus",
   time: 30,
-  zoneRadiusMeters: 1200,
-  transportSearchRadiusMeters: 1200,
+  zoneRadiusMeters: 400,
+  transportSearchRadiusMeters: 400,
   greenVegetationLevel: "medium",
   enrichments: {
-    safety: true,
+    safety: false,
     green: false,
     flood: true,
     pois: true

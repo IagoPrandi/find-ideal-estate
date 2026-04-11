@@ -207,13 +207,13 @@ class TestListingUsageInferenceFromUrl:
 
         assert usage_type == "commercial"
 
-    def test_marks_residential_from_listing_url(self) -> None:
+    def test_prioritizes_commercial_when_bedrooms_are_missing_even_with_residential_url(self) -> None:
         usage_type = infer_listing_usage_type_from_url(
             "https://www.zapimoveis.com.br/imovel/aluguel-apartamento-pinheiros-sao-paulo-sp-70m2-id-123456/",
             0,
         )
 
-        assert usage_type == "residential"
+        assert usage_type == "commercial"
 
     def test_falls_back_to_bedrooms_when_url_has_no_signal(self) -> None:
         assert infer_listing_usage_type_from_url("https://www.example.com/imovel/123", 0) == "commercial"

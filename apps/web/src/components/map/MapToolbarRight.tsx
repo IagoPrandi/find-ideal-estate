@@ -41,7 +41,7 @@ export function MapToolbarRight({
       {isLayerMenuOpen ? (
         <div className="pointer-events-auto absolute bottom-full right-0 mb-2 w-48 rounded-xl border border-slate-200 bg-white/95 p-4 shadow-xl backdrop-blur-md">
           <div className="mb-3 flex items-center justify-between text-xs font-bold uppercase text-slate-800">
-            Camadas Visíveis
+            Camadas visíveis
             <button type="button" onClick={onLayerMenuClose} className="text-slate-400 hover:text-slate-700">
               <X size={16} />
             </button>

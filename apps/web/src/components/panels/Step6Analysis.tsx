@@ -525,14 +525,14 @@ export function Step6Analysis() {
               </p>
               {listingsJobQuery.data ? (
                 <p className="mt-1 text-xs font-medium text-slate-500">
-                  Job de listings: {listingsJobQuery.data.progress_percent}%
+                  Busca de imóveis: {listingsJobQuery.data.progress_percent}%
                   {scrapeDiagnostics?.active_platform ? ` · ativo em ${platformLabel(scrapeDiagnostics.active_platform)}` : ""}
                   {overallDuration ? ` · ${overallDuration}` : ""}
                 </p>
               ) : null}
             </div>
             <button type="button" className="rounded-lg bg-pastel-violet-50 px-3 py-1.5 text-sm font-medium text-pastel-violet-600 transition-colors hover:bg-pastel-violet-100" disabled>
-              Gerar Relatório PDF
+              Gerar relatório em PDF
             </button>
           </div>
 
@@ -551,7 +551,7 @@ export function Step6Analysis() {
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Progresso por plataforma</p>
                   <p className="mt-1 text-sm text-slate-600">
-                    {diagnosticsSummary?.total_scraped ? `${diagnosticsSummary.total_scraped} anúncios raspados no worker` : "Acompanhando o scrape em tempo real."}
+                    {diagnosticsSummary?.total_scraped ? `${diagnosticsSummary.total_scraped} anúncios processados até agora` : "Acompanhando o scraping em tempo real."}
                   </p>
                 </div>
                 <div className="flex items-center gap-2 self-start">
@@ -601,10 +601,10 @@ export function Step6Analysis() {
                         </div>
 
                         <div className="mt-3 space-y-1.5 text-xs text-slate-600">
-                          {isActivePlatform ? <p className="font-medium text-pastel-violet-700">Raspando agora nesta plataforma.</p> : null}
+                          {isActivePlatform ? <p className="font-medium text-pastel-violet-700">Buscando anúncios nesta plataforma agora.</p> : null}
                           {duration ? <p>Duração: {duration}</p> : null}
-                          {details.scrape_duration_ms ? <p>Scrape: {formatDuration(details.scrape_duration_ms)}</p> : null}
-                          {details.persist_duration_ms ? <p>Persistência: {formatDuration(details.persist_duration_ms)}</p> : null}
+                          {details.scrape_duration_ms ? <p>Coleta: {formatDuration(details.scrape_duration_ms)}</p> : null}
+                          {details.persist_duration_ms ? <p>Gravação: {formatDuration(details.persist_duration_ms)}</p> : null}
                           {details.error_message ? <p className="text-rose-700">{details.error_message}</p> : null}
                         </div>
                       </div>
@@ -620,7 +620,7 @@ export function Step6Analysis() {
               Imóveis ({displayedListings.length}{displayedListings.length !== (listingsQuery.data?.total_count || 0) ? ` de ${listingsQuery.data?.total_count || 0}` : ""})
             </button>
             <button type="button" onClick={() => { void handleOpenDashboardTab(); }} disabled={isPreparingDashboard} className={`pb-3 text-sm font-medium border-b-2 transition-colors disabled:cursor-wait disabled:opacity-80 ${activeTab === "dashboard" ? "border-pastel-violet-500 text-pastel-violet-600" : "border-transparent text-slate-500 hover:text-slate-700"}`}>
-              {isPreparingDashboard ? "Preparando dashboard..." : "Dashboard Analítico"}
+              {isPreparingDashboard ? "Preparando dashboard..." : "Dashboard analítico"}
             </button>
           </div>
         </div>
@@ -765,9 +765,9 @@ export function Step6Analysis() {
             {!listingsQuery.isLoading && rawListings.length === 0 ? (
               <div className="rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-600 shadow-sm">
                 {listingsQuery.data?.freshness_status === "no_cache"
-                  ? "O scraping foi iniciado. Esta tela atualiza automaticamente assim que os primeiros imóveis estiverem prontos."
+                  ? "A busca foi iniciada. Esta tela é atualizada automaticamente assim que os primeiros imóveis estiverem prontos."
                   : scrapedButNoCards
-                    ? `O scraping terminou e raspou ${diagnosticsSummary?.total_scraped || 0} anúncios, mas nenhum permaneceu elegível para esta busca após os filtros do backend. Tente outra rua ou outra zona.`
+                    ? `A busca terminou e encontrou ${diagnosticsSummary?.total_scraped || 0} anúncios, mas nenhum permaneceu elegível após os filtros da busca. Tente outra rua ou outra zona.`
                     : "Nenhum imóvel disponível ainda para esta busca."}
               </div>
             ) : null}
@@ -786,7 +786,7 @@ export function Step6Analysis() {
               const priceDeltaVsRegion = calculatePercentDelta(price, regionAveragePrice);
               const unitPriceLabel = typeof listing.current_unit_price === "number" && Number.isFinite(listing.current_unit_price)
                 ? `${formatCurrencyBr(listing.current_unit_price)}/m²`
-                : "m² sem base";
+                : "m² indisponível";
               const priceDeltaTone = typeof priceDeltaVsRegion !== "number"
                 ? "text-slate-500"
                 : priceDeltaVsRegion > 0
@@ -918,8 +918,8 @@ export function Step6Analysis() {
                     </div>
                     <h4 className="mb-2 text-sm font-medium text-slate-700">{listing.address_normalized || "Endereço não informado"}</h4>
                     <div className="mb-4 flex flex-wrap items-center gap-4 text-sm text-slate-600">
-                      <span className="inline-flex items-center gap-1"><MapIcon className="h-3.5 w-3.5" /> {listing.area_m2 ? `${Math.round(listing.area_m2)}m²` : "Área n/d"}</span>
-                      <span className="inline-flex items-center gap-1"><Home className="h-3.5 w-3.5" /> {listing.bedrooms ?? "--"} dorms</span>
+                      <span className="inline-flex items-center gap-1"><MapIcon className="h-3.5 w-3.5" /> {listing.area_m2 ? `${Math.round(listing.area_m2)}m²` : "Área indisponível"}</span>
+                      <span className="inline-flex items-center gap-1"><Home className="h-3.5 w-3.5" /> {listing.bedrooms ?? "--"} quartos</span>
                     </div>
                     <div className={`mb-3 inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium ${spatialBadge.className}`}>
                       <MapIcon className="h-3 w-3" />
@@ -979,7 +979,7 @@ export function Step6Analysis() {
                                         <ExternalLink className="h-3.5 w-3.5" />
                                       </a>
                                     ) : (
-                                      <span className="rounded-lg bg-slate-200 px-2 py-1 text-[10px] font-medium text-slate-500">Sem link</span>
+                                      <span className="rounded-lg bg-slate-200 px-2 py-1 text-[10px] font-medium text-slate-500">Link indisponível</span>
                                     )}
                                   </div>
                                 );

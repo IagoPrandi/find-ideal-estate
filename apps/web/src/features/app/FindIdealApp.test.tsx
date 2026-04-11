@@ -460,6 +460,16 @@ describe("FindIdealApp", () => {
 
   it("restores the safety layer with heatmap viewport loading and aligned legend", async () => {
     useUIStore.setState((state) => ({ ...state, step: 1, panelWidth: 420, isCollapsed: false }));
+    useJourneyStore.setState((state) => ({
+      ...state,
+      config: {
+        ...state.config,
+        enrichments: {
+          ...state.config.enrichments,
+          safety: true,
+        },
+      },
+    }));
 
     renderWithQueryClient();
 
@@ -489,19 +499,12 @@ describe("FindIdealApp", () => {
     expect(incidentLayer?.paint?.["circle-stroke-opacity"]).toEqual(["interpolate", ["linear"], ["zoom"], 10, 0, 15, 0, 16, 0.92]);
     expect(incidentLayer?.paint?.["circle-stroke-width"]).toEqual(["interpolate", ["linear"], ["zoom"], 10, 0, 15, 0, 16, 1.5]);
 
-    const legend = screen.getByText("Tipos de ocorrência").parentElement;
-    expect(legend).not.toBeNull();
-    expect(legend).toHaveStyle({ left: "448px", bottom: "16px" });
-
-    await act(async () => {
-      useUIStore.getState().setCollapsed(true);
-    });
-
-    await waitFor(() => {
-      expect(legend).toHaveStyle({ left: "16px", bottom: "16px" });
-    });
-
     fireEvent.click(screen.getByRole("button", { name: "Camadas" }));
+    fireEvent.click(screen.getByRole("button", { name: /Expandir legenda de Segurança/i }));
+
+    const legend = await screen.findByText("Tipos de ocorrência");
+    expect(legend).toBeInTheDocument();
+
     fireEvent.click(screen.getByLabelText("Segurança"));
 
     await waitFor(() => {
@@ -512,6 +515,16 @@ describe("FindIdealApp", () => {
 
   it("filters and isolates safety categories from the legend controls", async () => {
     useUIStore.setState((state) => ({ ...state, step: 1, panelWidth: 420, isCollapsed: false }));
+    useJourneyStore.setState((state) => ({
+      ...state,
+      config: {
+        ...state.config,
+        enrichments: {
+          ...state.config.enrichments,
+          safety: true,
+        },
+      },
+    }));
 
     renderWithQueryClient();
 
@@ -522,6 +535,9 @@ describe("FindIdealApp", () => {
         ["theft", "robbery", "violence", "sexual", "drugs", "other"]
       );
     });
+
+    fireEvent.click(screen.getByRole("button", { name: "Camadas" }));
+    fireEvent.click(screen.getByRole("button", { name: /Expandir legenda de Segurança/i }));
 
     fireEvent.click(screen.getByRole("button", { name: "Ocultar Furto" }));
 
@@ -545,6 +561,10 @@ describe("FindIdealApp", () => {
       );
     });
 
+    expect(screen.getByText("Roubo")).toBeInTheDocument();
+    expect(screen.getByText("Violência")).toHaveClass("line-through");
+    expect(screen.getByText("Outros")).toHaveClass("line-through");
+
     fireEvent.click(screen.getByRole("button", { name: "Mostrar todas as categorias novamente" }));
 
     await waitFor(() => {
@@ -554,6 +574,9 @@ describe("FindIdealApp", () => {
         ["robbery", "violence", "sexual", "drugs", "other"]
       );
     });
+
+    expect(screen.getByText("Violência")).toBeInTheDocument();
+    expect(screen.getByText("Outros")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Mostrar Furto" }));
 
@@ -675,7 +698,7 @@ describe("FindIdealApp", () => {
       throw new Error("Layers panel not rendered.");
     }
 
-    const greenCheckbox = within(panel).getByRole("checkbox", { name: "Área verde" });
+    const greenCheckbox = within(panel).getByRole("checkbox", { name: "Áreas verdes" });
     fireEvent.click(greenCheckbox);
 
     await waitFor(() => {
