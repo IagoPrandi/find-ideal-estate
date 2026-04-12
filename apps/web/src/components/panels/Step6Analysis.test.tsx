@@ -564,6 +564,169 @@ describe("Step6Analysis", () => {
     expect(screen.queryByText(/Endereço sem coordenadas/i)).not.toBeInTheDocument();
   });
 
+  it("recovers a card image when the Step 6 payload refreshes with a new valid URL", async () => {
+    const firstResponse = {
+      source: "cache",
+      job_id: null,
+      freshness_status: "fresh",
+      listings: [
+        {
+          property_id: "prop-1",
+          platform: "quintoandar",
+          platform_listing_id: "qa-1",
+          address_normalized: "Rua Dentro, 10",
+          image_url: "/listing-images/broken.webp",
+          current_best_price: "3500",
+          condo_fee: "500",
+          iptu: "100",
+          area_m2: 70,
+          inside_zone: true,
+          has_coordinates: true,
+          lat: -23.5,
+          lon: -46.7,
+          platforms_available: ["quintoandar"]
+        }
+      ],
+      total_count: 1,
+      cache_age_hours: 0.1
+    };
+    const secondResponse = {
+      ...firstResponse,
+      listings: [
+        {
+          ...firstResponse.listings[0],
+          image_url: "/listing-images/fixed.webp"
+        }
+      ]
+    };
+
+    vi.mocked(getZoneListings)
+      .mockResolvedValueOnce(firstResponse as never)
+      .mockResolvedValueOnce(secondResponse as never);
+    vi.mocked(getJob).mockResolvedValue({
+      id: "listings-job-1",
+      journey_id: "journey-1",
+      job_type: "listings_scrape",
+      state: "completed",
+      progress_percent: 100,
+      current_stage: "listings_scrape",
+      cancel_requested_at: null,
+      started_at: "2026-03-27T10:00:00Z",
+      finished_at: "2026-03-27T10:03:00Z",
+      worker_id: "worker-1",
+      error_code: null,
+      error_message: null,
+      created_at: "2026-03-27T10:00:00Z",
+      result_ref: { scrape_diagnostics: { status: "complete", summary: { total_scraped: 1, platforms_completed: ["quintoandar"], platforms_failed: [] }, platforms: {} } }
+    } as never);
+
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false,
+          gcTime: 0,
+        },
+      },
+    });
+
+    await act(async () => {
+      render(
+        <QueryClientProvider client={queryClient}>
+          <Step6Analysis />
+        </QueryClientProvider>
+      );
+    });
+
+    const initialImage = await screen.findByAltText(/Rua Dentro, 10/i);
+    expect(initialImage).toHaveAttribute("src", "https://www.quintoandar.com.br/listing-images/broken.webp");
+
+    fireEvent.error(initialImage);
+    await waitFor(() => {
+      expect(screen.queryByAltText(/Rua Dentro, 10/i)).not.toBeInTheDocument();
+    });
+
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: ["zone-listings", "journey-1", "zone-fp-1", "rent", "all"] });
+    });
+
+    expect(await screen.findByAltText(/Rua Dentro, 10/i)).toHaveAttribute(
+      "src",
+      "https://www.quintoandar.com.br/listing-images/fixed.webp"
+    );
+  });
+
+  it("falls back to another platform image when the primary card image fails", async () => {
+    vi.mocked(getZoneListings).mockResolvedValue({
+      source: "cache",
+      job_id: null,
+      freshness_status: "fresh",
+      listings: [
+        {
+          property_id: "prop-1",
+          platform: "zapimoveis",
+          platform_listing_id: "zap-1",
+          address_normalized: "Rua Dentro, 10",
+          image_url: "/listing-images/broken-zap.webp",
+          current_best_price: "3500",
+          condo_fee: "500",
+          iptu: "100",
+          area_m2: 70,
+          inside_zone: true,
+          has_coordinates: true,
+          lat: -23.5,
+          lon: -46.7,
+          platforms_available: ["zapimoveis", "quintoandar"],
+          platform_variants: [
+            {
+              platform: "zapimoveis",
+              platform_listing_id: "zap-1",
+              image_url: "/listing-images/broken-zap.webp",
+              current_best_price: "3500",
+            },
+            {
+              platform: "quintoandar",
+              platform_listing_id: "qa-1",
+              image_url: "/listing-images/fallback-qa.webp",
+              current_best_price: "3600",
+            }
+          ]
+        }
+      ],
+      total_count: 1,
+      cache_age_hours: 0.1
+    } as never);
+    vi.mocked(getJob).mockResolvedValue({
+      id: "listings-job-1",
+      journey_id: "journey-1",
+      job_type: "listings_scrape",
+      state: "completed",
+      progress_percent: 100,
+      current_stage: "listings_scrape",
+      cancel_requested_at: null,
+      started_at: "2026-03-27T10:00:00Z",
+      finished_at: "2026-03-27T10:03:00Z",
+      worker_id: "worker-1",
+      error_code: null,
+      error_message: null,
+      created_at: "2026-03-27T10:00:00Z",
+      result_ref: { scrape_diagnostics: { status: "complete", summary: { total_scraped: 1, platforms_completed: ["zapimoveis", "quintoandar"], platforms_failed: [] }, platforms: {} } }
+    } as never);
+
+    await renderWithQueryClient();
+
+    const initialImage = await screen.findByAltText(/Rua Dentro, 10/i);
+    expect(initialImage).toHaveAttribute("src", "https://www.zapimoveis.com.br/listing-images/broken-zap.webp");
+
+    fireEvent.error(initialImage);
+
+    await waitFor(() => {
+      expect(screen.getByAltText(/Rua Dentro, 10/i)).toHaveAttribute(
+        "src",
+        "https://www.quintoandar.com.br/listing-images/fallback-qa.webp"
+      );
+    });
+  });
+
   it("shows per-platform prices and ad links when hovering the duplicated availability badge", async () => {
     vi.mocked(getZoneListings).mockResolvedValue({
       source: "cache",

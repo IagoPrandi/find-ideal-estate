@@ -20,11 +20,13 @@ from modules.listings.scrapers.quintoandar import (  # noqa: E402
     _extract_from_quintoandar_dom_rows,
     _extract_from_quintoandar_payload,
     _extract_quintoandar_coordinate_map,
+    _parse_quintoandar_house,
     _to_quintoandar_location_slug,
 )
 from modules.listings.scrapers.vivareal import (  # noqa: E402
     _extract_from_dom_rows,
     _extract_from_glue_payload,
+    _extract_listing_card_image_url,
 )
 from modules.listings.scrapers.zapimoveis import (  # noqa: E402
     _extract_from_glue_payload as zap_extract_glue,
@@ -74,6 +76,7 @@ def _make_dom_rows(n: int, platform: str = "vivareal") -> list[dict]:
     for i in range(1, n + 1):
         rows.append({
             "href": f"/imovel/{2000 + i}/nome-do-imovel-{i}/",
+            "image_url": f"/{platform}/thumb-{i}.webp",
             "text": (
                 f"Apartamento {i} quarto  "
                 f"R$ {2000 + i * 100:,}  "
@@ -89,6 +92,7 @@ def _make_quintoandar_dom_rows(n: int) -> list[dict]:
     for i in range(1, n + 1):
         rows.append({
             "href": f"/imovel/{3000 + i}",
+            "image_url": f"/thumbs/qa-{i}.webp",
             "text": (
                 f"Apartamento {i} quarto  "
                 f"R$ {2500 + i * 100:,}  "
@@ -158,6 +162,27 @@ class TestVivaRealExtraction:
         assert r["area_m2"] == 75.0
         assert r["bedrooms"] == 2
 
+    def test_dom_fallback_preserves_image_url(self) -> None:
+        rows = [{"href": "/imovel/123456/", "text": "R$ 3.500,00  75 m²  2 quartos", "image_url": "/thumbs/vr-1.webp"}]
+        results = _extract_from_dom_rows(rows, "vivareal")
+
+        assert len(results) == 1
+        assert results[0]["image_url"] == "https://www.vivareal.com.br/thumbs/vr-1.webp"
+
+    def test_glue_payload_normalizes_relative_media_url(self) -> None:
+        image_url = _extract_listing_card_image_url(
+            {
+                "medias": [
+                    {
+                        "url": "/thumbs/vr-2.webp"
+                    }
+                ]
+            },
+            "vivareal",
+        )
+
+        assert image_url == "https://www.vivareal.com.br/thumbs/vr-2.webp"
+
     def test_glue_payload_uses_approximate_point_coordinates(self) -> None:
         payload = {
             "search": {
@@ -196,6 +221,19 @@ class TestVivaRealExtraction:
         assert len(results) == 1
         assert results[0]["lat"] == -23.521
         assert results[0]["lon"] == -46.729
+
+    def test_glue_payload_ignores_template_media_urls(self) -> None:
+        image_url = _extract_listing_card_image_url(
+            {
+                "medias": [
+                    {
+                        "url": "https://resizedimgs.vivareal.com/img/vr-listing/abc/{description}.webp?action={action}&dimension={width}x{height}"
+                    }
+                ]
+            }
+        )
+
+        assert image_url is None
 
 
 class TestListingUsageInferenceFromUrl:
@@ -237,6 +275,13 @@ class TestZapImoveisExtraction:
         rows = _make_dom_rows(8, "zapimoveis")
         results = _extract_from_dom_rows(rows, "zapimoveis")
         assert len(results) >= 5
+
+    def test_dom_fallback_normalizes_image_url(self) -> None:
+        rows = [{"href": "/imovel/123456/", "text": "R$ 3.500,00  75 m²  2 quartos", "image_url": "/thumbs/zap-1.webp"}]
+        results = _extract_from_dom_rows(rows, "zapimoveis")
+
+        assert len(results) == 1
+        assert results[0]["image_url"] == "https://www.zapimoveis.com.br/thumbs/zap-1.webp"
 
     def test_glue_payload_uses_approximate_point_coordinates(self) -> None:
         payload = {
@@ -309,6 +354,23 @@ class TestQuintoAndarExtraction:
             assert r["platform_listing_id"]
             assert r["url"].startswith("https://www.quintoandar.com.br")
 
+    def test_payload_normalizes_cover_image_filename(self) -> None:
+        result = _parse_quintoandar_house(
+            "4001",
+            {
+                "id": "4001",
+                "rentPrice": 3200,
+                "coverImage": "894723853-808.334581783361IMG2447.JPG",
+                "address": "Rua Teste",
+                "neighbourhood": "Pinheiros",
+                "city": "São Paulo",
+            },
+            "rent",
+        )
+
+        assert result is not None
+        assert result["image_url"] == "https://www.quintoandar.com.br/img/med/894723853-808.334581783361IMG2447.JPG"
+
     def test_dom_fallback_skips_rows_without_id(self) -> None:
         rows = [{"href": "/sem-numero/", "text": "Apartamento"}]
         results = _extract_from_quintoandar_dom_rows(rows)
@@ -322,6 +384,13 @@ class TestQuintoAndarExtraction:
         assert r["area_m2"] == 80.0
         assert r["bedrooms"] == 3
         assert r["url"] == "https://www.quintoandar.com.br/imovel/654321"
+
+    def test_dom_fallback_preserves_image_url(self) -> None:
+        rows = [{"href": "/imovel/654321", "text": "R$ 4.200,00  80 m²  3 quartos", "image_url": "/thumbs/qa-1.webp"}]
+        results = _extract_from_quintoandar_dom_rows(rows)
+
+        assert len(results) == 1
+        assert results[0]["image_url"] == "https://www.quintoandar.com.br/thumbs/qa-1.webp"
 
     def test_api_payload_extraction(self) -> None:
         """Ensure _extract_from_quintoandar_payload handles nested API formats."""

@@ -22,6 +22,8 @@ from .base import (
     _as_float,
     _as_int,
     _get_by_path,
+    _has_renderable_image_url,
+    _normalize_image_url,
 )
 
 
@@ -330,7 +332,8 @@ class QuintoAndarScraper(ScraperBase):
             )
             if next_data_raw:
                 try:
-                    intercepted_payloads.append(json.loads(next_data_raw))
+                    next_payload = json.loads(next_data_raw)
+                    intercepted_payloads.append(next_payload)
                 except Exception:
                     pass
 
@@ -339,6 +342,14 @@ class QuintoAndarScraper(ScraperBase):
                 () => {
                     const anchors = Array.from(document.querySelectorAll('a[href*="/imovel/"]'));
                     return anchors.slice(0, 120).map((a) => ({
+                        image_url: (() => {
+                            const card = a.closest('article') || a.closest('section') || a;
+                            const img = card.querySelector('img');
+                            const source = card.querySelector('source[srcset]');
+                            const srcset = source?.getAttribute('srcset') || img?.getAttribute('srcset') || '';
+                            const srcsetUrl = srcset.split(',').map((item) => item.trim().split(' ')[0]).find(Boolean) || '';
+                            return img?.currentSrc || img?.getAttribute('src') || img?.getAttribute('data-src') || img?.getAttribute('data-lazy-src') || srcsetUrl || '';
+                        })(),
                         href: a.getAttribute('href') || '',
                         text: (a.closest('article') || a).innerText || '',
                     }));
@@ -365,6 +376,30 @@ class QuintoAndarScraper(ScraperBase):
                 if not house_id or house_id not in coordinate_map:
                     continue
                 item["lat"], item["lon"] = coordinate_map[house_id]
+
+        if isinstance(dom_rows, list):
+            dom_listings = _extract_from_quintoandar_dom_rows(dom_rows)
+            dom_by_id = {
+                str(item.get("platform_listing_id") or ""): item
+                for item in dom_listings
+                if item.get("platform_listing_id")
+            }
+            for item in listings:
+                dom_item = dom_by_id.get(str(item.get("platform_listing_id") or ""))
+                if dom_item is None:
+                    continue
+                if (
+                    not _has_renderable_image_url(
+                        item.get("image_url"),
+                        platform_base="https://www.quintoandar.com.br",
+                        filename_prefix="https://www.quintoandar.com.br/img/med",
+                    )
+                    and _has_renderable_image_url(
+                        dom_item.get("image_url"),
+                        platform_base="https://www.quintoandar.com.br",
+                    )
+                ):
+                    item["image_url"] = dom_item.get("image_url")
 
         if not listings and isinstance(dom_rows, list):
             listings.extend(_extract_from_quintoandar_dom_rows(dom_rows))
@@ -690,11 +725,25 @@ def _parse_quintoandar_house(
         "platform": "quintoandar",
         "platform_listing_id": house_id,
         "url": url,
-        "image_url": (
+        "image_url": _normalize_image_url(
             _get_by_path(h, "coverImageUrl")
             or _get_by_path(h, "coverImage.url")
+            or _get_by_path(h, "coverImage.src")
+            or _get_by_path(h, "coverImage.default")
+            or _get_by_path(h, "coverImage")
+            or _get_by_path(h, "imageList.0")
             or _get_by_path(h, "images.0.url")
+            or _get_by_path(h, "images.0.imageUrl")
+            or _get_by_path(h, "images.0.src")
             or _get_by_path(h, "gallery.0.url")
+            or _get_by_path(h, "gallery.0.imageUrl")
+            or _get_by_path(h, "gallery.0.src")
+            or _get_by_path(h, "photos.0.url")
+            or _get_by_path(h, "photos.0.imageUrl")
+            or _get_by_path(h, "photos.0.src")
+            or _get_by_path(h, "photos.0"),
+            platform_base="https://www.quintoandar.com.br",
+            filename_prefix="https://www.quintoandar.com.br/img/med",
         ),
         "lat": lat,
         "lon": lon,
@@ -739,7 +788,11 @@ def _extract_from_quintoandar_dom_rows(rows: list[dict[str, Any]]) -> list[dict[
             "platform": "quintoandar",
             "platform_listing_id": lid,
             "url": link,
-            "image_url": None,
+            "image_url": _normalize_image_url(
+                row.get("image_url"),
+                platform_base="https://www.quintoandar.com.br",
+                filename_prefix="https://www.quintoandar.com.br/img/med",
+            ),
             "lat": None,
             "lon": None,
             "price_brl": _as_float(price_match.group(0)) if price_match else None,

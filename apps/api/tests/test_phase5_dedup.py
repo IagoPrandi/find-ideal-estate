@@ -153,6 +153,20 @@ async def _phase5_schema_ready() -> bool:
                     AND to_regclass('public.listing_ads') IS NOT NULL
                     AND to_regclass('public.listing_snapshots') IS NOT NULL
                     AND to_regclass('public.zones') IS NOT NULL
+                    AND EXISTS (
+                        SELECT 1
+                        FROM information_schema.columns
+                        WHERE table_schema = 'public'
+                          AND table_name = 'listing_ads'
+                          AND column_name = 'usage_type'
+                    )
+                    AND EXISTS (
+                        SELECT 1
+                        FROM information_schema.columns
+                        WHERE table_schema = 'public'
+                          AND table_name = 'listing_ads'
+                          AND column_name = 'usage_type_inferred'
+                    )
                 """
             )
         )
@@ -304,13 +318,16 @@ async def test_fetch_listing_cards_for_zone_supports_all_spatial_scope() -> None
         assert cards[0]["platform_variants"][0]["current_best_price"] == "3500.00"
         assert cards[0]["platform_variants"][0]["condo_fee"] == "500.00"
         assert cards[0]["platform_variants"][0]["iptu"] == "100.00"
+        assert cards[0]["platform_variants"][0]["image_url"] == "https://example.org/quintoandar.jpg"
         assert cards[0]["platform_variants"][1]["platform_listing_id"] == platform_listing_ids[1]
         assert cards[0]["platform_variants"][1]["url"] == "https://example.org/zap/dedup"
         assert cards[0]["platform_variants"][1]["current_best_price"] == "3300.00"
         assert cards[0]["platform_variants"][1]["condo_fee"] == "800.00"
         assert cards[0]["platform_variants"][1]["iptu"] == "90.00"
+        assert cards[0]["platform_variants"][1]["image_url"] == "https://example.org/zap.jpg"
         assert cards[0]["neighborhood_name"] == "Bairro Dedup QA"
         assert cards[0]["city_name"] == "Cidade Dedup"
+        assert cards[0]["image_url"] == "https://example.org/quintoandar.jpg"
         assert cards[0]["current_unit_price"] == pytest.approx(58.57142857142857)
         assert cards[0]["neighborhood_median_unit_price"] == pytest.approx(58.57142857142857)
         assert cards[0]["current_vs_neighborhood_pct"] == pytest.approx(0.0)
@@ -323,6 +340,399 @@ async def test_fetch_listing_cards_for_zone_supports_all_spatial_scope() -> None
             await _cleanup_fetch_listing_cards_rows(
                 fingerprint=fingerprint,
                 platform_listing_ids=platform_listing_ids,
+                zone_fingerprint=zone_fingerprint,
+            )
+        await close_db()
+
+
+@pytest.mark.anyio
+async def test_fetch_listing_cards_for_zone_falls_back_to_variant_image() -> None:
+    init_db(os.environ["DATABASE_URL"])
+
+    zone_fingerprint = f"zone-dedup-{uuid4().hex[:8]}"
+    platform_listing_ids = [f"dedup-noimg-{uuid4().hex[:8]}", f"dedup-withimg-{uuid4().hex[:8]}"]
+    base_lat = -22.3215
+    base_lon = -45.1843
+    address_label = "Rua Imagem Compartilhada, Bairro Dedup Img, Cidade Dedup, SP"
+    fingerprint = compute_property_fingerprint(
+        address_normalized=address_label,
+        lat=base_lat,
+        lon=base_lon,
+        area_m2=75,
+        bedrooms=2,
+    )
+    observed_since = datetime.now(timezone.utc) - timedelta(seconds=1)
+    schema_ready = False
+
+    try:
+        schema_ready = await _phase5_schema_ready()
+        if not schema_ready:
+            pytest.skip("Phase 5 schema not migrated. Run alembic upgrade head.")
+
+        await _cleanup_fetch_listing_cards_rows(
+            fingerprint=fingerprint,
+            platform_listing_ids=platform_listing_ids,
+            zone_fingerprint=zone_fingerprint,
+        )
+
+        engine = get_engine()
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    """
+                    INSERT INTO zones (
+                        fingerprint,
+                        modal,
+                        max_time_minutes,
+                        radius_meters,
+                        isochrone_geom,
+                        state
+                    ) VALUES (
+                        :fingerprint,
+                        'transit',
+                        30,
+                        1200,
+                        ST_GeomFromText(:polygon_wkt, 4326),
+                        'complete'
+                    )
+                    """
+                ),
+                {
+                    "fingerprint": zone_fingerprint,
+                    "polygon_wkt": f"POLYGON(({base_lon - 0.01} {base_lat - 0.01}, {base_lon + 0.01} {base_lat - 0.01}, {base_lon + 0.01} {base_lat + 0.01}, {base_lon - 0.01} {base_lat + 0.01}, {base_lon - 0.01} {base_lat - 0.01}))",
+                },
+            )
+
+        await upsert_property_and_ad(
+            fingerprint=fingerprint,
+            address_normalized=address_label,
+            lat=base_lat,
+            lon=base_lon,
+            area_m2=75,
+            bedrooms=2,
+            bathrooms=2,
+            parking=1,
+            usage_type="residential",
+            platform="zapimoveis",
+            platform_listing_id=platform_listing_ids[0],
+            url="https://example.org/zap/no-image",
+            advertised_usage_type="rent",
+            price=Decimal("3100"),
+            condo_fee=Decimal("250"),
+            iptu=Decimal("80"),
+            raw_payload={"image_url": None},
+        )
+        await upsert_property_and_ad(
+            fingerprint=fingerprint,
+            address_normalized=address_label,
+            lat=base_lat,
+            lon=base_lon,
+            area_m2=75,
+            bedrooms=2,
+            bathrooms=2,
+            parking=1,
+            usage_type="residential",
+            platform="quintoandar",
+            platform_listing_id=platform_listing_ids[1],
+            url="https://example.org/quinto/with-image",
+            advertised_usage_type="rent",
+            price=Decimal("3200"),
+            condo_fee=Decimal("260"),
+            iptu=Decimal("90"),
+            raw_payload={"image_url": "https://example.org/shared-image.jpg"},
+        )
+
+        cards = await fetch_listing_cards_for_zone(
+            zone_fingerprint=zone_fingerprint,
+            search_type="rent",
+            usage_type="residential",
+            platforms=["zapimoveis", "quintoandar"],
+            observed_since=observed_since,
+            spatial_scope="all",
+        )
+
+        assert len(cards) == 1
+        assert cards[0]["platform"] == "zapimoveis"
+        assert cards[0]["image_url"] == "https://example.org/shared-image.jpg"
+        assert [variant["image_url"] for variant in cards[0]["platform_variants"]] == [
+            "https://example.org/shared-image.jpg",
+            "https://example.org/shared-image.jpg",
+        ]
+    finally:
+        if schema_ready:
+            await _cleanup_fetch_listing_cards_rows(
+                fingerprint=fingerprint,
+                platform_listing_ids=platform_listing_ids,
+                zone_fingerprint=zone_fingerprint,
+            )
+        await close_db()
+
+
+@pytest.mark.anyio
+async def test_fetch_listing_cards_for_zone_reuses_previous_snapshot_image() -> None:
+    init_db(os.environ["DATABASE_URL"])
+
+    zone_fingerprint = f"zone-dedup-{uuid4().hex[:8]}"
+    platform_listing_id = f"dedup-history-{uuid4().hex[:8]}"
+    base_lat = -22.3715
+    base_lon = -45.2343
+    address_label = "Rua Histórico de Imagem, Bairro Dedup Histórico, Cidade Dedup, SP"
+    fingerprint = compute_property_fingerprint(
+        address_normalized=address_label,
+        lat=base_lat,
+        lon=base_lon,
+        area_m2=68,
+        bedrooms=2,
+    )
+    observed_since = datetime.now(timezone.utc) - timedelta(minutes=30)
+    schema_ready = False
+
+    try:
+        schema_ready = await _phase5_schema_ready()
+        if not schema_ready:
+            pytest.skip("Phase 5 schema not migrated. Run alembic upgrade head.")
+
+        await _cleanup_fetch_listing_cards_rows(
+            fingerprint=fingerprint,
+            platform_listing_ids=[platform_listing_id],
+            zone_fingerprint=zone_fingerprint,
+        )
+
+        engine = get_engine()
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    """
+                    INSERT INTO zones (
+                        fingerprint,
+                        modal,
+                        max_time_minutes,
+                        radius_meters,
+                        isochrone_geom,
+                        state
+                    ) VALUES (
+                        :fingerprint,
+                        'transit',
+                        30,
+                        1200,
+                        ST_GeomFromText(:polygon_wkt, 4326),
+                        'complete'
+                    )
+                    """
+                ),
+                {
+                    "fingerprint": zone_fingerprint,
+                    "polygon_wkt": f"POLYGON(({base_lon - 0.01} {base_lat - 0.01}, {base_lon + 0.01} {base_lat - 0.01}, {base_lon + 0.01} {base_lat + 0.01}, {base_lon - 0.01} {base_lat + 0.01}, {base_lon - 0.01} {base_lat - 0.01}))",
+                },
+            )
+
+        await upsert_property_and_ad(
+            fingerprint=fingerprint,
+            address_normalized=address_label,
+            lat=base_lat,
+            lon=base_lon,
+            area_m2=68,
+            bedrooms=2,
+            bathrooms=2,
+            parking=1,
+            usage_type="residential",
+            platform="vivareal",
+            platform_listing_id=platform_listing_id,
+            url="https://example.org/vivareal/history",
+            advertised_usage_type="rent",
+            price=Decimal("3600"),
+            condo_fee=Decimal("420"),
+            iptu=Decimal("120"),
+            raw_payload={"image_url": "https://example.org/previous-image.jpg"},
+        )
+        await upsert_property_and_ad(
+            fingerprint=fingerprint,
+            address_normalized=address_label,
+            lat=base_lat,
+            lon=base_lon,
+            area_m2=68,
+            bedrooms=2,
+            bathrooms=2,
+            parking=1,
+            usage_type="residential",
+            platform="vivareal",
+            platform_listing_id=platform_listing_id,
+            url="https://example.org/vivareal/history",
+            advertised_usage_type="rent",
+            price=Decimal("3550"),
+            condo_fee=Decimal("420"),
+            iptu=Decimal("120"),
+            raw_payload={"image_url": None},
+        )
+
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    """
+                    WITH ordered_snapshots AS (
+                        SELECT
+                            ls.id,
+                            ROW_NUMBER() OVER (ORDER BY ls.observed_at ASC, ls.id ASC) AS snapshot_rank
+                        FROM listing_snapshots ls
+                        JOIN listing_ads la ON la.id = ls.listing_ad_id
+                        WHERE la.platform_listing_id = :platform_listing_id
+                    )
+                    UPDATE listing_snapshots ls
+                    SET observed_at = CASE
+                        WHEN ordered_snapshots.snapshot_rank = 1 THEN CAST(:older_observed_at AS TIMESTAMPTZ)
+                        ELSE CAST(:newer_observed_at AS TIMESTAMPTZ)
+                    END
+                    FROM ordered_snapshots
+                    WHERE ls.id = ordered_snapshots.id
+                    """
+                ),
+                {
+                    "platform_listing_id": platform_listing_id,
+                    "older_observed_at": datetime.now(timezone.utc) - timedelta(minutes=20),
+                    "newer_observed_at": datetime.now(timezone.utc) - timedelta(minutes=5),
+                },
+            )
+
+        cards = await fetch_listing_cards_for_zone(
+            zone_fingerprint=zone_fingerprint,
+            search_type="rent",
+            usage_type="residential",
+            platforms=["vivareal"],
+            observed_since=observed_since,
+            spatial_scope="all",
+        )
+
+        assert len(cards) == 1
+        assert cards[0]["platform"] == "vivareal"
+        assert cards[0]["image_url"] == "https://example.org/previous-image.jpg"
+        assert cards[0]["platform_variants"][0]["image_url"] == "https://example.org/previous-image.jpg"
+    finally:
+        if schema_ready:
+            await _cleanup_fetch_listing_cards_rows(
+                fingerprint=fingerprint,
+                platform_listing_ids=[platform_listing_id],
+                zone_fingerprint=zone_fingerprint,
+            )
+        await close_db()
+
+
+@pytest.mark.anyio
+async def test_fetch_listing_cards_for_zone_reuses_image_from_same_property_history() -> None:
+    init_db(os.environ["DATABASE_URL"])
+
+    zone_fingerprint = f"zone-dedup-{uuid4().hex[:8]}"
+    current_listing_id = f"zap-current-{uuid4().hex[:8]}"
+    previous_listing_id = f"zap-previous-{uuid4().hex[:8]}"
+    base_lat = -22.3315
+    base_lon = -45.1943
+    address_label = "Rua Teste Imagem, Vila Leopoldina, São Paulo, SP"
+    fingerprint = compute_property_fingerprint(
+        address_normalized=address_label,
+        lat=base_lat,
+        lon=base_lon,
+        area_m2=72,
+        bedrooms=2,
+    )
+    observed_since = datetime.now(timezone.utc) - timedelta(minutes=1)
+    schema_ready = False
+
+    try:
+        schema_ready = await _phase5_schema_ready()
+        if not schema_ready:
+            pytest.skip("Phase 5 schema not migrated. Run alembic upgrade head.")
+
+        await _cleanup_fetch_listing_cards_rows(
+            fingerprint=fingerprint,
+            platform_listing_ids=[current_listing_id, previous_listing_id],
+            zone_fingerprint=zone_fingerprint,
+        )
+
+        engine = get_engine()
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    """
+                    INSERT INTO zones (
+                        fingerprint,
+                        modal,
+                        max_time_minutes,
+                        radius_meters,
+                        isochrone_geom,
+                        state
+                    ) VALUES (
+                        :fingerprint,
+                        'transit',
+                        30,
+                        1200,
+                        ST_GeomFromText(:polygon_wkt, 4326),
+                        'complete'
+                    )
+                    """
+                ),
+                {
+                    "fingerprint": zone_fingerprint,
+                    "polygon_wkt": f"POLYGON(({base_lon - 0.01} {base_lat - 0.01}, {base_lon + 0.01} {base_lat - 0.01}, {base_lon + 0.01} {base_lat + 0.01}, {base_lon - 0.01} {base_lat + 0.01}, {base_lon - 0.01} {base_lat - 0.01}))",
+                },
+            )
+
+        await upsert_property_and_ad(
+            fingerprint=fingerprint,
+            address_normalized=address_label,
+            lat=base_lat,
+            lon=base_lon,
+            area_m2=72,
+            bedrooms=2,
+            bathrooms=2,
+            parking=1,
+            usage_type="residential",
+            platform="zapimoveis",
+            platform_listing_id=previous_listing_id,
+            url="https://example.org/zap/previous",
+            advertised_usage_type="rent",
+            price=Decimal("3600"),
+            condo_fee=Decimal("300"),
+            iptu=Decimal("100"),
+            raw_payload={"image_url": "https://example.org/property-image.jpg"},
+        )
+        await upsert_property_and_ad(
+            fingerprint=fingerprint,
+            address_normalized=address_label,
+            lat=base_lat,
+            lon=base_lon,
+            area_m2=72,
+            bedrooms=2,
+            bathrooms=2,
+            parking=1,
+            usage_type="residential",
+            platform="zapimoveis",
+            platform_listing_id=current_listing_id,
+            url="https://example.org/zap/current",
+            advertised_usage_type="rent",
+            price=Decimal("3500"),
+            condo_fee=Decimal("300"),
+            iptu=Decimal("100"),
+            raw_payload={"image_url": None},
+        )
+
+        cards = await fetch_listing_cards_for_zone(
+            zone_fingerprint=zone_fingerprint,
+            search_type="rent",
+            usage_type="residential",
+            platforms=["zapimoveis"],
+            observed_since=observed_since,
+            spatial_scope="all",
+        )
+
+        assert len(cards) == 1
+        assert cards[0]["platform"] == "zapimoveis"
+        assert cards[0]["platform_listing_id"] == current_listing_id
+        assert cards[0]["image_url"] == "https://example.org/property-image.jpg"
+        assert cards[0]["platform_variants"][0]["image_url"] == "https://example.org/property-image.jpg"
+    finally:
+        if schema_ready:
+            await _cleanup_fetch_listing_cards_rows(
+                fingerprint=fingerprint,
+                platform_listing_ids=[current_listing_id, previous_listing_id],
                 zone_fingerprint=zone_fingerprint,
             )
         await close_db()
@@ -561,7 +971,7 @@ async def test_fetch_listing_cards_for_zone_all_scope_limits_outside_zone_to_rec
 
 
 @pytest.mark.anyio
-async def test_upsert_property_and_ad_updates_existing_property_usage_type() -> None:
+async def test_upsert_property_and_ad_stores_usage_type_per_listing_ad() -> None:
     init_db(os.environ["DATABASE_URL"])
 
     fingerprint = compute_property_fingerprint(
@@ -571,7 +981,8 @@ async def test_upsert_property_and_ad_updates_existing_property_usage_type() -> 
         area_m2=31,
         bedrooms=0,
     )
-    platform_listing_id = f"usage-{uuid4().hex[:8]}"
+    residential_listing_id = f"usage-res-{uuid4().hex[:8]}"
+    commercial_listing_id = f"usage-com-{uuid4().hex[:8]}"
     schema_ready = False
 
     try:
@@ -586,15 +997,15 @@ async def test_upsert_property_and_ad_updates_existing_property_usage_type() -> 
                     """
                     DELETE FROM listing_snapshots
                     WHERE listing_ad_id IN (
-                        SELECT id FROM listing_ads WHERE platform_listing_id = :platform_listing_id
+                        SELECT id FROM listing_ads WHERE platform_listing_id = ANY(:platform_listing_ids)
                     )
                     """
                 ),
-                {"platform_listing_id": platform_listing_id},
+                {"platform_listing_ids": [residential_listing_id, commercial_listing_id]},
             )
             await conn.execute(
-                text("DELETE FROM listing_ads WHERE platform_listing_id = :platform_listing_id"),
-                {"platform_listing_id": platform_listing_id},
+                text("DELETE FROM listing_ads WHERE platform_listing_id = ANY(:platform_listing_ids)"),
+                {"platform_listing_ids": [residential_listing_id, commercial_listing_id]},
             )
             await conn.execute(
                 text("DELETE FROM properties WHERE fingerprint = :fingerprint"),
@@ -612,7 +1023,7 @@ async def test_upsert_property_and_ad_updates_existing_property_usage_type() -> 
             parking=0,
             usage_type="residential",
             platform="zapimoveis",
-            platform_listing_id=platform_listing_id,
+            platform_listing_id=residential_listing_id,
             url="https://www.zapimoveis.com.br/imovel/aluguel-apartamento-centro-sp-id-1/",
             advertised_usage_type="rent",
             price=Decimal("3100"),
@@ -632,7 +1043,7 @@ async def test_upsert_property_and_ad_updates_existing_property_usage_type() -> 
             parking=0,
             usage_type="commercial",
             platform="zapimoveis",
-            platform_listing_id=platform_listing_id,
+            platform_listing_id=commercial_listing_id,
             url="https://www.zapimoveis.com.br/imovel/aluguel-conjunto-comercial-centro-sp-id-1/",
             advertised_usage_type="rent",
             price=Decimal("3100"),
@@ -642,12 +1053,31 @@ async def test_upsert_property_and_ad_updates_existing_property_usage_type() -> 
         )
 
         async with engine.connect() as conn:
-            usage_type = await conn.scalar(
+            property_usage_type = await conn.scalar(
                 text("SELECT usage_type FROM properties WHERE fingerprint = :fingerprint"),
                 {"fingerprint": fingerprint},
             )
+            listing_rows = (
+                await conn.execute(
+                    text(
+                        """
+                        SELECT platform_listing_id, usage_type, usage_type_inferred
+                        FROM listing_ads
+                        WHERE platform_listing_id = ANY(:platform_listing_ids)
+                        ORDER BY platform_listing_id
+                        """
+                    ),
+                    {"platform_listing_ids": [residential_listing_id, commercial_listing_id]},
+                )
+            ).mappings().all()
 
-        assert usage_type == "commercial"
+        usage_by_listing = {row["platform_listing_id"]: row for row in listing_rows}
+
+        assert property_usage_type is None
+        assert usage_by_listing[residential_listing_id]["usage_type"] == "residential"
+        assert usage_by_listing[commercial_listing_id]["usage_type"] == "commercial"
+        assert usage_by_listing[residential_listing_id]["usage_type_inferred"] is True
+        assert usage_by_listing[commercial_listing_id]["usage_type_inferred"] is True
     finally:
         if schema_ready:
             engine = get_engine()
@@ -657,18 +1087,167 @@ async def test_upsert_property_and_ad_updates_existing_property_usage_type() -> 
                         """
                         DELETE FROM listing_snapshots
                         WHERE listing_ad_id IN (
-                            SELECT id FROM listing_ads WHERE platform_listing_id = :platform_listing_id
+                            SELECT id FROM listing_ads WHERE platform_listing_id = ANY(:platform_listing_ids)
                         )
                         """
                     ),
-                    {"platform_listing_id": platform_listing_id},
+                    {"platform_listing_ids": [residential_listing_id, commercial_listing_id]},
                 )
                 await conn.execute(
-                    text("DELETE FROM listing_ads WHERE platform_listing_id = :platform_listing_id"),
-                    {"platform_listing_id": platform_listing_id},
+                    text("DELETE FROM listing_ads WHERE platform_listing_id = ANY(:platform_listing_ids)"),
+                    {"platform_listing_ids": [residential_listing_id, commercial_listing_id]},
                 )
                 await conn.execute(
                     text("DELETE FROM properties WHERE fingerprint = :fingerprint"),
                     {"fingerprint": fingerprint},
+                )
+        await close_db()
+
+
+@pytest.mark.anyio
+async def test_fetch_listing_cards_for_zone_filters_by_listing_ad_usage_type() -> None:
+    init_db(os.environ["DATABASE_URL"])
+
+    zone_fingerprint = f"zone-usage-filter-{uuid4().hex[:8]}"
+    residential_listing_id = f"usage-filter-res-{uuid4().hex[:8]}"
+    commercial_listing_id = f"usage-filter-com-{uuid4().hex[:8]}"
+    address_label = "Rua Uso Misto, Sumaré, São Paulo, SP"
+    lat = -11.1111
+    lon = -47.2222
+    fingerprint = compute_property_fingerprint(
+        address_normalized=address_label,
+        lat=lat,
+        lon=lon,
+        area_m2=80,
+        bedrooms=2,
+    )
+    schema_ready = False
+
+    try:
+        schema_ready = await _phase5_schema_ready()
+        if not schema_ready:
+            pytest.skip("Phase 5 schema not migrated. Run alembic upgrade head.")
+
+        await _cleanup_fetch_listing_cards_rows(
+            fingerprint=fingerprint,
+            platform_listing_ids=[residential_listing_id, commercial_listing_id],
+            zone_fingerprint=zone_fingerprint,
+        )
+
+        engine = get_engine()
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    """
+                    INSERT INTO zones (
+                        fingerprint,
+                        modal,
+                        max_time_minutes,
+                        radius_meters,
+                        isochrone_geom,
+                        state
+                    )
+                    VALUES (
+                        :zone_fingerprint,
+                        'transit',
+                        30,
+                        1200,
+                        ST_GeomFromText(:polygon_wkt, 4326),
+                        'complete'
+                    )
+                    """
+                ),
+                {
+                    "zone_fingerprint": zone_fingerprint,
+                    "polygon_wkt": "POLYGON((-47.2272 -11.1161, -47.2172 -11.1161, -47.2172 -11.1061, -47.2272 -11.1061, -47.2272 -11.1161))",
+                },
+            )
+
+        await upsert_property_and_ad(
+            fingerprint=fingerprint,
+            address_normalized=address_label,
+            lat=lat,
+            lon=lon,
+            area_m2=80,
+            bedrooms=2,
+            bathrooms=2,
+            parking=1,
+            usage_type="residential",
+            platform="zapimoveis",
+            platform_listing_id=residential_listing_id,
+            url="https://www.zapimoveis.com.br/imovel/aluguel-apartamento-sumare-sao-paulo-sp-80m2-id-1/",
+            advertised_usage_type="rent",
+            price=Decimal("4500"),
+            condo_fee=Decimal("300"),
+            iptu=Decimal("100"),
+            raw_payload={"url": "https://www.zapimoveis.com.br/imovel/aluguel-apartamento-sumare-sao-paulo-sp-80m2-id-1/"},
+        )
+
+        await upsert_property_and_ad(
+            fingerprint=fingerprint,
+            address_normalized=address_label,
+            lat=lat,
+            lon=lon,
+            area_m2=80,
+            bedrooms=2,
+            bathrooms=2,
+            parking=1,
+            usage_type="commercial",
+            platform="vivareal",
+            platform_listing_id=commercial_listing_id,
+            url="https://www.vivareal.com.br/imovel/ponto-comercial-sumare-sao-paulo-80m2-aluguel-id-2/",
+            advertised_usage_type="rent",
+            price=Decimal("5200"),
+            condo_fee=Decimal("0"),
+            iptu=Decimal("0"),
+            raw_payload={"url": "https://www.vivareal.com.br/imovel/ponto-comercial-sumare-sao-paulo-80m2-aluguel-id-2/"},
+        )
+
+        residential_cards = await fetch_listing_cards_for_zone(
+            zone_fingerprint=zone_fingerprint,
+            search_type="rent",
+            usage_type="residential",
+            platforms=["zapimoveis", "vivareal"],
+        )
+        commercial_cards = await fetch_listing_cards_for_zone(
+            zone_fingerprint=zone_fingerprint,
+            search_type="rent",
+            usage_type="commercial",
+            platforms=["zapimoveis", "vivareal"],
+        )
+
+        assert len(residential_cards) == 1
+        assert residential_cards[0]["platform_listing_id"] == residential_listing_id
+        assert residential_cards[0]["usage_type"] == "residential"
+
+        assert len(commercial_cards) == 1
+        assert commercial_cards[0]["platform_listing_id"] == commercial_listing_id
+        assert commercial_cards[0]["usage_type"] == "commercial"
+    finally:
+        if schema_ready:
+            engine = get_engine()
+            async with engine.begin() as conn:
+                await conn.execute(
+                    text(
+                        """
+                        DELETE FROM listing_snapshots
+                        WHERE listing_ad_id IN (
+                            SELECT id FROM listing_ads WHERE platform_listing_id = ANY(:platform_listing_ids)
+                        )
+                        """
+                    ),
+                    {"platform_listing_ids": [residential_listing_id, commercial_listing_id]},
+                )
+                await conn.execute(
+                    text("DELETE FROM listing_ads WHERE platform_listing_id = ANY(:platform_listing_ids)"),
+                    {"platform_listing_ids": [residential_listing_id, commercial_listing_id]},
+                )
+                await conn.execute(
+                    text("DELETE FROM properties WHERE fingerprint = :fingerprint"),
+                    {"fingerprint": fingerprint},
+                )
+                await conn.execute(
+                    text("DELETE FROM zones WHERE fingerprint = :zone_fingerprint"),
+                    {"zone_fingerprint": zone_fingerprint},
                 )
         await close_db()

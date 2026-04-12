@@ -17,9 +17,9 @@ import {
   SlidersHorizontal,
   Building2,
 } from "lucide-react";
-import { getJob, getZoneDashboardAnalytics, getZoneListings, type ListingPlatformVariantRead } from "../../api/client";
+import { apiActionHint, getJob, getZoneDashboardAnalytics, getZoneListings, type ListingPlatformVariantRead } from "../../api/client";
 import { ListingsScrapeDiagnosticsSchema, type ListingsScrapeDiagnostics, type ListingsScrapePlatformDiagnostics } from "../../api/schemas";
-import { applyListingsPanelFilters, formatCurrencyBr, getListingDisplayPrice, getListingSelectionKey, resolvePlatformImageUrl, resolvePlatformUrl } from "../../lib/listingFormat";
+import { applyListingsPanelFilters, formatCurrencyBr, getListingDisplayPrice, getListingSelectionKey, resolveListingCardImageUrls, resolvePlatformUrl } from "../../lib/listingFormat";
 import { useJourneyStore, useUIStore, type ListingsPanelFilters } from "../../state";
 import { Step6Dashboard } from "./Step6Dashboard";
 
@@ -193,6 +193,7 @@ export function Step6Analysis() {
   const [openAvailabilityPopoverKey, setOpenAvailabilityPopoverKey] = useState<string | null>(null);
   const [openPriceDeltaTooltipKey, setOpenPriceDeltaTooltipKey] = useState<string | null>(null);
   const [debouncedPriceComparisonFilters, setDebouncedPriceComparisonFilters] = useState<ListingsPanelFilters>(listingsFilters);
+  const [failedListingImageKeys, setFailedListingImageKeys] = useState<Record<string, true>>({});
 
   const persistedListingsJobId = listingsJobId;
 
@@ -414,6 +415,10 @@ export function Step6Analysis() {
       setJobIds({ listingsJobId: null });
     }
   }, [hasInterruptedListingsJob, persistedListingsJobId, setJobIds]);
+
+  useEffect(() => {
+    setFailedListingImageKeys({});
+  }, [journeyId, zoneFingerprint]);
 
   useEffect(() => {
     if (!journeyId || !zoneFingerprint) {
@@ -798,7 +803,10 @@ export function Step6Analysis() {
                 ? `${debouncedPriceComparisonFilters.spatialScope === "inside_zone" ? "Média da zona" : "Média do recorte"}: ${formatCurrencyBr(regionAveragePrice)}`
                 : "Média da região indisponível";
               const adUrl = resolvePlatformUrl(listing.url, listing.platform);
-              const imageUrl = resolvePlatformImageUrl(listing.image_url, listing.platform);
+              const imageCandidates = resolveListingCardImageUrls(listing);
+              const imageUrl = imageCandidates.find((candidateUrl) => !failedListingImageKeys[`${cardInstanceKey}:${candidateUrl}`]) || null;
+              const imageStateKey = imageUrl ? `${cardInstanceKey}:${imageUrl}` : null;
+              const shouldRenderImage = Boolean(imageUrl && imageStateKey);
               const platformVariants = listing.platform_variants || [];
               const hasAvailabilityPopover = Boolean(listing.duplication_badge && platformVariants.length > 1);
               const isSelected = listingKey !== "" && listingKey === selectedListingKey;
@@ -847,27 +855,41 @@ export function Step6Analysis() {
                   className={`group flex cursor-pointer flex-col overflow-hidden rounded-2xl border bg-white text-left transition-all hover:shadow-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-pastel-violet-300 sm:flex-row ${isSelected ? "border-pastel-violet-300 ring-2 ring-pastel-violet-100 shadow-lg" : "border-slate-200"}`}
                 >
                   <div className="relative h-40 shrink-0 bg-gradient-to-br from-pastel-violet-100 via-white to-slate-100 sm:h-auto sm:w-48">
-                    {imageUrl ? (
+                    {shouldRenderImage && imageUrl ? (
                       <img
+                        key={imageStateKey}
                         src={imageUrl}
                         alt={listing.address_normalized || "Imagem do imóvel"}
                         className="absolute inset-0 h-full w-full object-cover"
                         loading="lazy"
-                        onError={(event) => {
-                          event.currentTarget.style.display = "none";
+                        onError={() => {
+                          if (!imageStateKey) {
+                            return;
+                          }
+                          setFailedListingImageKeys((current) => {
+                            if (current[imageStateKey]) {
+                              return current;
+                            }
+                            return {
+                              ...current,
+                              [imageStateKey]: true,
+                            };
+                          });
                         }}
                       />
                     ) : null}
-                    <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400">
-                      <Building2 className="h-9 w-9" />
-                      <span className="mt-2 text-xs font-semibold uppercase tracking-[0.16em]">{availablePlatformsLabel(listing.platforms_available, listing.platform)}</span>
-                    </div>
+                    {!shouldRenderImage ? (
+                      <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400">
+                        <Building2 className="h-9 w-9" />
+                        <span className="mt-2 text-xs font-semibold uppercase tracking-[0.16em]">{availablePlatformsLabel(listing.platforms_available, listing.platform)}</span>
+                      </div>
+                    ) : null}
                     <div className="absolute left-2 top-2 rounded bg-white/90 px-2 py-1 text-xs font-bold text-slate-700 shadow-sm backdrop-blur-sm">
                       {availablePlatformsLabel(listing.platforms_available, listing.platform)}
                     </div>
                   </div>
                   <div className="flex flex-1 flex-col p-4">
-                    <div className="mb-1 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(190px,224px)] sm:items-start">
+                      <div className="mb-3 flex flex-col gap-2">
                       <div className="min-w-0">
                         <p className="text-sm text-slate-500">{config.type === "rent" ? "Locação" : "Compra"}</p>
                         {(listing.platforms_available || []).length > 1 ? (
@@ -921,7 +943,7 @@ export function Step6Analysis() {
                       <span className="inline-flex items-center gap-1"><MapIcon className="h-3.5 w-3.5" /> {listing.area_m2 ? `${Math.round(listing.area_m2)}m²` : "Área indisponível"}</span>
                       <span className="inline-flex items-center gap-1"><Home className="h-3.5 w-3.5" /> {listing.bedrooms ?? "--"} quartos</span>
                     </div>
-                    <div className={`mb-3 inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium ${spatialBadge.className}`}>
+                    <div className={`mb-3 flex w-full items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium ${spatialBadge.className}`}>
                       <MapIcon className="h-3 w-3" />
                       {spatialBadge.label}
                     </div>

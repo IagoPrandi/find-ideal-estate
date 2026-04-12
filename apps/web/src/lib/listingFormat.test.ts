@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applyListingsPanelFilters, getListingDisplayPrice, getListingSelectionKey, parseFiniteNumber, resolvePlatformImageUrl } from "./listingFormat";
+import { applyListingsPanelFilters, getListingDisplayPrice, getListingSelectionKey, parseFiniteNumber, resolveListingCardImageUrl, resolveListingCardImageUrls, resolvePlatformImageUrl } from "./listingFormat";
 
 describe("parseFiniteNumber", () => {
   it("preserves backend decimal strings with dot separator", () => {
@@ -31,6 +31,63 @@ describe("parseFiniteNumber", () => {
   it("resolves relative and protocol-relative image URLs", () => {
     expect(resolvePlatformImageUrl("/listing-image.webp", "vivareal")).toBe("https://www.vivareal.com.br/listing-image.webp");
     expect(resolvePlatformImageUrl("//images.example.com/photo.jpg", "zapimoveis")).toBe("https://images.example.com/photo.jpg");
+  });
+
+  it("normalizes QuintoAndar filename-only image values", () => {
+    expect(resolvePlatformImageUrl("894723853-808.334581783361IMG2447.JPG", "quintoandar")).toBe(
+      "https://www.quintoandar.com.br/img/med/894723853-808.334581783361IMG2447.JPG"
+    );
+  });
+
+  it("ignores unresolved template image URLs", () => {
+    expect(
+      resolvePlatformImageUrl(
+        "https://resizedimgs.vivareal.com/img/vr-listing/abc/{description}.webp?action={action}&dimension={width}x{height}",
+        "vivareal"
+      )
+    ).toBeNull();
+  });
+
+  it("falls back to the first platform variant image when the primary image is missing", () => {
+    expect(resolveListingCardImageUrl({
+      image_url: null,
+      platform: "quintoandar",
+      platform_variants: [
+        {
+          platform: "quintoandar",
+          image_url: null,
+        },
+        {
+          platform: "vivareal",
+          image_url: "/listing-images/vr-1.webp",
+        },
+      ],
+    } as never)).toBe("https://www.vivareal.com.br/listing-images/vr-1.webp");
+  });
+
+  it("returns unique card image candidates ordered by primary then variants", () => {
+    expect(resolveListingCardImageUrls({
+      image_url: "/listing-images/zap-1.webp",
+      platform: "zapimoveis",
+      platform_variants: [
+        {
+          platform: "zapimoveis",
+          image_url: "/listing-images/zap-1.webp",
+        },
+        {
+          platform: "vivareal",
+          image_url: "/listing-images/vr-1.webp",
+        },
+        {
+          platform: "quintoandar",
+          image_url: "894723853-808.334581783361IMG2447.JPG",
+        },
+      ],
+    } as never)).toEqual([
+      "https://www.zapimoveis.com.br/listing-images/zap-1.webp",
+      "https://www.vivareal.com.br/listing-images/vr-1.webp",
+      "https://www.quintoandar.com.br/img/med/894723853-808.334581783361IMG2447.JPG",
+    ]);
   });
 
   it("builds a stable selection key for cards and map points", () => {

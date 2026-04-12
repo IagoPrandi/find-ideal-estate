@@ -17,8 +17,10 @@ from .vivareal import (
     _glue_try_resolve_location_url,
     _build_glue_fallback_url,
     _count_primary_listings,
+    _extract_from_dom_rows,
     _extract_from_glue_payload,
     _geocode_address_nominatim,
+    _has_usable_listing_image_url,
     _infer_city_state_from_address,
     _tweak_glue_listings_url,
 )
@@ -114,6 +116,7 @@ class ZapImoveisScraper(ScraperBase):
 
     async def _scrape_with_context(self, context: Any) -> list[dict[str, Any]]:
         intercepted_payloads: list[dict[str, Any]] = []
+        dom_rows: list[dict[str, Any]] = []
         glue_urls: set[str] = set()
         live_glue_headers: dict[str, str] = {}
         last_listings_url: str | None = None
@@ -361,6 +364,26 @@ class ZapImoveisScraper(ScraperBase):
                         except Exception:
                             break
 
+            dom_rows = await page.evaluate(
+                """
+                () => {
+                    const anchors = Array.from(document.querySelectorAll('a[href*="/imovel/"]'));
+                    return anchors.slice(0, 120).map((a) => ({
+                        image_url: (() => {
+                            const card = a.closest('article') || a.closest('section') || a.closest('[class*="card"]') || a;
+                            const img = card.querySelector('img');
+                            const source = card.querySelector('source[srcset]');
+                            const srcset = source?.getAttribute('srcset') || img?.getAttribute('srcset') || '';
+                            const srcsetUrl = srcset.split(',').map((item) => item.trim().split(' ')[0]).find(Boolean) || '';
+                            return img?.currentSrc || img?.getAttribute('src') || img?.getAttribute('data-src') || img?.getAttribute('data-lazy-src') || srcsetUrl || '';
+                        })(),
+                        href: a.getAttribute('href') || '',
+                        text: (a.closest('article') || a).innerText || '',
+                    }));
+                }
+                """
+            )
+
         finally:
             await page.close()
 
@@ -369,6 +392,23 @@ class ZapImoveisScraper(ScraperBase):
             listings.extend(
                 _extract_from_glue_payload(payload, "zapimoveis", self.search_type)
             )
+
+        if isinstance(dom_rows, list):
+            dom_listings = _extract_from_dom_rows(dom_rows, "zapimoveis")
+            dom_by_id = {
+                str(item.get("platform_listing_id") or ""): item
+                for item in dom_listings
+                if item.get("platform_listing_id")
+            }
+            for item in listings:
+                dom_item = dom_by_id.get(str(item.get("platform_listing_id") or ""))
+                if dom_item is None:
+                    continue
+                if not _has_usable_listing_image_url(item.get("image_url")) and _has_usable_listing_image_url(dom_item.get("image_url")):
+                    item["image_url"] = dom_item.get("image_url")
+
+            if not listings:
+                listings.extend(dom_listings)
 
         seen: set[str] = set()
         unique = []

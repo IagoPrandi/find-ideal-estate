@@ -795,7 +795,7 @@ function CompactMetricCard(props: {
       };
 
   return (
-    <div className={`${sizeClass.container} ${props.className || ""} flex h-full min-h-[148px] border border-slate-200 bg-white shadow-sm`}>
+    <div className={`${sizeClass.container} ${props.className || ""} flex h-full min-h-[135px] border border-slate-200 bg-white shadow-sm`}>
       <div className="flex min-w-0 flex-1 flex-col">
         <div className={`relative min-w-0 ${sizeClass.content}`}>
           <p className={`${sizeClass.eyebrow} font-semibold uppercase leading-tight text-slate-500`}>{props.eyebrow}</p>

@@ -238,6 +238,7 @@ async def list_zones_for_journey(journey_id: UUID) -> ZoneListResponse:
                     ) snapshot ON TRUE
                     WHERE la.is_active = TRUE
                       AND la.advertised_usage_type = :search_type
+                                            AND (:usage_type = 'all' OR la.usage_type IS NULL OR la.usage_type = :usage_type)
                     GROUP BY la.property_id
                 ),
                 zone_prices AS (
@@ -249,11 +250,6 @@ async def list_zones_for_journey(journey_id: UUID) -> ZoneListResponse:
                       ON p.location IS NOT NULL
                      AND ST_Within(p.location, jzb.isochrone_geom)
                     JOIN latest_active_prices lap ON lap.property_id = p.id
-                    WHERE (
-                        :usage_type = 'all'
-                        OR p.usage_type IS NULL
-                        OR p.usage_type = :usage_type
-                    )
                 )
                 SELECT
                     fingerprint,

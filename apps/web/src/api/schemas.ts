@@ -121,6 +121,7 @@ export const ListingPlatformVariantBackendSchema = z.object({
   platform: z.string().nullable().optional(),
   platform_listing_id: z.string().nullable().optional(),
   url: z.string().nullable().optional(),
+  image_url: z.string().nullable().optional(),
   current_best_price: z.string().nullable().optional(),
   condo_fee: z.string().nullable().optional(),
   iptu: z.string().nullable().optional(),

@@ -29,6 +29,8 @@ class ListingAdRead(BaseModel):
     platform_listing_id: str
     url: str | None = None
     advertised_usage_type: str | None = None
+    usage_type: str | None = None
+    usage_type_inferred: bool = False
     first_seen_at: datetime
     last_seen_at: datetime
     is_active: bool = True
@@ -48,6 +50,7 @@ class ListingPlatformVariantRead(BaseModel):
     platform: str
     platform_listing_id: str
     url: str | None = None
+    image_url: str | None = None
     current_best_price: Decimal | None = None
     condo_fee: Decimal | None = None
     iptu: Decimal | None = None

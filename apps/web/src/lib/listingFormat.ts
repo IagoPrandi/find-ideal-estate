@@ -1,4 +1,4 @@
-import type { ListingCardRead } from "../api/client";
+import type { ListingCardRead, ListingPlatformVariantRead } from "../api/client";
 import type { ListingsPanelFilters } from "../state/journey-store";
 
 const PLATFORM_BASE_URLS: Record<string, string> = {
@@ -9,11 +9,20 @@ const PLATFORM_BASE_URLS: Record<string, string> = {
 
 function resolvePlatformAbsoluteUrl(url: string | null | undefined, platform: string | null | undefined): string | null {
   if (!url) return null;
+  if (url.includes("{description}") || url.includes("{action}") || url.includes("{width}") || url.includes("{height}")) {
+    return null;
+  }
   if (url.startsWith("//")) return `https:${url}`;
   if (url.startsWith("https://") || url.startsWith("http://")) return url;
   if (url.startsWith("/")) {
     const base = PLATFORM_BASE_URLS[(platform ?? "").toLowerCase()];
     if (base) return `${base}${url}`;
+  }
+  if (
+    (platform ?? "").toLowerCase() === "quintoandar"
+    && /\.(?:avif|gif|jpe?g|png|webp)$/i.test(url)
+  ) {
+    return `https://www.quintoandar.com.br/img/med/${url.replace(/^\/+/, "")}`;
   }
   return null;
 }
@@ -29,6 +38,35 @@ export function resolvePlatformUrl(url: string | null | undefined, platform: str
 
 export function resolvePlatformImageUrl(url: string | null | undefined, platform: string | null | undefined): string | null {
   return resolvePlatformAbsoluteUrl(url, platform);
+}
+
+export function resolveListingCardImageUrls(
+  listing: Pick<ListingCardRead, "image_url" | "platform" | "platform_variants">
+): string[] {
+  const candidates: string[] = [];
+
+  const primaryImageUrl = resolvePlatformImageUrl(listing.image_url, listing.platform);
+  if (primaryImageUrl) {
+    candidates.push(primaryImageUrl);
+  }
+
+  const variants = Array.isArray(listing.platform_variants)
+    ? listing.platform_variants
+    : [];
+  for (const variant of variants as Array<Pick<ListingPlatformVariantRead, "image_url" | "platform">>) {
+    const variantImageUrl = resolvePlatformImageUrl(variant.image_url, variant.platform);
+    if (variantImageUrl && !candidates.includes(variantImageUrl)) {
+      candidates.push(variantImageUrl);
+    }
+  }
+
+  return candidates;
+}
+
+export function resolveListingCardImageUrl(
+  listing: Pick<ListingCardRead, "image_url" | "platform" | "platform_variants">
+): string | null {
+  return resolveListingCardImageUrls(listing)[0] || null;
 }
 
 export function formatCurrencyBr(value: unknown): string {

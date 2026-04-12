@@ -94,15 +94,14 @@ async def upsert_property_and_ad(
                 f"""
                 INSERT INTO properties (
                     address_normalized, location, area_m2, bedrooms, bathrooms,
-                    parking, usage_type, fingerprint
+                    parking, fingerprint
                 ) VALUES (
                     :address_normalized,
                     {geom_expr},
                     :area_m2, :bedrooms, :bathrooms,
-                    :parking, :usage_type, :fingerprint
+                    :parking, :fingerprint
                 )
-                ON CONFLICT (fingerprint) DO UPDATE
-                    SET usage_type = COALESCE(EXCLUDED.usage_type, properties.usage_type)
+                ON CONFLICT (fingerprint) DO NOTHING
                 """
             ),
             {
@@ -111,7 +110,6 @@ async def upsert_property_and_ad(
                 "bedrooms": bedrooms,
                 "bathrooms": bathrooms,
                 "parking": parking,
-                "usage_type": usage_type,
                 "fingerprint": fingerprint,
             },
         )
@@ -128,15 +126,20 @@ async def upsert_property_and_ad(
                 """
                 INSERT INTO listing_ads (
                     property_id, platform, platform_listing_id,
-                    url, advertised_usage_type
+                    url, advertised_usage_type, usage_type, usage_type_inferred
                 ) VALUES (
                     :property_id, :platform, :platform_listing_id,
-                    :url, :advertised_usage_type
+                    :url, :advertised_usage_type, :usage_type, :usage_type_inferred
                 )
                 ON CONFLICT (platform, platform_listing_id) DO UPDATE
                     SET last_seen_at = now(),
                         is_active = true,
-                        url = EXCLUDED.url
+                        url = EXCLUDED.url,
+                        usage_type = COALESCE(EXCLUDED.usage_type, listing_ads.usage_type),
+                        usage_type_inferred = CASE
+                            WHEN EXCLUDED.usage_type IS NULL THEN listing_ads.usage_type_inferred
+                            ELSE EXCLUDED.usage_type_inferred
+                        END
                 """
             ),
             {
@@ -145,6 +148,8 @@ async def upsert_property_and_ad(
                 "platform_listing_id": platform_listing_id,
                 "url": url,
                 "advertised_usage_type": advertised_usage_type,
+                "usage_type": usage_type,
+                "usage_type_inferred": usage_type is not None,
             },
         )
 
@@ -219,6 +224,7 @@ async def fetch_listing_cards_for_zone(
             "platform": raw_variant.get("platform"),
             "platform_listing_id": raw_variant.get("platform_listing_id"),
             "url": raw_variant.get("url"),
+            "image_url": raw_variant.get("image_url"),
             "current_best_price": _serialize_money(raw_variant.get("current_best_price")),
             "condo_fee": _serialize_money(raw_variant.get("condo_fee")),
             "iptu": _serialize_money(raw_variant.get("iptu")),
@@ -235,6 +241,7 @@ async def fetch_listing_cards_for_zone(
                         la.platform,
                         la.platform_listing_id,
                         la.url,
+                        la.usage_type,
                         la.advertised_usage_type,
                         ls.price,
                         ls.condo_fee,
@@ -243,7 +250,36 @@ async def fetch_listing_cards_for_zone(
                             WHEN ls.price IS NULL THEN NULL
                             ELSE COALESCE(ls.price, 0) + COALESCE(ls.condo_fee, 0) + COALESCE(ls.iptu, 0)
                         END AS total_price,
-                        ls.raw_payload->>'image_url' AS image_url,
+                        COALESCE(
+                            NULLIF(ls.raw_payload->>'image_url', ''),
+                            (
+                                SELECT prev.raw_payload->>'image_url'
+                                FROM listing_snapshots prev
+                                WHERE prev.listing_ad_id = la.id
+                                  AND COALESCE(prev.raw_payload->>'image_url', '') <> ''
+                                ORDER BY prev.observed_at DESC
+                                LIMIT 1
+                                                        ),
+                                                        (
+                                                                SELECT prev.raw_payload->>'image_url'
+                                                                FROM listing_snapshots prev
+                                                                JOIN listing_ads prev_la ON prev_la.id = prev.listing_ad_id
+                                                                WHERE prev_la.property_id = la.property_id
+                                                                    AND prev_la.platform = la.platform
+                                                                    AND COALESCE(prev.raw_payload->>'image_url', '') <> ''
+                                                                ORDER BY prev.observed_at DESC
+                                                                LIMIT 1
+                                                        ),
+                                                        (
+                                                                SELECT prev.raw_payload->>'image_url'
+                                                                FROM listing_snapshots prev
+                                                                JOIN listing_ads prev_la ON prev_la.id = prev.listing_ad_id
+                                                                WHERE prev_la.property_id = la.property_id
+                                                                    AND COALESCE(prev.raw_payload->>'image_url', '') <> ''
+                                                                ORDER BY prev.observed_at DESC
+                                                                LIMIT 1
+                            )
+                        ) AS image_url,
                         ls.observed_at,
                         ROW_NUMBER() OVER (
                             PARTITION BY la.property_id
@@ -264,6 +300,7 @@ async def fetch_listing_cards_for_zone(
                     WHERE la.is_active = true
                       AND la.platform = ANY(:platforms)
                       AND (la.advertised_usage_type = :search_type OR la.advertised_usage_type IS NULL)
+                                            AND (:usage_type = 'all' OR la.usage_type IS NULL OR la.usage_type = :usage_type)
                       AND (ls.availability_state = 'active' OR ls.availability_state IS NULL)
                 ),
                 recent_search_properties AS (
@@ -273,6 +310,7 @@ async def fetch_listing_cards_for_zone(
                     WHERE la.is_active = true
                       AND la.platform = ANY(:platforms)
                       AND (la.advertised_usage_type = :search_type OR la.advertised_usage_type IS NULL)
+                                            AND (:usage_type = 'all' OR la.usage_type IS NULL OR la.usage_type = :usage_type)
                       AND (ls.availability_state = 'active' OR ls.availability_state IS NULL)
                       AND (
                             (
@@ -317,7 +355,6 @@ async def fetch_listing_cards_for_zone(
                         p.bedrooms,
                         p.bathrooms,
                         p.parking,
-                        p.usage_type,
                         p.location IS NOT NULL AS has_coordinates,
                         CASE
                             WHEN p.location IS NULL THEN false
@@ -325,7 +362,6 @@ async def fetch_listing_cards_for_zone(
                         END AS inside_zone
                     FROM properties p
                     JOIN zones z ON z.fingerprint = :zone_fp
-                    WHERE (p.usage_type = :usage_type OR :usage_type = 'all')
                 ),
                 property_price_context AS (
                     SELECT
@@ -365,7 +401,7 @@ async def fetch_listing_cards_for_zone(
                     zp.bedrooms,
                     zp.bathrooms,
                     zp.parking,
-                    zp.usage_type,
+                    bp.usage_type,
                     bp.platform,
                     bp.platform_listing_id,
                     bp.url,
@@ -409,6 +445,7 @@ async def fetch_listing_cards_for_zone(
                                 'platform', bp2.platform,
                                 'platform_listing_id', bp2.platform_listing_id,
                                 'url', bp2.url,
+                                'image_url', bp2.image_url,
                                 'current_best_price', bp2.price,
                                 'condo_fee', bp2.condo_fee,
                                 'iptu', bp2.iptu,
@@ -450,6 +487,14 @@ async def fetch_listing_cards_for_zone(
             second_price = row["second_best_price"]
             best_price = row["current_best_price"]
             best_total_price = row["current_total_price"]
+            platform_variants = [
+                _serialize_platform_variant(variant)
+                for variant in (row["platform_variants"] or [])
+            ]
+            image_url = row["image_url"] or next(
+                (variant.get("image_url") for variant in platform_variants if variant.get("image_url")),
+                None,
+            )
             dup_badge = None
             if platform_count >= 2 and best_total_price is not None:
                 price_fmt = f"R$ {int(best_total_price):,}".replace(",", ".")
@@ -473,12 +518,9 @@ async def fetch_listing_cards_for_zone(
                     "platform": row["platform"],
                     "platform_listing_id": row["platform_listing_id"],
                     "url": row["url"],
-                    "image_url": row["image_url"],
+                    "image_url": image_url,
                     "platforms_available": list(row["platforms_available"] or []),
-                    "platform_variants": [
-                        _serialize_platform_variant(variant)
-                        for variant in (row["platform_variants"] or [])
-                    ],
+                    "platform_variants": platform_variants,
                     "current_best_price": str(best_price) if best_price is not None else None,
                     "current_unit_price": float(row["current_unit_price"]) if row["current_unit_price"] is not None else None,
                     "neighborhood_median_unit_price": float(row["neighborhood_median_unit_price"]) if row["neighborhood_median_unit_price"] is not None else None,

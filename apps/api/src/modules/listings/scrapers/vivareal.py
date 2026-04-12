@@ -23,7 +23,9 @@ from .base import (
     ScraperBase,
     _as_float,
     _as_int,
+    _has_renderable_image_url,
     _get_by_path,
+    _normalize_image_url,
 )
 
 VIVAREAL_BASE = "https://www.vivareal.com.br"
@@ -36,6 +38,44 @@ COMMON_LISTING_PATHS = [
     "result.listings",
     "listings",
 ]
+
+
+def _platform_base_url(platform: str) -> str:
+    return "https://www.zapimoveis.com.br" if platform == "zapimoveis" else VIVAREAL_BASE
+
+
+def _extract_listing_card_image_url(
+    node: dict[str, Any],
+    platform: str = "vivareal",
+) -> str | None:
+    if not isinstance(node, dict):
+        return None
+    return _normalize_image_url(
+        _get_by_path(node, "medias.0.url")
+        or _get_by_path(node, "medias.0.imageUrl")
+        or _get_by_path(node, "medias.0.src")
+        or _get_by_path(node, "media.0.url")
+        or _get_by_path(node, "media.0.imageUrl")
+        or _get_by_path(node, "images.0.url")
+        or _get_by_path(node, "images.0.imageUrl")
+        or _get_by_path(node, "images.0.src")
+        or _get_by_path(node, "gallery.0.url")
+        or _get_by_path(node, "gallery.0.imageUrl")
+        or _get_by_path(node, "gallery.0.src")
+        or _get_by_path(node, "photos.0.url")
+        or _get_by_path(node, "photos.0.imageUrl")
+        or _get_by_path(node, "photos.0.src")
+        or _get_by_path(node, "cover.url")
+        or _get_by_path(node, "cover.src")
+        or _get_by_path(node, "coverImage.url")
+        or _get_by_path(node, "coverImage.src")
+        or _get_by_path(node, "coverImage"),
+        platform_base=_platform_base_url(platform),
+    )
+
+
+def _has_usable_listing_image_url(value: Any) -> bool:
+    return _has_renderable_image_url(value)
 
 _VR_SP_ZONE_BY_NEIGHBORHOOD = {
     "vila leopoldina": "zona-oeste",
@@ -476,6 +516,7 @@ class VivaRealScraper(ScraperBase):
 
     async def _scrape_with_context(self, context: Any) -> list[dict[str, Any]]:
         intercepted_payloads: list[dict[str, Any]] = []
+        dom_rows: list[dict[str, Any]] = []
         glue_urls: set[str] = set()
         live_glue_headers: dict[str, str] = {}
         last_listings_url: str | None = None
@@ -659,6 +700,26 @@ class VivaRealScraper(ScraperBase):
                         except Exception:
                             break
 
+            dom_rows = await page.evaluate(
+                """
+                () => {
+                    const anchors = Array.from(document.querySelectorAll('a[href*="/imovel/"]'));
+                    return anchors.slice(0, 120).map((a) => ({
+                        image_url: (() => {
+                            const card = a.closest('article') || a.closest('section') || a.closest('[class*="card"]') || a;
+                            const img = card.querySelector('img');
+                            const source = card.querySelector('source[srcset]');
+                            const srcset = source?.getAttribute('srcset') || img?.getAttribute('srcset') || '';
+                            const srcsetUrl = srcset.split(',').map((item) => item.trim().split(' ')[0]).find(Boolean) || '';
+                            return img?.currentSrc || img?.getAttribute('src') || img?.getAttribute('data-src') || img?.getAttribute('data-lazy-src') || srcsetUrl || '';
+                        })(),
+                        href: a.getAttribute('href') || '',
+                        text: (a.closest('article') || a).innerText || '',
+                    }));
+                }
+                """
+            )
+
         finally:
             await page.unroute("**/glue-api.vivareal.com/v2/listings**", _glue_route_handler)
             await page.close()
@@ -666,6 +727,23 @@ class VivaRealScraper(ScraperBase):
         listings: list[dict[str, Any]] = []
         for payload in intercepted_payloads:
             listings.extend(_extract_from_glue_payload(payload, "vivareal", self.search_type))
+
+        if isinstance(dom_rows, list):
+            dom_listings = _extract_from_dom_rows(dom_rows, "vivareal")
+            dom_by_id = {
+                str(item.get("platform_listing_id") or ""): item
+                for item in dom_listings
+                if item.get("platform_listing_id")
+            }
+            for item in listings:
+                dom_item = dom_by_id.get(str(item.get("platform_listing_id") or ""))
+                if dom_item is None:
+                    continue
+                if not _has_usable_listing_image_url(item.get("image_url")) and _has_usable_listing_image_url(dom_item.get("image_url")):
+                    item["image_url"] = dom_item.get("image_url")
+
+            if not listings:
+                listings.extend(dom_listings)
 
         seen: set[str] = set()
         unique = []
@@ -792,12 +870,7 @@ def _extract_from_glue_payload(
                 "platform": platform,
                 "platform_listing_id": lid,
                 "url": link,
-                "image_url": (
-                    _get_by_path(listing, "medias.0.url")
-                    or _get_by_path(listing, "medias.0.imageUrl")
-                    or _get_by_path(listing, "images.0.url")
-                    or _get_by_path(listing, "images.0")
-                ),
+                "image_url": _extract_listing_card_image_url(listing, platform),
                 "lat": lat,
                 "lon": lon,
                 "price_brl": price,
@@ -874,7 +947,10 @@ def _extract_from_dom_rows(rows: list[dict[str, Any]], platform: str) -> list[di
                 "platform": platform,
                 "platform_listing_id": lid,
                 "url": link,
-                "image_url": None,
+                "image_url": _normalize_image_url(
+                    row.get("image_url"),
+                    platform_base=_platform_base_url(platform),
+                ),
                 "lat": None,
                 "lon": None,
                 "price_brl": _as_float(price_match.group(0)) if price_match else None,

@@ -146,7 +146,7 @@ def _build_price_dashboard_filter_sql(
     min_size: float | None,
     max_size: float | None,
     price_alias: str,
-    usage_alias: str,
+    usage_alias: str | None,
     area_alias: str,
     inside_zone_alias: str,
 ) -> tuple[str, dict[str, Any]]:
@@ -155,7 +155,7 @@ def _build_price_dashboard_filter_sql(
 
     if spatial_scope == "inside_zone":
         clauses.append(f"{inside_zone_alias} = TRUE")
-    if usage_type != "all":
+    if usage_type != "all" and usage_alias:
         clauses.append(f"({usage_alias} IS NULL OR {usage_alias} = :price_filter_usage_type)")
         params["price_filter_usage_type"] = usage_type
     if min_price is not None:
@@ -843,7 +843,7 @@ async def fetch_zone_dashboard_analytics(
             min_size=min_size,
             max_size=max_size,
             price_alias="lap.current_total_price",
-            usage_alias="zp.usage_type",
+            usage_alias=None,
             area_alias="zp.area_m2",
             inside_zone_alias="zp.inside_zone",
         )
@@ -868,6 +868,7 @@ async def fetch_zone_dashboard_analytics(
                     ) snapshot ON TRUE
                     WHERE la.is_active = TRUE
                       AND la.advertised_usage_type = :search_type
+                                            AND (:usage_type = 'all' OR la.usage_type IS NULL OR la.usage_type = :usage_type)
                     GROUP BY la.property_id
                 ),
                 zone_props AS (
@@ -875,7 +876,6 @@ async def fetch_zone_dashboard_analytics(
                         p.id AS property_id,
                         pa.city_name,
                         pa.neighborhood_name,
-                        p.usage_type,
                         p.area_m2,
                         p.location,
                         CASE
@@ -904,6 +904,7 @@ async def fetch_zone_dashboard_analytics(
                 """
             ),
                         {
+                            "usage_type": usage_type,
                                 "search_type": search_type,
                                 "zone_fingerprint": zone_fingerprint,
                                 **current_price_filter_params,
@@ -1025,6 +1026,7 @@ async def fetch_zone_dashboard_analytics(
                     ) snapshot ON TRUE
                     WHERE la.is_active = TRUE
                       AND la.advertised_usage_type = :search_type
+                                            AND (:usage_type = 'all' OR la.usage_type IS NULL OR la.usage_type = :usage_type)
                     GROUP BY la.property_id
                 )
                 , zone_props AS (
@@ -1032,7 +1034,6 @@ async def fetch_zone_dashboard_analytics(
                         p.id AS property_id,
                         pa.city_name,
                         pa.neighborhood_name,
-                        p.usage_type,
                         p.area_m2,
                         CASE
                             WHEN p.location IS NULL THEN FALSE
@@ -1074,6 +1075,7 @@ async def fetch_zone_dashboard_analytics(
             {
                 "zone_fingerprint": zone_fingerprint,
                 "search_type": search_type,
+                "usage_type": usage_type,
                 **current_price_filter_params,
             },
         )

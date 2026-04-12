@@ -147,6 +147,52 @@ def _normalize_legacy_platform(platform: str) -> str:
     return aliases.get(key, key)
 
 
+def _normalize_image_url(
+    value: Any,
+    *,
+    platform_base: str | None = None,
+    filename_prefix: str | None = None,
+) -> str | None:
+    if not isinstance(value, str):
+        return None
+
+    normalized = value.strip()
+    if not normalized:
+        return None
+
+    if any(token in normalized for token in ("{description}", "{action}", "{width}", "{height}")):
+        return None
+
+    if normalized.startswith("//"):
+        return f"https:{normalized}"
+
+    if normalized.startswith("https://") or normalized.startswith("http://"):
+        return normalized
+
+    if normalized.startswith("/"):
+        if platform_base:
+            return f"{platform_base.rstrip('/')}{normalized}"
+        return None
+
+    if filename_prefix and re.search(r"\.(?:avif|gif|jpe?g|png|webp)(?:$|\?)", normalized, re.IGNORECASE):
+        return f"{filename_prefix.rstrip('/')}/{normalized.lstrip('/')}"
+
+    return None
+
+
+def _has_renderable_image_url(
+    value: Any,
+    *,
+    platform_base: str | None = None,
+    filename_prefix: str | None = None,
+) -> bool:
+    return _normalize_image_url(
+        value,
+        platform_base=platform_base,
+        filename_prefix=filename_prefix,
+    ) is not None
+
+
 def _infer_repo_root(anchor: Path) -> Path | None:
     for parent in anchor.parents:
         has_legacy = (parent / "cods_ok" / "realestate_meta_search.py").exists()
@@ -425,6 +471,13 @@ class ScraperBase(ABC):
                     "platform": platform_norm,
                     "platform_listing_id": lid,
                     "url": item.get("url"),
+                    "image_url": (
+                        item.get("image_url")
+                        or item.get("image")
+                        or item.get("imageUrl")
+                        or _get_by_path(item, "images.0.url")
+                        or _get_by_path(item, "images.0")
+                    ),
                     "lat": _as_float(item.get("lat")),
                     "lon": _as_float(item.get("lon")),
                     "price_brl": _as_float(item.get("price_brl")),
@@ -541,6 +594,13 @@ class ScraperBase(ABC):
                     "platform": platform_norm,
                     "platform_listing_id": lid,
                     "url": item.get("url"),
+                    "image_url": (
+                        item.get("image_url")
+                        or item.get("image")
+                        or item.get("imageUrl")
+                        or _get_by_path(item, "images.0.url")
+                        or _get_by_path(item, "images.0")
+                    ),
                     "lat": _as_float(item.get("lat")),
                     "lon": _as_float(item.get("lon")),
                     "price_brl": _as_float(item.get("price_brl")),
