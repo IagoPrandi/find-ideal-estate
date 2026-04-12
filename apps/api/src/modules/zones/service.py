@@ -19,6 +19,9 @@ from sqlalchemy import text
 logger = logging.getLogger(__name__)
 _ESTIMATED_WALKING_SPEED_METERS_PER_MINUTE = 80
 _ESTIMATED_DRIVING_SPEED_METERS_PER_MINUTE = 500
+_DIRECT_ISOCHRONE_MIN_AREA_RATIO_VS_CIRCLE = 0.05
+_DIRECT_ISOCHRONE_MIN_BOUNDARY_RATIO_VS_RADIUS = 0.15
+_DIRECT_ISOCHRONE_MIN_AREA_RATIO_FOR_EDGE_CASE = 0.25
 _FIND_EXISTING_ZONES_BY_FINGERPRINT_SQL = text(
     """
     SELECT id, fingerprint
@@ -44,6 +47,15 @@ class ZoneGenerationOutcome:
     zone_id: UUID
     fingerprint: str
     reused: bool
+
+
+@dataclass(frozen=True)
+class DirectIsochroneMetrics:
+    covers_origin: bool
+    area_m2: float
+    boundary_distance_m: float
+    area_ratio_vs_circle: float
+    boundary_ratio_vs_radius: float
 
 
 def compute_zone_fingerprint(
@@ -252,6 +264,193 @@ def _circle_polygon(lat: float, lon: float, radius_m: float, n_points: int = 36)
     return {"type": "Polygon", "coordinates": [coords]}
 
 
+def _iter_polygon_coordinate_sets(geometry: dict[str, Any]) -> list[list[list[list[float]]]]:
+    geometry_type = str(geometry.get("type") or "").strip()
+    coordinates = geometry.get("coordinates")
+    if geometry_type == "Polygon" and isinstance(coordinates, list):
+        return [coordinates]
+    if geometry_type == "MultiPolygon" and isinstance(coordinates, list):
+        return coordinates
+    return []
+
+
+def _project_lon_lat_to_local_meters(
+    lon: float,
+    lat: float,
+    *,
+    origin_lon: float,
+    origin_lat: float,
+) -> tuple[float, float]:
+    meters_per_lat = 111_320.0
+    meters_per_lon = meters_per_lat * max(math.cos(math.radians(origin_lat)), 1e-6)
+    return (
+        (lon - origin_lon) * meters_per_lon,
+        (lat - origin_lat) * meters_per_lat,
+    )
+
+
+def _project_ring_to_local_meters(
+    ring: list[Any],
+    *,
+    origin_lon: float,
+    origin_lat: float,
+) -> list[tuple[float, float]]:
+    projected: list[tuple[float, float]] = []
+    for point in ring:
+        if not isinstance(point, (list, tuple)) or len(point) < 2:
+            continue
+        lon = point[0]
+        lat = point[1]
+        if not isinstance(lon, (int, float)) or not isinstance(lat, (int, float)):
+            continue
+        projected.append(
+            _project_lon_lat_to_local_meters(
+                float(lon),
+                float(lat),
+                origin_lon=origin_lon,
+                origin_lat=origin_lat,
+            )
+        )
+    return projected
+
+
+def _point_in_ring(point: tuple[float, float], ring: list[tuple[float, float]]) -> bool:
+    if len(ring) < 3:
+        return False
+
+    x, y = point
+    inside = False
+    previous_x, previous_y = ring[-1]
+    for current_x, current_y in ring:
+        intersects = ((current_y > y) != (previous_y > y)) and (
+            x < (previous_x - current_x) * (y - current_y) / ((previous_y - current_y) or 1e-12) + current_x
+        )
+        if intersects:
+            inside = not inside
+        previous_x, previous_y = current_x, current_y
+    return inside
+
+
+def _distance_point_to_segment_m(
+    point: tuple[float, float],
+    start: tuple[float, float],
+    end: tuple[float, float],
+) -> float:
+    point_x, point_y = point
+    start_x, start_y = start
+    end_x, end_y = end
+    delta_x = end_x - start_x
+    delta_y = end_y - start_y
+    segment_length_sq = delta_x * delta_x + delta_y * delta_y
+    if segment_length_sq <= 0:
+        return math.hypot(point_x - start_x, point_y - start_y)
+
+    projection = ((point_x - start_x) * delta_x + (point_y - start_y) * delta_y) / segment_length_sq
+    projection = max(0.0, min(1.0, projection))
+    closest_x = start_x + projection * delta_x
+    closest_y = start_y + projection * delta_y
+    return math.hypot(point_x - closest_x, point_y - closest_y)
+
+
+def _ring_area_m2(ring: list[tuple[float, float]]) -> float:
+    if len(ring) < 3:
+        return 0.0
+    area = 0.0
+    previous_x, previous_y = ring[-1]
+    for current_x, current_y in ring:
+        area += previous_x * current_y - current_x * previous_y
+        previous_x, previous_y = current_x, current_y
+    return abs(area) / 2.0
+
+
+def _measure_direct_isochrone_geometry(
+    geometry: dict[str, Any],
+    *,
+    origin_lat: float,
+    origin_lon: float,
+    expected_radius_m: float,
+) -> DirectIsochroneMetrics:
+    polygons = _iter_polygon_coordinate_sets(geometry)
+    if not polygons:
+        return DirectIsochroneMetrics(
+            covers_origin=False,
+            area_m2=0.0,
+            boundary_distance_m=0.0,
+            area_ratio_vs_circle=0.0,
+            boundary_ratio_vs_radius=0.0,
+        )
+
+    origin = (0.0, 0.0)
+    covers_origin = False
+    area_m2 = 0.0
+    boundary_distance_m = math.inf
+
+    for polygon in polygons:
+        projected_rings = [
+            _project_ring_to_local_meters(
+                ring,
+                origin_lon=origin_lon,
+                origin_lat=origin_lat,
+            )
+            for ring in polygon
+            if isinstance(ring, list)
+        ]
+        projected_rings = [ring for ring in projected_rings if len(ring) >= 3]
+        if not projected_rings:
+            continue
+
+        exterior = projected_rings[0]
+        holes = projected_rings[1:]
+        polygon_area = _ring_area_m2(exterior) - sum(_ring_area_m2(hole) for hole in holes)
+        area_m2 += max(0.0, polygon_area)
+
+        if _point_in_ring(origin, exterior) and not any(_point_in_ring(origin, hole) for hole in holes):
+            covers_origin = True
+
+        for ring in projected_rings:
+            previous = ring[-1]
+            for current in ring:
+                boundary_distance_m = min(
+                    boundary_distance_m,
+                    _distance_point_to_segment_m(origin, previous, current),
+                )
+                previous = current
+
+    if not math.isfinite(boundary_distance_m):
+        boundary_distance_m = 0.0
+
+    ideal_circle_area_m2 = math.pi * max(expected_radius_m, 0.0) * max(expected_radius_m, 0.0)
+    area_ratio_vs_circle = area_m2 / ideal_circle_area_m2 if ideal_circle_area_m2 > 0 else 0.0
+    boundary_ratio_vs_radius = boundary_distance_m / expected_radius_m if expected_radius_m > 0 else 0.0
+    return DirectIsochroneMetrics(
+        covers_origin=covers_origin,
+        area_m2=area_m2,
+        boundary_distance_m=boundary_distance_m,
+        area_ratio_vs_circle=area_ratio_vs_circle,
+        boundary_ratio_vs_radius=boundary_ratio_vs_radius,
+    )
+
+
+def _direct_isochrone_validation_issue(metrics: DirectIsochroneMetrics) -> str | None:
+    if not metrics.covers_origin:
+        return "origin is outside returned geometry"
+    if metrics.area_ratio_vs_circle < _DIRECT_ISOCHRONE_MIN_AREA_RATIO_VS_CIRCLE:
+        return (
+            "returned area is implausibly small for requested travel time "
+            f"(area_ratio_vs_circle={metrics.area_ratio_vs_circle:.3f})"
+        )
+    if (
+        metrics.boundary_ratio_vs_radius < _DIRECT_ISOCHRONE_MIN_BOUNDARY_RATIO_VS_RADIUS
+        and metrics.area_ratio_vs_circle < _DIRECT_ISOCHRONE_MIN_AREA_RATIO_FOR_EDGE_CASE
+    ):
+        return (
+            "origin is too close to the isochrone boundary for the requested travel time "
+            f"(boundary_ratio_vs_radius={metrics.boundary_ratio_vs_radius:.3f}, "
+            f"area_ratio_vs_circle={metrics.area_ratio_vs_circle:.3f})"
+        )
+    return None
+
+
 async def _clear_journey_zone_links(conn, journey_id: UUID) -> None:
     await conn.execute(
         text(
@@ -363,6 +562,29 @@ class ZoneService:
             logger.warning("Valhalla unavailable, using circle fallback: %s", exc)
             geometry = _circle_polygon(float(lat), float(lon), float(radius_meters))
             is_circle_fallback = True
+
+        if not is_circle_fallback and _is_direct_isochrone_modal(modal):
+            metrics = _measure_direct_isochrone_geometry(
+                geometry,
+                origin_lat=float(lat),
+                origin_lon=float(lon),
+                expected_radius_m=float(radius_meters),
+            )
+            validation_issue = _direct_isochrone_validation_issue(metrics)
+            if validation_issue is not None:
+                logger.warning(
+                    "Valhalla returned implausible %s isochrone, using circle fallback: %s "
+                    "(covers_origin=%s area_m2=%.1f boundary_distance_m=%.1f area_ratio_vs_circle=%.3f boundary_ratio_vs_radius=%.3f)",
+                    modal,
+                    validation_issue,
+                    metrics.covers_origin,
+                    metrics.area_m2,
+                    metrics.boundary_distance_m,
+                    metrics.area_ratio_vs_circle,
+                    metrics.boundary_ratio_vs_radius,
+                )
+                geometry = _circle_polygon(float(lat), float(lon), float(radius_meters))
+                is_circle_fallback = True
 
         insert_result = await conn.execute(
             text(

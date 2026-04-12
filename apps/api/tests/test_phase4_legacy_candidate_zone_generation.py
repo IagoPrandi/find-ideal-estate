@@ -309,7 +309,13 @@ def test_zone_service_generates_single_walk_isochrone_without_transport_seed(mon
 						"type": "Feature",
 						"geometry": {
 							"type": "Polygon",
-							"coordinates": [[[-46.63331, -23.55052], [-46.632, -23.55052], [-46.632, -23.549], [-46.63331, -23.55052]]],
+							"coordinates": [[
+								[-46.64031, -23.55652],
+								[-46.62631, -23.55652],
+								[-46.62631, -23.54452],
+								[-46.64031, -23.54452],
+								[-46.64031, -23.55652],
+							]],
 						},
 					}
 				],
@@ -361,6 +367,7 @@ def test_zone_service_generates_single_walk_isochrone_without_transport_seed(mon
 	assert outcome["total"] == 1
 	assert outcome["completed"] == 1
 	assert [zone.reused for zone in outcome["zones"]] == [False]
+	assert fake_conn.insert_zone_params[0]["is_circle_fallback"] is False
 
 
 def test_zone_service_generates_single_car_isochrone_without_transport_seed(monkeypatch) -> None:
@@ -377,7 +384,13 @@ def test_zone_service_generates_single_car_isochrone_without_transport_seed(monk
 						"type": "Feature",
 						"geometry": {
 							"type": "Polygon",
-							"coordinates": [[[-46.63331, -23.55052], [-46.631, -23.55052], [-46.631, -23.548], [-46.63331, -23.55052]]],
+							"coordinates": [[
+								[-46.70531, -23.60552],
+								[-46.56131, -23.60552],
+								[-46.56131, -23.49552],
+								[-46.70531, -23.49552],
+								[-46.70531, -23.60552],
+							]],
 						},
 					}
 				],
@@ -429,3 +442,113 @@ def test_zone_service_generates_single_car_isochrone_without_transport_seed(monk
 	assert outcome["total"] == 1
 	assert outcome["completed"] == 1
 	assert [zone.reused for zone in outcome["zones"]] == [False]
+	assert fake_conn.insert_zone_params[0]["is_circle_fallback"] is False
+
+
+def test_zone_service_falls_back_when_walk_isochrone_is_implausibly_small(monkeypatch) -> None:
+	class _FakeValhallaAdapter:
+		async def isochrone(self, origin, costing, contours_minutes):
+			assert costing == "pedestrian"
+			assert contours_minutes == [15]
+			return {
+				"type": "FeatureCollection",
+				"features": [
+					{
+						"type": "Feature",
+						"geometry": {
+							"type": "Polygon",
+							"coordinates": [[
+								[-46.566185, -23.565064],
+								[-46.565310, -23.565064],
+								[-46.565310, -23.564126],
+								[-46.567060, -23.564126],
+								[-46.567060, -23.565939],
+								[-46.566185, -23.565064],
+							]],
+						},
+					}
+				],
+			}
+
+	service = ZoneService(valhalla_adapter=_FakeValhallaAdapter(), otp_adapter=object())
+	fake_conn = _FakeConn(
+		context_row={
+			"journey_id": uuid4(),
+			"input_snapshot": {
+				"transport_mode": "walk",
+				"max_travel_minutes": 15,
+				"reference_point": {"lat": -23.565064, "lon": -46.566185},
+			},
+			"transport_point_id": None,
+			"transport_point_source": None,
+			"transport_point_modal_types": [],
+			"lat": None,
+			"lon": None,
+		},
+		existing_zone_rows=[None],
+		created_zone_ids=[uuid4()],
+	)
+
+	monkeypatch.setattr("src.modules.zones.service.get_engine", lambda: _FakeEngine(fake_conn))
+	monkeypatch.setattr(
+		"src.modules.zones.service.generate_candidate_zones_for_seed",
+		lambda **kwargs: (_ for _ in ()).throw(AssertionError("candidate generation should not run for walk mode")),
+	)
+
+	asyncio.run(service.ensure_zones_for_job(uuid4()))
+
+	assert fake_conn.insert_zone_params[0]["is_circle_fallback"] is True
+
+
+def test_zone_service_falls_back_when_car_isochrone_does_not_cover_origin(monkeypatch) -> None:
+	class _FakeValhallaAdapter:
+		async def isochrone(self, origin, costing, contours_minutes):
+			assert costing == "auto"
+			assert contours_minutes == [25]
+			return {
+				"type": "FeatureCollection",
+				"features": [
+					{
+						"type": "Feature",
+						"geometry": {
+							"type": "Polygon",
+							"coordinates": [[
+								[-46.660000, -23.560000],
+								[-46.610000, -23.560000],
+								[-46.610000, -23.600000],
+								[-46.660000, -23.600000],
+								[-46.660000, -23.560000],
+							]],
+						},
+					}
+				],
+			}
+
+	service = ZoneService(valhalla_adapter=_FakeValhallaAdapter(), otp_adapter=object())
+	fake_conn = _FakeConn(
+		context_row={
+			"journey_id": uuid4(),
+			"input_snapshot": {
+				"transport_mode": "car",
+				"max_travel_minutes": 25,
+				"reference_point": {"lat": -23.520950, "lon": -46.727225},
+			},
+			"transport_point_id": None,
+			"transport_point_source": None,
+			"transport_point_modal_types": [],
+			"lat": None,
+			"lon": None,
+		},
+		existing_zone_rows=[None],
+		created_zone_ids=[uuid4()],
+	)
+
+	monkeypatch.setattr("src.modules.zones.service.get_engine", lambda: _FakeEngine(fake_conn))
+	monkeypatch.setattr(
+		"src.modules.zones.service.generate_candidate_zones_for_seed",
+		lambda **kwargs: (_ for _ in ()).throw(AssertionError("candidate generation should not run for car mode")),
+	)
+
+	asyncio.run(service.ensure_zones_for_job(uuid4()))
+
+	assert fake_conn.insert_zone_params[0]["is_circle_fallback"] is True
