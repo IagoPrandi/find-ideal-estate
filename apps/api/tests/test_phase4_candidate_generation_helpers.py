@@ -63,11 +63,14 @@ def test_rail_sql_templates_match_materialized_geosampa_schema() -> None:
     metro_line_sql = _METRO_LINES_SQL.text
     trem_line_sql = _TREM_LINES_SQL.text
 
-    assert "nearby_origins" in bus_sql
+    assert "seed_origin" in bus_sql
+    assert "ORDER BY distance_m ASC, stop_id ASC" in bus_sql
+    assert "LIMIT 1" in bus_sql
     assert "s.location && ST_Expand(reference.geom, reference.radius_deg)" in bus_sql
     assert "ST_DWithin(s.location::geography, reference.geom::geography" in bus_sql
     assert "DISTINCT ON (origin_stop_id, trip_id)" in bus_sql
     assert "seed_area.stop_id = candidate.stop_id" in bus_sql
+    assert "nearby_origins" not in bus_sql
     assert "CAST(:prefix AS text) || md5(ST_AsEWKB(ST_PointOnSurface(geometry))::text)" in station_sql
     assert "CAST(:mode AS text) AS mode" in station_sql
     assert "id::text" not in station_sql
@@ -142,3 +145,35 @@ def test_generate_candidate_zones_raises_when_bus_candidates_are_unavailable(mon
         assert "bus candidate zones" in str(exc)
     else:
         raise AssertionError("Expected bus-only generation to fail without downstream GTFS candidates")
+
+
+def test_generate_candidate_zones_does_not_apply_reference_geometry_filter(monkeypatch) -> None:
+    async def _fake_load_bus_candidates(*args, **kwargs):
+        return [
+            PointCandidate("bus:forward", "bus", "forward", 7.0, -46.6280, -23.55),
+            PointCandidate("bus:behind", "bus", "behind", 5.0, -46.6320, -23.55),
+        ]
+
+    async def _fake_load_rail_candidates(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr(
+        "src.modules.zones.candidate_generation._load_bus_candidates",
+        _fake_load_bus_candidates,
+    )
+    monkeypatch.setattr(
+        "src.modules.zones.candidate_generation._load_rail_candidates",
+        _fake_load_rail_candidates,
+    )
+
+    zones = asyncio.run(
+        generate_candidate_zones_for_seed(
+            seed_lat=-23.55,
+            seed_lon=-46.63,
+            max_time_minutes=20,
+            radius_meters=600,
+            public_transport_mode="bus",
+        )
+    )
+
+    assert [zone.source_point_id for zone in zones] == ["behind", "forward"]

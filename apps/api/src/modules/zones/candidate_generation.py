@@ -153,7 +153,7 @@ _BUS_DOWNSTREAM_SQL = text(
             ST_SetSRID(ST_MakePoint(CAST(:seed_lon AS DOUBLE PRECISION), CAST(:seed_lat AS DOUBLE PRECISION)), 4326) AS geom,
             CAST(:seed_max_distance_meters AS DOUBLE PRECISION) / 111320.0 AS radius_deg
     ),
-    nearby_origins AS (
+    seed_area AS (
         SELECT
             s.stop_id,
             ST_Distance(s.location::geography, reference.geom::geography) AS distance_m
@@ -162,9 +162,16 @@ _BUS_DOWNSTREAM_SQL = text(
         WHERE s.location && ST_Expand(reference.geom, reference.radius_deg)
           AND ST_DWithin(s.location::geography, reference.geom::geography, CAST(:seed_max_distance_meters AS DOUBLE PRECISION))
     ),
+    seed_origin AS (
+        SELECT
+            stop_id AS origin_stop_id
+        FROM seed_area
+        ORDER BY distance_m ASC, stop_id ASC
+        LIMIT 1
+    ),
     origin_times_raw AS (
         SELECT
-            nearby.stop_id AS origin_stop_id,
+            origin.origin_stop_id,
             st.trip_id,
             st.stop_sequence AS origin_sequence,
             (
@@ -172,8 +179,8 @@ _BUS_DOWNSTREAM_SQL = text(
                 + split_part(st.departure_time, ':', 2)::int * 60
                 + split_part(st.departure_time, ':', 3)::int
             ) AS origin_departure_sec
-        FROM nearby_origins nearby
-        JOIN gtfs_stop_times st ON st.stop_id = nearby.stop_id
+        FROM seed_origin origin
+        JOIN gtfs_stop_times st ON st.stop_id = origin.origin_stop_id
         WHERE st.departure_time ~ :time_pattern
     ),
     origin_times AS (
@@ -204,7 +211,7 @@ _BUS_DOWNSTREAM_SQL = text(
                     AND candidate.stop_id <> origin.origin_stop_id
                     AND NOT EXISTS (
                             SELECT 1
-                            FROM nearby_origins seed_area
+                    FROM seed_area
                             WHERE seed_area.stop_id = candidate.stop_id
                     )
     )
@@ -627,10 +634,8 @@ async def generate_candidate_zones_for_seed(
             require_dataset=normalized_public_transport_mode == "rail",
         )
 
-    combined = _dedupe_point_candidates(
-        bus_candidates + rail_candidates,
-        dedupe_radius_meters,
-    )
+    combined_candidates = bus_candidates + rail_candidates
+    combined = _dedupe_point_candidates(combined_candidates, dedupe_radius_meters)
     if not combined:
         if normalized_public_transport_mode == "bus":
             raise CandidateZoneGenerationError(

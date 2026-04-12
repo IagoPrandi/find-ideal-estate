@@ -121,6 +121,7 @@ def test_zone_service_generates_zones_from_legacy_candidates(monkeypatch) -> Non
 		"input_snapshot": {
 			"transport_mode": "transit",
 			"public_transport_mode": "rail",
+			"reference_point": {"lat": -23.5512, "lon": -46.6354},
 			"max_travel_time_min": 35,
 			"zone_radius_meters": 900,
 			"dataset_version_id": "11111111-1111-1111-1111-111111111111",
@@ -192,6 +193,8 @@ def test_zone_service_generates_zones_from_legacy_candidates(monkeypatch) -> Non
 	assert helper_calls[0]["radius_meters"] == 900
 	assert helper_calls[0]["max_time_minutes"] == 35
 	assert helper_calls[0]["public_transport_mode"] == "rail"
+	assert "reference_lat" not in helper_calls[0]
+	assert "reference_lon" not in helper_calls[0]
 	assert fake_conn.deleted_previous_associations is True
 	assert fake_conn.cleared_selected_zone is True
 	assert fake_conn.find_existing_zone_calls == 1

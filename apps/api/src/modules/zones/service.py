@@ -731,6 +731,7 @@ class ZoneService:
             raise RuntimeError(f"No selected transport seed found for journey {journey_id}")
 
         public_transport_mode = _extract_public_transport_mode(input_snapshot)
+        reference_point = _extract_reference_point(input_snapshot)
         _validate_public_transport_seed(
             public_transport_mode,
             transport_point_source=context["transport_point_source"],
