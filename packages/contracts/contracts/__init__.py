@@ -1,5 +1,6 @@
 """Shared contracts package for inter-module DTOs."""
 
+from .auth import AuthLoginRequest, AuthRegisterRequest, AuthStatusRead, AuthUserRead
 from .dashboard import (
     DashboardDistributionBucketRead,
     DashboardPriceHistoryPointRead,
@@ -46,6 +47,10 @@ from .zones import (
 __version__ = "0.1.0"
 
 __all__ = [
+    "AuthLoginRequest",
+    "AuthRegisterRequest",
+    "AuthStatusRead",
+    "AuthUserRead",
     "DashboardDistributionBucketRead",
     "DashboardPriceHistoryPointRead",
     "DashboardRankingItemRead",

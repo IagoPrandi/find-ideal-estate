@@ -1,8 +1,8 @@
 # PRD — Find Ideal Estate
 
-**Versão:** 2.0  
+**Versão:** 2.1  
 **Fonte canônica:** `analise_reformulacao_find_ideal_estate_v18.md`  
-**Última atualização:** 2026-03-15  
+**Última atualização:** 2026-04-12  
 **Status:** Ativo
 
 ---
@@ -76,7 +76,7 @@ Encontrar imóvel para alugar ou comprar em São Paulo é um processo fragmentad
 | 5 | Imóveis: scrapers + dedup + cache | ✅ Concluída | 2026-03-22 | M5.1–M5.7 concluídos |
 | 6 | Dashboard + relatório PDF | 🔄 Em progresso | — | M6.1-M6.2 concluídos; segurança agora usa cidade/bairro persistidos e normalizados |
 | 7 | Scheduler noturno (prewarm) | ⬜ Não iniciada | — | APScheduler, prioridades de fila |
-| 8 | Auth + planos + Stripe | ⬜ Não iniciada | — | fastapi-users, magic link, Resend |
+| 8 | Auth + créditos + Stripe avulso | ⬜ Não iniciada | — | fastapi-users, magic link, Resend, créditos por operação |
 
 ### Fases de frontend
 
@@ -90,7 +90,7 @@ Encontrar imóvel para alugar ou comprar em São Paulo é um processo fragmentad
 | FE5 | Etapa 3: progressão SSE + zonas | ✅ Concluída | 2026-03-24 | Geração/enriquecimento via jobs com polling e atualização progressiva |
 | FE6 | Etapa 4: comparação de zonas | ✅ Concluída | 2026-03-24 | Comparação de zonas com lista ordenada e badges/filtros validados |
 | FE7 | Etapa 5 + 6: imóveis + dashboard | ✅ Concluída | 2026-03-24 | Imóveis e dashboard validados; relatório permanece no escopo FE8 |
-| FE8 | Relatório + auth + planos | ⬜ Não iniciada | — | Download PDF, upgrade CTA |
+| FE8 | Relatório + auth + créditos | ⬜ Não iniciada | — | Download PDF, compra de créditos, saldo na conta |}
 
 > **Regra de milestone:** a fase só é marcada como concluída após confirmação explícita do responsável. Não marcar na ausência de confirmação.
 
@@ -260,7 +260,7 @@ VALHALLA_URL            ← URL interna Hostinger VPS
 OTP_URL                 ← URL interna Hostinger VPS
 R2_BUCKET / S3_BUCKET
 RESEND_API_KEY          ← Fase 8
-STRIPE_SECRET_KEY       ← Fase 8
+STRIPE_SECRET_KEY       ← Fase 8 (Payment Intent, compra avulsa)
 STRIPE_WEBHOOK_SECRET   ← Fase 8
 ```
 
@@ -303,8 +303,8 @@ zones ────────────────────────�
   ├─ listing_search_requests
   └─ dataset_versions
 
-plans ── user_subscriptions ── users
-      └─ usage_quotas
+user_credits ── credit_ledger ── users
+credit_packages ── credit_purchases ── users
 
 external_usage_ledger
 scraping_degradation_events
@@ -517,48 +517,72 @@ zone_listing_caches (
 **`ZoneCacheStatus`:**
 `pending → scraping → partial → complete | failed | cancelled_partial`
 
-### `plans`
+### `user_credits`
 
 ```sql
-plans (
-  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  slug             TEXT UNIQUE NOT NULL,  -- 'free' | 'pro'
-  name             TEXT NOT NULL,
-  price_brl        NUMERIC(8,2),
-  price_annual_brl NUMERIC(8,2),
-  features         JSONB,
-  created_at       TIMESTAMPTZ DEFAULT NOW()
+user_credits (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    UUID REFERENCES users(id) UNIQUE NOT NULL,
+  balance    INT NOT NULL DEFAULT 0,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 )
 ```
 
-### `user_subscriptions`
+Saldo atômico por usuário. Toda alteração passa por `credit_ledger`.
+
+### `credit_ledger`
 
 ```sql
-user_subscriptions (
-  id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id                UUID REFERENCES users(id),
-  plan_id                UUID REFERENCES plans(id),
-  stripe_subscription_id TEXT,
-  status                 TEXT NOT NULL,  -- 'active' | 'past_due' | 'cancelled'
-  current_period_start   TIMESTAMPTZ,
-  current_period_end     TIMESTAMPTZ,
-  created_at             TIMESTAMPTZ DEFAULT NOW(),
-  updated_at             TIMESTAMPTZ DEFAULT NOW()
+credit_ledger (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id       UUID REFERENCES users(id) NOT NULL,
+  delta         INT NOT NULL,           -- positivo = crédito; negativo = débito
+  reason        TEXT NOT NULL,          -- 'initial_session' | 'signup_bonus' | 'purchase'
+                                        -- | 'zone_transit' | 'zone_walking' | 'zone_car'
+                                        -- | 'listing_cache' | 'scraping_fresh' | 'report'
+                                        -- | 'refund'
+  reference_id  UUID,                   -- job_id, journey_id ou credit_purchase_id
+  balance_after INT NOT NULL,
+  created_at    TIMESTAMPTZ DEFAULT NOW()
 )
 ```
 
-### `usage_quotas`
+### `credit_packages`
 
 ```sql
-usage_quotas (
-  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id        UUID REFERENCES users(id),
-  plan_id        UUID REFERENCES plans(id),
-  period_start   TIMESTAMPTZ,
-  period_end     TIMESTAMPTZ,
-  zone_analyses  INT DEFAULT 0,
-  reports_gen    INT DEFAULT 0,
-  updated_at     TIMESTAMPTZ DEFAULT NOW()
+credit_packages (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  slug        TEXT UNIQUE NOT NULL,   -- 'starter' | 'explorer' | 'pro'
+  name        TEXT NOT NULL,
+  credits     INT NOT NULL,
+  price_brl   NUMERIC(8,2) NOT NULL,
+  is_active   BOOLEAN DEFAULT true,
+  created_at  TIMESTAMPTZ DEFAULT NOW()
+)
+```
+
+Seed inicial:
+
+| slug | name | credits | price_brl |
+|---|---|---|---|
+| starter | Starter | 60 | 9,90 |
+| explorer | Explorer | 150 | 19,90 |
+| pro | Pro | 400 | 44,90 |
+
+### `credit_purchases`
+
+```sql
+credit_purchases (
+  id                        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id                   UUID REFERENCES users(id) NOT NULL,
+  package_id                UUID REFERENCES credit_packages(id) NOT NULL,
+  stripe_payment_intent_id  TEXT UNIQUE,
+  stripe_checkout_session_id TEXT UNIQUE,
+  status                    TEXT NOT NULL DEFAULT 'pending',  -- 'pending' | 'completed' | 'failed' | 'refunded'
+  credits_granted           INT,
+  amount_brl                NUMERIC(8,2),
+  created_at                TIMESTAMPTZ DEFAULT NOW(),
+  completed_at              TIMESTAMPTZ
 )
 ```
 
@@ -636,7 +660,8 @@ scraping_degradation_events (
 webhook_events (
   id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   provider     TEXT NOT NULL,   -- 'stripe' | 'mobility_db'
-  event_type   TEXT NOT NULL,
+  event_type   TEXT NOT NULL,   -- 'payment_intent.succeeded' | 'charge.refunded' | ...
+  stripe_event_id TEXT UNIQUE,  -- idempotência: segundo recebimento ignorado silenciosamente
   payload      JSONB,
   processed    BOOLEAN DEFAULT false,
   processed_at TIMESTAMPTZ,
@@ -843,21 +868,67 @@ t=30s    Watchdog: força cancelled_partial se worker não confirmou
 Watchdog: scheduler a cada 60s, detecta jobs `running` sem heartbeat > 2min
 (`job_heartbeat:{job_id}` no Redis, TTL 120s; worker publica a cada 30s).
 
-### Controle de plano antes do scraping
+### Controle de créditos antes de operações custosas
 
 ```python
-async def get_effective_plan(user: User | None, session_id: str | None) -> PlanSlug:
-    if user and user.has_active_subscription():
-        return PlanSlug.PRO
-    return PlanSlug.FREE   # anônimo e free: mesmo tratamento
+CREDIT_COSTS: dict[CreditOperation, int] = {
+    CreditOperation.ZONE_TRANSIT:    9,   # geração (7) + enriquecimento (2)
+    CreditOperation.ZONE_WALKING:   28,   # geração (24) + enriquecimento (4)
+    CreditOperation.ZONE_CAR:       28,   # geração (24) + enriquecimento (4)
+    CreditOperation.LISTING_CACHE:   1,   # acesso a imóveis em cache (transporte)
+    CreditOperation.LISTING_CACHE_WALK: 2, # acesso a imóveis em cache (a pé/carro)
+    CreditOperation.SCRAPING_FRESH:  5,   # scraping sob demanda (adicional ao cache)
+    CreditOperation.REPORT:          5,   # geração de relatório PDF
+}
 
-async def request_listings(journey_id, zone_id, user, session_id, config):
-    plan  = await plans.get_effective_plan(user=user, session_id=session_id)
+async def check_and_consume_credits(
+    user_id: UUID | None,
+    session_id: str | None,
+    operation: CreditOperation,
+) -> CreditResult:
+    cost = CREDIT_COSTS[operation]
+    if user_id:
+        async with db.transaction():
+            row = await db.fetchrow(
+                "SELECT balance FROM user_credits WHERE user_id=$1 FOR UPDATE",
+                user_id,
+            )
+            if not row or row["balance"] < cost:
+                raise InsufficientCreditsError(required=cost, balance=row["balance"] if row else 0)
+            new_balance = row["balance"] - cost
+            await db.execute(
+                "UPDATE user_credits SET balance=$1 WHERE user_id=$2",
+                new_balance, user_id,
+            )
+            await db.execute(
+                """INSERT INTO credit_ledger (user_id, delta, reason, reference_id, balance_after)
+                   VALUES ($1, $2, $3, NULL, $4)""",
+                user_id, -cost, operation.value, new_balance,
+            )
+        return CreditResult(consumed=cost, balance=new_balance)
+    else:
+        # sessão anônima: saldo rastreado em Redis KEY credit:session:{session_id}
+        balance = int(await redis.get(f"credit:session:{session_id}") or 0)
+        if balance < cost:
+            raise InsufficientCreditsError(required=cost, balance=balance)
+        new_balance = balance - cost
+        await redis.set(f"credit:session:{session_id}", new_balance, ex=7 * 86400)
+        return CreditResult(consumed=cost, balance=new_balance)
+
+async def request_listings(journey_id, zone_id, user_id, session_id, config):
+    modal = config.modal  # 'transit' | 'walking' | 'car'
+    op = (
+        CreditOperation.LISTING_CACHE
+        if modal == "transit"
+        else CreditOperation.LISTING_CACHE_WALK
+    )
+    await check_and_consume_credits(user_id=user_id, session_id=session_id, operation=op)
+
     cache = await zone_listing_caches.get(zone_id, config)
 
     await listing_search_requests.record(
         journey_id=journey_id,
-        user_id=user.id if user else None,
+        user_id=user_id,
         session_id=session_id,
         zone_fingerprint=config.zone_fingerprint,
         search_location_normalized=config.search_location_normalized,
@@ -871,21 +942,16 @@ async def request_listings(journey_id, zone_id, user, session_id, config):
         ),
     )
 
-    if plan.slug == PlanSlug.FREE:
-        if cache and cache.is_usable():
-            return ListingsRequestResult(source="cache", ...)
+    if not cache or not cache.is_usable():
+        # sem cache: usuário pode pagar créditos extras por scraping fresco
         return ListingsRequestResult(
             source="none",
             freshness_status="queued_for_next_prewarm",
-            upgrade_reason="fresh_listings",
+            upgrade_reason="fresh_listings_requires_credits",
             next_refresh_window="03:00–05:30",
         )
 
-    # PRO: dispara Playwright imediatamente
-    job = await jobs.enqueue_scraping(
-        zone_id=zone_id, config=config, priority=Priority.USER_REQUEST
-    )
-    return ListingsRequestResult(source="scraping", job_id=job.id, ...)
+    return ListingsRequestResult(source="cache", ...)
 ```
 
 ### Prewarm noturno
@@ -1044,7 +1110,7 @@ logradouro+Bairro+Cidade+UF. Botão "Buscar imóveis" habilitado só após sele�
 Cards: foto, preço, metragem, endereço resumido, plataforma, link externo,
 badge de duplicidade, botão "ver acessibilidade".
 Filtros: faixa de preço, faixa de metragem, tipo de uso, plataforma, ordenação.
-Plataformas FREE: QuintoAndar + Zap. PRO: + VivaReal (lock + CTA no FREE).
+Todas as plataformas disponíveis (QuintoAndar, Zap, VivaReal) são acessíveis por créditos — a distinção não é por plano, mas por saldo.
 Resultado preliminar com badge de frescor; diff incremental ao revalidar.
 
 **Aba Dashboard da zona:**
@@ -1081,7 +1147,6 @@ e até o transporte. Alternância entre categorias sem recarregar.
 
 **`fastapi-users`** — integrado na Fase 8.
 
-- Magic link por email (primário): zero senha, zero fricção.
 - OAuth Google: configurável após magic link, sem reescrita.
 - Integração SQLAlchemy 2 nativa.
 - Cookie HTTP-only com rotação automática de sessão.
@@ -1102,14 +1167,22 @@ Autenticação exigida apenas em momentos de alto valor:
 - Download do relatório PDF.
 - Salvar jornada.
 - Acessar histórico.
+- Comprar créditos.
 
-No cadastro, jornada anônima migrada atomicamente:
+No cadastro, jornada anônima migrada atomicamente e créditos de sessão transferidos com bônus:
 
 ```sql
 BEGIN;
 UPDATE journeys
    SET user_id = :new_user_id, anonymous_session_id = NULL
  WHERE anonymous_session_id = :session_id AND user_id IS NULL;
+-- cria conta de créditos com saldo de sessão + bônus de cadastro (30)
+INSERT INTO user_credits (user_id, balance)
+VALUES (:new_user_id, :session_balance + 30)
+ON CONFLICT (user_id) DO UPDATE SET balance = EXCLUDED.balance;
+INSERT INTO credit_ledger (user_id, delta, reason, balance_after)
+VALUES  (:new_user_id, :session_balance, 'initial_session', :session_balance),
+        (:new_user_id, 30, 'signup_bonus', :session_balance + 30);
 COMMIT;
 ```
 
@@ -1120,56 +1193,87 @@ Jornadas com relatório gerado: 30 dias.
 
 | Feature | Fase | Depende de auth? |
 |---|---|---|
-| Análise de transporte e zonas | 4 | Não |
-| Cache de imóveis (FREE) | 6 | Não |
+| Análise de transporte e zonas | 4 | Não (créditos de sessão) |
+| Cache de imóveis | 6 | Não (créditos de sessão) |
 | Badge de frescor | 6 | Não |
-| Download do relatório PDF | 7 | Sim (CTA de cadastro) |
+| Scraping fresco (créditos extras) | 6 | Não (créditos de sessão) |
+| Download do relatório PDF | 7 | Sim (CTA de cadastro + crédito de sessão ou conta) |
 | Histórico de análises | 7 | Sim |
-| Scraping fresh (PRO) | 8 | Sim |
-| Plano Pro / Stripe | 8 | Sim |
-| Quotas por plano | 8 | Sim |
+| Compra de créditos (Stripe) | 8 | Sim |
+| Saldo e extrato de créditos | 8 | Sim |
 
-**Fases 6–7 sem auth completa:** `get_effective_plan()` retorna `FREE` para todas as sessões.
-A distinção FREE/PRO real só é ativada na Fase 8.
+**Fases 6–7 sem auth completa:** créditos de sessão trackeados por Redis `credit:session:{session_id}` com TTL 7 dias.
+A conta de créditos real (com `user_credits` + `credit_ledger`) só é criada na Fase 8.
+Sessões anônimas que se cadastram recebem: créditos de sessão migrados + 30 de bônus.
 
 ---
 
 ## 11. Monetização
 
-### Planos
+### Modelo de créditos
 
-| Funcionalidade | Gratuito | Pro (R$29/mês ou R$249/ano) |
+O único modelo de monetização implementado é a **venda de cotas de crédito**. Não há assinatura recorrente.
+
+Cada operação da jornada consome uma quantidade definida de créditos. O saldo é pessoal e não expira.
+
+#### Créditos iniciais
+
+| Momento | Créditos concedidos | Observação |
 |---|---|---|
-| Análises de zona | 2/mês | Ilimitado |
-| Modal de isócrona | Transporte público + a pé | + Carro |
-| Imóveis | Cache pré-aquecido (12h) | Scraping fresco sob demanda |
-| Tempo até ver imóveis | Imediato | 30–90s |
-| Relatório PDF | 2/mês (exige cadastro) | Ilimitado |
-| Histórico de análises | Não | Sim |
-| Plataformas disponíveis | QuintoAndar + Zap | + VivaReal |
-| Dashboard histórico | 30 dias | 90 dias |
+| Primeiro acesso (sem cadastro) | **30 créditos** | Rastreados por sessão (cookie) |
+| Cadastro (magic link) | **+30 créditos** | Bônus de boas-vindas; créditos de sessão migrados automaticamente |
+| **Total após cadastro** | **60 créditos** | Suficiente para 6 análises via transporte público ou 2 análises a pé/carro |
 
-**Relatório avulso:** R$9,90 por relatório (usuário gratuito).
-Três avulsos equivalem ao plano mensal — argumento natural de upgrade.
+> **Proporcionalidade garantida:** 30 créditos de sessão permitem exatamente 3 análises completas via transporte público **ou** 1 análise completa a pé/carro.
 
-### CTAs contextualizadas
+#### Custo por operação
 
-- VivaReal no FREE: `"Adicione VivaReal à sua busca — plano Pro por R$ 29/mês"`
-- Isócrona de carro: `"Analise deslocamento de carro — plano Pro por R$ 29/mês"`
-- Terceiro relatório: `"Baixe por R$ 9,90 ou acesse ilimitados no plano Pro"`
-- Endereço sem cache (FREE): UI mostra opção de upgrade no momento de maior frustração
-  (maior conversão).
+| Etapa | Operação | Créditos |
+|---|---|---|
+| 1 | Configuração da jornada | 0 |
+| 2 | Busca de pontos de transporte | 0 |
+| 3 | Geração de zona — transporte público | 7 |
+| 3–4 | Enriquecimento de zona — transporte público | 2 |
+| 3 | Geração de zona — a pé ou carro | 24 |
+| 3–4 | Enriquecimento de zona — a pé ou carro | 4 |
+| 5 | Acesso a imóveis em cache (por zona) | 1 (transporte) / 2 (a pé/carro) |
+| 5 | Scraping fresco de imóveis (por zona) | +5 (além do custo de cache) |
+| 6 | Geração de relatório PDF | 5 |
 
-### Stripe — webhooks obrigatórios
+**Custo total típico por análise completa (sem relatório):**
+
+| Modal | Geração + Enriquecimento + Cache | Total |
+|---|---|---|
+| Transporte público | 7 + 2 + 1 | **10 créditos** |
+| A pé | 24 + 4 + 2 | **30 créditos** |
+| Carro | 24 + 4 + 2 | **30 créditos** |
+
+#### Pacotes de créditos (compra avulsa)
+
+| Pacote | Créditos | Preço | Equivalência |
+|---|---|---|---|
+| Starter | 60 créditos | R$ 9,90 | 6 análises de transporte público ou 2 a pé/carro |
+| Explorer | 150 créditos | R$ 19,90 | 15 análises de transporte público ou 5 a pé/carro |
+| Pro | 400 créditos | R$ 44,90 | 40 análises de transporte público ou ~13 a pé/carro |
+
+> Três pacotes Starter equivalem ao valor do pacote Pro — argumento natural de upgrade.
+
+#### CTAs contextualizadas
+
+- Saldo insuficiente para zona a pé/carro: `"Você precisa de 30 créditos para esta análise — adquira créditos a partir de R$ 9,90"`
+- Saldo insuficiente para scraping fresco: `"Você precisa de mais 5 créditos para scraping agora — adquira créditos a partir de R$ 9,90"`
+- Saldo insuficiente para relatório: `"Você precisa de 5 créditos para gerar o relatório — adquira créditos a partir de R$ 9,90"`
+- Endereço sem cache e sem créditos suficientes: UI mostra saldo atual e botão de compra no momento de maior frustração (maior conversão).
+- Primeiro acesso sem cadastro próximo de zerar créditos: `"Cadastre-se agora e ganhe 30 créditos gratuitos extras"`
+
+### Stripe — eventos obrigatórios (Payment Intent, compra avulsa)
 
 | Evento | Ação |
 |---|---|
-| `checkout.session.completed` | Criar `user_subscriptions` com `status = active` |
-| `invoice.payment_succeeded` | Renovar `current_period_end` |
-| `invoice.payment_failed` | Marcar `past_due`, enviar email de aviso |
-| `customer.subscription.updated` | Sincronizar upgrade/downgrade |
-| `customer.subscription.deleted` | Marcar `cancelled`, rebaixar para FREE |
-| `charge.refunded` | Registrar no ledger |
+| `payment_intent.succeeded` | Creditar pacote em `user_credits`; registrar em `credit_ledger`; registrar em `credit_purchases` |
+| `payment_intent.payment_failed` | Marcar `credit_purchases.status = failed`; notificar usuário |
+| `charge.refunded` | Estornar créditos via `credit_ledger` (delta negativo com `reason = 'refund'`); marcar `credit_purchases.status = refunded` |
+| `checkout.session.completed` | Confirmação de sessão de checkout antecedendo o Payment Intent |
 
 ---
 
@@ -1575,13 +1679,13 @@ após 3ª: `zones.badges.finalized` emitido exatamente uma vez. ✅
 
 **Verificação:** clicar "Ver acessibilidade" → 5 rotas aparecem no mapa sem piscar.
 
-#### M6.6 — Quotas e CTA de cadastro ⬜
-- [ ] Sessão anônima: 2 relatórios/mês via `usage_quotas` por IP/session
-- [ ] Ao atingir limite: modal `"Crie uma conta gratuita para baixar mais relatórios"`
-- [ ] `get_effective_plan()` retorna FREE para todas as sessões (auth real somente na Fase 8)
-- [ ] Quota por sessão: contagem via Redis (KEY `quota:report:{session_id}:{month}`, TTL 31 dias)
+#### M6.6 — Saldo de créditos e CTA de cadastro ⬜
+- [ ] Sessão anônima próxima de zerar créditos (≤ 15) → banner `"Cadastre-se e ganhe 30 créditos extras"`
+- [ ] Operação com créditos insuficientes → modal com saldo atual, custo da operação e botão "Comprar créditos" (redireciona para Fase 8)
+- [ ] `GET /account/credits/session` retorna `{balance}` para sessões anônimas (lê Redis)
+- [ ] Créditos de sessão exibidos no header da aplicação (badge)
 
-**Verificação:** 3ª geração de relatório por mesma sessão → 403 com `upgrade_reason = "report_quota_exceeded"`.
+**Verificação:** sessão nova → consumir 25 créditos → banner de baixo saldo aparece; consumir os 5 restantes → modal de créditos insuficientes ao tentar nova operação.
 
 ---
 
@@ -1636,9 +1740,9 @@ após 3ª: `zones.badges.finalized` emitido exatamente uma vez. ✅
 
 ---
 
-### Fase 8 — Auth + planos + Stripe ⬜
+### Fase 8 — Auth + créditos + Stripe avulso ⬜
 
-**Objetivo:** produto monetizável com distinção FREE/PRO real e pagamento integrado.
+**Objetivo:** produto monetizável com sistema de créditos real, compra avulsa via Stripe e distinção entre sessão anônima e conta autenticada.
 **Esforço estimado:** 10–12 dias · **Status:** ⬜ Não iniciada
 **Dependências bloqueantes:** M6.5, M7.4.
 
@@ -1651,53 +1755,52 @@ após 3ª: `zones.badges.finalized` emitido exatamente uma vez. ✅
 
 **Verificação:** `POST /auth/request-magic-link` → email entregue em < 30s; clicar link → cookie de sessão; segunda vez → token inválido.
 
-#### M8.2 — Migração de jornada anônima ⬜
+#### M8.2 — Migração de jornada anônima + créditos ⬜
 - [ ] Hook `on_after_login`: verifica `anonymous_session_id` no cookie
-- [ ] Transação atômica: `UPDATE journeys SET user_id = :uid WHERE anonymous_session_id = :sid AND user_id IS NULL`
+- [ ] Transação atômica: migra jornadas + lê saldo de sessão do Redis + cria `user_credits` com saldo + 30 de bônus + registra ambos em `credit_ledger`
 - [ ] Cookie anônimo limpo após migração
 - [ ] Jornadas do usuário antes do cadastro ficam acessíveis no histórico
 
-**Verificação:** completar 2 etapas anonimamente → fazer cadastro → histórico mostra ambas as jornadas.
+**Verificação:** completar 2 etapas anonimamente (consumindo créditos de sessão) → fazer cadastro → histórico mostra ambas as jornadas; saldo em `user_credits` = créditos restantes de sessão + 30.
 
-#### M8.3 — Tabelas de planos e quotas ⬜
-- [ ] Seed: `plans` com `slug = 'free'` e `slug = 'pro'`
-- [ ] `user_subscriptions` e `usage_quotas` migrados
-- [ ] `get_effective_plan(user)` real: consulta `user_subscriptions` + `status = active`
-- [ ] `UsageQuotaService.check_and_consume(user, operation)` → `QuotaExceededError` se esgotado
-- [ ] Limites FREE: 2 análises de zona/mês, 2 relatórios/mês
+#### M8.3 — Tabelas de créditos e seed ⬜
+- [ ] Migrations: `user_credits`, `credit_ledger`, `credit_packages`, `credit_purchases`
+- [ ] Seed: 3 pacotes (`starter`, `explorer`, `pro`) com créditos e preços conforme seção 11
+- [ ] `CreditService.check_and_consume(user_id, operation)` → `InsufficientCreditsError` se saldo insuficiente
+- [ ] `CreditService.grant(user_id, delta, reason)` → atomicamente atualiza `user_credits` + registra em `credit_ledger`
+- [ ] `GET /account/credits` retorna `{balance, ledger_last_10}`
 
-**Verificação:** usuário sem subscrição → `get_effective_plan()` = FREE; 3ª análise → `QuotaExceededError`.
+**Verificação:** usuário sem saldo → `check_and_consume(ZONE_TRANSIT)` → `InsufficientCreditsError(required=9, balance=0)`.
 
-#### M8.4 — Features desbloqueadas para PRO ⬜
-- [ ] **Isócrona de carro:** `car` modal habilitado para PRO; lock + CTA para FREE
-- [ ] **VivaReal:** `VivaRealScraper` enfileirado somente quando `plan = PRO`
-- [ ] **Scraping fresco:** `request_listings()` com lógica real FREE vs PRO
-- [ ] **Dashboard histórico:** 30 dias FREE → 90 dias PRO
-- [ ] **Histórico de análises:** `GET /journeys?user_id={id}` para autenticados
+#### M8.4 — Créditos de sessão anônima ⬜
+- [ ] `POST /journeys` inicializa `credit:session:{session_id}` no Redis com 30 créditos (apenas se chave inexistente), TTL 7 dias
+- [ ] `check_and_consume_credits` lê/decrementa do Redis para sessões anônimas
+- [ ] Saldo insuficiente na sessão anônima → resposta `402` com `{required, balance, upgrade_reason: "signup_for_bonus"}`
+- [ ] Banner na UI: `"Cadastre-se e ganhe 30 créditos extras"` quando saldo ≤ 15
 
-**Verificação:** usuário PRO → campo `car` habilitado no formulário; mesmo endpoint retorna 90 dias de dados.
+**Verificação:** nova sessão → consumir 30 créditos em zonas → próxima zona retorna 402; após cadastro → saldo migrado + 30 extras.
 
-#### M8.5 — Integração Stripe ⬜
-- [ ] `POST /billing/checkout` → Stripe Checkout Session; retorna `{checkout_url}`
+#### M8.5 — Integração Stripe (Payment Intent) ⬜
+- [ ] `POST /billing/checkout/{package_slug}` → cria Stripe Checkout Session com `mode=payment`; retorna `{checkout_url}`
 - [ ] `POST /webhooks/stripe` com `stripe.Webhook.construct_event()` obrigatório
-- [ ] 6 eventos mapeados (ver seção 11): `checkout.session.completed`, `invoice.payment_succeeded`, `invoice.payment_failed`, `customer.subscription.updated`, `customer.subscription.deleted`, `charge.refunded`
+- [ ] 3 eventos mapeados (ver seção 11): `checkout.session.completed`, `payment_intent.succeeded`, `charge.refunded`
 - [ ] Idempotência: `webhook_events.stripe_event_id` UNIQUE; duplicado ignorado silenciosamente
-- [ ] PRO ativado em < 5s após `checkout.session.completed`
+- [ ] Créditos creditados em < 5s após `payment_intent.succeeded`
 
-**Verificação:** teste com Stripe CLI `stripe trigger checkout.session.completed` → `user_subscriptions.status = active`; mesmo evento duas vezes → sem duplicação.
+**Verificação:** teste com Stripe CLI `stripe trigger payment_intent.succeeded` → `user_credits.balance` aumenta pelo pacote comprado; mesmo evento duas vezes → sem duplicação.
 
 #### M8.6 — Dashboard do usuário ⬜
-- [ ] Página `/account`: plano atual, uso do mês (análises + relatórios), data de renovação
-- [ ] Botão "Fazer upgrade" redireciona para checkout Stripe
-- [ ] Downgrade para FREE: funcionalidades PRO ficam travadas imediatamente
-- [ ] `GET /account/usage` retorna `{plan, zone_analyses_used, reports_used, period_end}`
+- [ ] Página `/conta`: saldo atual de créditos, extrato (últimas 10 operações), botões de compra por pacote
+- [ ] Botão "Comprar créditos" redireciona para checkout Stripe do pacote selecionado
+- [ ] `GET /account/credits` retorna `{balance, ledger_last_10}`
+- [ ] Saldo exibido no header da aplicação (badge)
 
-**Verificação:** usuário PRO cancela no Stripe → webhook recebido → `GET /account/usage` mostra plano FREE.
+**Verificação:** comprar pacote Starter → saldo aumenta 60; extrato mostra entrada `purchase` + saídas de operações anteriores.
 
-#### M8.7 — Testes E2E de auth e pagamento ⬜
-- [ ] Playwright: fluxo completo `signup → magic link → login → checkout (Stripe test) → uso PRO`
-- [ ] Cenário de downgrade: cancelar → funcionalidades PRO bloqueadas
-- [ ] Smoke Dataset A executado com usuário autenticado FREE e PRO
+#### M8.7 — Testes E2E de auth e créditos ⬜
+- [ ] Playwright: fluxo completo `acesso anônimo → consumir créditos de sessão → cadastro → créditos migrados + bônus → compra de pacote (Stripe test) → créditos creditados`
+- [ ] Smoke Dataset A executado com sessão anônima e com usuário autenticado
+- [ ] Cenário de saldo zero: operação bloqueada com mensagem correta
 
 **Verificação:** testes E2E passam em staging sem intervenção manual.
 
@@ -1714,12 +1817,12 @@ após 3ª: `zones.badges.finalized` emitido exatamente uma vez. ✅
 
 ### Rate limiting (Redis-based)
 
-| Camada | Limite FREE | Limite anônimo |
+| Camada | Limite autenticado | Limite anônimo |
 |---|---|---|
-| Geocoding | 100 req/hora | 50 req/hora |
-| POIs (Search Box Category Search) | 60 req/hora | 30 req/hora |
-| Criação de jornada | 10/dia | 5/dia |
-| Geração de relatório | 2/mês | 2/mês |
+| Geocoding | 150 req/hora | 50 req/hora |
+| POIs (Search Box Category Search) | 90 req/hora | 30 req/hora |
+| Criação de jornada | 20/dia | 5/dia |
+| Geração de relatório | sem limite fixo (controlado por créditos) | sem limite fixo (controlado por créditos) |
 
 Soft limit → avisa UI, ativa fallback.
 Hard limit → bloqueia a operação, mantém fluxo via cache/seleção manual.
@@ -1849,8 +1952,8 @@ testes integração · smoke Dataset A em staging
 | Prewarm não termina antes do pico matinal | Média | Alto | Limite de 100 endereços por run; alerta em 30 min; escalar VPS se p95 prewarm > 2h |
 | S3/R2 signed URL expirada antes do download | Baixa | Baixo | Endpoint de regeneração; retenção de 30 dias |
 | Custo Mapbox Search (geocoding + POIs) > orçamento mensal | Média | Médio | Cache efêmero; rate limit por operação; debounce; orçamento diário; reduzir categorias e raio quando necessário |
-| Stripe webhook duplicado ativando PRO duas vezes | Baixa | Médio | Idempotência por `stripe_event_id` UNIQUE em `webhook_events` |
-| Migração anônima → autenticado perdendo jornada | Baixa | Alto | Transação atômica; fallback: jornada anônima permanece acessível |
+| Stripe webhook duplicado creditando créditos duas vezes | Baixa | Médio | Idempotência por `stripe_event_id` UNIQUE em `webhook_events` |
+| Migração anônima → autenticado perdendo jornada ou créditos | Baixa | Alto | Transação atômica; saldo Redis lido antes do COMMIT; fallback: jornada anônima permanece acessível |
 | GTFS desatualizado gerando rotas incorretas | Média | Médio | Webhook Mobility Database dispara ingestão automática |
 | WeasyPrint consumindo > 600MB | Baixa | Médio | Concorrência 1 na fila `reports`; timeout de job em 60s |
 
@@ -1883,5 +1986,8 @@ Não reabrir sem análise de impacto documentada.
 | Auth nas Fases 6–7 | **Toda sessão = FREE** | Elimina dependência circular; PRO ativado na Fase 8 |
 | Plataformas FREE | **QuintoAndar + Zap** | Restrição computacional, não de implementação |
 | Plataforma PRO extra | **VivaReal** | Terceiro scraper Playwright disponível |
-| Preço Pro | **R$29/mês ou R$249/ano** | — |
-| Relatório avulso | **R$9,90** | — |
+| Modelo de monetização | **Cotas de crédito avulsas (sem assinatura)** | Zero comprometimento do usuário; experiência proporcional ao saldo; Stripe Payment Intent em vez de Subscription |
+| Créditos iniciais | **30 (sessão) + 30 (cadastro)** | Proporcional: 3 análises de transporte público ou 1 análise a pé/carro com os 30 de sessão |
+| Pacote Starter | **60 créditos por R$ 9,90** | — |
+| Pacote Explorer | **150 créditos por R$ 19,90** | — |
+| Pacote Pro | **400 créditos por R$ 44,90** | — |

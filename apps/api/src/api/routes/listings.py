@@ -16,10 +16,12 @@ import hashlib
 import json
 from uuid import UUID
 
+from api.routes.auth import get_optional_auth_context
 from contracts import ListingsRequestResult, SearchAddressSuggestion
 from core.config import get_settings
 from core.db import get_engine as _get_engine
-from fastapi import APIRouter, Cookie, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
+from modules.auth.service import get_accessible_journey
 from modules.listings.cache import (
     cache_age_hours,
     cache_is_usable,
@@ -193,7 +195,7 @@ async def _find_active_listings_job_id(
 async def listings_search(
     journey_id: UUID,
     body: ListingsSearchRequest,
-    anonymous_session_id: str | None = Cookie(default=None),
+    auth_context=Depends(get_optional_auth_context),
 ) -> ListingsRequestResult:
     """
     M5.6: Record confirmed listing search and determine result source.
@@ -203,6 +205,10 @@ async def listings_search(
       - partial hit from overlapping zone -> return with partial badge.
       - cache miss -> return queued result ; search is still recorded for prewarm.
     """
+    journey = await get_accessible_journey(journey_id, auth_context)
+    if journey is None:
+        raise HTTPException(status_code=404, detail="Journey not found")
+
     try:
         registry = get_platform_registry()
     except PlatformRegistryError as exc:
@@ -234,7 +240,8 @@ async def listings_search(
     # Always record demand (including misses -- drives prewarm)
     await record_search_request(
         journey_id=journey_id,
-        session_id=anonymous_session_id,
+        user_id=auth_context.user.id if auth_context.user is not None else None,
+        session_id=auth_context.anonymous_session_id,
         zone_fingerprint=body.zone_fingerprint,
         search_location_normalized=normalized_search_location,
         search_location_label=body.search_location_label,
@@ -345,8 +352,10 @@ async def get_listings_scrape_plan(
     search_type: str = Query(default="rent"),
     usage_type: str = Query(default="residential"),
     platforms: list[str] | None = Query(default=None),
+    auth_context=Depends(get_optional_auth_context),
 ) -> ListingsScrapePlanResponse:
-    del journey_id
+    if await get_accessible_journey(journey_id, auth_context) is None:
+        raise HTTPException(status_code=404, detail="Journey not found")
     try:
         registry = get_platform_registry()
     except PlatformRegistryError as exc:
@@ -381,7 +390,8 @@ async def get_listings_scrape_plan(
 async def address_suggest(
     journey_id: UUID,
     zone_fingerprint: str = Query(...),
-        q: str = Query(default=""),
+    q: str = Query(default=""),
+    auth_context=Depends(get_optional_auth_context),
 ) -> list[SearchAddressSuggestion]:
     """
         M5.7: Combobox suggestions for streets inside the selected zone.
@@ -392,6 +402,9 @@ async def address_suggest(
             - return scraper-ready labels in the form:
                 "Rua, Bairro, Cidade-UF"
     """
+    if await get_accessible_journey(journey_id, auth_context) is None:
+        raise HTTPException(status_code=404, detail="Journey not found")
+
     engine = _get_engine()
     async with engine.connect() as conn:
         zone_result = await conn.execute(
@@ -469,10 +482,14 @@ async def get_zone_listings(
     usage_type: str = Query(default="residential"),
     platforms: list[str] | None = Query(default=None),
     spatial_scope: str = Query(default="inside_zone"),
+    auth_context=Depends(get_optional_auth_context),
 ) -> ListingsRequestResult:
     """
     M5.7 Step 6: Return cached listing cards for a zone, plus freshness info.
     """
+    if await get_accessible_journey(journey_id, auth_context) is None:
+        raise HTTPException(status_code=404, detail="Journey not found")
+
     try:
         registry = get_platform_registry()
     except PlatformRegistryError as exc:

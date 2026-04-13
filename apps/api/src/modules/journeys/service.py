@@ -87,25 +87,65 @@ async def get_journey(journey_id: UUID) -> JourneyRead | None:
     return _row_to_journey(row)
 
 
-async def create_journey(payload: JourneyCreate, anonymous_session_id: str | None = None) -> JourneyRead:
+async def get_journey_for_access(
+    journey_id: UUID,
+    *,
+    user_id: UUID | None = None,
+    anonymous_session_id: str | None = None,
+) -> JourneyRead | None:
+    if user_id is not None:
+        engine = get_engine()
+        async with engine.connect() as conn:
+            result = await conn.execute(
+                text(f"{_JOURNEY_SELECT} AND user_id = :user_id"),
+                {"journey_id": journey_id, "user_id": user_id},
+            )
+            row = result.mappings().first()
+        if row is not None:
+            return _row_to_journey(row)
+
+    if anonymous_session_id:
+        engine = get_engine()
+        async with engine.connect() as conn:
+            result = await conn.execute(
+                text(
+                    f"{_JOURNEY_SELECT} AND user_id IS NULL AND anonymous_session_id = :anonymous_session_id"
+                ),
+                {"journey_id": journey_id, "anonymous_session_id": anonymous_session_id},
+            )
+            row = result.mappings().first()
+        if row is not None:
+            return _row_to_journey(row)
+
+    return None
+
+
+async def create_journey(
+    payload: JourneyCreate,
+    anonymous_session_id: str | None = None,
+    user_id: UUID | None = None,
+) -> JourneyRead:
     session_id = anonymous_session_id or generate_anonymous_session_id()
     reference_point = payload.secondary_reference_point
     params = {
         "anonymous_session_id": session_id,
+        "user_id": user_id,
         "input_snapshot": json.dumps(payload.input_snapshot) if payload.input_snapshot is not None else None,
         "secondary_reference_label": payload.secondary_reference_label,
         "expires_at": default_expiration(),
     }
-    insert_sql = """
+    owner_columns = "user_id" if user_id is not None else "anonymous_session_id"
+    owner_values = ":user_id" if user_id is not None else ":anonymous_session_id"
+    insert_sql = f"""
         INSERT INTO journeys (
-            anonymous_session_id,
+            {owner_columns},
             state,
             input_snapshot,
             secondary_reference_label,
             expires_at
         )
         VALUES (
-            :anonymous_session_id,
+            {owner_values},
             :state,
             CAST(:input_snapshot AS JSONB),
             :secondary_reference_label,
@@ -116,9 +156,9 @@ async def create_journey(payload: JourneyCreate, anonymous_session_id: str | Non
     if reference_point is not None:
         params["secondary_reference_lat"] = reference_point.lat
         params["secondary_reference_lon"] = reference_point.lon
-        insert_sql = """
+        insert_sql = f"""
             INSERT INTO journeys (
-                anonymous_session_id,
+                {owner_columns},
                 state,
                 input_snapshot,
                 secondary_reference_label,
@@ -126,7 +166,7 @@ async def create_journey(payload: JourneyCreate, anonymous_session_id: str | Non
                 expires_at
             )
             VALUES (
-                :anonymous_session_id,
+                {owner_values},
                 :state,
                 CAST(:input_snapshot AS JSONB),
                 :secondary_reference_label,

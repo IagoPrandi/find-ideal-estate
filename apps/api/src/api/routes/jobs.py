@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from api.routes.auth import get_optional_auth_context
 from contracts import JobCancelAccepted, JobCreate, JobRead
-from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
+from modules.auth.service import get_accessible_journey
 from modules.jobs.events import job_events_stream
 from modules.jobs.service import create_job, get_job, request_job_cancellation
 
@@ -12,7 +14,10 @@ router = APIRouter(prefix="/jobs", tags=["jobs"])
 
 
 @router.post("", response_model=JobRead, status_code=status.HTTP_201_CREATED)
-async def create_job_endpoint(payload: JobCreate, response: Response) -> JobRead:
+async def create_job_endpoint(payload: JobCreate, response: Response, auth_context=Depends(get_optional_auth_context)) -> JobRead:
+    journey = await get_accessible_journey(payload.journey_id, auth_context)
+    if journey is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Journey not found")
     result = await create_job(payload)
     if not result.created:
         response.status_code = status.HTTP_200_OK
@@ -20,15 +25,20 @@ async def create_job_endpoint(payload: JobCreate, response: Response) -> JobRead
 
 
 @router.get("/{job_id}", response_model=JobRead)
-async def get_job_endpoint(job_id: UUID) -> JobRead:
+async def get_job_endpoint(job_id: UUID, auth_context=Depends(get_optional_auth_context)) -> JobRead:
     job = await get_job(job_id)
     if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    if job.journey_id is None or await get_accessible_journey(job.journey_id, auth_context) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
     return job
 
 
 @router.post("/{job_id}/cancel", response_model=JobCancelAccepted, status_code=status.HTTP_202_ACCEPTED)
-async def cancel_job_endpoint(job_id: UUID) -> JobCancelAccepted:
+async def cancel_job_endpoint(job_id: UUID, auth_context=Depends(get_optional_auth_context)) -> JobCancelAccepted:
+    job = await get_job(job_id)
+    if job is None or job.journey_id is None or await get_accessible_journey(job.journey_id, auth_context) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
     cancellation = await request_job_cancellation(job_id)
     if cancellation is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
@@ -36,9 +46,11 @@ async def cancel_job_endpoint(job_id: UUID) -> JobCancelAccepted:
 
 
 @router.get("/{job_id}/events")
-async def job_events_endpoint(job_id: UUID, request: Request) -> StreamingResponse:
+async def job_events_endpoint(job_id: UUID, request: Request, auth_context=Depends(get_optional_auth_context)) -> StreamingResponse:
     job = await get_job(job_id)
     if job is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
+    if job.journey_id is None or await get_accessible_journey(job.journey_id, auth_context) is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Job not found")
 
     return StreamingResponse(

@@ -16,6 +16,7 @@ _SHARED_CONTRACTS_DIR = Path(__file__).resolve().parents[3] / "packages" / "cont
 if str(_SHARED_CONTRACTS_DIR) not in __path__:
     __path__.append(str(_SHARED_CONTRACTS_DIR))
 
+from .auth import AuthLoginRequest, AuthRegisterRequest, AuthStatusRead, AuthUserRead
 from .dashboard import (
     DashboardDistributionBucketRead,
     DashboardPriceHistoryPointRead,
@@ -58,6 +59,10 @@ from .zones import (
 __version__ = "0.1.0"
 
 __all__ = [
+    "AuthLoginRequest",
+    "AuthRegisterRequest",
+    "AuthStatusRead",
+    "AuthUserRead",
     "DashboardDistributionBucketRead",
     "DashboardPriceHistoryPointRead",
     "DashboardRankRead",

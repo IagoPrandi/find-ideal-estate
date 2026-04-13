@@ -15,12 +15,14 @@ from contracts import (
 )
 from core.container import get_container
 from core.db import get_engine
-from fastapi import APIRouter, Cookie, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
+from api.routes.auth import get_optional_auth_context
 from modules.journeys.service import (
     ANONYMOUS_SESSION_COOKIE,
     create_journey,
     expire_journey,
     generate_anonymous_session_id,
+    get_journey_for_access,
     get_journey,
     update_journey,
 )
@@ -37,6 +39,17 @@ from modules.zones.vegetation import (
 from sqlalchemy import text
 
 router = APIRouter(prefix="/journeys", tags=["journeys"])
+
+
+async def _get_accessible_journey_or_404(journey_id: UUID, auth_context) -> JourneyRead:
+    journey = await get_journey_for_access(
+        journey_id,
+        user_id=auth_context.user.id if auth_context.user is not None else None,
+        anonymous_session_id=auth_context.anonymous_session_id,
+    )
+    if journey is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Journey not found")
+    return journey
 
 
 def _normalize_badges_payload(raw_badges: Any) -> dict[str, dict[str, Any]] | None:
@@ -463,29 +476,35 @@ async def list_zone_safety_incidents_for_journey(
 async def create_journey_endpoint(
     payload: JourneyCreate,
     response: Response,
-    anonymous_session_id: str | None = Cookie(default=None),
+    auth_context=Depends(get_optional_auth_context),
 ) -> JourneyRead:
-    session_id = anonymous_session_id or generate_anonymous_session_id()
-    journey = await create_journey(payload, anonymous_session_id=session_id)
-    response.set_cookie(
-        key=ANONYMOUS_SESSION_COOKIE,
-        value=session_id,
-        httponly=True,
-        samesite="lax",
-    )
+    session_id = auth_context.anonymous_session_id or generate_anonymous_session_id()
+    if auth_context.user is not None:
+        journey = await create_journey(payload, user_id=auth_context.user.id)
+    else:
+        journey = await create_journey(payload, anonymous_session_id=session_id)
+    if auth_context.user is None and auth_context.anonymous_session_id is None:
+        response.set_cookie(
+            key=ANONYMOUS_SESSION_COOKIE,
+            value=session_id,
+            httponly=True,
+            samesite="lax",
+        )
     return journey
 
 
 @router.get("/{journey_id}", response_model=JourneyRead)
-async def get_journey_endpoint(journey_id: UUID) -> JourneyRead:
-    journey = await get_journey(journey_id)
-    if journey is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Journey not found")
-    return journey
+async def get_journey_endpoint(journey_id: UUID, auth_context=Depends(get_optional_auth_context)) -> JourneyRead:
+    return await _get_accessible_journey_or_404(journey_id, auth_context)
 
 
 @router.patch("/{journey_id}", response_model=JourneyRead)
-async def update_journey_endpoint(journey_id: UUID, payload: JourneyUpdate) -> JourneyRead:
+async def update_journey_endpoint(
+    journey_id: UUID,
+    payload: JourneyUpdate,
+    auth_context=Depends(get_optional_auth_context),
+) -> JourneyRead:
+    await _get_accessible_journey_or_404(journey_id, auth_context)
     journey = await update_journey(journey_id, payload)
     if journey is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Journey not found")
@@ -493,7 +512,8 @@ async def update_journey_endpoint(journey_id: UUID, payload: JourneyUpdate) -> J
 
 
 @router.delete("/{journey_id}", response_model=JourneyRead)
-async def delete_journey_endpoint(journey_id: UUID) -> JourneyRead:
+async def delete_journey_endpoint(journey_id: UUID, auth_context=Depends(get_optional_auth_context)) -> JourneyRead:
+    await _get_accessible_journey_or_404(journey_id, auth_context)
     journey = await expire_journey(journey_id)
     if journey is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Journey not found")
@@ -501,18 +521,17 @@ async def delete_journey_endpoint(journey_id: UUID) -> JourneyRead:
 
 
 @router.get("/{journey_id}/transport-points", response_model=list[TransportPointRead])
-async def list_transport_points_endpoint(journey_id: UUID) -> list[TransportPointRead]:
-    journey = await get_journey(journey_id)
-    if journey is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Journey not found")
+async def list_transport_points_endpoint(
+    journey_id: UUID,
+    auth_context=Depends(get_optional_auth_context),
+) -> list[TransportPointRead]:
+    await _get_accessible_journey_or_404(journey_id, auth_context)
     return await list_transport_points_for_journey(journey_id)
 
 
 @router.get("/{journey_id}/zones", response_model=ZoneListResponse)
-async def list_zones_endpoint(journey_id: UUID) -> ZoneListResponse:
-    journey = await get_journey(journey_id)
-    if journey is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Journey not found")
+async def list_zones_endpoint(journey_id: UUID, auth_context=Depends(get_optional_auth_context)) -> ZoneListResponse:
+    await _get_accessible_journey_or_404(journey_id, auth_context)
     return await list_zones_for_journey(journey_id)
 
 
@@ -523,10 +542,9 @@ async def list_zones_endpoint(journey_id: UUID) -> ZoneListResponse:
 async def list_zone_safety_incidents_endpoint(
     journey_id: UUID,
     zone_fingerprint: str,
+    auth_context=Depends(get_optional_auth_context),
 ) -> ZoneSafetyIncidentCollectionRead:
-    journey = await get_journey(journey_id)
-    if journey is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Journey not found")
+    await _get_accessible_journey_or_404(journey_id, auth_context)
     return await list_zone_safety_incidents_for_journey(journey_id, zone_fingerprint)
 
 
@@ -548,10 +566,9 @@ async def get_zone_dashboard_analytics_endpoint(
     max_price: float | None = None,
     min_size: float | None = None,
     max_size: float | None = None,
+    auth_context=Depends(get_optional_auth_context),
 ) -> ZoneDashboardAnalyticsRead:
-    journey = await get_journey(journey_id)
-    if journey is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Journey not found")
+    await _get_accessible_journey_or_404(journey_id, auth_context)
 
     if usage_type not in {"all", "residential", "commercial"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="usage_type deve ser 'all', 'residential' ou 'commercial'")
@@ -591,10 +608,9 @@ async def get_zone_favorite_analytics_endpoint(
     zone_fingerprint: str,
     search_type: str = "rent",
     usage_type: str = "all",
+    auth_context=Depends(get_optional_auth_context),
 ) -> ZoneFavoriteAnalyticsRead:
-    journey = await get_journey(journey_id)
-    if journey is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Journey not found")
+    await _get_accessible_journey_or_404(journey_id, auth_context)
 
     if usage_type not in {"all", "residential", "commercial"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="usage_type deve ser 'all', 'residential' ou 'commercial'")

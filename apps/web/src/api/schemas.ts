@@ -1,5 +1,19 @@
 import { z } from "zod";
 
+export const AuthUserReadSchema = z.object({
+  id: z.string(),
+  email: z.string().email(),
+  display_name: z.string().nullable().optional(),
+  is_active: z.boolean(),
+  created_at: z.string()
+});
+
+export const AuthStatusReadSchema = z.object({
+  is_authenticated: z.boolean(),
+  user: AuthUserReadSchema.nullable().optional(),
+  session_expires_at: z.string().nullable().optional()
+});
+
 export const RunStatusSchema = z.object({
   state: z.string(),
   stage: z.string(),

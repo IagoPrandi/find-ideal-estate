@@ -47,6 +47,7 @@ vi.mock("maplibre-gl", () => {
   class MockMap {
     private sources: Record<string, { setData: (data: unknown) => void }> = {};
     private layers = new Set<string>();
+    private images = new Set<string>();
 
     on(
       event: string,
@@ -65,6 +66,9 @@ vi.mock("maplibre-gl", () => {
       }
       return this;
     }
+    off() {
+      return this;
+    }
     addSource(name: string) {
       this.sources[name] = {
         setData: () => {
@@ -80,6 +84,16 @@ vi.mock("maplibre-gl", () => {
       this.layers.add(layer.id);
       return this;
     }
+    hasImage(id: string) {
+      return this.images.has(id);
+    }
+    addImage(id: string) {
+      this.images.add(id);
+      return this;
+    }
+    isSourceLoaded() {
+      return true;
+    }
     moveLayer() {
       return this;
     }
@@ -90,6 +104,9 @@ vi.mock("maplibre-gl", () => {
       return this;
     }
     setPaintProperty() {
+      return this;
+    }
+    setFilter() {
       return this;
     }
     queryRenderedFeatures() {

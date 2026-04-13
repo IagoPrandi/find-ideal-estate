@@ -115,11 +115,16 @@ def test_create_journey_sets_anonymous_cookie(monkeypatch):
 def test_patch_journey_returns_updated_payload(monkeypatch):
     sample = _sample_journey()
 
+    async def _accessible(journey_id, *, user_id=None, anonymous_session_id=None):
+        assert journey_id == sample.id
+        return sample
+
     async def _update(journey_id, payload: JourneyUpdate) -> JourneyRead | None:
         assert journey_id == sample.id
         assert payload.last_completed_step == 4
         return sample.model_copy(update={"last_completed_step": 4, "state": JourneyState.ACTIVE})
 
+    monkeypatch.setattr("api.routes.journeys.get_journey_for_access", _accessible)
     monkeypatch.setattr("api.routes.journeys.update_journey", _update)
 
     with TestClient(app) as client:
@@ -133,6 +138,10 @@ def test_patch_journey_returns_updated_payload(monkeypatch):
 def test_create_job_returns_pending_job(monkeypatch):
     sample = _sample_job()
 
+    async def _accessible(journey_id, context):
+        assert journey_id == sample.journey_id
+        return _sample_journey().model_copy(update={"id": sample.journey_id})
+
     async def _create(payload: JobCreate):
         assert payload.job_type == JobType.TRANSPORT_SEARCH
         return SimpleNamespace(
@@ -140,6 +149,7 @@ def test_create_job_returns_pending_job(monkeypatch):
             created=True,
         )
 
+    monkeypatch.setattr("api.routes.jobs.get_accessible_journey", _accessible)
     monkeypatch.setattr("api.routes.jobs.create_job", _create)
 
     with TestClient(app) as client:
@@ -155,6 +165,10 @@ def test_create_job_returns_pending_job(monkeypatch):
 def test_create_job_returns_existing_active_job_with_200(monkeypatch):
     sample = _sample_job()
 
+    async def _accessible(journey_id, context):
+        assert journey_id == sample.journey_id
+        return _sample_journey().model_copy(update={"id": sample.journey_id})
+
     async def _create(payload: JobCreate):
         assert payload.job_type == JobType.ZONE_ENRICHMENT
         return SimpleNamespace(
@@ -162,6 +176,7 @@ def test_create_job_returns_existing_active_job_with_200(monkeypatch):
             created=False,
         )
 
+    monkeypatch.setattr("api.routes.jobs.get_accessible_journey", _accessible)
     monkeypatch.setattr("api.routes.jobs.create_job", _create)
 
     with TestClient(app) as client:
@@ -183,10 +198,20 @@ def test_cancel_job_returns_accepted(monkeypatch):
         cancel_requested_at=datetime.now(tz=timezone.utc),
     )
 
+    async def _accessible(journey_id, context):
+        assert journey_id == sample.journey_id
+        return _sample_journey().model_copy(update={"id": sample.journey_id})
+
+    async def _get_job(job_id):
+        assert job_id == sample.id
+        return sample
+
     async def _cancel(job_id):
         assert job_id == sample.id
         return accepted
 
+    monkeypatch.setattr("api.routes.jobs.get_accessible_journey", _accessible)
+    monkeypatch.setattr("api.routes.jobs.get_job", _get_job)
     monkeypatch.setattr("api.routes.jobs.request_job_cancellation", _cancel)
 
     with TestClient(app) as client:
@@ -248,7 +273,7 @@ def test_get_journey_transport_points_returns_enriched_list(monkeypatch):
     sample = _sample_journey()
     sample_point = _sample_transport_point(sample.id)
 
-    async def _get(journey_id):
+    async def _accessible(journey_id, *, user_id=None, anonymous_session_id=None):
         assert journey_id == sample.id
         return sample
 
@@ -256,7 +281,7 @@ def test_get_journey_transport_points_returns_enriched_list(monkeypatch):
         assert journey_id == sample.id
         return [sample_point]
 
-    monkeypatch.setattr("api.routes.journeys.get_journey", _get)
+    monkeypatch.setattr("api.routes.journeys.get_journey_for_access", _accessible)
     monkeypatch.setattr("api.routes.journeys.list_transport_points_for_journey", _list)
 
     with TestClient(app) as client:
@@ -274,7 +299,7 @@ def test_get_journey_zones_returns_list_response(monkeypatch):
     sample = _sample_journey()
     zone_id = str(uuid4())
 
-    async def _get(journey_id):
+    async def _accessible(journey_id, *, user_id=None, anonymous_session_id=None):
         assert journey_id == sample.id
         return sample
 
@@ -332,7 +357,7 @@ def test_get_journey_zones_returns_list_response(monkeypatch):
             "completed_count": 1,
         }
 
-    monkeypatch.setattr("api.routes.journeys.get_journey", _get)
+    monkeypatch.setattr("api.routes.journeys.get_journey_for_access", _accessible)
     monkeypatch.setattr("api.routes.journeys.list_zones_for_journey", _list)
 
     with TestClient(app) as client:
@@ -363,7 +388,7 @@ def test_classify_public_safety_group_maps_canonical_groups():
 def test_get_journey_zone_safety_incidents_returns_feature_collection(monkeypatch):
     sample = _sample_journey()
 
-    async def _get(journey_id):
+    async def _accessible(journey_id, *, user_id=None, anonymous_session_id=None):
         assert journey_id == sample.id
         return sample
 
@@ -391,7 +416,7 @@ def test_get_journey_zone_safety_incidents_returns_feature_collection(monkeypatc
             ],
         }
 
-    monkeypatch.setattr("api.routes.journeys.get_journey", _get)
+    monkeypatch.setattr("api.routes.journeys.get_journey_for_access", _accessible)
     monkeypatch.setattr("api.routes.journeys.list_zone_safety_incidents_for_journey", _list)
 
     with TestClient(app) as client:

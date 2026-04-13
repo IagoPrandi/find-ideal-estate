@@ -164,6 +164,21 @@ body {
   color: var(--color-text);
 }
 
+.auth-shell {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  z-index: 55;
+  pointer-events: none;
+}
+
+.auth-shell__content {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
 .favorites-shell {
   position: absolute;
   right: 1rem;
@@ -253,6 +268,10 @@ body {
     bottom: 1rem !important;
     width: auto !important;
     height: min(52vh, 520px) !important;
+  }
+
+  .auth-shell {
+    right: 4.5rem;
   }
 
   .favorites-shell {

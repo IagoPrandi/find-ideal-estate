@@ -5,6 +5,7 @@ import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { API_BASE, getBusLineDetails, getBusStopDetails, getJourneyTransportPoints, getJourneyZonesList, getPublicSafetyIncidentsForViewport, getTransportStopDetails, getZoneListings } from "../../api/client";
 import { FavoritesPanel, WizardPanel } from "../../components/panels";
+import { AuthAccessCard } from "../auth/AuthAccessCard";
 import { getPoiCategoryMeta, getZonePoiSelectionKey, sortPoiPoints, ZonePoiPointLike, zoneNeedsPoiBackfill } from "../../domain/poi";
 import { applyListingsPanelFilters, getListingDisplayPrice, getListingSelectionKey } from "../../lib/listingFormat";
 import { getIncludedGreenVegetationLevels, useFavoritesStore, useJourneyStore, useUIStore } from "../../state";
@@ -1977,6 +1978,7 @@ export function FindIdealApp() {
   return (
     <main className={`find-ideal-app relative h-screen w-full overflow-hidden ${isFavoritesPanelOpen ? "find-ideal-app--favorites-open" : ""}`}>
       <div ref={mapContainerRef} className="h-full w-full" aria-label="Mapa principal" />
+      <AuthAccessCard />
       <FavoritesPanel />
       <div className="map-side-controls pointer-events-none absolute bottom-14 right-4 z-40 flex flex-col items-end gap-2">
         {isLayerMenuOpen ? (
