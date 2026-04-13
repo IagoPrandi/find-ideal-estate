@@ -33,6 +33,8 @@ import {
   ListingPlatformVariantBackendSchema,
   ListingCardReadBackendSchema,
   ListingsRequestResultBackendSchema
+  ,ZoneFavoriteAnalytics,
+  ZoneFavoriteAnalyticsBackendSchema
 } from "./schemas";
 
 export const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
@@ -574,6 +576,18 @@ export async function getZoneDashboardAnalytics(
     `/journeys/${encodeURIComponent(journeyId)}/zones/${encodeURIComponent(zoneFingerprint)}/dashboard-analytics?${params.toString()}`,
     ZoneDashboardAnalyticsBackendSchema,
   )) as ZoneDashboardAnalytics;
+}
+
+export async function getZoneFavoriteAnalytics(
+  journeyId: string,
+  zoneFingerprint: string,
+  searchType: string = "rent",
+  usageType: string = "all",
+): Promise<ZoneFavoriteAnalytics> {
+  return (await requestJson(
+    `/journeys/${encodeURIComponent(journeyId)}/zones/${encodeURIComponent(zoneFingerprint)}/favorite-analytics?search_type=${encodeURIComponent(searchType)}&usage_type=${encodeURIComponent(usageType)}`,
+    ZoneFavoriteAnalyticsBackendSchema,
+  )) as ZoneFavoriteAnalytics;
 }
 
 export async function getZoneListings(

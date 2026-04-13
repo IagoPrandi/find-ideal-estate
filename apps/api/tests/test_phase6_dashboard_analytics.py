@@ -24,6 +24,7 @@ from modules.dashboard.analytics import (  # noqa: E402
     _build_dashboard_ranking_items,
     build_rank_summary,
     classify_flood_risk,
+    fetch_zone_favorite_analytics,
     parse_address_components,
 )
 from src.main import app  # noqa: E402
@@ -283,3 +284,121 @@ def test_get_zone_dashboard_analytics_route_forwards_requested_page(monkeypatch)
     assert body["price"]["zone_active_listing_count"] == 0
     assert body["safety"]["robbery_density_per_km2"] == 9.96
     assert body["environment"]["flood_risk_label"] is None
+
+
+def test_fetch_zone_favorite_analytics_builds_lightweight_metrics(monkeypatch):
+    async def _fetch_zone_dashboard_analytics(**kwargs):
+        page = kwargs["page"]
+        if page == "preco":
+            return {
+                "context": {
+                    "zone_fingerprint": "zone-fp-1",
+                    "neighborhood_name": "Vila Mariana",
+                    "city_name": "São Paulo",
+                    "state_code": "SP",
+                    "zone_area_m2": 120000.0,
+                },
+                "price": {
+                    "zone_average_price": 4200.0,
+                    "zone_average_unit_price": 120.5,
+                },
+                "safety": {},
+                "environment": {},
+            }
+        if page == "seguranca":
+            return {
+                "context": {
+                    "zone_fingerprint": "zone-fp-1",
+                    "zone_area_m2": 120000.0,
+                },
+                "price": {},
+                "safety": {
+                    "homicide_density_per_km2": 0.5,
+                    "robbery_density_per_km2": 3.0,
+                    "theft_count_365d": 12,
+                },
+                "environment": {},
+            }
+        return {
+            "context": {
+                "zone_fingerprint": "zone-fp-1",
+                "zone_area_m2": 120000.0,
+            },
+            "price": {},
+            "safety": {},
+            "environment": {
+                "green_percentage": 25.0,
+                "flood_percentage": 1.8,
+                "flood_risk_label": "Moderado",
+            },
+        }
+
+    monkeypatch.setattr("modules.dashboard.analytics.fetch_zone_dashboard_analytics", _fetch_zone_dashboard_analytics)
+
+    payload = __import__("asyncio").run(
+        fetch_zone_favorite_analytics(
+            journey_id=uuid4(),
+            zone_fingerprint="zone-fp-1",
+            search_type="rent",
+            usage_type="residential",
+        )
+    )
+
+    assert payload["metrics"]["zone_average_price"] == 4200.0
+    assert payload["metrics"]["zone_average_unit_price"] == 120.5
+    assert payload["metrics"]["homicide_density_per_km2"] == 0.5
+    assert payload["metrics"]["robbery_density_per_km2"] == 3.0
+    assert payload["metrics"]["theft_density_per_km2"] == 100.0
+    assert payload["metrics"]["crime_density_per_km2"] == 103.5
+    assert payload["metrics"]["green_percentage"] == 25.0
+    assert payload["metrics"]["flood_risk_label"] == "Moderado"
+
+
+def test_get_zone_favorite_analytics_route_returns_contract(monkeypatch):
+    sample = _sample_journey()
+
+    async def _get_journey(journey_id):
+        assert journey_id == sample.id
+        return sample
+
+    async def _fetch_zone_favorite_analytics(**kwargs):
+        assert kwargs["journey_id"] == sample.id
+        assert kwargs["zone_fingerprint"] == "zone-fp-1"
+        assert kwargs["search_type"] == "rent"
+        assert kwargs["usage_type"] == "residential"
+        return {
+            "context": {
+                "zone_fingerprint": "zone-fp-1",
+                "neighborhood_name": "Vila Mariana",
+                "city_name": "São Paulo",
+                "state_code": "SP",
+                "zone_area_m2": 120000.0,
+            },
+            "metrics": {
+                "zone_average_price": 4200.0,
+                "zone_average_unit_price": 120.5,
+                "homicide_density_per_km2": 0.5,
+                "robbery_density_per_km2": 3.0,
+                "theft_density_per_km2": 100.0,
+                "crime_density_per_km2": 103.5,
+                "green_percentage": 25.0,
+                "flood_percentage": 1.8,
+                "flood_risk_label": "Moderado",
+            },
+        }
+
+    monkeypatch.setattr("api.routes.journeys.get_journey", _get_journey)
+    monkeypatch.setattr("api.routes.journeys.fetch_zone_favorite_analytics", _fetch_zone_favorite_analytics)
+
+    with TestClient(app) as client:
+        response = client.get(
+            f"/journeys/{sample.id}/zones/zone-fp-1/favorite-analytics"
+            "?search_type=rent&usage_type=residential"
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["context"]["city_name"] == "São Paulo"
+    assert body["metrics"]["zone_average_unit_price"] == 120.5
+    assert body["metrics"]["crime_density_per_km2"] == 103.5
+    assert body["metrics"]["flood_risk_label"] == "Moderado"

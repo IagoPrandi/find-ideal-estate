@@ -9,6 +9,7 @@ from contracts import (
     JourneyUpdate,
     TransportPointRead,
     ZoneDashboardAnalyticsRead,
+    ZoneFavoriteAnalyticsRead,
     ZoneListResponse,
     ZoneSafetyIncidentCollectionRead,
 )
@@ -24,7 +25,7 @@ from modules.journeys.service import (
     update_journey,
 )
 from modules.public_safety import classify_public_safety_group
-from modules.dashboard.analytics import fetch_zone_dashboard_analytics
+from modules.dashboard.analytics import fetch_zone_dashboard_analytics, fetch_zone_favorite_analytics
 from modules.public_safety import public_safety_group_case_sql
 from modules.zones.badges import build_metric_badge
 from modules.zones.vegetation import (
@@ -579,3 +580,33 @@ async def get_zone_dashboard_analytics_endpoint(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
     return ZoneDashboardAnalyticsRead.model_validate(payload)
+
+
+@router.get(
+    "/{journey_id}/zones/{zone_fingerprint}/favorite-analytics",
+    response_model=ZoneFavoriteAnalyticsRead,
+)
+async def get_zone_favorite_analytics_endpoint(
+    journey_id: UUID,
+    zone_fingerprint: str,
+    search_type: str = "rent",
+    usage_type: str = "all",
+) -> ZoneFavoriteAnalyticsRead:
+    journey = await get_journey(journey_id)
+    if journey is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Journey not found")
+
+    if usage_type not in {"all", "residential", "commercial"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="usage_type deve ser 'all', 'residential' ou 'commercial'")
+
+    try:
+        payload = await fetch_zone_favorite_analytics(
+            journey_id=journey_id,
+            zone_fingerprint=zone_fingerprint,
+            search_type=search_type,
+            usage_type=usage_type,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    return ZoneFavoriteAnalyticsRead.model_validate(payload)

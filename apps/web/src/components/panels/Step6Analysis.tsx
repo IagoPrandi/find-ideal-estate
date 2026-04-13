@@ -9,6 +9,7 @@ import {
   ChevronUp,
   CircleDot,
   ExternalLink,
+  Heart,
   Home,
   Loader2,
   MapIcon,
@@ -17,14 +18,17 @@ import {
   SlidersHorizontal,
   Building2,
 } from "lucide-react";
-import { apiActionHint, getJob, getZoneDashboardAnalytics, getZoneListings, type ListingPlatformVariantRead } from "../../api/client";
+import { apiActionHint, getJob, getZoneDashboardAnalytics, getZoneFavoriteAnalytics, getZoneListings, type ListingPlatformVariantRead } from "../../api/client";
 import { ListingsScrapeDiagnosticsSchema, type ListingsScrapeDiagnostics, type ListingsScrapePlatformDiagnostics } from "../../api/schemas";
+import { buildZoneFavoriteAnalyticsQueryKey } from "../../lib/favorites";
 import { applyListingsPanelFilters, formatCurrencyBr, getListingDisplayPrice, getListingSelectionKey, resolveListingCardImageUrls, resolvePlatformUrl } from "../../lib/listingFormat";
-import { useJourneyStore, useUIStore, type ListingsPanelFilters } from "../../state";
+import { useFavoritesStore, useJourneyStore, useUIStore, type ListingsPanelFilters } from "../../state";
 import { Step6Dashboard } from "./Step6Dashboard";
 
 const DASHBOARD_ANALYTICS_STALE_TIME = 30 * 60_000;
 const DASHBOARD_ANALYTICS_GC_TIME = 60 * 60_000;
+const FAVORITES_ANALYTICS_STALE_TIME = 30 * 60_000;
+const FAVORITES_ANALYTICS_GC_TIME = 60 * 60_000;
 const PRICE_DASHBOARD_FILTER_DEBOUNCE_MS = 350;
 const ACTIVE_LISTINGS_JOB_STATES = new Set(["pending", "running", "retrying"]);
 const TERMINAL_LISTINGS_JOB_STATES = new Set(["completed", "failed", "cancelled", "cancelled_partial"]);
@@ -182,6 +186,8 @@ export function Step6Analysis() {
   const activeTab = useUIStore((state) => state.activeTab);
   const setActiveTab = useUIStore((state) => state.setActiveTab);
   const setJobIds = useJourneyStore((state) => state.setJobIds);
+  const toggleFavorite = useFavoritesStore((state) => state.toggleFavorite);
+  const favoriteListings = useFavoritesStore((state) => state.favorites);
   const listingCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const listingsPanelScrollRef = useRef<HTMLDivElement | null>(null);
   const lastScrolledListingKeyRef = useRef<string | null>(null);
@@ -306,6 +312,7 @@ export function Step6Analysis() {
     && listingsForScope.length === 0;
 
   const displayedListings = applyListingsPanelFilters(rawListings, listingsFilters);
+  const favoriteListingKeySet = useMemo(() => new Set(favoriteListings.map((favorite) => favorite.listingKey)), [favoriteListings]);
 
   const priceComparisonDashboardQuery = useQuery({
     queryKey: buildPriceDashboardQueryKey(debouncedPriceComparisonFilters),
@@ -810,6 +817,7 @@ export function Step6Analysis() {
               const platformVariants = listing.platform_variants || [];
               const hasAvailabilityPopover = Boolean(listing.duplication_badge && platformVariants.length > 1);
               const isSelected = listingKey !== "" && listingKey === selectedListingKey;
+              const isSavedFavorite = listingKey ? favoriteListingKeySet.has(listingKey) : false;
               const spatialBadge = !listing.has_coordinates
                 ? {
                     className: "border-slate-200 bg-slate-50 text-slate-600",
@@ -1012,30 +1020,75 @@ export function Step6Analysis() {
                       </div>
                     ) : null}
                     <div className="mt-auto border-t border-slate-100 pt-3">
-                      {adUrl ? (
-                        <a
-                          href={adUrl}
-                          target="_blank"
-                          rel="noreferrer"
-                          aria-label="Abrir página do anúncio"
-                          onClick={(event) => event.stopPropagation()}
-                          className="flex w-full items-center justify-center gap-2 rounded-lg bg-pastel-violet-50 px-3 py-2.5 text-sm font-medium text-pastel-violet-600 transition-colors hover:bg-pastel-violet-100"
-                        >
-                          <span>Abrir página do anúncio</span>
-                          <ExternalLink className="h-4 w-4" />
-                        </a>
-                      ) : (
+                      <div className="flex items-center gap-2">
+                        {adUrl ? (
+                          <a
+                            href={adUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            aria-label="Abrir página do anúncio"
+                            onClick={(event) => event.stopPropagation()}
+                            className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-pastel-violet-50 px-3 py-2.5 text-sm font-medium text-pastel-violet-600 transition-colors hover:bg-pastel-violet-100"
+                          >
+                            <span>Abrir página do anúncio</span>
+                            <ExternalLink className="h-4 w-4" />
+                          </a>
+                        ) : (
+                          <button
+                            type="button"
+                            disabled
+                            aria-label="Anúncio indisponível"
+                            onClick={(event) => event.stopPropagation()}
+                            className="flex flex-1 cursor-not-allowed items-center justify-center gap-2 rounded-lg bg-slate-100 px-3 py-2.5 text-sm font-medium text-slate-400"
+                          >
+                            <span>Anúncio indisponível</span>
+                            <ExternalLink className="h-4 w-4" />
+                          </button>
+                        )}
                         <button
                           type="button"
-                          disabled
-                          aria-label="Anúncio indisponível"
-                          onClick={(event) => event.stopPropagation()}
-                          className="flex w-full cursor-not-allowed items-center justify-center gap-2 rounded-lg bg-slate-100 px-3 py-2.5 text-sm font-medium text-slate-400"
+                          aria-label={isSavedFavorite ? "Remover da lista de interesse" : "Adicionar a lista de interesse"}
+                          aria-pressed={isSavedFavorite}
+                          title={isSavedFavorite ? "Remover da lista de interesse" : "Adicionar a lista de interesse"}
+                          disabled={!listingKey || !journeyId || !zoneFingerprint}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            if (!listingKey || !journeyId || !zoneFingerprint) {
+                              return;
+                            }
+                            const nextWillBeSaved = !isSavedFavorite;
+                            toggleFavorite({
+                              listing,
+                              journeyId,
+                              zoneFingerprint,
+                              searchType: config.type,
+                              usageType: listingsFilters.usageType,
+                            });
+                            if (!nextWillBeSaved) {
+                              return;
+                            }
+                            void queryClient.prefetchQuery({
+                              queryKey: buildZoneFavoriteAnalyticsQueryKey(
+                                journeyId,
+                                zoneFingerprint,
+                                config.type,
+                                listingsFilters.usageType,
+                              ),
+                              queryFn: async () => getZoneFavoriteAnalytics(
+                                journeyId,
+                                zoneFingerprint,
+                                config.type,
+                                listingsFilters.usageType,
+                              ),
+                              staleTime: FAVORITES_ANALYTICS_STALE_TIME,
+                              gcTime: FAVORITES_ANALYTICS_GC_TIME,
+                            });
+                          }}
+                          className={`inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border transition ${isSavedFavorite ? "border-rose-200 bg-rose-50 text-rose-600 hover:border-rose-300 hover:bg-rose-100" : "border-slate-200 bg-white text-slate-500 hover:border-pastel-violet-300 hover:bg-pastel-violet-50 hover:text-pastel-violet-700"}`}
                         >
-                          <span>Anúncio indisponível</span>
-                          <ExternalLink className="h-4 w-4" />
+                          <Heart className={`h-4.5 w-4.5 ${isSavedFavorite ? "fill-current" : ""}`} />
                         </button>
-                      )}
+                      </div>
                     </div>
                   </div>
                 </div>

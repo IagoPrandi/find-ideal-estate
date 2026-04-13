@@ -11,6 +11,8 @@ from .dashboard import (
     ZoneDashboardEnvironmentRead,
     ZoneDashboardPriceRead,
     ZoneDashboardSafetyRead,
+    ZoneFavoriteAnalyticsRead,
+    ZoneFavoriteMetricsRead,
 )
 from .enums import JobState, JobType, JourneyState
 from .jobs import JobCancelAccepted, JobCreate, JobEventRead, JobRead
@@ -74,6 +76,8 @@ __all__ = [
     "ZoneDashboardEnvironmentRead",
     "ZoneDashboardPriceRead",
     "ZoneDashboardSafetyRead",
+    "ZoneFavoriteAnalyticsRead",
+    "ZoneFavoriteMetricsRead",
     "ZoneBadgeRead",
     "ZoneCacheStatusRead",
     "ZoneJourneyRankRead",

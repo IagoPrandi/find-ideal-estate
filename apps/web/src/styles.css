@@ -164,6 +164,87 @@ body {
   color: var(--color-text);
 }
 
+.favorites-shell {
+  position: absolute;
+  right: 1rem;
+  top: 1rem;
+  bottom: 1rem;
+  z-index: 45;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  pointer-events: none;
+}
+
+.favorites-toggle {
+  pointer-events: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  align-self: center;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.96);
+  color: #6d28d9;
+  padding: 0.75rem 0.9rem;
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.18);
+  backdrop-filter: blur(14px);
+  transition: transform 180ms ease, box-shadow 180ms ease, color 180ms ease;
+}
+
+.favorites-toggle:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 20px 48px rgba(15, 23, 42, 0.22);
+}
+
+.favorites-toggle--active {
+  color: #5b21b6;
+}
+
+.favorites-panel {
+  pointer-events: auto;
+  display: flex;
+  height: 100%;
+  width: min(50vw, 54rem);
+  min-width: 34rem;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  border-radius: 1rem;
+  background: #ffffff;
+  box-shadow: 0 24px 48px rgba(15, 23, 42, 0.18);
+  transition: opacity 220ms ease, transform 220ms ease, width 220ms ease, min-width 220ms ease;
+}
+
+.favorites-panel--closed {
+  width: 0;
+  min-width: 0;
+  opacity: 0;
+  transform: translateX(1rem);
+  pointer-events: none;
+}
+
+.favorites-panel--open {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.find-ideal-app .map-side-controls {
+  transition: right 220ms ease;
+}
+
+.find-ideal-app .maplibregl-ctrl-bottom-right {
+  transition: right 220ms ease;
+}
+
+.find-ideal-app--favorites-open .map-side-controls {
+  right: calc(min(50vw, 54rem) + 2.5rem);
+}
+
+.find-ideal-app--favorites-open .maplibregl-ctrl-bottom-right {
+  right: calc(min(50vw, 54rem) + 1rem) !important;
+}
+
 @media (max-width: 1024px) {
   .wizard-shell {
     left: 1rem !important;
@@ -172,5 +253,38 @@ body {
     bottom: 1rem !important;
     width: auto !important;
     height: min(52vh, 520px) !important;
+  }
+
+  .favorites-shell {
+    left: 1rem;
+    right: 1rem;
+    top: 1rem;
+    bottom: auto;
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .favorites-toggle {
+    align-self: flex-end;
+  }
+
+  .favorites-panel {
+    width: 100%;
+    min-width: 0;
+    height: min(56vh, 40rem);
+  }
+
+  .favorites-panel--closed {
+    height: 0;
+    width: 100%;
+    transform: translateY(-0.75rem);
+  }
+
+  .find-ideal-app--favorites-open .map-side-controls {
+    right: 1rem;
+  }
+
+  .find-ideal-app--favorites-open .maplibregl-ctrl-bottom-right {
+    right: 0 !important;
   }
 }

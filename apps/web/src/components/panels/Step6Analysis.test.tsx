@@ -2,13 +2,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Step6Analysis } from "./Step6Analysis";
-import { useJourneyStore, useUIStore } from "../../state";
-import { getJob, getZoneDashboardAnalytics, getZoneListings } from "../../api/client";
+import { useFavoritesStore, useJourneyStore, useUIStore } from "../../state";
+import { getJob, getZoneDashboardAnalytics, getZoneFavoriteAnalytics, getZoneListings } from "../../api/client";
 
 vi.mock("../../api/client", () => ({
   apiActionHint: (error: unknown) => (error instanceof Error ? error.message : "erro"),
   getJob: vi.fn(),
   getZoneDashboardAnalytics: vi.fn(),
+  getZoneFavoriteAnalytics: vi.fn(),
   getZoneListings: vi.fn()
 }));
 
@@ -54,6 +55,7 @@ describe("Step6Analysis", () => {
 
     useJourneyStore.getState().resetJourney();
     useUIStore.getState().resetUI();
+    useFavoritesStore.getState().resetFavoritesState();
     useJourneyStore.setState((state) => ({
       ...state,
       journeyId: "journey-1",
@@ -269,6 +271,26 @@ describe("Step6Analysis", () => {
           }
         }
       }
+    } as never);
+    vi.mocked(getZoneFavoriteAnalytics).mockResolvedValue({
+      context: {
+        zone_fingerprint: "zone-fp-1",
+        neighborhood_name: "Itaim Bibi",
+        city_name: "São Paulo",
+        state_code: "SP",
+        zone_area_m2: 120000,
+      },
+      metrics: {
+        zone_average_price: 10850,
+        zone_average_unit_price: 99.5,
+        homicide_density_per_km2: 0.06,
+        robbery_density_per_km2: 9.96,
+        theft_density_per_km2: 35.19,
+        crime_density_per_km2: 45.21,
+        green_percentage: 26.6,
+        flood_percentage: 1,
+        flood_risk_label: "Moderado",
+      },
     } as never);
   });
 
@@ -1195,5 +1217,75 @@ describe("Step6Analysis", () => {
     expect(within(hero).getByText(/tipo: comercial/i)).toBeInTheDocument();
     expect(within(hero).getByText(/preço: R\$ 6.000 a R\$ 12.000/i)).toBeInTheDocument();
     expect(within(hero).getByText(/área: a partir de 45 m²/i)).toBeInTheDocument();
+  });
+
+  it("adds and removes a listing from favorites and prefetches comparison analytics", async () => {
+    vi.mocked(getZoneListings).mockResolvedValue({
+      source: "cache",
+      job_id: null,
+      freshness_status: "fresh",
+      listings: [
+        {
+          property_id: "prop-1",
+          platform: "quintoandar",
+          platform_listing_id: "qa-1",
+          address_normalized: "Rua Dentro, 10",
+          url: "/imovel/aluguel-sao-paulo-sp/qa-1/",
+          current_best_price: "3500",
+          condo_fee: "500",
+          iptu: "100",
+          area_m2: 70,
+          bedrooms: 2,
+          inside_zone: true,
+          has_coordinates: true,
+          lat: -23.5,
+          lon: -46.7,
+          platforms_available: ["quintoandar"],
+        },
+      ],
+      total_count: 1,
+      cache_age_hours: 0.1,
+    } as never);
+    vi.mocked(getJob).mockResolvedValue({
+      id: "listings-job-1",
+      journey_id: "journey-1",
+      job_type: "listings_scrape",
+      state: "completed",
+      progress_percent: 100,
+      current_stage: "listings_scrape",
+      cancel_requested_at: null,
+      started_at: "2026-03-27T10:00:00Z",
+      finished_at: "2026-03-27T10:03:00Z",
+      worker_id: "worker-1",
+      error_code: null,
+      error_message: null,
+      created_at: "2026-03-27T10:00:00Z",
+      result_ref: {
+        scrape_diagnostics: {
+          status: "complete",
+          summary: {
+            total_scraped: 1,
+            platforms_completed: ["quintoandar"],
+            platforms_failed: [],
+          },
+          platforms: {},
+        },
+      },
+    } as never);
+
+    await renderWithQueryClient();
+
+    const addButton = await screen.findByRole("button", { name: /Adicionar a lista de interesse/i });
+    fireEvent.click(addButton);
+
+    expect(useFavoritesStore.getState().favorites).toHaveLength(1);
+
+    await waitFor(() => {
+      expect(getZoneFavoriteAnalytics).toHaveBeenCalledWith("journey-1", "zone-fp-1", "rent", "residential");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Remover da lista de interesse/i }));
+
+    expect(useFavoritesStore.getState().favorites).toHaveLength(0);
   });
 });

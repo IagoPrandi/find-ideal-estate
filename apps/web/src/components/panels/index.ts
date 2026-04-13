@@ -1,4 +1,5 @@
 export * from "./ProgressTracker";
+export * from "./FavoritesPanel";
 export * from "./Step1Config";
 export * from "./Step2Transport";
 export * from "./Step3Zones";

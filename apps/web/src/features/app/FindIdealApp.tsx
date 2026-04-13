@@ -4,10 +4,10 @@ import { ChevronDown, Eye, EyeOff, Layers } from "lucide-react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { API_BASE, getBusLineDetails, getBusStopDetails, getJourneyTransportPoints, getJourneyZonesList, getPublicSafetyIncidentsForViewport, getTransportStopDetails, getZoneListings } from "../../api/client";
-import { WizardPanel } from "../../components/panels";
+import { FavoritesPanel, WizardPanel } from "../../components/panels";
 import { getPoiCategoryMeta, getZonePoiSelectionKey, sortPoiPoints, ZonePoiPointLike, zoneNeedsPoiBackfill } from "../../domain/poi";
 import { applyListingsPanelFilters, getListingDisplayPrice, getListingSelectionKey } from "../../lib/listingFormat";
-import { getIncludedGreenVegetationLevels, useJourneyStore, useUIStore } from "../../state";
+import { getIncludedGreenVegetationLevels, useFavoritesStore, useJourneyStore, useUIStore } from "../../state";
 
 const MAPTILER_KEY =
   import.meta.env.VITE_MAPTILER_API_KEY || (import.meta.env.MODE === "test" ? "test-maptiler-key" : "");
@@ -783,6 +783,7 @@ export function FindIdealApp() {
   const listingsJobId = useJourneyStore((state) => state.listingsJobId);
   const listingsFilters = useJourneyStore((state) => state.listingsFilters);
   const config = useJourneyStore((state) => state.config);
+  const isFavoritesPanelOpen = useFavoritesStore((state) => state.isPanelOpen);
   const setSelectedTransportId = useJourneyStore((state) => state.setSelectedTransportId);
   const setSelectedListingKey = useJourneyStore((state) => state.setSelectedListingKey);
   const setSelectedPoiKey = useJourneyStore((state) => state.setSelectedPoiKey);
@@ -1974,9 +1975,10 @@ export function FindIdealApp() {
   }
 
   return (
-    <main className="relative h-screen w-full overflow-hidden">
+    <main className={`find-ideal-app relative h-screen w-full overflow-hidden ${isFavoritesPanelOpen ? "find-ideal-app--favorites-open" : ""}`}>
       <div ref={mapContainerRef} className="h-full w-full" aria-label="Mapa principal" />
-      <div className="pointer-events-none absolute bottom-14 right-4 z-40 flex flex-col items-end gap-2">
+      <FavoritesPanel />
+      <div className="map-side-controls pointer-events-none absolute bottom-14 right-4 z-40 flex flex-col items-end gap-2">
         {isLayerMenuOpen ? (
           <div
             ref={layerMenuRef}

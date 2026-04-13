@@ -422,6 +422,27 @@ export const ZoneDashboardAnalyticsBackendSchema = z.object({
   })
 });
 
+export const ZoneFavoriteAnalyticsBackendSchema = z.object({
+  context: z.object({
+    zone_fingerprint: z.string(),
+    neighborhood_name: z.string().nullable().optional(),
+    city_name: z.string().nullable().optional(),
+    state_code: z.string().nullable().optional(),
+    zone_area_m2: z.number().nullable().optional()
+  }),
+  metrics: z.object({
+    zone_average_price: z.number().nullable().optional(),
+    zone_average_unit_price: z.number().nullable().optional(),
+    homicide_density_per_km2: z.number().nullable().optional(),
+    robbery_density_per_km2: z.number().nullable().optional(),
+    theft_density_per_km2: z.number().nullable().optional(),
+    crime_density_per_km2: z.number().nullable().optional(),
+    green_percentage: z.number().nullable().optional(),
+    flood_percentage: z.number().nullable().optional(),
+    flood_risk_label: z.string().nullable().optional()
+  })
+});
+
 export type PriceRollupRead = {
   id: string;
   date: string;
@@ -435,6 +456,7 @@ export type PriceRollupRead = {
 };
 
 export type ZoneDashboardAnalytics = z.output<typeof ZoneDashboardAnalyticsBackendSchema>;
+export type ZoneFavoriteAnalytics = z.output<typeof ZoneFavoriteAnalyticsBackendSchema>;
 
 export const TransportFeatureSchema = z.object({
   type: z.literal("Feature"),

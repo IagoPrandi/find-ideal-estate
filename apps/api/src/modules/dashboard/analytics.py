@@ -1641,3 +1641,92 @@ async def fetch_zone_dashboard_analytics(
             ),
         },
     }
+
+
+async def fetch_zone_favorite_analytics(
+    *,
+    journey_id: UUID,
+    zone_fingerprint: str,
+    search_type: str,
+    usage_type: str,
+) -> dict[str, Any]:
+    price_payload = await fetch_zone_dashboard_analytics(
+        journey_id=journey_id,
+        zone_fingerprint=zone_fingerprint,
+        property_id=None,
+        neighborhood_name=None,
+        city_name=None,
+        page="preco",
+        search_type=search_type,
+        usage_type=usage_type,
+        spatial_scope="inside_zone",
+        min_price=None,
+        max_price=None,
+        min_size=None,
+        max_size=None,
+    )
+    safety_payload = await fetch_zone_dashboard_analytics(
+        journey_id=journey_id,
+        zone_fingerprint=zone_fingerprint,
+        property_id=None,
+        neighborhood_name=None,
+        city_name=None,
+        page="seguranca",
+        search_type=search_type,
+        usage_type=usage_type,
+        spatial_scope="inside_zone",
+        min_price=None,
+        max_price=None,
+        min_size=None,
+        max_size=None,
+    )
+    environment_payload = await fetch_zone_dashboard_analytics(
+        journey_id=journey_id,
+        zone_fingerprint=zone_fingerprint,
+        property_id=None,
+        neighborhood_name=None,
+        city_name=None,
+        page="ambiente",
+        search_type=search_type,
+        usage_type=usage_type,
+        spatial_scope="inside_zone",
+        min_price=None,
+        max_price=None,
+        min_size=None,
+        max_size=None,
+    )
+
+    context = price_payload.get("context") or safety_payload.get("context") or environment_payload.get("context") or {}
+    zone_area_m2 = _safe_float(context.get("zone_area_m2"))
+    zone_area_km2 = _safe_ratio(zone_area_m2, _SQUARE_METERS_PER_KM2)
+    safety = safety_payload.get("safety") or {}
+    environment = environment_payload.get("environment") or {}
+    homicide_density_per_km2 = _safe_float(safety.get("homicide_density_per_km2"))
+    robbery_density_per_km2 = _safe_float(safety.get("robbery_density_per_km2"))
+    theft_density_per_km2 = _safe_ratio(float(int(safety.get("theft_count_365d") or 0)), zone_area_km2)
+    crime_density_components = [
+        value
+        for value in [homicide_density_per_km2, robbery_density_per_km2, theft_density_per_km2]
+        if value is not None
+    ]
+
+    return {
+        "context": {
+            "zone_fingerprint": zone_fingerprint,
+            "neighborhood_name": context.get("neighborhood_name"),
+            "city_name": context.get("city_name"),
+            "state_code": context.get("state_code"),
+            "zone_area_m2": zone_area_m2,
+        },
+        "metrics": {
+            "zone_average_price": _safe_float((price_payload.get("price") or {}).get("zone_average_price")),
+            "zone_average_unit_price": _safe_float((price_payload.get("price") or {}).get("zone_average_unit_price")),
+            "homicide_density_per_km2": homicide_density_per_km2,
+            "robbery_density_per_km2": robbery_density_per_km2,
+            "theft_density_per_km2": theft_density_per_km2,
+            "crime_density_per_km2": sum(crime_density_components) if crime_density_components else None,
+            "green_percentage": _safe_float(environment.get("green_percentage")),
+            "flood_percentage": _safe_float(environment.get("flood_percentage")),
+            "flood_risk_label": environment.get("flood_risk_label"),
+        },
+    }

@@ -105,6 +105,23 @@ class ZoneDashboardEnvironmentRead(BaseModel):
     flood_rank: DashboardRankRead | None = None
 
 
+class ZoneFavoriteMetricsRead(BaseModel):
+    zone_average_price: float | None = None
+    zone_average_unit_price: float | None = None
+    homicide_density_per_km2: float | None = None
+    robbery_density_per_km2: float | None = None
+    theft_density_per_km2: float | None = None
+    crime_density_per_km2: float | None = None
+    green_percentage: float | None = None
+    flood_percentage: float | None = None
+    flood_risk_label: str | None = None
+
+
+class ZoneFavoriteAnalyticsRead(BaseModel):
+    context: ZoneDashboardContextRead
+    metrics: ZoneFavoriteMetricsRead
+
+
 class ZoneDashboardAnalyticsRead(BaseModel):
     context: ZoneDashboardContextRead
     price: ZoneDashboardPriceRead

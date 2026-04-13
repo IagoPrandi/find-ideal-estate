@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FindIdealApp } from "./FindIdealApp";
-import { useJourneyStore, useUIStore } from "../../state";
+import { useFavoritesStore, useJourneyStore, useUIStore } from "../../state";
 import { getBusLineDetails, getBusStopDetails, getJourneyTransportPoints, getJourneyZonesList, getPublicSafetyIncidentsForViewport, getTransportStopDetails, getZoneListings } from "../../api/client";
 
 const mapEaseToMock = vi.fn();
@@ -25,6 +25,7 @@ function emitMapEvent(event: string, payload?: any) {
 }
 
 vi.mock("../../components/panels", () => ({
+  FavoritesPanel: () => <div>Favorites panel</div>,
   WizardPanel: () => <div>Wizard panel</div>
 }));
 
@@ -197,11 +198,16 @@ function renderWithQueryClient() {
     }
   });
 
-  return render(
-    <QueryClientProvider client={queryClient}>
-      <FindIdealApp />
-    </QueryClientProvider>
-  );
+  let view!: ReturnType<typeof render>;
+  act(() => {
+    view = render(
+      <QueryClientProvider client={queryClient}>
+        <FindIdealApp />
+      </QueryClientProvider>
+    );
+  });
+
+  return view;
 }
 
 describe("FindIdealApp", () => {
@@ -222,6 +228,7 @@ describe("FindIdealApp", () => {
 
     useJourneyStore.getState().resetJourney();
     useUIStore.getState().resetUI();
+    useFavoritesStore.getState().resetFavoritesState();
     useUIStore.setState((state) => ({ ...state, step: 6 }));
     useJourneyStore.setState((state) => ({
       ...state,
@@ -271,6 +278,19 @@ describe("FindIdealApp", () => {
       total_count: 1,
       cache_age_hours: 0.1
     } as never);
+  });
+
+  it("adds the open layout class when the favorites panel is visible", () => {
+    useFavoritesStore.setState((state) => ({
+      ...state,
+      isPanelOpen: true,
+    }));
+
+    renderWithQueryClient();
+
+    const main = screen.getByLabelText(/Mapa principal/i).closest("main");
+    expect(main).toHaveClass("find-ideal-app--favorites-open");
+    expect(document.querySelector(".map-side-controls")).not.toBeNull();
   });
 
   it("centers the map when a card selection is pushed into shared state", async () => {
