@@ -190,6 +190,16 @@ export const ListingsRequestResultBackendSchema = z.object({
   cache_age_hours: z.number().nullable().optional()
 });
 
+export const FavoriteListingBackendSchema = z.object({
+  listing_key: z.string(),
+  journey_id: z.string(),
+  zone_fingerprint: z.string(),
+  search_type: z.string(),
+  usage_type: z.string(),
+  saved_at: z.string(),
+  listing: ListingCardReadBackendSchema,
+});
+
 export const ListingsScrapePlatformDiagnosticsSchema = z.object({
   status: z.string().optional(),
   sequence: z.number().nullable().optional(),

@@ -3,14 +3,22 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Step6Analysis } from "./Step6Analysis";
 import { useFavoritesStore, useJourneyStore, useUIStore } from "../../state";
-import { getJob, getZoneDashboardAnalytics, getZoneFavoriteAnalytics, getZoneListings } from "../../api/client";
+import { deleteAccountFavorite, getJob, getZoneDashboardAnalytics, getZoneFavoriteAnalytics, getZoneListings, saveAccountFavorite } from "../../api/client";
+
+const useAuthMock = vi.fn();
 
 vi.mock("../../api/client", () => ({
   apiActionHint: (error: unknown) => (error instanceof Error ? error.message : "erro"),
+  deleteAccountFavorite: vi.fn(),
   getJob: vi.fn(),
   getZoneDashboardAnalytics: vi.fn(),
   getZoneFavoriteAnalytics: vi.fn(),
-  getZoneListings: vi.fn()
+  getZoneListings: vi.fn(),
+  saveAccountFavorite: vi.fn(),
+}));
+
+vi.mock("../../features/auth/AuthContext", () => ({
+  useAuth: () => useAuthMock(),
 }));
 
 const scrollIntoViewMock = vi.fn();
@@ -56,6 +64,16 @@ describe("Step6Analysis", () => {
     useJourneyStore.getState().resetJourney();
     useUIStore.getState().resetUI();
     useFavoritesStore.getState().resetFavoritesState();
+    useFavoritesStore.setState({ isAuthenticated: true });
+    useAuthMock.mockReturnValue({
+      authStatus: {
+        is_authenticated: true,
+        user: null,
+        session_expires_at: null,
+      },
+      isLoading: false,
+      openAuthModal: vi.fn(),
+    });
     useJourneyStore.setState((state) => ({
       ...state,
       journeyId: "journey-1",
@@ -325,6 +343,16 @@ describe("Step6Analysis", () => {
     await waitFor(() => {
       expect(getJob).toHaveBeenCalledWith("listings-job-1");
     });
+    vi.mocked(saveAccountFavorite).mockImplementation(async (payload) => ({
+      listingKey: `property:${payload.listing.property_id}`,
+      journeyId: payload.journeyId,
+      zoneFingerprint: payload.zoneFingerprint,
+      searchType: payload.searchType,
+      usageType: payload.usageType,
+      savedAt: "2026-03-27T10:00:00Z",
+      listing: payload.listing,
+    }) as never);
+    vi.mocked(deleteAccountFavorite).mockResolvedValue(undefined as never);
   });
 
   it("explains when scraping completed but no listings fell inside the zone", async () => {
@@ -1278,7 +1306,9 @@ describe("Step6Analysis", () => {
     const addButton = await screen.findByRole("button", { name: /Adicionar a lista de interesse/i });
     fireEvent.click(addButton);
 
-    expect(useFavoritesStore.getState().favorites).toHaveLength(1);
+    await waitFor(() => {
+      expect(useFavoritesStore.getState().favorites).toHaveLength(1);
+    });
 
     await waitFor(() => {
       expect(getZoneFavoriteAnalytics).toHaveBeenCalledWith("journey-1", "zone-fp-1", "rent", "residential");
@@ -1286,6 +1316,83 @@ describe("Step6Analysis", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /Remover da lista de interesse/i }));
 
-    expect(useFavoritesStore.getState().favorites).toHaveLength(0);
+    await waitFor(() => {
+      expect(useFavoritesStore.getState().favorites).toHaveLength(0);
+    });
+  });
+
+  it("opens the login modal when a guest clicks the favorite heart", async () => {
+    const openAuthModal = vi.fn();
+
+    useFavoritesStore.setState({ isAuthenticated: false });
+    useAuthMock.mockReturnValue({
+      authStatus: {
+        is_authenticated: false,
+        user: null,
+        session_expires_at: null,
+      },
+      isLoading: false,
+      openAuthModal,
+    });
+
+    vi.mocked(getZoneListings).mockResolvedValue({
+      source: "cache",
+      job_id: null,
+      freshness_status: "fresh",
+      listings: [
+        {
+          property_id: "prop-1",
+          platform: "quintoandar",
+          platform_listing_id: "qa-1",
+          address_normalized: "Rua Dentro, 10",
+          url: "/imovel/aluguel-sao-paulo-sp/qa-1/",
+          current_best_price: "3500",
+          condo_fee: "500",
+          iptu: "100",
+          area_m2: 70,
+          bedrooms: 2,
+          inside_zone: true,
+          has_coordinates: true,
+          lat: -23.5,
+          lon: -46.7,
+          platforms_available: ["quintoandar"],
+        },
+      ],
+      total_count: 1,
+      cache_age_hours: 0.1,
+    } as never);
+    vi.mocked(getJob).mockResolvedValue({
+      id: "listings-job-1",
+      journey_id: "journey-1",
+      job_type: "listings_scrape",
+      state: "completed",
+      progress_percent: 100,
+      current_stage: "listings_scrape",
+      cancel_requested_at: null,
+      started_at: "2026-03-27T10:00:00Z",
+      finished_at: "2026-03-27T10:03:00Z",
+      worker_id: "worker-1",
+      error_code: null,
+      error_message: null,
+      created_at: "2026-03-27T10:00:00Z",
+      result_ref: {
+        scrape_diagnostics: {
+          status: "complete",
+          summary: {
+            total_scraped: 1,
+            platforms_completed: ["quintoandar"],
+            platforms_failed: [],
+          },
+          platforms: {},
+        },
+      },
+    } as never);
+
+    await renderWithQueryClient();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Entre para salvar na sua conta/i }));
+
+    expect(openAuthModal).toHaveBeenCalledWith("login");
+    expect(saveAccountFavorite).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,7 @@
 import { z, ZodSchema } from "zod";
 import {
   AuthStatusReadSchema,
+  FavoriteListingBackendSchema,
   FinalListingsJson,
   FinalizeResponse,
   JobRead,
@@ -8,6 +9,7 @@ import {
   JourneyRead,
   JourneyReadSchema,
   ListingsCollection,
+  ListingsScrapePlanResponseSchema,
   ListingsScrapeResponse,
   PriceRollupRead,
   PriceRollupReadSchema,
@@ -68,6 +70,27 @@ export class ApiError extends Error {
 }
 
 export type AuthStatusRead = z.output<typeof AuthStatusReadSchema>;
+export type FavoriteListingEntry = {
+  listingKey: string;
+  journeyId: string;
+  zoneFingerprint: string;
+  searchType: string;
+  usageType: string;
+  savedAt: string;
+  listing: ListingCardRead;
+};
+
+function mapFavoriteListingEntry(entry: z.output<typeof FavoriteListingBackendSchema>): FavoriteListingEntry {
+  return {
+    listingKey: entry.listing_key,
+    journeyId: entry.journey_id,
+    zoneFingerprint: entry.zone_fingerprint,
+    searchType: entry.search_type,
+    usageType: entry.usage_type,
+    savedAt: entry.saved_at,
+    listing: ListingCardReadBackendSchema.parse(entry.listing),
+  };
+}
 
 function legacyRunNotSupported(action: string): never {
   throw new ApiError(
@@ -281,6 +304,37 @@ export async function logoutAuth(): Promise<AuthStatusRead> {
   });
 }
 
+export async function getAccountFavorites(): Promise<FavoriteListingEntry[]> {
+  const response = await requestJson("/favorites", z.array(FavoriteListingBackendSchema));
+  return response.map(mapFavoriteListingEntry);
+}
+
+export async function saveAccountFavorite(payload: {
+  journeyId: string;
+  zoneFingerprint: string;
+  searchType: string;
+  usageType: string;
+  listing: ListingCardRead;
+}): Promise<FavoriteListingEntry> {
+  const response = await requestJson("/favorites", FavoriteListingBackendSchema, {
+    method: "POST",
+    body: {
+      journey_id: payload.journeyId,
+      zone_fingerprint: payload.zoneFingerprint,
+      search_type: payload.searchType,
+      usage_type: payload.usageType,
+      listing: payload.listing,
+    },
+  });
+  return mapFavoriteListingEntry(response);
+}
+
+export async function deleteAccountFavorite(listingKey: string): Promise<void> {
+  await requestJson(`/favorites/${encodeURIComponent(listingKey)}`, z.object({ message: z.string() }), {
+    method: "DELETE",
+  });
+}
+
 export type SearchAddressSuggestion = z.output<typeof SearchAddressSuggestionBackendSchema>;
 export async function getZoneAddressSuggestions(
   journeyId: string,
@@ -392,7 +446,10 @@ export async function getZoneDetail(runId: string, zoneUid: string): Promise<Zon
     train_station_count: 0,
     lines_used_for_generation: [],
     transport_points: [],
-    poi_points: zone.poi_points || [],
+    poi_points: (zone.poi_points || []).map((point) => ({
+      ...point,
+      kind: point.kind || "poi",
+    })),
     streets_count: 0,
     has_street_data: false,
     has_poi_data: Boolean((zone.poi_points && zone.poi_points.length > 0) || (zone.poi_counts && Object.keys(zone.poi_counts).length > 0)),

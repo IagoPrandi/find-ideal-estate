@@ -2,8 +2,6 @@ import { FormEvent, useMemo, useState } from "react";
 import { Loader2, LogIn, LogOut } from "lucide-react";
 import { useAuth } from "./AuthContext";
 
-type AuthMode = "login" | "register";
-
 const GOOGLE_AUTH_URL = String(import.meta.env.VITE_GOOGLE_AUTH_URL || "").trim();
 
 function formatExpiry(value: string | null | undefined) {
@@ -32,9 +30,21 @@ function GoogleIcon() {
 }
 
 export function AuthAccessCard() {
-  const { authStatus, errorMessage, isLoading, isSubmitting, clearError, login, logout, modeLabel, register } = useAuth();
-  const [isOpen, setIsOpen] = useState(false);
-  const [mode, setMode] = useState<AuthMode>("login");
+  const {
+    authModalMode,
+    authStatus,
+    closeAuthModal,
+    errorMessage,
+    isAuthModalOpen,
+    isLoading,
+    isSubmitting,
+    clearError,
+    login,
+    logout,
+    modeLabel,
+    openAuthModal,
+    register,
+  } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirmation, setPasswordConfirmation] = useState("");
@@ -45,14 +55,6 @@ export function AuthAccessCard() {
   const expiryLabel = useMemo(() => formatExpiry(authStatus.session_expires_at), [authStatus.session_expires_at]);
   const userName = authStatus.user?.display_name?.trim() || authStatus.user?.email?.split("@")[0] || "Conta";
 
-  const openModal = (nextMode: AuthMode) => {
-    clearError();
-    setGoogleNotice(null);
-    setFormNotice(null);
-    setMode(nextMode);
-    setIsOpen(true);
-  };
-
   const closeModal = () => {
     if (isSubmitting) {
       return;
@@ -60,7 +62,7 @@ export function AuthAccessCard() {
     clearError();
     setGoogleNotice(null);
     setFormNotice(null);
-    setIsOpen(false);
+    closeAuthModal();
   };
 
   const resetForm = () => {
@@ -80,7 +82,7 @@ export function AuthAccessCard() {
     }
     setFormNotice(null);
 
-    if (mode === "register") {
+    if (authModalMode === "register") {
       const normalizedConfirmation = passwordConfirmation.trim();
       if (!normalizedConfirmation) {
         setFormNotice("Repita a senha para concluir o cadastro.");
@@ -92,13 +94,13 @@ export function AuthAccessCard() {
       }
     }
 
-    const success = mode === "login"
+    const success = authModalMode === "login"
       ? await login({ email: normalizedEmail, password: normalizedPassword })
       : await register({ email: normalizedEmail, password: normalizedPassword, displayName });
 
     if (success) {
       resetForm();
-      setIsOpen(false);
+      closeAuthModal();
     }
   };
 
@@ -141,7 +143,11 @@ export function AuthAccessCard() {
               aria-label="Entrar na conta"
               title="Entrar"
               className="pointer-events-auto inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/80 bg-white/95 text-slate-600 shadow-md backdrop-blur-md transition hover:-translate-y-0.5 hover:text-pastel-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
-              onClick={() => openModal("login")}
+              onClick={() => {
+                setGoogleNotice(null);
+                setFormNotice(null);
+                openAuthModal("login");
+              }}
               disabled={isLoading}
             >
               {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
@@ -150,15 +156,15 @@ export function AuthAccessCard() {
         </div>
       </div>
 
-      {isOpen ? (
+      {isAuthModalOpen ? (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/35 px-4 py-8 backdrop-blur-sm">
           <div className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
             <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
               <div className="min-w-0">
                 <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Conta</p>
-                <h2 className="mt-2 text-lg font-semibold tracking-tight text-slate-900">{mode === "login" ? "Entrar para salvar a jornada" : "Criar conta"}</h2>
+                <h2 className="mt-2 text-lg font-semibold tracking-tight text-slate-900">{authModalMode === "login" ? "Entrar para salvar a jornada" : "Criar conta"}</h2>
                 <p className="mt-1 text-sm leading-relaxed text-slate-500">
-                  {mode === "login"
+                  {authModalMode === "login"
                     ? "Acesse sua conta para continuar de onde parou."
                     : "Crie sua conta sem perder a jornada iniciada nesta sessão."}
                 </p>
@@ -180,7 +186,7 @@ export function AuthAccessCard() {
 
               <div className="gem-divider" />
 
-              {mode === "register" ? (
+              {authModalMode === "register" ? (
                 <label className="grid gap-2 text-sm font-semibold text-slate-700">
                   Nome exibido
                   <input
@@ -217,7 +223,7 @@ export function AuthAccessCard() {
                 />
               </label>
 
-              {mode === "register" ? (
+              {authModalMode === "register" ? (
                 <label className="grid gap-2 text-sm font-semibold text-slate-700">
                   Repita a senha
                   <input
@@ -256,7 +262,7 @@ export function AuthAccessCard() {
                   className="gem-primary-button disabled:cursor-not-allowed disabled:opacity-60"
                   disabled={isSubmitting}
                 >
-                  {isSubmitting ? "Processando..." : modeLabel(mode)}
+                  {isSubmitting ? "Processando..." : modeLabel(authModalMode)}
                 </button>
                 <button
                   type="button"
@@ -265,11 +271,11 @@ export function AuthAccessCard() {
                     clearError();
                     setGoogleNotice(null);
                     setFormNotice(null);
-                    setMode(mode === "login" ? "register" : "login");
+                    openAuthModal(authModalMode === "login" ? "register" : "login");
                   }}
                   disabled={isSubmitting}
                 >
-                  {mode === "login" ? "Quero criar conta" : "Já tenho conta"}
+                  {authModalMode === "login" ? "Quero criar conta" : "Já tenho conta"}
                 </button>
               </div>
             </form>

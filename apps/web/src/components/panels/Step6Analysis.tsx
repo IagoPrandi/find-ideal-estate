@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { apiActionHint, getJob, getZoneDashboardAnalytics, getZoneFavoriteAnalytics, getZoneListings, type ListingPlatformVariantRead } from "../../api/client";
 import { ListingsScrapeDiagnosticsSchema, type ListingsScrapeDiagnostics, type ListingsScrapePlatformDiagnostics } from "../../api/schemas";
+import { useAuth } from "../../features/auth/AuthContext";
 import { buildZoneFavoriteAnalyticsQueryKey } from "../../lib/favorites";
 import { applyListingsPanelFilters, formatCurrencyBr, getListingDisplayPrice, getListingSelectionKey, resolveListingCardImageUrls, resolvePlatformUrl } from "../../lib/listingFormat";
 import { useFavoritesStore, useJourneyStore, useUIStore, type ListingsPanelFilters } from "../../state";
@@ -175,6 +176,7 @@ function buildPriceDashboardAnalyticsOptions(filters: ListingsPanelFilters, city
 
 export function Step6Analysis() {
   const queryClient = useQueryClient();
+  const { authStatus, isLoading: isAuthLoading, openAuthModal } = useAuth();
   const journeyId = useJourneyStore((state) => state.journeyId);
   const zoneFingerprint = useJourneyStore((state) => state.selectedZoneFingerprint);
   const listingsJobId = useJourneyStore((state) => state.listingsJobId);
@@ -188,6 +190,7 @@ export function Step6Analysis() {
   const setJobIds = useJourneyStore((state) => state.setJobIds);
   const toggleFavorite = useFavoritesStore((state) => state.toggleFavorite);
   const favoriteListings = useFavoritesStore((state) => state.favorites);
+  const isFavoritesHydrating = useFavoritesStore((state) => state.isHydrating);
   const listingCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const listingsPanelScrollRef = useRef<HTMLDivElement | null>(null);
   const lastScrolledListingKeyRef = useRef<string | null>(null);
@@ -543,9 +546,6 @@ export function Step6Analysis() {
                 </p>
               ) : null}
             </div>
-            <button type="button" className="rounded-lg bg-pastel-violet-50 px-3 py-1.5 text-sm font-medium text-pastel-violet-600 transition-colors hover:bg-pastel-violet-100" disabled>
-              Gerar relatório em PDF
-            </button>
           </div>
 
           {interruptedScrapeMessage ? (
@@ -818,6 +818,13 @@ export function Step6Analysis() {
               const hasAvailabilityPopover = Boolean(listing.duplication_badge && platformVariants.length > 1);
               const isSelected = listingKey !== "" && listingKey === selectedListingKey;
               const isSavedFavorite = listingKey ? favoriteListingKeySet.has(listingKey) : false;
+              const favoriteButtonLabel = isAuthLoading
+                ? "Verificando sua conta"
+                : !authStatus.is_authenticated
+                ? "Entre para salvar na sua conta"
+                : isSavedFavorite
+                  ? "Remover da lista de interesse"
+                  : "Adicionar a lista de interesse";
               const spatialBadge = !listing.has_coordinates
                 ? {
                     className: "border-slate-200 bg-slate-50 text-slate-600",
@@ -1047,24 +1054,28 @@ export function Step6Analysis() {
                         )}
                         <button
                           type="button"
-                          aria-label={isSavedFavorite ? "Remover da lista de interesse" : "Adicionar a lista de interesse"}
+                          aria-label={favoriteButtonLabel}
                           aria-pressed={isSavedFavorite}
-                          title={isSavedFavorite ? "Remover da lista de interesse" : "Adicionar a lista de interesse"}
-                          disabled={!listingKey || !journeyId || !zoneFingerprint}
-                          onClick={(event) => {
+                          title={favoriteButtonLabel}
+                          disabled={!listingKey || !journeyId || !zoneFingerprint || isFavoritesHydrating || isAuthLoading}
+                          onClick={async (event) => {
                             event.stopPropagation();
-                            if (!listingKey || !journeyId || !zoneFingerprint) {
+                            if (!listingKey || !journeyId || !zoneFingerprint || isFavoritesHydrating || isAuthLoading) {
+                              return;
+                            }
+                            if (!authStatus.is_authenticated) {
+                              openAuthModal("login");
                               return;
                             }
                             const nextWillBeSaved = !isSavedFavorite;
-                            toggleFavorite({
+                            const changed = await toggleFavorite({
                               listing,
                               journeyId,
                               zoneFingerprint,
                               searchType: config.type,
                               usageType: listingsFilters.usageType,
                             });
-                            if (!nextWillBeSaved) {
+                            if (!nextWillBeSaved || !changed) {
                               return;
                             }
                             void queryClient.prefetchQuery({

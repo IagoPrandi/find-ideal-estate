@@ -120,6 +120,24 @@ class ListingsRequestResult(BaseModel):
     cache_age_hours: float | None = None
 
 
+class FavoriteListingCreate(BaseModel):
+    journey_id: UUID
+    zone_fingerprint: str
+    search_type: str
+    usage_type: str
+    listing: ListingCardRead
+
+
+class FavoriteListingRead(BaseModel):
+    listing_key: str
+    journey_id: UUID
+    zone_fingerprint: str
+    search_type: str
+    usage_type: str
+    saved_at: datetime
+    listing: ListingCardRead
+
+
 class SearchAddressSuggestion(BaseModel):
     """Address suggestion for Step 5 combobox."""
     label: str

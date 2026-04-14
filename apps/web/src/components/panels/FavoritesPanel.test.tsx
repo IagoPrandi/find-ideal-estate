@@ -7,6 +7,9 @@ import { getZoneFavoriteAnalytics } from "../../api/client";
 
 vi.mock("../../api/client", () => ({
   getZoneFavoriteAnalytics: vi.fn(),
+  getAccountFavorites: vi.fn(),
+  saveAccountFavorite: vi.fn(),
+  deleteAccountFavorite: vi.fn(),
 }));
 
 function renderPanel() {
@@ -30,6 +33,7 @@ describe("FavoritesPanel", () => {
   beforeEach(() => {
     useFavoritesStore.getState().resetFavoritesState();
     useFavoritesStore.setState({
+      isAuthenticated: true,
       isPanelOpen: true,
       activeTab: "compare",
       selectedMetricIds: ["listing_total_price"],
@@ -137,7 +141,7 @@ describe("FavoritesPanel", () => {
   it("uses the selected metrics as the single source of truth for ranking and matrix columns", async () => {
     renderPanel();
 
-    expect(screen.getByText("2 imóveis salvos neste navegador.")).toBeInTheDocument();
+    expect(screen.getByText("2 imóveis salvos na sua conta.")).toBeInTheDocument();
 
     await waitFor(() => {
       expect(getZoneFavoriteAnalytics).toHaveBeenCalledTimes(2);

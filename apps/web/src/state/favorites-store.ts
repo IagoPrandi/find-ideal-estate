@@ -1,44 +1,44 @@
 import { create } from "zustand";
-import type { ListingCardRead } from "../api/client";
+import type { AuthStatusRead, FavoriteListingEntry, ListingCardRead } from "../api/client";
 import { ALL_FAVORITE_METRIC_IDS, DEFAULT_FAVORITE_METRIC_IDS, type FavoriteMetricId, isFavoriteMetricId } from "../lib/favorites";
 import { getListingSelectionKey } from "../lib/listingFormat";
 
 export type FavoritesPanelTab = "saved" | "compare";
 
-export type FavoriteListingEntry = {
-  listingKey: string;
-  journeyId: string;
-  zoneFingerprint: string;
-  searchType: string;
-  usageType: string;
-  savedAt: string;
-  listing: ListingCardRead;
-};
-
-type FavoritesPersistedState = {
-  favorites: FavoriteListingEntry[];
+type FavoritesPreferenceState = {
   selectedMetricIds: FavoriteMetricId[];
 };
 
-type FavoritesState = FavoritesPersistedState & {
+type FavoritesLegacyState = {
+  favorites?: FavoriteListingEntry[];
+  selectedMetricIds?: string[];
+};
+
+type FavoritesState = {
+  favorites: FavoriteListingEntry[];
+  selectedMetricIds: FavoriteMetricId[];
   isPanelOpen: boolean;
   activeTab: FavoritesPanelTab;
+  isAuthenticated: boolean;
+  isHydrating: boolean;
+  accountUserId: string | null;
   isFavorite: (listingKey: string) => boolean;
+  syncWithAuthStatus: (authStatus: AuthStatusRead) => Promise<void>;
   addFavorite: (payload: {
     listing: ListingCardRead;
     journeyId: string;
     zoneFingerprint: string;
     searchType: string;
     usageType: string;
-  }) => void;
-  removeFavorite: (listingKey: string) => void;
+  }) => Promise<boolean>;
+  removeFavorite: (listingKey: string) => Promise<boolean>;
   toggleFavorite: (payload: {
     listing: ListingCardRead;
     journeyId: string;
     zoneFingerprint: string;
     searchType: string;
     usageType: string;
-  }) => void;
+  }) => Promise<boolean>;
   setPanelOpen: (value: boolean) => void;
   togglePanel: () => void;
   setActiveTab: (value: FavoritesPanelTab) => void;
@@ -47,105 +47,222 @@ type FavoritesState = FavoritesPersistedState & {
   resetFavoritesState: () => void;
 };
 
-const FAVORITES_STORAGE_KEY = "find-ideal-estate:favorites:v1";
+const FAVORITES_PREFERENCES_STORAGE_KEY = "find-ideal-estate:favorite-preferences:v1";
+const LEGACY_FAVORITES_STORAGE_KEY = "find-ideal-estate:favorites:v1";
+let latestFavoritesSyncRequestId = 0;
 
 function normalizeMetricIds(metricIds: string[] | undefined) {
   const normalized = (metricIds || []).filter(isFavoriteMetricId);
   return normalized.length > 0 ? normalized : DEFAULT_FAVORITE_METRIC_IDS;
 }
 
-function loadPersistedState(): FavoritesPersistedState {
+function loadLegacyState(): FavoritesLegacyState {
+  if (typeof window === "undefined") {
+    return {};
+  }
+
+  try {
+    const raw = window.localStorage.getItem(LEGACY_FAVORITES_STORAGE_KEY);
+    if (!raw) {
+      return {};
+    }
+
+    return JSON.parse(raw) as FavoritesLegacyState;
+  } catch {
+    return {};
+  }
+}
+
+function loadPreferenceState(): FavoritesPreferenceState {
+  const legacyState = loadLegacyState();
   if (typeof window === "undefined") {
     return {
-      favorites: [],
-      selectedMetricIds: DEFAULT_FAVORITE_METRIC_IDS,
+      selectedMetricIds: normalizeMetricIds(legacyState.selectedMetricIds),
     };
   }
 
   try {
-    const raw = window.localStorage.getItem(FAVORITES_STORAGE_KEY);
+    const raw = window.localStorage.getItem(FAVORITES_PREFERENCES_STORAGE_KEY);
     if (!raw) {
       return {
-        favorites: [],
-        selectedMetricIds: DEFAULT_FAVORITE_METRIC_IDS,
+        selectedMetricIds: normalizeMetricIds(legacyState.selectedMetricIds),
       };
     }
 
-    const parsed = JSON.parse(raw) as Partial<FavoritesPersistedState>;
+    const parsed = JSON.parse(raw) as Partial<FavoritesPreferenceState>;
     return {
-      favorites: Array.isArray(parsed.favorites) ? parsed.favorites : [],
       selectedMetricIds: normalizeMetricIds(parsed.selectedMetricIds as string[] | undefined),
     };
   } catch {
     return {
-      favorites: [],
-      selectedMetricIds: DEFAULT_FAVORITE_METRIC_IDS,
+      selectedMetricIds: normalizeMetricIds(legacyState.selectedMetricIds),
     };
   }
 }
 
-function persistState(state: FavoritesPersistedState) {
+function persistPreferenceState(state: FavoritesPreferenceState) {
   if (typeof window === "undefined") {
     return;
   }
 
   window.localStorage.setItem(
-    FAVORITES_STORAGE_KEY,
+    FAVORITES_PREFERENCES_STORAGE_KEY,
     JSON.stringify({
-      favorites: state.favorites,
       selectedMetricIds: state.selectedMetricIds.filter((metricId) => ALL_FAVORITE_METRIC_IDS.includes(metricId)),
     }),
   );
 }
 
-const initialPersistedState = loadPersistedState();
+function clearLegacyFavoritesState() {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.removeItem(LEGACY_FAVORITES_STORAGE_KEY);
+}
+
+async function getAccountFavoritesApi() {
+  const client = await import("../api/client");
+  return client.getAccountFavorites();
+}
+
+async function saveAccountFavoriteApi(payload: {
+  listing: ListingCardRead;
+  journeyId: string;
+  zoneFingerprint: string;
+  searchType: string;
+  usageType: string;
+}) {
+  const client = await import("../api/client");
+  return client.saveAccountFavorite(payload);
+}
+
+async function deleteAccountFavoriteApi(listingKey: string) {
+  const client = await import("../api/client");
+  await client.deleteAccountFavorite(listingKey);
+}
+
+const initialPreferenceState = loadPreferenceState();
 
 export const useFavoritesStore = create<FavoritesState>((set, get) => ({
-  favorites: initialPersistedState.favorites,
-  selectedMetricIds: initialPersistedState.selectedMetricIds,
+  favorites: [],
+  selectedMetricIds: initialPreferenceState.selectedMetricIds,
   isPanelOpen: false,
   activeTab: "saved",
+  isAuthenticated: false,
+  isHydrating: false,
+  accountUserId: null,
   isFavorite: (listingKey) => get().favorites.some((favorite) => favorite.listingKey === listingKey),
-  addFavorite: ({ listing, journeyId, zoneFingerprint, searchType, usageType }) => {
-    const listingKey = getListingSelectionKey(listing);
-    if (!listingKey) {
+  syncWithAuthStatus: async (authStatus) => {
+    const nextUserId = authStatus.is_authenticated ? authStatus.user?.id || null : null;
+
+    if (!authStatus.is_authenticated || !nextUserId) {
+      latestFavoritesSyncRequestId += 1;
+      set({
+        favorites: [],
+        isAuthenticated: false,
+        isHydrating: false,
+        accountUserId: null,
+      });
       return;
     }
 
-    set((state) => {
-      const nextFavorites = [
-        {
-          listingKey,
-          journeyId,
-          zoneFingerprint,
-          searchType,
-          usageType,
-          savedAt: new Date().toISOString(),
-          listing,
-        },
-        ...state.favorites.filter((favorite) => favorite.listingKey !== listingKey),
-      ];
-      persistState({ favorites: nextFavorites, selectedMetricIds: state.selectedMetricIds });
-      return { favorites: nextFavorites };
+    const currentState = get();
+    if (currentState.isAuthenticated && currentState.accountUserId === nextUserId && !currentState.isHydrating) {
+      return;
+    }
+
+    const syncRequestId = ++latestFavoritesSyncRequestId;
+    set({
+      isAuthenticated: true,
+      isHydrating: true,
+      accountUserId: nextUserId,
     });
+
+    try {
+      let favorites = await getAccountFavoritesApi();
+      const legacyFavorites = Array.isArray(loadLegacyState().favorites) ? loadLegacyState().favorites || [] : [];
+
+      if (legacyFavorites.length > 0) {
+        for (const favorite of legacyFavorites) {
+          await saveAccountFavoriteApi({
+            listing: favorite.listing,
+            journeyId: favorite.journeyId,
+            zoneFingerprint: favorite.zoneFingerprint,
+            searchType: favorite.searchType,
+            usageType: favorite.usageType,
+          });
+        }
+        clearLegacyFavoritesState();
+        favorites = await getAccountFavoritesApi();
+      }
+
+      if (syncRequestId !== latestFavoritesSyncRequestId) {
+        return;
+      }
+
+      set({
+        favorites,
+        isAuthenticated: true,
+        isHydrating: false,
+        accountUserId: nextUserId,
+      });
+    } catch {
+      if (syncRequestId !== latestFavoritesSyncRequestId) {
+        return;
+      }
+
+      set({
+        favorites: [],
+        isAuthenticated: true,
+        isHydrating: false,
+        accountUserId: nextUserId,
+      });
+    }
   },
-  removeFavorite: (listingKey) => {
-    set((state) => {
-      const nextFavorites = state.favorites.filter((favorite) => favorite.listingKey !== listingKey);
-      persistState({ favorites: nextFavorites, selectedMetricIds: state.selectedMetricIds });
-      return { favorites: nextFavorites };
-    });
+  addFavorite: async ({ listing, journeyId, zoneFingerprint, searchType, usageType }) => {
+    if (!get().isAuthenticated) {
+      return false;
+    }
+
+    const listingKey = getListingSelectionKey(listing);
+    if (!listingKey) {
+      return false;
+    }
+
+    try {
+      const savedFavorite = await saveAccountFavoriteApi({ listing, journeyId, zoneFingerprint, searchType, usageType });
+      set((state) => ({
+        favorites: [savedFavorite, ...state.favorites.filter((favorite) => favorite.listingKey !== savedFavorite.listingKey)],
+      }));
+      return true;
+    } catch {
+      return false;
+    }
   },
-  toggleFavorite: (payload) => {
+  removeFavorite: async (listingKey) => {
+    if (!get().isAuthenticated) {
+      return false;
+    }
+
+    try {
+      await deleteAccountFavoriteApi(listingKey);
+      set((state) => ({
+        favorites: state.favorites.filter((favorite) => favorite.listingKey !== listingKey),
+      }));
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  toggleFavorite: async (payload) => {
     const listingKey = getListingSelectionKey(payload.listing);
     if (!listingKey) {
-      return;
+      return false;
     }
     if (get().isFavorite(listingKey)) {
-      get().removeFavorite(listingKey);
-      return;
+      return await get().removeFavorite(listingKey);
     }
-    get().addFavorite(payload);
+    return await get().addFavorite(payload);
   },
   setPanelOpen: (value) => set({ isPanelOpen: value }),
   togglePanel: () => set((state) => ({ isPanelOpen: !state.isPanelOpen })),
@@ -159,26 +276,30 @@ export const useFavoritesStore = create<FavoritesState>((set, get) => ({
       if (nextMetricIds.length === 0) {
         return state;
       }
-      persistState({ favorites: state.favorites, selectedMetricIds: nextMetricIds });
+      persistPreferenceState({ selectedMetricIds: nextMetricIds });
       return { selectedMetricIds: nextMetricIds };
     });
   },
   setSelectedMetricIds: (metricIds) => {
     const nextMetricIds = normalizeMetricIds(metricIds);
-    set((state) => {
-      persistState({ favorites: state.favorites, selectedMetricIds: nextMetricIds });
+    set(() => {
+      persistPreferenceState({ selectedMetricIds: nextMetricIds });
       return { selectedMetricIds: nextMetricIds };
     });
   },
   resetFavoritesState: () => {
     if (typeof window !== "undefined") {
-      window.localStorage.removeItem(FAVORITES_STORAGE_KEY);
+      window.localStorage.removeItem(FAVORITES_PREFERENCES_STORAGE_KEY);
+      window.localStorage.removeItem(LEGACY_FAVORITES_STORAGE_KEY);
     }
     set({
       favorites: [],
       selectedMetricIds: DEFAULT_FAVORITE_METRIC_IDS,
       isPanelOpen: false,
       activeTab: "saved",
+      isAuthenticated: false,
+      isHydrating: false,
+      accountUserId: null,
     });
   },
 }));

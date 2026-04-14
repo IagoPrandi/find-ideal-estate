@@ -23,6 +23,7 @@ export function FavoritesPanel() {
   const selectedMetricIds = useFavoritesStore((state) => state.selectedMetricIds);
   const isPanelOpen = useFavoritesStore((state) => state.isPanelOpen);
   const activeTab = useFavoritesStore((state) => state.activeTab);
+  const isAuthenticated = useFavoritesStore((state) => state.isAuthenticated);
   const togglePanel = useFavoritesStore((state) => state.togglePanel);
   const setActiveTab = useFavoritesStore((state) => state.setActiveTab);
   const removeFavorite = useFavoritesStore((state) => state.removeFavorite);
@@ -167,8 +168,10 @@ export function FavoritesPanel() {
             <h2 className="text-sm font-semibold text-slate-900">Painel de interesse</h2>
             <p className="mt-1 text-xs text-slate-500">
               {favorites.length === 0
-                ? "Salve imóveis na etapa 6 para montar ranking e matriz comparativa."
-                : `${favorites.length} ${favorites.length === 1 ? "imóvel salvo" : "imóveis salvos"} neste navegador.`}
+                ? (isAuthenticated
+                    ? "Salve imóveis na etapa 6 para montar ranking e matriz comparativa na sua conta."
+                    : "Entre na sua conta para salvar imóveis e comparar favoritos em qualquer navegador.")
+                : `${favorites.length} ${favorites.length === 1 ? "imóvel salvo" : "imóveis salvos"} na sua conta.`}
             </p>
           </div>
           <div className="inline-flex rounded-2xl border border-slate-200 bg-slate-50 p-1 text-xs font-semibold text-slate-600">
@@ -193,8 +196,12 @@ export function FavoritesPanel() {
           <div className="panel-scroll flex-1 space-y-3 overflow-y-auto px-5 py-4">
             {favorites.length === 0 ? (
               <div className="rounded-[24px] border border-dashed border-slate-300 bg-slate-50/80 px-5 py-8 text-center">
-                <p className="text-sm font-semibold text-slate-700">Nenhum imóvel salvo ainda</p>
-                <p className="mt-2 text-xs leading-relaxed text-slate-500">Use o coração ao lado do link do anúncio para adicionar itens à lista de interesse.</p>
+                <p className="text-sm font-semibold text-slate-700">{isAuthenticated ? "Nenhum imóvel salvo ainda" : "Entre para usar favoritos"}</p>
+                <p className="mt-2 text-xs leading-relaxed text-slate-500">
+                  {isAuthenticated
+                    ? "Use o coração ao lado do link do anúncio para adicionar itens à lista de interesse da sua conta."
+                    : "Os favoritos agora são associados à sua conta, não mais ao navegador atual."}
+                </p>
               </div>
             ) : (
               favorites.map((favorite) => {
@@ -223,7 +230,9 @@ export function FavoritesPanel() {
                           <button
                             type="button"
                             aria-label="Remover da lista de interesse"
-                            onClick={() => removeFavorite(favorite.listingKey)}
+                            onClick={() => {
+                              void removeFavorite(favorite.listingKey);
+                            }}
                             className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 text-rose-600 transition hover:border-rose-300 hover:bg-rose-100"
                             title="Remover da lista de interesse"
                           >

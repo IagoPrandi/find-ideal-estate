@@ -180,6 +180,7 @@ body {
 }
 
 .favorites-shell {
+  --favorites-panel-top-offset: 4.125rem;
   position: absolute;
   right: 1rem;
   top: 1rem;
@@ -219,7 +220,9 @@ body {
 .favorites-panel {
   pointer-events: auto;
   display: flex;
-  height: 100%;
+  align-self: flex-start;
+  height: calc(100% - var(--favorites-panel-top-offset));
+  margin-top: var(--favorites-panel-top-offset);
   width: min(50vw, 54rem);
   min-width: 34rem;
   flex-direction: column;
@@ -275,6 +278,7 @@ body {
   }
 
   .favorites-shell {
+    --favorites-panel-top-offset: 0rem;
     left: 1rem;
     right: 1rem;
     top: 1rem;
@@ -288,9 +292,11 @@ body {
   }
 
   .favorites-panel {
+    align-self: auto;
     width: 100%;
     min-width: 0;
     height: min(56vh, 40rem);
+    margin-top: 0;
   }
 
   .favorites-panel--closed {

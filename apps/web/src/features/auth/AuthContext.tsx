@@ -1,5 +1,6 @@
 import { createContext, ReactNode, startTransition, useContext, useEffect, useMemo, useState } from "react";
 import { ApiError, AuthStatusRead, getAuthStatus, loginAuth, logoutAuth, registerAuth } from "../../api/client";
+import { useFavoritesStore } from "../../state";
 
 type AuthMode = "login" | "register";
 
@@ -8,11 +9,15 @@ type AuthContextValue = {
   isLoading: boolean;
   isSubmitting: boolean;
   errorMessage: string | null;
+  isAuthModalOpen: boolean;
+  authModalMode: AuthMode;
   refresh: () => Promise<void>;
   login: (payload: { email: string; password: string }) => Promise<boolean>;
   register: (payload: { email: string; password: string; displayName?: string }) => Promise<boolean>;
   logout: () => Promise<void>;
   clearError: () => void;
+  openAuthModal: (mode?: AuthMode) => void;
+  closeAuthModal: () => void;
   modeLabel: (mode: AuthMode) => string;
 };
 
@@ -32,10 +37,13 @@ function toMessage(error: unknown): string {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const syncFavoritesWithAuthStatus = useFavoritesStore((state) => state.syncWithAuthStatus);
   const [authStatus, setAuthStatus] = useState<AuthStatusRead>(GUEST_STATUS);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authModalMode, setAuthModalMode] = useState<AuthMode>("login");
 
   const refresh = async () => {
     setIsLoading(true);
@@ -57,6 +65,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void refresh();
   }, []);
+
+  useEffect(() => {
+    void syncFavoritesWithAuthStatus(authStatus);
+  }, [authStatus, syncFavoritesWithAuthStatus]);
 
   const login = async (payload: { email: string; password: string }) => {
     setIsSubmitting(true);
@@ -111,18 +123,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const clearError = () => setErrorMessage(null);
+
+  const openAuthModal = (mode: AuthMode = "login") => {
+    clearError();
+    setAuthModalMode(mode);
+    setIsAuthModalOpen(true);
+  };
+
+  const closeAuthModal = () => {
+    setIsAuthModalOpen(false);
+  };
+
   const value = useMemo<AuthContextValue>(() => ({
     authStatus,
     isLoading,
     isSubmitting,
     errorMessage,
+    isAuthModalOpen,
+    authModalMode,
     refresh,
     login,
     register,
     logout,
-    clearError: () => setErrorMessage(null),
+    clearError,
+    openAuthModal,
+    closeAuthModal,
     modeLabel: (mode) => (mode === "login" ? "Entrar" : "Criar conta")
-  }), [authStatus, errorMessage, isLoading, isSubmitting]);
+  }), [authModalMode, authStatus, errorMessage, isAuthModalOpen, isLoading, isSubmitting]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

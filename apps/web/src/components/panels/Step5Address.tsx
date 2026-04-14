@@ -24,7 +24,7 @@ export function Step5Address() {
   const [error, setError] = useState<string | null>(null);
   const [activeSuggestionIndex, setActiveSuggestionIndex] = useState(-1);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
-  const [scrapePlan, setScrapePlan] = useState<ListingsScrapePlanResponse | null>(null);
+  const [, setScrapePlan] = useState<ListingsScrapePlanResponse | null>(null);
 
   async function submitAddressSelection(address: {
     label: string;
@@ -153,15 +153,6 @@ export function Step5Address() {
           <Info className="mt-0.5 h-5 w-5 shrink-0 text-pastel-violet-500" />
           <p>Ao clicar no campo, a lista mostra os endereços encontrados dentro da zona selecionada. Se preferir, digite para filtrar a lista.</p>
         </div>
-
-        {scrapePlan ? (
-          <div className="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600 shadow-sm">
-            <p className="font-medium text-slate-800">Paginação estimada do scraping web: {scrapePlan.total_pages} páginas</p>
-            <p className="mt-1 text-xs text-slate-500">
-              {scrapePlan.platforms.map((item) => `${item.platform}: ${item.max_pages}`).join(" • ")}
-            </p>
-          </div>
-        ) : null}
 
         <div className="space-y-2">
           <label htmlFor={inputId} className="text-sm font-medium text-slate-700">Endereço de busca na zona</label>

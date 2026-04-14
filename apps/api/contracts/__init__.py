@@ -34,6 +34,8 @@ from .enums import JobState, JobType, JourneyState
 from .jobs import JobCancelAccepted, JobCreate, JobEventRead, JobRead
 from .journeys import JourneyCreate, JourneyRead, JourneyReferencePoint, JourneyUpdate
 from .listings import (
+    FavoriteListingCreate,
+    FavoriteListingRead,
     ListingAdRead,
     ListingCardRead,
     ListingPlatformVariantRead,
@@ -63,6 +65,8 @@ __all__ = [
     "AuthRegisterRequest",
     "AuthStatusRead",
     "AuthUserRead",
+    "FavoriteListingCreate",
+    "FavoriteListingRead",
     "DashboardDistributionBucketRead",
     "DashboardPriceHistoryPointRead",
     "DashboardRankRead",
