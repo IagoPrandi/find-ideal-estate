@@ -172,6 +172,12 @@ body {
   pointer-events: none;
 }
 
+.find-ideal-app {
+  --favorites-panel-top-offset: 4.125rem;
+  --favorites-toggle-desktop-height: 3.25rem;
+  --favorites-controls-gap: 0.75rem;
+}
+
 .auth-shell__content {
   display: flex;
   align-items: center;
@@ -180,14 +186,13 @@ body {
 }
 
 .favorites-shell {
-  --favorites-panel-top-offset: 4.125rem;
   position: absolute;
   right: 1rem;
   top: 1rem;
   bottom: 1rem;
   z-index: 45;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 0.75rem;
   pointer-events: none;
 }
@@ -197,7 +202,8 @@ body {
   display: inline-flex;
   align-items: center;
   gap: 0.5rem;
-  align-self: center;
+  align-self: flex-start;
+  margin-top: var(--favorites-panel-top-offset);
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.72);
   background: rgba(255, 255, 255, 0.96);
@@ -251,6 +257,10 @@ body {
   transition: right 220ms ease;
 }
 
+.find-ideal-app .map-layer-menu {
+  max-height: calc(100vh - (1rem + var(--favorites-panel-top-offset) + var(--favorites-toggle-desktop-height) + var(--favorites-controls-gap)) - 6rem);
+}
+
 .find-ideal-app .maplibregl-ctrl-bottom-right {
   transition: right 220ms ease;
 }
@@ -289,6 +299,7 @@ body {
 
   .favorites-toggle {
     align-self: flex-end;
+    margin-top: 0;
   }
 
   .favorites-panel {
@@ -307,6 +318,10 @@ body {
 
   .find-ideal-app--favorites-open .map-side-controls {
     right: 1rem;
+  }
+
+  .find-ideal-app .map-layer-menu {
+    max-height: min(72vh, 38rem);
   }
 
   .find-ideal-app--favorites-open .maplibregl-ctrl-bottom-right {

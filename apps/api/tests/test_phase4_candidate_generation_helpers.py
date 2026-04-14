@@ -38,6 +38,17 @@ def test_bucketize_candidates_keeps_fastest_per_bucket() -> None:
     assert [candidate.source_point_id for candidate in bucketed] == ["a", "c"]
 
 
+def test_bucketize_candidates_keeps_spatially_distinct_points_within_same_bucket() -> None:
+    candidates = [
+        PointCandidate("bus:a", "bus", "a", 14.58, -46.682227, -23.586955),
+        PointCandidate("bus:b", "bus", "b", 15.47, -46.689166, -23.573286),
+    ]
+
+    bucketed = _bucketize_candidates(candidates, 2, min_spatial_separation_meters=50.0)
+
+    assert [candidate.source_point_id for candidate in bucketed] == ["a", "b"]
+
+
 def test_dedupe_candidates_and_buffer_generation_are_spatially_stable() -> None:
     candidates = [
         PointCandidate("rail:a", "rail", "a", 8.0, -46.6300, -23.5500),

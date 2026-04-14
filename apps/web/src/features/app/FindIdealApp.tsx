@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, Eye, EyeOff, Layers } from "lucide-react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { API_BASE, getBusLineDetails, getBusStopDetails, getJourneyTransportPoints, getJourneyZonesList, getPublicSafetyIncidentsForViewport, getTransportStopDetails, getZoneListings } from "../../api/client";
+import { API_BASE, getBusLineDetails, getBusStopDetails, getJourneyTransportPoints, getJourneyZonesList, getPublicSafetyIncidentsForViewport, getSelectedTransportTrace, getTransportStopDetails, getZoneListings } from "../../api/client";
 import { FavoritesPanel, WizardPanel } from "../../components/panels";
 import { AuthAccessCard } from "../auth/AuthAccessCard";
 import { getPoiCategoryMeta, getZonePoiSelectionKey, sortPoiPoints, ZonePoiPointLike, zoneNeedsPoiBackfill } from "../../domain/poi";
@@ -20,6 +20,7 @@ const apiTileUrl = (path: string) => `${API_BASE}${path}`;
 
 const BUS_LAYER_LIST = ["bus-line-layer", "bus-stop-layer", "bus-terminal-layer"] as const;
 const TRANSPORT_CANDIDATES_SOURCE_ID = "transport-candidates-source-runtime";
+const SELECTED_TRANSPORT_TRACE_SOURCE_ID = "selected-transport-trace-source-runtime";
 const ZONES_SOURCE_ID = "journey-zones-source-runtime";
 const ZONE_POIS_SOURCE_ID = "journey-zone-pois-source-runtime";
 const LISTINGS_SOURCE_ID = "journey-listings-source-runtime";
@@ -90,6 +91,18 @@ type SequentialLayerGroupKey = "transportPoints" | "transportLines" | "green" | 
 type SequentialLayerSettings = {
   layerVisibility: Record<MapOverlayLayerKey, boolean>;
   greenEnabled: boolean;
+};
+
+type TransportCandidatePoint = {
+  id: string;
+  lon: number;
+  lat: number;
+  name?: string | null;
+  route_count: number;
+  source: string;
+  external_id?: string | null;
+  route_ids?: string[];
+  modal_types?: string[];
 };
 
 const DEFAULT_LAYER_VISIBILITY: Record<MapOverlayLayerKey, boolean> = {
@@ -256,7 +269,7 @@ const getMapViewportBounds = (map: maplibregl.Map) => {
 const getZonePalette = (index: number) => ZONE_COLOR_PALETTE[index % ZONE_COLOR_PALETTE.length];
 
 const toTransportCandidatesFeatureCollection = (
-  points: Array<{ id: string; lon: number; lat: number; name?: string | null; route_count: number; source: string; external_id?: string | null }>,
+  points: TransportCandidatePoint[],
   selectedTransportId: string | null
 ): GeoJSON.FeatureCollection => ({
   type: "FeatureCollection",
@@ -767,7 +780,7 @@ export function FindIdealApp() {
   const [isolatedSafetyGroup, setIsolatedSafetyGroup] = useState<SafetyGroupKey | null>(null);
   const [safetyGroupVisibilityBeforeIsolation, setSafetyGroupVisibilityBeforeIsolation] = useState<Record<SafetyGroupKey, boolean> | null>(null);
   const [visibleSequentialLayerGroupIndex, setVisibleSequentialLayerGroupIndex] = useState(-1);
-  const [transportCandidatePoints, setTransportCandidatePoints] = useState<Array<{ id: string; lon: number; lat: number; name?: string | null; route_count: number; source: string; external_id?: string | null }>>([]);
+  const [transportCandidatePoints, setTransportCandidatePoints] = useState<TransportCandidatePoint[]>([]);
   const [selectedZonePoiState, setSelectedZonePoiState] = useState<{ zoneFingerprint: string | null; poiPoints: ZonePoiPointLike[] }>({
     zoneFingerprint: null,
     poiPoints: []
@@ -1004,6 +1017,11 @@ export function FindIdealApp() {
         data: EMPTY_FEATURE_COLLECTION,
       });
 
+      map.addSource(SELECTED_TRANSPORT_TRACE_SOURCE_ID, {
+        type: "geojson",
+        data: EMPTY_FEATURE_COLLECTION,
+      });
+
       map.addSource(ZONES_SOURCE_ID, {
         type: "geojson",
         data: EMPTY_FEATURE_COLLECTION,
@@ -1081,6 +1099,84 @@ export function FindIdealApp() {
           "line-color": "#0f766e",
           "line-width": ["interpolate", ["linear"], ["zoom"], 8, 1.5, 12, 2.8, 15, 4.2],
           "line-opacity": 0.88,
+        },
+      });
+
+      map.addLayer({
+        id: "selected-bus-trace-casing-layer",
+        type: "line",
+        source: SELECTED_TRANSPORT_TRACE_SOURCE_ID,
+        filter: ["==", ["get", "mode"], "bus"],
+        layout: { visibility: "none", "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": "#ffffff",
+          "line-width": ["interpolate", ["linear"], ["zoom"], 8, 4.2, 12, 6.8, 15, 9.2],
+          "line-opacity": 0.96,
+        },
+      });
+
+      map.addLayer({
+        id: "selected-bus-trace-layer",
+        type: "line",
+        source: SELECTED_TRANSPORT_TRACE_SOURCE_ID,
+        filter: ["==", ["get", "mode"], "bus"],
+        layout: { visibility: "none", "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": "#5b21b6",
+          "line-width": ["interpolate", ["linear"], ["zoom"], 8, 2.4, 12, 4.4, 15, 6.4],
+          "line-opacity": 0.98,
+        },
+      });
+
+      map.addLayer({
+        id: "selected-metro-trace-casing-layer",
+        type: "line",
+        source: SELECTED_TRANSPORT_TRACE_SOURCE_ID,
+        filter: ["==", ["get", "mode"], "metro"],
+        layout: { visibility: "none", "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": "#ffffff",
+          "line-width": ["interpolate", ["linear"], ["zoom"], 8, 4.6, 12, 7.4, 15, 10],
+          "line-opacity": 0.96,
+        },
+      });
+
+      map.addLayer({
+        id: "selected-metro-trace-layer",
+        type: "line",
+        source: SELECTED_TRANSPORT_TRACE_SOURCE_ID,
+        filter: ["==", ["get", "mode"], "metro"],
+        layout: { visibility: "none", "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": "#e11d48",
+          "line-width": ["interpolate", ["linear"], ["zoom"], 8, 2.8, 12, 4.8, 15, 6.8],
+          "line-opacity": 0.98,
+        },
+      });
+
+      map.addLayer({
+        id: "selected-train-trace-casing-layer",
+        type: "line",
+        source: SELECTED_TRANSPORT_TRACE_SOURCE_ID,
+        filter: ["==", ["get", "mode"], "train"],
+        layout: { visibility: "none", "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": "#ffffff",
+          "line-width": ["interpolate", ["linear"], ["zoom"], 8, 4.4, 12, 7, 15, 9.6],
+          "line-opacity": 0.96,
+        },
+      });
+
+      map.addLayer({
+        id: "selected-train-trace-layer",
+        type: "line",
+        source: SELECTED_TRANSPORT_TRACE_SOURCE_ID,
+        filter: ["==", ["get", "mode"], "train"],
+        layout: { visibility: "none", "line-cap": "round", "line-join": "round" },
+        paint: {
+          "line-color": "#0f766e",
+          "line-width": ["interpolate", ["linear"], ["zoom"], 8, 2.6, 12, 4.6, 15, 6.6],
+          "line-opacity": 0.98,
         },
       });
 
@@ -1777,6 +1873,47 @@ export function FindIdealApp() {
     const activeMap = map;
 
     let cancelled = false;
+    let requestId = 0;
+
+    async function syncSelectedTransportTrace() {
+      if (!journeyId || step < 2 || !selectedTransportId) {
+        setGeoJsonSourceData(activeMap, SELECTED_TRANSPORT_TRACE_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
+        return;
+      }
+
+      const selectedPoint = transportCandidatePoints.find((point) => point.id === selectedTransportId);
+      if (!selectedPoint?.external_id) {
+        setGeoJsonSourceData(activeMap, SELECTED_TRANSPORT_TRACE_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
+        return;
+      }
+
+      const currentRequestId = ++requestId;
+      const routeIds = Array.isArray(selectedPoint.route_ids) ? selectedPoint.route_ids : [];
+      const trace = await getSelectedTransportTrace(selectedPoint.source, selectedPoint.external_id, routeIds);
+      if (!cancelled && currentRequestId === requestId) {
+        setGeoJsonSourceData(activeMap, SELECTED_TRANSPORT_TRACE_SOURCE_ID, trace);
+      }
+    }
+
+    void syncSelectedTransportTrace().catch(() => {
+      if (!cancelled) {
+        setGeoJsonSourceData(activeMap, SELECTED_TRANSPORT_TRACE_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isMapReady, journeyId, selectedTransportId, step, transportCandidatePoints]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isMapReady) {
+      return;
+    }
+    const activeMap = map;
+
+    let cancelled = false;
     let pollTimeout: number | undefined;
 
     async function syncZones() {
@@ -1944,11 +2081,18 @@ export function FindIdealApp() {
     const transportLinesVisible = isSequentialLayerGroupVisible("transportLines", visibleSequentialLayerGroupIndex, sequentialLayerSettings);
     const greenVisible = isSequentialLayerGroupVisible("green", visibleSequentialLayerGroupIndex, sequentialLayerSettings);
     const floodVisible = isSequentialLayerGroupVisible("flood", visibleSequentialLayerGroupIndex, sequentialLayerSettings);
+    const selectedTraceVisible = transportLinesVisible && Boolean(selectedTransportId);
 
     map.setLayoutProperty("bus-line-layer", "visibility", transportLinesVisible && layerVisibility.routes ? "visible" : "none");
     map.setLayoutProperty("bus-line-direction-layer", "visibility", transportLinesVisible && layerVisibility.routes ? "visible" : "none");
     map.setLayoutProperty("metro-line-layer", "visibility", transportLinesVisible && layerVisibility.metro ? "visible" : "none");
     map.setLayoutProperty("train-line-layer", "visibility", transportLinesVisible && layerVisibility.train ? "visible" : "none");
+    map.setLayoutProperty("selected-bus-trace-casing-layer", "visibility", selectedTraceVisible && layerVisibility.routes ? "visible" : "none");
+    map.setLayoutProperty("selected-bus-trace-layer", "visibility", selectedTraceVisible && layerVisibility.routes ? "visible" : "none");
+    map.setLayoutProperty("selected-metro-trace-casing-layer", "visibility", selectedTraceVisible && layerVisibility.metro ? "visible" : "none");
+    map.setLayoutProperty("selected-metro-trace-layer", "visibility", selectedTraceVisible && layerVisibility.metro ? "visible" : "none");
+    map.setLayoutProperty("selected-train-trace-casing-layer", "visibility", selectedTraceVisible && layerVisibility.train ? "visible" : "none");
+    map.setLayoutProperty("selected-train-trace-layer", "visibility", selectedTraceVisible && layerVisibility.train ? "visible" : "none");
     map.setLayoutProperty("bus-stop-layer", "visibility", transportPointsVisible && layerVisibility.busStops ? "visible" : "none");
     map.setLayoutProperty("bus-terminal-layer", "visibility", transportPointsVisible && layerVisibility.busStops ? "visible" : "none");
     map.setLayoutProperty("metro-station-layer", "visibility", transportPointsVisible && layerVisibility.metro ? "visible" : "none");
@@ -1965,7 +2109,7 @@ export function FindIdealApp() {
     map.setLayoutProperty("flood-layer", "visibility", floodVisible ? "visible" : "none");
     map.setLayoutProperty("green-layer", "visibility", greenVisible ? "visible" : "none");
     map.setFilter("green-layer", ["in", "vegetation_level", ...getIncludedGreenVegetationLevels(config.greenVegetationLevel)] as never);
-  }, [config, isMapReady, layerVisibility, visibleSequentialLayerGroupIndex]);
+  }, [config, isMapReady, layerVisibility, selectedTransportId, visibleSequentialLayerGroupIndex]);
 
   if (mapError) {
     return (
@@ -1984,7 +2128,7 @@ export function FindIdealApp() {
         {isLayerMenuOpen ? (
           <div
             ref={layerMenuRef}
-            className="pointer-events-auto flex max-h-[min(72vh,38rem)] w-[21rem] flex-col overflow-hidden rounded-[1.75rem] border border-slate-200 bg-white/95 shadow-xl backdrop-blur-md"
+            className="map-layer-menu pointer-events-auto flex max-h-full w-[21rem] flex-col overflow-hidden rounded-[1.75rem] border border-slate-200 bg-white/95 shadow-xl backdrop-blur-md"
           >
             <p className="px-4 pb-2 pt-4 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Camadas do mapa</p>
             <div className="panel-scroll min-h-0 overflow-y-auto pb-2">

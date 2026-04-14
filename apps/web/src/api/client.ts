@@ -26,6 +26,7 @@ import {
   TransportLayersResponseSchema,
   TransportPointRead,
   TransportPointReadSchema,
+  TransportTraceResponseSchema,
   TransportStopsResponse,
   TransportStopsResponseSchema,
   ZoneDetailResponse,
@@ -525,6 +526,24 @@ export async function getJourneyTransportPoints(journeyId: string): Promise<Tran
     `/journeys/${journeyId}/transport-points`,
     z.array(TransportPointReadSchema)
   )) as TransportPointRead[];
+}
+
+export async function getSelectedTransportTrace(
+  sourceKind: string,
+  externalId: string,
+  routeIds: string[] = []
+): Promise<GeoJSON.FeatureCollection<GeoJSON.Geometry>> {
+  const params = new URLSearchParams({
+    source_kind: sourceKind,
+    external_id: externalId,
+  });
+  for (const routeId of routeIds) {
+    params.append("route_ids", routeId);
+  }
+  return await requestJson(
+    `/transport/selected-trace?${params.toString()}`,
+    TransportTraceResponseSchema
+  ) as GeoJSON.FeatureCollection<GeoJSON.Geometry>;
 }
 
 export async function getBusStopDetails(stopId: string): Promise<TransportBusDetailResponse> {

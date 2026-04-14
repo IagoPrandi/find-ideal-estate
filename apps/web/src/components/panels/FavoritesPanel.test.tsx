@@ -180,4 +180,21 @@ describe("FavoritesPanel", () => {
     expect(within(ranking).getAllByText(/Rua Mais/i)[0]).toHaveTextContent("Rua Mais Verde, 20");
     expect(within(ranking).getByText("Venceu 2 de 2 métricas selecionadas")).toBeInTheDocument();
   });
+
+  it("shows the current ranking position inside each saved favorite card", async () => {
+    useFavoritesStore.setState((state) => ({
+      ...state,
+      activeTab: "saved",
+      selectedMetricIds: ["listing_total_price", "zone_green_percentage"],
+    }));
+
+    renderPanel();
+
+    await waitFor(() => {
+      expect(getZoneFavoriteAnalytics).toHaveBeenCalled();
+    });
+
+    expect(await screen.findByTestId("favorite-saved-rank-property:cheap")).toHaveTextContent("2º no ranking");
+    expect(screen.getByTestId("favorite-saved-rank-property:green")).toHaveTextContent("1º no ranking");
+  });
 });

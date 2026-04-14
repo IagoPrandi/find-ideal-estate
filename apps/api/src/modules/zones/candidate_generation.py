@@ -96,15 +96,41 @@ def _distance_squared(x1: float, y1: float, x2: float, y2: float) -> float:
     return dx * dx + dy * dy
 
 
-def _bucketize_candidates(candidates: list[PointCandidate], step_minutes: int) -> list[PointCandidate]:
+def _bucketize_candidates(
+    candidates: list[PointCandidate],
+    step_minutes: int,
+    *,
+    min_spatial_separation_meters: float | None = None,
+) -> list[PointCandidate]:
     step = max(step_minutes, 1)
-    selected: dict[int, PointCandidate] = {}
+    if not candidates:
+        return []
+
+    if min_spatial_separation_meters is None or min_spatial_separation_meters <= 0:
+        selected: dict[int, PointCandidate] = {}
+        for candidate in sorted(candidates, key=lambda item: item.travel_time_minutes):
+            bucket = int(math.floor(candidate.travel_time_minutes / step))
+            current = selected.get(bucket)
+            if current is None or candidate.travel_time_minutes < current.travel_time_minutes:
+                selected[bucket] = candidate
+        return list(selected.values())
+
+    radius_squared = float(min_spatial_separation_meters) * float(min_spatial_separation_meters)
+    selected: dict[int, list[PointCandidate]] = {}
+    selected_xy: dict[int, list[tuple[float, float]]] = {}
     for candidate in sorted(candidates, key=lambda item: item.travel_time_minutes):
         bucket = int(math.floor(candidate.travel_time_minutes / step))
-        current = selected.get(bucket)
-        if current is None or candidate.travel_time_minutes < current.travel_time_minutes:
-            selected[bucket] = candidate
-    return list(selected.values())
+        bucket_xy = selected_xy.setdefault(bucket, [])
+        x, y = _TO_UTM.transform(candidate.lon, candidate.lat)
+        if any(_distance_squared(x, y, kept_x, kept_y) <= radius_squared for kept_x, kept_y in bucket_xy):
+            continue
+        selected.setdefault(bucket, []).append(candidate)
+        bucket_xy.append((x, y))
+
+    bucketed: list[PointCandidate] = []
+    for bucket in sorted(selected):
+        bucketed.extend(selected[bucket])
+    return bucketed
 
 
 def _dedupe_point_candidates(candidates: list[PointCandidate], radius_meters: float) -> list[PointCandidate]:
@@ -364,7 +390,11 @@ async def _load_bus_candidates(
         for row in rows
         if row["stop_id"]
     ]
-    candidates = _bucketize_candidates(candidates, bucket_minutes)
+    candidates = _bucketize_candidates(
+        candidates,
+        bucket_minutes,
+        min_spatial_separation_meters=dedupe_radius_meters,
+    )
     candidates.sort(key=lambda item: item.travel_time_minutes)
     candidates = candidates[: max(1, max_candidates)]
     return _dedupe_point_candidates(candidates, dedupe_radius_meters)

@@ -427,6 +427,172 @@ ORDER BY route_number
 """
 
 
+_SELECTED_GTFS_STOP_TRACE_SQL = """
+WITH selected_stop AS (
+    SELECT s.stop_id::text AS stop_id
+    FROM gtfs_stops s
+    WHERE s.stop_id::text = :external_id
+), candidate_shapes AS (
+    SELECT DISTINCT
+        gt.shape_id::text AS shape_id,
+        gt.route_id::text AS route_id
+    FROM selected_stop ss
+    JOIN gtfs_stop_times gst ON gst.stop_id::text = ss.stop_id
+    JOIN gtfs_trips gt ON gt.trip_id = gst.trip_id
+    JOIN gtfs_routes gr ON gr.route_id = gt.route_id
+    WHERE gr.route_type = 3
+      AND gt.shape_id IS NOT NULL
+      AND (
+          COALESCE(array_length(CAST(:route_ids AS TEXT[]), 1), 0) = 0
+          OR gt.route_id::text = ANY(CAST(:route_ids AS TEXT[]))
+      )
+), traced_shapes AS (
+    SELECT
+        cs.shape_id AS id,
+        COALESCE(NULLIF(gr.route_short_name, ''), NULLIF(gr.route_long_name, ''), cs.route_id) AS name,
+        'bus'::text AS mode,
+        'gtfs_shape'::text AS source_kind,
+        ST_AsGeoJSON(ST_MakeLine(gs.location ORDER BY gs.shape_pt_sequence))::JSONB AS geometry
+    FROM candidate_shapes cs
+    JOIN gtfs_shapes gs ON gs.shape_id::text = cs.shape_id
+    JOIN gtfs_routes gr ON gr.route_id::text = cs.route_id
+    GROUP BY cs.shape_id, name
+)
+SELECT id, name, mode, source_kind, geometry
+FROM traced_shapes
+WHERE geometry IS NOT NULL
+LIMIT 80
+"""
+
+
+_SELECTED_GEOSAMPA_BUS_STOP_TRACE_SQL = f"""
+WITH anchor AS (
+    SELECT ST_PointOnSurface(g.geometry) AS geom_4326
+    FROM geosampa_bus_stops g
+    WHERE md5(ST_AsEWKB(g.geometry)::text) = :external_id
+), nearby_gtfs_stops AS (
+    SELECT s.stop_id::text AS stop_id
+    FROM gtfs_stops s
+    JOIN anchor a
+      ON s.location && ST_Expand(a.geom_4326, {_meters_to_degree_buffer(_GEOSAMPA_BUS_STOP_MATCH_METERS)})
+     AND ST_DWithin(s.location::geography, a.geom_4326::geography, {_GEOSAMPA_BUS_STOP_MATCH_METERS})
+), candidate_shapes AS (
+    SELECT DISTINCT
+        gt.shape_id::text AS shape_id,
+        gt.route_id::text AS route_id
+    FROM nearby_gtfs_stops ngs
+    JOIN gtfs_stop_times gst ON gst.stop_id::text = ngs.stop_id
+    JOIN gtfs_trips gt ON gt.trip_id = gst.trip_id
+    JOIN gtfs_routes gr ON gr.route_id = gt.route_id
+    WHERE gr.route_type = 3
+      AND gt.shape_id IS NOT NULL
+      AND (
+          COALESCE(array_length(CAST(:route_ids AS TEXT[]), 1), 0) = 0
+          OR gt.route_id::text = ANY(CAST(:route_ids AS TEXT[]))
+      )
+), traced_shapes AS (
+    SELECT
+        cs.shape_id AS id,
+        COALESCE(NULLIF(gr.route_short_name, ''), NULLIF(gr.route_long_name, ''), cs.route_id) AS name,
+        'bus'::text AS mode,
+        'gtfs_shape'::text AS source_kind,
+        ST_AsGeoJSON(ST_MakeLine(gs.location ORDER BY gs.shape_pt_sequence))::JSONB AS geometry
+    FROM candidate_shapes cs
+    JOIN gtfs_shapes gs ON gs.shape_id::text = cs.shape_id
+    JOIN gtfs_routes gr ON gr.route_id::text = cs.route_id
+    GROUP BY cs.shape_id, name
+)
+SELECT id, name, mode, source_kind, geometry
+FROM traced_shapes
+WHERE geometry IS NOT NULL
+LIMIT 80
+"""
+
+
+_SELECTED_GEOSAMPA_BUS_TERMINAL_TRACE_SQL = f"""
+WITH anchor AS (
+    SELECT ST_PointOnSurface(g.geometry) AS geom_4326
+    FROM geosampa_bus_terminals g
+    WHERE md5(ST_AsEWKB(g.geometry)::text) = :external_id
+), nearby_gtfs_stops AS (
+    SELECT s.stop_id::text AS stop_id
+    FROM gtfs_stops s
+    JOIN anchor a
+      ON s.location && ST_Expand(a.geom_4326, {_meters_to_degree_buffer(_GEOSAMPA_BUS_TERMINAL_MATCH_METERS)})
+     AND ST_DWithin(s.location::geography, a.geom_4326::geography, {_GEOSAMPA_BUS_TERMINAL_MATCH_METERS})
+), candidate_shapes AS (
+    SELECT DISTINCT
+        gt.shape_id::text AS shape_id,
+        gt.route_id::text AS route_id
+    FROM nearby_gtfs_stops ngs
+    JOIN gtfs_stop_times gst ON gst.stop_id::text = ngs.stop_id
+    JOIN gtfs_trips gt ON gt.trip_id = gst.trip_id
+    JOIN gtfs_routes gr ON gr.route_id = gt.route_id
+    WHERE gr.route_type = 3
+      AND gt.shape_id IS NOT NULL
+      AND (
+          COALESCE(array_length(CAST(:route_ids AS TEXT[]), 1), 0) = 0
+          OR gt.route_id::text = ANY(CAST(:route_ids AS TEXT[]))
+      )
+), traced_shapes AS (
+    SELECT
+        cs.shape_id AS id,
+        COALESCE(NULLIF(gr.route_short_name, ''), NULLIF(gr.route_long_name, ''), cs.route_id) AS name,
+        'bus'::text AS mode,
+        'gtfs_shape'::text AS source_kind,
+        ST_AsGeoJSON(ST_MakeLine(gs.location ORDER BY gs.shape_pt_sequence))::JSONB AS geometry
+    FROM candidate_shapes cs
+    JOIN gtfs_shapes gs ON gs.shape_id::text = cs.shape_id
+    JOIN gtfs_routes gr ON gr.route_id::text = cs.route_id
+    GROUP BY cs.shape_id, name
+)
+SELECT id, name, mode, source_kind, geometry
+FROM traced_shapes
+WHERE geometry IS NOT NULL
+LIMIT 80
+"""
+
+
+_SELECTED_GEOSAMPA_METRO_STATION_TRACE_SQL = """
+WITH selected_station AS (
+    SELECT ST_PointOnSurface(g.geometry) AS point_geom
+    FROM geosampa_metro_stations g
+    WHERE md5(ST_AsEWKB(g.geometry)::text) = :external_id
+)
+SELECT
+    md5(ST_AsEWKB(g.geometry)::text) AS id,
+    COALESCE(NULLIF(g.nm_linha_metro_trem, ''), NULLIF(g.nr_nome_linha, ''), 'Linha de metrô') AS name,
+    'metro'::text AS mode,
+    'geosampa_metro_line'::text AS source_kind,
+    ST_AsGeoJSON(ST_LineMerge(g.geometry))::JSONB AS geometry
+FROM geosampa_metro_lines g
+CROSS JOIN selected_station s
+WHERE g.geometry IS NOT NULL
+  AND ST_DWithin(g.geometry::geography, s.point_geom::geography, 160)
+LIMIT 12
+"""
+
+
+_SELECTED_GEOSAMPA_TREM_STATION_TRACE_SQL = """
+WITH selected_station AS (
+    SELECT ST_PointOnSurface(g.geometry) AS point_geom
+    FROM geosampa_trem_stations g
+    WHERE md5(ST_AsEWKB(g.geometry)::text) = :external_id
+)
+SELECT
+    md5(ST_AsEWKB(g.geometry)::text) AS id,
+    COALESCE(NULLIF(g.nm_linha_metro_trem, ''), 'Linha de trem') AS name,
+    'train'::text AS mode,
+    'geosampa_train_line'::text AS source_kind,
+    ST_AsGeoJSON(ST_LineMerge(g.geometry))::JSONB AS geometry
+FROM geosampa_trem_lines g
+CROSS JOIN selected_station s
+WHERE g.geometry IS NOT NULL
+  AND ST_DWithin(g.geometry::geography, s.point_geom::geography, 160)
+LIMIT 12
+"""
+
+
 async def _query_transport_stop_detail_rows(conn, stop_id: str, source_kind: str) -> list[dict]:
     sql_by_source_kind = {
         "gtfs_stop": _BUS_STOP_DETAIL_SQL,
@@ -933,6 +1099,34 @@ async def get_transport_stop_details(
     }
 
 
+@router.get("/selected-trace")
+async def get_selected_transport_trace(
+    source_kind: str = Query(..., min_length=1),
+    external_id: str = Query(..., min_length=1),
+    route_ids: list[str] = Query(default=[]),
+) -> dict:
+    sql_by_source_kind = {
+        "gtfs_stop": _SELECTED_GTFS_STOP_TRACE_SQL,
+        "geosampa_bus_stop": _SELECTED_GEOSAMPA_BUS_STOP_TRACE_SQL,
+        "geosampa_bus_terminal": _SELECTED_GEOSAMPA_BUS_TERMINAL_TRACE_SQL,
+        "geosampa_metro_station": _SELECTED_GEOSAMPA_METRO_STATION_TRACE_SQL,
+        "geosampa_trem_station": _SELECTED_GEOSAMPA_TREM_STATION_TRACE_SQL,
+    }
+    sql = sql_by_source_kind.get(source_kind)
+    if sql is None:
+        raise HTTPException(status_code=400, detail="source_kind de trajeto selecionado não suportado")
+
+    features = await _safe_query_lines(
+        get_engine(),
+        sql,
+        {
+            "external_id": external_id,
+            "route_ids": route_ids,
+        },
+    )
+    return {"type": "FeatureCollection", "features": features}
+
+
 async def _safe_query_features(engine, sql: str, params: dict) -> list[dict]:
     """Execute spatial query and return GeoJSON features; returns [] on any table/query error."""
     try:
@@ -983,6 +1177,7 @@ async def _safe_query_lines(engine, sql: str, params: dict) -> list[dict]:
                         "id": str(row.get("id") or ""),
                         "name": str(row.get("name") or ""),
                         "mode": str(row.get("mode") or "bus"),
+                        "source_kind": str(row.get("source_kind") or ""),
                     },
                 }
             )

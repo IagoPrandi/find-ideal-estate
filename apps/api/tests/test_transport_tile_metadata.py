@@ -23,6 +23,7 @@ from src.api.routes.transport import (  # noqa: E402
     _TRANSPORT_LINES_TILE_ROWS_SQL,
     _TRANSPORT_STOPS_TILE_ROWS_SQL,
     _query_public_safety_feature_collection,
+    get_selected_transport_trace,
     get_transport_stop_details,
 )
 from core.db import close_db, get_engine, init_db  # noqa: E402
@@ -77,6 +78,7 @@ async def _cleanup_sample_rows() -> None:
     async with engine.begin() as conn:
         await conn.execute(text("DELETE FROM public_safety_incidents WHERE category = ANY(:categories)"), {"categories": [SAMPLE_SAFETY_CATEGORY, SAMPLE_SAFETY_SECOND_CATEGORY]})
         await conn.execute(text("DELETE FROM geosampa_bus_stops WHERE nm_ponto_onibus = :stop_name"), {"stop_name": SAMPLE_GEOSAMPA_STOP_NAME})
+        await conn.execute(text("DELETE FROM gtfs_stop_times WHERE trip_id = :trip_id"), {"trip_id": SAMPLE_ARTIFACT_TRIP_ID})
         await conn.execute(text("DELETE FROM gtfs_trips WHERE trip_id = :trip_id"), {"trip_id": SAMPLE_ARTIFACT_TRIP_ID})
         await conn.execute(text("DELETE FROM gtfs_routes WHERE route_id = :route_id"), {"route_id": SAMPLE_ARTIFACT_ROUTE_ID})
         await conn.execute(text("DELETE FROM gtfs_shapes WHERE shape_id = :shape_id"), {"shape_id": SAMPLE_ARTIFACT_SHAPE_ID})
@@ -303,6 +305,44 @@ async def test_transport_stop_details_return_lines_on_demand() -> None:
         assert gtfs_result["buses"] == ["175T-10", "875A-10"]
         assert geosampa_result["count"] == 2
         assert geosampa_result["buses"] == ["175T-10", "875A-10"]
+    finally:
+        await _cleanup_sample_rows()
+        await close_db()
+
+
+@pytest.mark.anyio
+async def test_selected_transport_trace_keeps_only_shapes_for_selected_routes() -> None:
+    init_db(os.environ["DATABASE_URL"])
+    try:
+        if not await _ensure_gtfs_schema() or not await _ensure_geosampa_schema():
+            pytest.skip("Phase 3 transport schemas not migrated. Run alembic upgrade head.")
+
+        await _cleanup_sample_rows()
+        await _insert_sample_gtfs_rows()
+
+        engine = get_engine()
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    """
+                    INSERT INTO gtfs_stop_times (trip_id, stop_id, arrival_time, departure_time, stop_sequence)
+                    VALUES (:trip_id, :stop_id, '08:10:00', '08:10:00', 1)
+                    """
+                ),
+                {
+                    "trip_id": SAMPLE_ARTIFACT_TRIP_ID,
+                    "stop_id": SAMPLE_STOP_ID,
+                },
+            )
+
+        result = await get_selected_transport_trace(
+            source_kind="gtfs_stop",
+            external_id=SAMPLE_STOP_ID,
+            route_ids=[SAMPLE_ROUTE_IDS[0]],
+        )
+
+        trace_ids = [feature["properties"]["id"] for feature in result["features"]]
+        assert trace_ids == [SAMPLE_SHAPE_ID]
     finally:
         await _cleanup_sample_rows()
         await close_db()

@@ -509,6 +509,11 @@ export const TransportStopsResponseSchema = z.object({
   features: z.array(TransportFeatureSchema)
 });
 
+export const TransportTraceResponseSchema = z.object({
+  type: z.literal("FeatureCollection"),
+  features: z.array(TransportFeatureSchema)
+});
+
 export const TransportPointReadSchema = z.object({
   id: z.string(),
   journey_id: z.string(),

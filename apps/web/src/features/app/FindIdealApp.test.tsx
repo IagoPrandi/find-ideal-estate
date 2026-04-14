@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FindIdealApp } from "./FindIdealApp";
 import { useFavoritesStore, useJourneyStore, useUIStore } from "../../state";
-import { getBusLineDetails, getBusStopDetails, getJourneyTransportPoints, getJourneyZonesList, getPublicSafetyIncidentsForViewport, getTransportStopDetails, getZoneListings } from "../../api/client";
+import { getBusLineDetails, getBusStopDetails, getJourneyTransportPoints, getJourneyZonesList, getPublicSafetyIncidentsForViewport, getSelectedTransportTrace, getTransportStopDetails, getZoneListings } from "../../api/client";
 
 const mapEaseToMock = vi.fn();
 const mapSetLayoutPropertyMock = vi.fn();
@@ -29,12 +29,17 @@ vi.mock("../../components/panels", () => ({
   WizardPanel: () => <div>Wizard panel</div>
 }));
 
+vi.mock("../auth/AuthAccessCard", () => ({
+  AuthAccessCard: () => <div>Auth card</div>,
+}));
+
 vi.mock("../../api/client", () => ({
   API_BASE: "http://localhost:8000",
   getBusLineDetails: vi.fn(),
   getBusStopDetails: vi.fn(),
   getTransportStopDetails: vi.fn(),
   getJourneyTransportPoints: vi.fn(),
+  getSelectedTransportTrace: vi.fn(),
   getJourneyZonesList: vi.fn(),
   getPublicSafetyIncidentsForViewport: vi.fn(),
   getZoneListings: vi.fn()
@@ -240,6 +245,7 @@ describe("FindIdealApp", () => {
     vi.mocked(getBusStopDetails).mockResolvedValue({ count: 0, buses: [], source: "gtfs" } as never);
     vi.mocked(getTransportStopDetails).mockResolvedValue({ count: 0, buses: [], source: "gtfs_stop" } as never);
     vi.mocked(getJourneyTransportPoints).mockResolvedValue([] as never);
+    vi.mocked(getSelectedTransportTrace).mockResolvedValue({ type: "FeatureCollection", features: [] } as never);
     vi.mocked(getJourneyZonesList).mockResolvedValue({ zones: [], total_count: 0, completed_count: 0 } as never);
     vi.mocked(getPublicSafetyIncidentsForViewport).mockResolvedValue({
       type: "FeatureCollection",
@@ -430,6 +436,57 @@ describe("FindIdealApp", () => {
     await waitFor(() => {
       expect(mapSetLayoutPropertyMock).toHaveBeenCalledWith("flood-layer", "visibility", "visible");
     });
+  });
+
+  it("fetches and renders the selected transport trace for the chosen point", async () => {
+    useJourneyStore.setState((state) => ({
+      ...state,
+      step: 2,
+      selectedTransportId: "transport-1",
+    }));
+    vi.mocked(getJourneyTransportPoints).mockResolvedValue([
+      {
+        id: "transport-1",
+        lon: -46.69,
+        lat: -23.51,
+        name: "Parada A",
+        route_count: 2,
+        source: "gtfs_stop",
+        external_id: "stop-1",
+        route_ids: ["route-1", "route-2"],
+      }
+    ] as never);
+    vi.mocked(getSelectedTransportTrace).mockResolvedValue({
+      type: "FeatureCollection",
+      features: [
+        {
+          type: "Feature",
+          geometry: {
+            type: "LineString",
+            coordinates: [[-46.69, -23.51], [-46.68, -23.5]],
+          },
+          properties: {
+            id: "shape-1",
+            name: "Linha 1",
+            mode: "bus",
+            source_kind: "gtfs_shape",
+          }
+        }
+      ]
+    } as never);
+
+    renderWithQueryClient();
+
+    await waitFor(() => {
+      expect(getSelectedTransportTrace).toHaveBeenCalledWith("gtfs_stop", "stop-1", ["route-1", "route-2"]);
+    });
+
+    expect(mapSourceData["selected-transport-trace-source-runtime"]).toEqual(
+      expect.objectContaining({
+        type: "FeatureCollection",
+        features: [expect.objectContaining({ properties: expect.objectContaining({ id: "shape-1" }) })],
+      })
+    );
   });
 
   it("keeps overlapping zones visually distinguishable on the map", async () => {

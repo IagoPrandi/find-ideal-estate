@@ -66,7 +66,7 @@ export function FavoritesPanel() {
         target.searchType,
         target.usageType,
       ),
-      enabled: isPanelOpen && activeTab === "compare",
+      enabled: isPanelOpen,
       staleTime: FAVORITES_ANALYTICS_STALE_TIME,
       gcTime: FAVORITES_ANALYTICS_GC_TIME,
       retry: false,
@@ -106,6 +106,10 @@ export function FavoritesPanel() {
     () => buildFavoriteRanking(comparisonItems, selectedMetricIds),
     [comparisonItems, selectedMetricIds],
   );
+
+  const rankingPositionByListingKey = useMemo(() => {
+    return new Map(ranking.map((item, index) => [item.listingKey, index + 1]));
+  }, [ranking]);
 
   const metricWinCounts = useMemo(
     () => buildFavoriteMetricWinCounts(comparisonItems, selectedMetricIds),
@@ -208,6 +212,7 @@ export function FavoritesPanel() {
                 const adUrl = resolvePlatformUrl(favorite.listing.url, favorite.listing.platform);
                 const imageCandidates = resolveListingCardImageUrls(favorite.listing);
                 const price = getListingDisplayPrice(favorite.listing);
+                const rankingPosition = rankingPositionByListingKey.get(favorite.listingKey) || null;
                 const unitPriceLabel = typeof favorite.listing.current_unit_price === "number"
                   ? `${formatCurrencyBr(favorite.listing.current_unit_price)}/m²`
                   : "m² indisponível";
@@ -224,7 +229,17 @@ export function FavoritesPanel() {
                       <div className="flex min-w-0 flex-col gap-3 p-4">
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
-                            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">{favorite.listing.platform || "Plataforma"}</p>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">{favorite.listing.platform || "Plataforma"}</p>
+                              {rankingPosition ? (
+                                <span
+                                  data-testid={`favorite-saved-rank-${favorite.listingKey}`}
+                                  className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] ${rankingPosition === 1 ? "border border-emerald-200 bg-emerald-50 text-emerald-700" : "border border-slate-200 bg-slate-50 text-slate-600"}`}
+                                >
+                                  {`${rankingPosition}º no ranking`}
+                                </span>
+                              ) : null}
+                            </div>
                             <h3 className="mt-1 line-clamp-2 text-sm font-bold leading-snug text-slate-900">{favorite.listing.address_normalized || "Endereço não informado"}</h3>
                           </div>
                           <button
