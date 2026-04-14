@@ -24,6 +24,7 @@ from modules.dashboard.analytics import (  # noqa: E402
     _build_dashboard_ranking_items,
     build_rank_summary,
     classify_flood_risk,
+    fetch_zone_dashboard_analytics,
     fetch_zone_favorite_analytics,
     parse_address_components,
 )
@@ -117,7 +118,7 @@ def test_build_dashboard_ranking_items_orders_desc_when_higher_is_better():
 def test_get_zone_dashboard_analytics_route_returns_contract(monkeypatch):
     sample = _sample_journey()
 
-    async def _get_journey(journey_id):
+    async def _get_accessible_journey_or_404(journey_id, _auth_context):
         assert journey_id == sample.id
         return sample
 
@@ -208,7 +209,7 @@ def test_get_zone_dashboard_analytics_route_returns_contract(monkeypatch):
             },
         }
 
-    monkeypatch.setattr("api.routes.journeys.get_journey", _get_journey)
+    monkeypatch.setattr("api.routes.journeys._get_accessible_journey_or_404", _get_accessible_journey_or_404)
     monkeypatch.setattr("api.routes.journeys.fetch_zone_dashboard_analytics", _fetch_zone_dashboard_analytics)
 
     with TestClient(app) as client:
@@ -233,7 +234,7 @@ def test_get_zone_dashboard_analytics_route_returns_contract(monkeypatch):
 def test_get_zone_dashboard_analytics_route_forwards_requested_page(monkeypatch):
     sample = _sample_journey()
 
-    async def _get_journey(journey_id):
+    async def _get_accessible_journey_or_404(journey_id, _auth_context):
         assert journey_id == sample.id
         return sample
 
@@ -270,7 +271,7 @@ def test_get_zone_dashboard_analytics_route_forwards_requested_page(monkeypatch)
             "environment": {},
         }
 
-    monkeypatch.setattr("api.routes.journeys.get_journey", _get_journey)
+    monkeypatch.setattr("api.routes.journeys._get_accessible_journey_or_404", _get_accessible_journey_or_404)
     monkeypatch.setattr("api.routes.journeys.fetch_zone_dashboard_analytics", _fetch_zone_dashboard_analytics)
 
     with TestClient(app) as client:
@@ -357,7 +358,7 @@ def test_fetch_zone_favorite_analytics_builds_lightweight_metrics(monkeypatch):
 def test_get_zone_favorite_analytics_route_returns_contract(monkeypatch):
     sample = _sample_journey()
 
-    async def _get_journey(journey_id):
+    async def _get_accessible_journey_or_404(journey_id, _auth_context):
         assert journey_id == sample.id
         return sample
 
@@ -387,7 +388,7 @@ def test_get_zone_favorite_analytics_route_returns_contract(monkeypatch):
             },
         }
 
-    monkeypatch.setattr("api.routes.journeys.get_journey", _get_journey)
+    monkeypatch.setattr("api.routes.journeys._get_accessible_journey_or_404", _get_accessible_journey_or_404)
     monkeypatch.setattr("api.routes.journeys.fetch_zone_favorite_analytics", _fetch_zone_favorite_analytics)
 
     with TestClient(app) as client:
@@ -402,3 +403,126 @@ def test_get_zone_favorite_analytics_route_returns_contract(monkeypatch):
     assert body["metrics"]["zone_average_unit_price"] == 120.5
     assert body["metrics"]["crime_density_per_km2"] == 103.5
     assert body["metrics"]["flood_risk_label"] == "Moderado"
+
+
+def test_fetch_zone_dashboard_analytics_scopes_price_ranking_to_loaded_zone_listings(monkeypatch):
+    executed_calls: list[tuple[str, dict[str, object]]] = []
+    cache_created_at = datetime(2026, 4, 13, 18, 0, tzinfo=timezone.utc)
+
+    class _FakeMappingsResult:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def first(self):
+            return self._rows[0] if self._rows else None
+
+        def all(self):
+            return self._rows
+
+    class _FakeExecuteResult:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def mappings(self):
+            return _FakeMappingsResult(self._rows)
+
+    class _FakeConnection:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def execute(self, statement, params=None):
+            sql = str(statement)
+            resolved_params = dict(params or {})
+            executed_calls.append((sql, resolved_params))
+
+            if len(executed_calls) == 1:
+                return _FakeExecuteResult([
+                    {
+                        "fingerprint": "zone-fp-1",
+                        "zone_area_m2": 120000.0,
+                        "green_area_m2": 0.0,
+                        "flood_area_m2": 0.0,
+                    }
+                ])
+
+            if len(executed_calls) == 2:
+                return _FakeExecuteResult([
+                    {
+                        "property_id": "prop-1",
+                        "city_name": "São Paulo",
+                        "neighborhood_name": "Vila Mariana",
+                        "current_total_price": 10850.0,
+                        "unit_price": 105.43,
+                    }
+                ])
+
+            if len(executed_calls) == 3:
+                return _FakeExecuteResult([
+                    {
+                        "city_name": "São Paulo",
+                        "neighborhood_name": "Vila Mariana",
+                        "day": datetime(2026, 4, 1, tzinfo=timezone.utc).date(),
+                        "average_price": 10850.0,
+                        "sample_count": 1,
+                    }
+                ])
+
+            raise AssertionError(f"Unexpected execute call: {sql}")
+
+    class _FakeEngine:
+        def connect(self):
+            return _FakeConnection()
+
+    async def _get_latest_search_request_for_zone(_journey_id, _zone_fingerprint):
+        return {
+            "search_location_normalized": "rua-domingos-de-morais-vila-mariana-sao-paulo-sp",
+        }
+
+    async def _get_cache_record(_search_location_normalized):
+        return {
+            "created_at": cache_created_at,
+            "status": "complete",
+        }
+
+    monkeypatch.setattr("modules.dashboard.analytics.get_latest_search_request_for_zone", _get_latest_search_request_for_zone)
+    monkeypatch.setattr("modules.dashboard.analytics.get_cache_record", _get_cache_record)
+    monkeypatch.setattr("modules.dashboard.analytics.cache_is_usable", lambda cache: bool(cache))
+    monkeypatch.setattr("modules.dashboard.analytics.get_engine", lambda: _FakeEngine())
+
+    payload = __import__("asyncio").run(
+        fetch_zone_dashboard_analytics(
+            journey_id=uuid4(),
+            zone_fingerprint="zone-fp-1",
+            property_id=None,
+            neighborhood_name=None,
+            city_name=None,
+            page="preco",
+            search_type="rent",
+            usage_type="residential",
+            spatial_scope="inside_zone",
+            min_price=None,
+            max_price=None,
+            min_size=None,
+            max_size=None,
+        )
+    )
+
+    assert payload["price"]["selected_neighborhood_name"] == "Vila Mariana"
+    assert payload["price"]["zone_active_listing_count"] == 1
+
+    current_prices_sql, current_prices_params = executed_calls[1]
+    history_sql, history_params = executed_calls[2]
+
+    assert "recent_search_properties AS" in current_prices_sql
+    assert "zp.inside_zone = TRUE OR rsp.property_id IS NOT NULL" in current_prices_sql
+    assert current_prices_params["search_location_normalized"] == "rua-domingos-de-morais-vila-mariana-sao-paulo-sp"
+    assert current_prices_params["observed_since"] == cache_created_at
+    assert current_prices_params["has_search_location"] is True
+
+    assert "recent_search_properties AS" in history_sql
+    assert "zp.inside_zone = TRUE OR rsp.property_id IS NOT NULL" in history_sql
+    assert history_params["search_location_normalized"] == "rua-domingos-de-morais-vila-mariana-sao-paulo-sp"
+    assert history_params["observed_since"] == cache_created_at

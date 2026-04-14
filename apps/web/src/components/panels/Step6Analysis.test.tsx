@@ -355,6 +355,201 @@ describe("Step6Analysis", () => {
     vi.mocked(deleteAccountFavorite).mockResolvedValue(undefined as never);
   });
 
+  it("recalculates dashboard analytics after listings scraping finishes", async () => {
+    let listingsReady = false;
+
+    vi.mocked(getZoneListings).mockImplementation(async () => ((
+      listingsReady
+        ? {
+            source: "cache",
+            job_id: null,
+            freshness_status: "fresh",
+            listings: [
+              {
+                property_id: "prop-1",
+                platform: "quintoandar",
+                platform_listing_id: "qa-1",
+                address_normalized: "Rua Itacema, Itaim Bibi, São Paulo, SP",
+                current_best_price: "10850",
+                condo_fee: "0",
+                iptu: "0",
+                area_m2: 105,
+                usage_type: "residential",
+                inside_zone: true,
+                has_coordinates: true,
+                lat: -23.58,
+                lon: -46.68,
+                platforms_available: ["quintoandar"],
+              },
+            ],
+            total_count: 1,
+            cache_age_hours: 0.1,
+          }
+        : {
+            source: "none",
+            job_id: "listings-job-1",
+            freshness_status: "no_cache",
+            listings: [],
+            total_count: 0,
+            cache_age_hours: null,
+          }
+    )) as never);
+
+    vi.mocked(getJob).mockImplementation(async () => ((
+      listingsReady
+        ? {
+            id: "listings-job-1",
+            journey_id: "journey-1",
+            job_type: "listings_scrape",
+            state: "completed",
+            progress_percent: 100,
+            current_stage: "listings_scrape",
+            cancel_requested_at: null,
+            started_at: "2026-03-27T10:00:00Z",
+            finished_at: "2026-03-27T10:03:00Z",
+            worker_id: "worker-1",
+            error_code: null,
+            error_message: null,
+            created_at: "2026-03-27T10:00:00Z",
+            result_ref: {
+              scrape_diagnostics: {
+                status: "complete",
+                summary: {
+                  total_scraped: 1,
+                  platforms_completed: ["quintoandar"],
+                  platforms_failed: [],
+                },
+                platforms: {},
+              },
+            },
+          }
+        : {
+            id: "listings-job-1",
+            journey_id: "journey-1",
+            job_type: "listings_scrape",
+            state: "running",
+            progress_percent: 67,
+            current_stage: "listings_scrape",
+            cancel_requested_at: null,
+            started_at: "2026-03-27T10:00:00Z",
+            finished_at: null,
+            worker_id: "worker-1",
+            error_code: null,
+            error_message: null,
+            created_at: "2026-03-27T10:00:00Z",
+            result_ref: {
+              scrape_diagnostics: {
+                status: "scraping",
+                active_platform: "quintoandar",
+                summary: {
+                  total_scraped: 0,
+                  platforms_completed: [],
+                  platforms_failed: [],
+                },
+                platforms: {},
+              },
+            },
+          }
+    )) as never);
+
+    vi.mocked(getZoneDashboardAnalytics).mockImplementation(async () => ({
+      context: {
+        zone_fingerprint: "zone-fp-1",
+        neighborhood_name: "Itaim Bibi",
+        city_name: null,
+        state_code: null,
+        zone_area_m2: 120000,
+      },
+      price: {
+        city_options: ["São Paulo"],
+        selected_city: null,
+        ranking_scope_label: "Valor médio do m² por bairro",
+        ranking_scope_note: "O ranking abaixo usa o valor médio do m² considerando apenas anúncios ativos com coordenadas dentro da zona analisada.",
+        selected_neighborhood_name: "Itaim Bibi",
+        zone_average_price: listingsReady ? 10850 : null,
+        zone_average_unit_price: listingsReady ? 99.5 : null,
+        zone_yearly_change_pct: null,
+        zone_active_listing_count: listingsReady ? 1 : 0,
+        neighborhood_average_unit_price: listingsReady ? 99.5 : null,
+        neighborhood_unit_price_rank: null,
+        neighborhood_unit_price_ranking: [],
+        yearly_change_pct: null,
+        yearly_change_rank: null,
+        history: [],
+        price_distribution: [],
+        note: null,
+      },
+      safety: {
+        city_options: [],
+        selected_city: null,
+        ranking_scope_label: "Bairros na zona analisada",
+        ranking_scope_note: "nota",
+        rate_scale_base: null,
+        selected_neighborhood_name: "Itaim Bibi",
+        homicide_count_365d: 0,
+        homicide_density_per_km2: null,
+        homicide_rank: null,
+        robbery_count_365d: 0,
+        robbery_density_per_km2: null,
+        robbery_rate_rank: null,
+        robbery_rate_ranking: [],
+        theft_count_365d: 0,
+        robbery_to_theft_ratio: null,
+        robbery_to_theft_rank: null,
+        peak_hours: [],
+      },
+      environment: {
+        ranking_scope_label: "Zonas da jornada atual",
+        ranking_scope_note: "nota",
+        green_area_m2: 0,
+        green_percentage: 0,
+        green_rank: null,
+        flood_area_m2: 0,
+        flood_percentage: 0,
+        flood_risk_label: "Muito baixo",
+        flood_rank: null,
+      },
+    }) as never);
+
+    const queryClient = new QueryClient({
+      defaultOptions: {
+        queries: {
+          retry: false,
+          gcTime: 0,
+        },
+      },
+    });
+
+    await act(async () => {
+      render(
+        <QueryClientProvider client={queryClient}>
+          <Step6Analysis />
+        </QueryClientProvider>
+      );
+    });
+
+    await waitFor(() => {
+      expect(getZoneDashboardAnalytics).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.click(await screen.findByRole("button", { name: /Dashboard analítico/i }));
+    expect(await screen.findByTestId("dashboard-page-preco")).toBeInTheDocument();
+
+    const dashboardCallsBeforeRefresh = vi.mocked(getZoneDashboardAnalytics).mock.calls.length;
+    listingsReady = true;
+
+    await act(async () => {
+      await Promise.all([
+        queryClient.refetchQueries({ queryKey: ["listings-job", "listings-job-1"] }),
+        queryClient.refetchQueries({ queryKey: ["zone-listings", "journey-1", "zone-fp-1", "rent", "all"] }),
+      ]);
+    });
+
+    await waitFor(() => {
+      expect(vi.mocked(getZoneDashboardAnalytics).mock.calls.length).toBeGreaterThan(dashboardCallsBeforeRefresh);
+    });
+  });
+
   it("explains when scraping completed but no listings fell inside the zone", async () => {
     vi.mocked(getZoneListings).mockResolvedValue({
       source: "cache",

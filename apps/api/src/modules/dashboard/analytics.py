@@ -10,6 +10,8 @@ from typing import Any
 from uuid import UUID
 
 from core.db import get_engine
+from modules.listings.cache import cache_is_usable, get_cache_record
+from modules.listings.search_requests import get_latest_search_request_for_zone
 from modules.public_safety.classification import public_safety_group_case_sql
 from modules.public_safety.standardization import (
     normalize_location_display_name,
@@ -433,6 +435,15 @@ async def fetch_zone_dashboard_analytics(
     max_size: float | None,
 ) -> dict[str, Any]:
     requested_page = page or "all"
+    latest_search = await get_latest_search_request_for_zone(journey_id, zone_fingerprint)
+    latest_search_location = (
+        str(latest_search["search_location_normalized"])
+        if latest_search and latest_search.get("search_location_normalized")
+        else None
+    )
+    latest_cache = await get_cache_record(latest_search_location)
+    usable_latest_cache = latest_cache if latest_cache and cache_is_usable(latest_cache) else None
+    loaded_search_observed_since = usable_latest_cache.get("created_at") if usable_latest_cache else None
     engine = get_engine()
     async with engine.connect() as conn:
         zone_result = await conn.execute(
@@ -871,6 +882,26 @@ async def fetch_zone_dashboard_analytics(
                                             AND (:usage_type = 'all' OR la.usage_type IS NULL OR la.usage_type = :usage_type)
                     GROUP BY la.property_id
                 ),
+                recent_search_properties AS (
+                    SELECT DISTINCT la.property_id
+                    FROM listing_ads la
+                    JOIN listing_snapshots ls ON ls.listing_ad_id = la.id
+                    WHERE la.is_active = TRUE
+                      AND la.advertised_usage_type = :search_type
+                      AND (:usage_type = 'all' OR la.usage_type IS NULL OR la.usage_type = :usage_type)
+                      AND (ls.availability_state = 'active' OR ls.availability_state IS NULL)
+                      AND (
+                            (
+                                :has_search_location = TRUE
+                                AND ls.raw_payload->>'search_location_normalized' = :search_location_normalized
+                            )
+                            OR (
+                                CAST(:observed_since AS TIMESTAMPTZ) IS NOT NULL
+                                AND COALESCE(ls.raw_payload->>'search_location_normalized', '') = ''
+                                AND ls.observed_at >= CAST(:observed_since AS TIMESTAMPTZ)
+                            )
+                        )
+                ),
                 zone_props AS (
                     SELECT
                         p.id AS property_id,
@@ -897,8 +928,10 @@ async def fetch_zone_dashboard_analytics(
                         ELSE NULL
                     END AS unit_price
                 FROM zone_props zp
+                LEFT JOIN recent_search_properties rsp ON rsp.property_id = zp.property_id
                 JOIN latest_active_prices lap ON lap.property_id = zp.property_id
-                                WHERE zp.city_name IS NOT NULL
+                                WHERE (zp.inside_zone = TRUE OR rsp.property_id IS NOT NULL)
+                  AND zp.city_name IS NOT NULL
                   AND zp.neighborhood_name IS NOT NULL
                                     {current_price_filters_sql}
                 """
@@ -907,6 +940,9 @@ async def fetch_zone_dashboard_analytics(
                             "usage_type": usage_type,
                                 "search_type": search_type,
                                 "zone_fingerprint": zone_fingerprint,
+                                "has_search_location": bool(latest_search_location),
+                                "search_location_normalized": latest_search_location,
+                                "observed_since": loaded_search_observed_since,
                                 **current_price_filter_params,
                         },
         )
@@ -1029,6 +1065,26 @@ async def fetch_zone_dashboard_analytics(
                                             AND (:usage_type = 'all' OR la.usage_type IS NULL OR la.usage_type = :usage_type)
                     GROUP BY la.property_id
                 )
+                , recent_search_properties AS (
+                    SELECT DISTINCT la.property_id
+                    FROM listing_ads la
+                    JOIN listing_snapshots ls ON ls.listing_ad_id = la.id
+                    WHERE la.is_active = TRUE
+                      AND la.advertised_usage_type = :search_type
+                      AND (:usage_type = 'all' OR la.usage_type IS NULL OR la.usage_type = :usage_type)
+                      AND (ls.availability_state = 'active' OR ls.availability_state IS NULL)
+                      AND (
+                            (
+                                :has_search_location = TRUE
+                                AND ls.raw_payload->>'search_location_normalized' = :search_location_normalized
+                            )
+                            OR (
+                                CAST(:observed_since AS TIMESTAMPTZ) IS NOT NULL
+                                AND COALESCE(ls.raw_payload->>'search_location_normalized', '') = ''
+                                AND ls.observed_at >= CAST(:observed_since AS TIMESTAMPTZ)
+                            )
+                        )
+                )
                 , zone_props AS (
                     SELECT
                         p.id AS property_id,
@@ -1049,8 +1105,10 @@ async def fetch_zone_dashboard_analytics(
                         zp.city_name,
                         zp.neighborhood_name
                     FROM zone_props zp
+                                        LEFT JOIN recent_search_properties rsp ON rsp.property_id = zp.property_id
                     JOIN latest_active_prices lap ON lap.property_id = zp.property_id
-                    WHERE zp.city_name IS NOT NULL
+                                        WHERE (zp.inside_zone = TRUE OR rsp.property_id IS NOT NULL)
+                                            AND zp.city_name IS NOT NULL
                       AND zp.neighborhood_name IS NOT NULL
                       {current_price_filters_sql}
                 )
@@ -1076,6 +1134,9 @@ async def fetch_zone_dashboard_analytics(
                 "zone_fingerprint": zone_fingerprint,
                 "search_type": search_type,
                 "usage_type": usage_type,
+                "has_search_location": bool(latest_search_location),
+                "search_location_normalized": latest_search_location,
+                "observed_since": loaded_search_observed_since,
                 **current_price_filter_params,
             },
         )

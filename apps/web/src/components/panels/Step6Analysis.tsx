@@ -196,6 +196,7 @@ export function Step6Analysis() {
   const lastScrolledListingKeyRef = useRef<string | null>(null);
   const lastProgressRunKeyRef = useRef<string | null>(null);
   const autoCollapsedProgressRunKeyRef = useRef<string | null>(null);
+  const lastListingsAvailabilityRef = useRef<{ runKey: string; freshnessStatus: string | null } | null>(null);
   const [isProgressCollapsed, setIsProgressCollapsed] = useState(false);
   const [isFiltersCollapsed, setIsFiltersCollapsed] = useState(false);
   const [isPreparingDashboard, setIsPreparingDashboard] = useState(false);
@@ -425,6 +426,47 @@ export function Step6Analysis() {
       setJobIds({ listingsJobId: null });
     }
   }, [hasInterruptedListingsJob, persistedListingsJobId, setJobIds]);
+
+  useEffect(() => {
+    const currentRunKey = [
+      journeyId || "no-journey",
+      zoneFingerprint || "no-zone",
+      effectiveListingsJobId || "no-job",
+    ].join(":");
+    const currentFreshnessStatus = listingsQuery.data?.freshness_status || null;
+    const previousAvailability = lastListingsAvailabilityRef.current;
+    const shouldRecalculateDashboard = Boolean(
+      journeyId
+      && zoneFingerprint
+      && previousAvailability
+      && previousAvailability.runKey === currentRunKey
+      && previousAvailability.freshnessStatus === "no_cache"
+      && currentFreshnessStatus
+      && currentFreshnessStatus !== "no_cache"
+      && !isScraping
+    );
+
+    lastListingsAvailabilityRef.current = {
+      runKey: currentRunKey,
+      freshnessStatus: currentFreshnessStatus,
+    };
+
+    if (!shouldRecalculateDashboard) {
+      return;
+    }
+
+    void queryClient.invalidateQueries({
+      queryKey: ["zone-dashboard-analytics", journeyId, zoneFingerprint, config.type],
+    });
+  }, [
+    config.type,
+    effectiveListingsJobId,
+    isScraping,
+    journeyId,
+    listingsQuery.data?.freshness_status,
+    queryClient,
+    zoneFingerprint,
+  ]);
 
   useEffect(() => {
     setFailedListingImageKeys({});
