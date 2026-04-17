@@ -96,6 +96,9 @@ describe("Step6Analysis", () => {
       const selectedSafetyCity = typeof options === "object" && options?.cityName
         ? options.cityName
         : null;
+      const selectedAddressScope = typeof options === "object" && options?.addressScope === "selected_address"
+        ? "selected_address"
+        : "all_addresses";
 
       const priceRankingByCity = {
         "São Paulo": [
@@ -117,9 +120,21 @@ describe("Step6Analysis", () => {
           { neighborhood_name: "Jardim Belval", city_name: "Barueri", value: 83.9, yearly_change_pct: 0.5, listing_count: 1 },
         ],
       } as const;
+      const priceRankingBySelectedAddressScope = {
+        "São Paulo": [
+          { neighborhood_name: "Brooklin", city_name: "São Paulo", value: 92.1, yearly_change_pct: -3.1, listing_count: 3 },
+          { neighborhood_name: "Vila Olímpia", city_name: "São Paulo", value: 119.8, yearly_change_pct: 5.4, listing_count: 2 },
+        ],
+        "Barueri": [
+          { neighborhood_name: "Alphaville", city_name: "Barueri", value: 75.2, yearly_change_pct: 1.4, listing_count: 8 },
+        ],
+      } as const;
+      const priceRankingCatalog = selectedAddressScope === "selected_address"
+        ? priceRankingBySelectedAddressScope
+        : priceRankingByCity;
       const priceRankingSource = selectedPriceCity
-        ? priceRankingByCity[selectedPriceCity as keyof typeof priceRankingByCity] || priceRankingByCity["São Paulo"]
-        : [...priceRankingByCity["São Paulo"], ...priceRankingByCity["Barueri"]];
+        ? priceRankingCatalog[selectedPriceCity as keyof typeof priceRankingCatalog] || priceRankingCatalog["São Paulo"]
+        : [...priceRankingCatalog["São Paulo"], ...priceRankingCatalog["Barueri"]];
       const selectedPriceNeighborhood = selectedPriceCity === "Barueri" ? "Alphaville" : "Itaim Bibi";
       const priceRanking = [...priceRankingSource]
         .sort((left, right) => left.value - right.value || left.neighborhood_name.localeCompare(right.neighborhood_name, "pt-BR"))
@@ -177,7 +192,9 @@ describe("Step6Analysis", () => {
           selected_city: selectedPriceCity,
           ranking_scope_label: "Valor médio do m² por bairro",
           ranking_scope_note: "O ranking abaixo usa o valor médio do m² considerando apenas anúncios ativos com coordenadas dentro da zona analisada.",
-          selected_neighborhood_name: selectedRankingItem.neighborhood_name,
+          selected_neighborhood_name: selectedAddressScope === "selected_address" && !selectedPriceCity
+            ? "Itaim Bibi"
+            : selectedRankingItem.neighborhood_name,
           zone_average_price: 10850,
           zone_average_unit_price: selectedPriceCity === "Barueri" ? 79.75 : 99.5,
           zone_yearly_change_pct: selectedPriceCity === "Barueri" ? 1.1 : -2.5,
@@ -325,7 +342,7 @@ describe("Step6Analysis", () => {
     const progressGrid = within(progressPanel).getByTestId("listings-platform-progress-grid");
 
     await waitFor(() => {
-      expect(getZoneListings).toHaveBeenCalledWith("journey-1", "zone-fp-1", "rent", "all", "all");
+      expect(getZoneListings).toHaveBeenCalledWith("journey-1", "zone-fp-1", "rent", "all", "all", "all_addresses");
     });
 
     expect(progressPanel).toBeInTheDocument();
@@ -353,6 +370,55 @@ describe("Step6Analysis", () => {
       listing: payload.listing,
     }) as never);
     vi.mocked(deleteAccountFavorite).mockResolvedValue(undefined as never);
+  });
+
+  it("shows persisted inventory notice and lets the user restrict listings to the selected step 5 address", async () => {
+    useJourneyStore.setState((state) => ({
+      ...state,
+      listingsJobId: null,
+      selectedAddress: {
+        label: "Rua Guaipa, Vila Leopoldina, Sao Paulo-SP",
+        normalized: "rua guaipa vila leopoldina sao paulo-sp",
+        locationType: "street",
+        lat: -23.520908,
+        lon: -46.727037,
+      },
+    }));
+    vi.mocked(getZoneListings).mockResolvedValue({
+      source: "none",
+      job_id: null,
+      freshness_status: "no_cache",
+      listings: [
+        {
+          property_id: "prop-1",
+          platform: "quintoandar",
+          platform_listing_id: "qa-1",
+          address_normalized: "Rua Dentro, 10",
+          current_best_price: "3500",
+          condo_fee: "500",
+          iptu: "100",
+          inside_zone: true,
+          has_coordinates: true,
+          lat: -23.5,
+          lon: -46.7,
+          platforms_available: ["quintoandar"],
+        }
+      ],
+      total_count: 1,
+      cache_age_hours: null,
+    } as never);
+
+    await renderWithQueryClient();
+
+    expect(await screen.findByText(/serão adicionados em até 24 horas/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Origem da coleta dos imóveis"), {
+      target: { value: "selected_address" },
+    });
+
+    await waitFor(() => {
+      expect(getZoneListings).toHaveBeenLastCalledWith("journey-1", "zone-fp-1", "rent", "all", "all", "selected_address");
+    });
   });
 
   it("recalculates dashboard analytics after listings scraping finishes", async () => {
@@ -1120,6 +1186,7 @@ describe("Step6Analysis", () => {
         maxPrice: null,
         usageType: "residential",
         spatialScope: "inside_zone",
+        addressScope: "all_addresses",
         minSize: null,
         maxSize: null,
       });
@@ -1257,6 +1324,7 @@ describe("Step6Analysis", () => {
         maxPrice: null,
         usageType: "residential",
         spatialScope: "inside_zone",
+        addressScope: "all_addresses",
         minSize: null,
         maxSize: null,
       });
@@ -1294,6 +1362,7 @@ describe("Step6Analysis", () => {
         maxPrice: null,
         usageType: "residential",
         spatialScope: "inside_zone",
+        addressScope: "all_addresses",
         minSize: null,
         maxSize: null,
       });
@@ -1428,6 +1497,7 @@ describe("Step6Analysis", () => {
           maxPrice: "12000",
           usageType: "commercial",
           spatialScope: "inside_zone",
+          addressScope: "all_addresses",
           minSize: "45",
           maxSize: null,
         },
@@ -1440,6 +1510,81 @@ describe("Step6Analysis", () => {
     expect(within(hero).getByText(/tipo: comercial/i)).toBeInTheDocument();
     expect(within(hero).getByText(/preço: R\$ 6.000 a R\$ 12.000/i)).toBeInTheDocument();
     expect(within(hero).getByText(/área: a partir de 45 m²/i)).toBeInTheDocument();
+  });
+
+  it("recarrega o ranking do dashboard quando muda a origem da coleta e mantém o bairro dominante da zona", async () => {
+    vi.mocked(getZoneListings).mockResolvedValue({
+      source: "cache",
+      job_id: null,
+      freshness_status: "fresh",
+      listings: [
+        {
+          property_id: "prop-1",
+          platform: "quintoandar",
+          platform_listing_id: "qa-1",
+          address_normalized: "Rua Itacema, Itaim Bibi, São Paulo, SP",
+          current_best_price: "11000",
+          condo_fee: "1500",
+          iptu: "400",
+          area_m2: 105,
+          inside_zone: true,
+          has_coordinates: true,
+          lat: -23.58,
+          lon: -46.68,
+          platforms_available: ["quintoandar"],
+        },
+      ],
+      total_count: 1,
+      cache_age_hours: 0.1,
+    } as never);
+    vi.mocked(getJob).mockResolvedValue({
+      id: "listings-job-1",
+      journey_id: "journey-1",
+      job_type: "listings_scrape",
+      state: "completed",
+      progress_percent: 100,
+      current_stage: "listings_scrape",
+      cancel_requested_at: null,
+      started_at: "2026-03-27T10:00:00Z",
+      finished_at: "2026-03-27T10:03:00Z",
+      worker_id: "worker-1",
+      error_code: null,
+      error_message: null,
+      created_at: "2026-03-27T10:00:00Z",
+      result_ref: { scrape_diagnostics: { status: "complete", summary: { total_scraped: 1, platforms_completed: ["quintoandar"], platforms_failed: [] }, platforms: {} } },
+    } as never);
+
+    await renderWithQueryClient();
+
+    fireEvent.click(await screen.findByRole("button", { name: /Dashboard analítico/i }));
+    expect(await screen.findByTestId("dashboard-page-preco")).toBeInTheDocument();
+    expect(screen.getByText(/14 bairros/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Imóveis/i }));
+    await screen.findByText(/Rua Itacema, Itaim Bibi, São Paulo, SP/i);
+
+    fireEvent.change(screen.getByLabelText("Origem da coleta dos imóveis"), {
+      target: { value: "selected_address" },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Dashboard analítico/i }));
+
+    await waitFor(() => {
+      expect(getZoneDashboardAnalytics).toHaveBeenCalledWith("journey-1", "zone-fp-1", "rent", {
+        cityName: null,
+        page: "preco",
+        minPrice: null,
+        maxPrice: null,
+        usageType: "residential",
+        spatialScope: "inside_zone",
+        addressScope: "selected_address",
+        minSize: null,
+        maxSize: null,
+      });
+    });
+
+    expect(await screen.findByText(/3 bairros/i)).toBeInTheDocument();
+    expect(screen.getByText(/Bairro dominante na zona: Itaim Bibi/i)).toBeInTheDocument();
   });
 
   it("adds and removes a listing from favorites and prefetches comparison analytics", async () => {

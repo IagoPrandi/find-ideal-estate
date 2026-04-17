@@ -1,0 +1,25 @@
+{
+  "totalCards": 95,
+  "loadedImageCards": 11,
+  "visibleCards": 5,
+  "samples": [
+    {
+      "address": "Rua Lealdade, Jaguaré, São Paulo, SP",
+      "price": "R$ 1.171",
+      "platform": "QuintoAndar",
+      "imageSrc": "https://www.quintoandar.com.br/img/med/894562599-983.2531337455556IMG7576.jpg"
+    },
+    {
+      "address": "Rua Barbalha, Lapa, São Paulo, SP",
+      "price": "R$ 1.251",
+      "platform": "QuintoAndar",
+      "imageSrc": "https://www.quintoandar.com.br/img/med/892948219-602.3999655264305MG7843.jpg"
+    },
+    {
+      "address": "Rua Barbalha, Alto da Lapa, São Paulo, SP",
+      "price": "R$ 1.397",
+      "platform": "QuintoAndar",
+      "imageSrc": "https://www.quintoandar.com.br/img/med/893287009-391.20377433246466MG4758.jpg"
+    }
+  ]
+}

@@ -36,8 +36,8 @@ _SAFETY_ZONE_NEIGHBORHOOD_SCOPE_NOTE = (
 )
 
 _PRICE_ZONE_NEIGHBORHOOD_SCOPE_NOTE = (
-    "O ranking abaixo usa o valor medio do m² considerando apenas anuncios ativos que passam pelo recorte atual do painel de imoveis. "
-    "O escopo pode considerar apenas itens dentro da zona ou todos os imoveis carregados; com filtro de cidade, o destaque recai sobre o bairro com mais imoveis no recorte atual."
+    "O ranking abaixo usa o valor medio do m² considerando apenas os anuncios ativos visiveis no recorte atual. "
+    "O bairro destacado e a posicao no ranking refletem esse mesmo subconjunto filtrado."
 )
 
 _OBSERVASAMPA_INDICATORS_PATH = Path(__file__).resolve().parents[5] / "data_cache" / "observasampa" / "ObservaSampaDadosAbertosIndicadoresCSV.csv"
@@ -429,6 +429,7 @@ async def fetch_zone_dashboard_analytics(
     search_type: str,
     usage_type: str,
     spatial_scope: str,
+    address_scope: str,
     min_price: float | None,
     max_price: float | None,
     min_size: float | None,
@@ -892,13 +893,21 @@ async def fetch_zone_dashboard_analytics(
                       AND (ls.availability_state = 'active' OR ls.availability_state IS NULL)
                       AND (
                             (
-                                :has_search_location = TRUE
-                                AND ls.raw_payload->>'search_location_normalized' = :search_location_normalized
+                                :address_scope = 'selected_address'
+                                AND (
+                                    (
+                                        :has_search_location = TRUE
+                                        AND ls.raw_payload->>'search_location_normalized' = :search_location_normalized
+                                    )
+                                    OR (
+                                        CAST(:observed_since AS TIMESTAMPTZ) IS NOT NULL
+                                        AND COALESCE(ls.raw_payload->>'search_location_normalized', '') = ''
+                                        AND ls.observed_at >= CAST(:observed_since AS TIMESTAMPTZ)
+                                    )
+                                )
                             )
                             OR (
-                                CAST(:observed_since AS TIMESTAMPTZ) IS NOT NULL
-                                AND COALESCE(ls.raw_payload->>'search_location_normalized', '') = ''
-                                AND ls.observed_at >= CAST(:observed_since AS TIMESTAMPTZ)
+                                :address_scope = 'all_addresses'
                             )
                         )
                 ),
@@ -921,6 +930,11 @@ async def fetch_zone_dashboard_analytics(
                     zp.property_id,
                     zp.city_name,
                     zp.neighborhood_name,
+                    zp.inside_zone,
+                    CASE
+                        WHEN :address_scope = 'selected_address' THEN COALESCE(rsp.property_id IS NOT NULL, FALSE)
+                        ELSE TRUE
+                    END AS in_loaded_scope,
                     lap.current_total_price,
                     CASE
                         WHEN zp.area_m2 IS NOT NULL AND zp.area_m2 > 0
@@ -939,6 +953,7 @@ async def fetch_zone_dashboard_analytics(
                         {
                             "usage_type": usage_type,
                                 "search_type": search_type,
+                                "address_scope": address_scope,
                                 "zone_fingerprint": zone_fingerprint,
                                 "has_search_location": bool(latest_search_location),
                                 "search_location_normalized": latest_search_location,
@@ -962,13 +977,16 @@ async def fetch_zone_dashboard_analytics(
         zone_average_price = None
         zone_average_unit_price = None
         zone_yearly_change_pct = None
-        zone_active_listing_count = len(current_zone_price_rows)
+        loaded_current_zone_price_rows = [
+            row for row in current_zone_price_rows if bool(row.get("in_loaded_scope", True))
+        ]
+        zone_active_listing_count = len(loaded_current_zone_price_rows)
         price_city_options: list[str] = []
         selected_neighborhood_prices: list[float] = []
         price_group_map: dict[tuple[str, str], dict[str, Any]] = {}
         zone_current_prices: list[float] = []
         zone_unit_prices: list[float] = []
-        for row in current_zone_price_rows:
+        for row in loaded_current_zone_price_rows:
             current_city_name = str(row.get("city_name") or "")
             current_neighborhood_name = str(row.get("neighborhood_name") or "")
             if not current_city_name or not current_neighborhood_name:
@@ -1002,6 +1020,28 @@ async def fetch_zone_dashboard_analytics(
         zone_average_unit_price = sum(zone_unit_prices) / len(zone_unit_prices) if zone_unit_prices else None
         price_city_options = sorted(set(price_city_options))
         selected_city = _resolve_location_context_match(requested_city, price_city_options)
+        if selected_city is None and requested_city is not None:
+            selected_city = requested_city
+
+        zone_dominant_group_map: dict[tuple[str, str], dict[str, Any]] = {}
+        for row in current_zone_price_rows:
+            if not row.get("inside_zone"):
+                continue
+            current_city_name = str(row.get("city_name") or "")
+            current_neighborhood_name = str(row.get("neighborhood_name") or "")
+            if not current_city_name or not current_neighborhood_name:
+                continue
+
+            group_key = (current_city_name, current_neighborhood_name)
+            group_entry = zone_dominant_group_map.setdefault(
+                group_key,
+                {
+                    "city_name": current_city_name,
+                    "neighborhood_name": current_neighborhood_name,
+                    "listing_count": 0,
+                },
+            )
+            group_entry["listing_count"] += 1
 
         grouped_price_rows: list[dict[str, Any]] = []
         for group_entry in price_group_map.values():
@@ -1028,14 +1068,16 @@ async def fetch_zone_dashboard_analytics(
                 ),
             )[0]
 
+        dominant_zone_price_row = _dominant_price_row(list(zone_dominant_group_map.values()))
         dominant_price_row = _dominant_price_row(grouped_price_rows)
         filtered_grouped_price_rows = [
             row for row in grouped_price_rows if selected_city is None or row.get("city_name") == selected_city
         ]
-        dominant_filtered_price_row = _dominant_price_row(filtered_grouped_price_rows)
+        ranking_price_rows = filtered_grouped_price_rows if selected_city is not None else grouped_price_rows
+        dominant_filtered_price_row = _dominant_price_row(ranking_price_rows)
 
-        if dominant_filtered_price_row is not None:
-            selected_neighborhood = str(dominant_filtered_price_row.get("neighborhood_name") or "") or None
+        if dominant_zone_price_row is not None:
+            selected_neighborhood = str(dominant_zone_price_row.get("neighborhood_name") or "") or None
             selected_state = None
         elif dominant_price_row is not None:
             selected_neighborhood = str(dominant_price_row.get("neighborhood_name") or "") or None
@@ -1075,13 +1117,21 @@ async def fetch_zone_dashboard_analytics(
                       AND (ls.availability_state = 'active' OR ls.availability_state IS NULL)
                       AND (
                             (
-                                :has_search_location = TRUE
-                                AND ls.raw_payload->>'search_location_normalized' = :search_location_normalized
+                                :address_scope = 'selected_address'
+                                AND (
+                                    (
+                                        :has_search_location = TRUE
+                                        AND ls.raw_payload->>'search_location_normalized' = :search_location_normalized
+                                    )
+                                    OR (
+                                        CAST(:observed_since AS TIMESTAMPTZ) IS NOT NULL
+                                        AND COALESCE(ls.raw_payload->>'search_location_normalized', '') = ''
+                                        AND ls.observed_at >= CAST(:observed_since AS TIMESTAMPTZ)
+                                    )
+                                )
                             )
                             OR (
-                                CAST(:observed_since AS TIMESTAMPTZ) IS NOT NULL
-                                AND COALESCE(ls.raw_payload->>'search_location_normalized', '') = ''
-                                AND ls.observed_at >= CAST(:observed_since AS TIMESTAMPTZ)
+                                :address_scope = 'all_addresses'
                             )
                         )
                 )
@@ -1103,7 +1153,11 @@ async def fetch_zone_dashboard_analytics(
                     SELECT
                         zp.property_id,
                         zp.city_name,
-                        zp.neighborhood_name
+                        zp.neighborhood_name,
+                        CASE
+                            WHEN :address_scope = 'selected_address' THEN COALESCE(rsp.property_id IS NOT NULL, FALSE)
+                            ELSE TRUE
+                        END AS in_loaded_scope
                     FROM zone_props zp
                                         LEFT JOIN recent_search_properties rsp ON rsp.property_id = zp.property_id
                     JOIN latest_active_prices lap ON lap.property_id = zp.property_id
@@ -1115,6 +1169,7 @@ async def fetch_zone_dashboard_analytics(
                 SELECT
                     fp.city_name,
                     fp.neighborhood_name,
+                    fp.in_loaded_scope,
                     DATE(ls.observed_at) AS day,
                     AVG(COALESCE(ls.price, 0) + COALESCE(ls.condo_fee, 0) + COALESCE(ls.iptu, 0))::DOUBLE PRECISION AS average_price,
                     COUNT(*)::INT AS sample_count
@@ -1126,7 +1181,7 @@ async def fetch_zone_dashboard_analytics(
                   AND ls.price IS NOT NULL
                   AND (ls.availability_state = 'active' OR ls.availability_state IS NULL)
                   AND ls.observed_at >= CURRENT_DATE - INTERVAL '365 days'
-                GROUP BY fp.city_name, fp.neighborhood_name, DATE(ls.observed_at)
+                GROUP BY fp.city_name, fp.neighborhood_name, fp.in_loaded_scope, DATE(ls.observed_at)
                 ORDER BY DATE(ls.observed_at) ASC, fp.city_name ASC, fp.neighborhood_name ASC
                 """
             ),
@@ -1134,6 +1189,7 @@ async def fetch_zone_dashboard_analytics(
                 "zone_fingerprint": zone_fingerprint,
                 "search_type": search_type,
                 "usage_type": usage_type,
+                "address_scope": address_scope,
                 "has_search_location": bool(latest_search_location),
                 "search_location_normalized": latest_search_location,
                 "observed_since": loaded_search_observed_since,
@@ -1150,14 +1206,16 @@ async def fetch_zone_dashboard_analytics(
             raw_day = row.get("day")
             average_price = _safe_float(row.get("average_price"))
             sample_count = int(row.get("sample_count") or 0)
+            in_loaded_scope = bool(row.get("in_loaded_scope", True))
             if not current_city_name or not current_neighborhood_name or raw_day is None or average_price is None or sample_count <= 0:
                 continue
 
             day = raw_day.isoformat() if hasattr(raw_day, "isoformat") else str(raw_day)
             neighborhood_history_series[(current_city_name, current_neighborhood_name)].append((day, average_price, sample_count))
-            weighted_day = zone_history_weighted.setdefault(day, {"weighted_sum": 0.0, "sample_count": 0.0})
-            weighted_day["weighted_sum"] += average_price * sample_count
-            weighted_day["sample_count"] += sample_count
+            if in_loaded_scope:
+                weighted_day = zone_history_weighted.setdefault(day, {"weighted_sum": 0.0, "sample_count": 0.0})
+                weighted_day["weighted_sum"] += average_price * sample_count
+                weighted_day["sample_count"] += sample_count
 
         yearly_changes: dict[tuple[str, str], float | None] = {}
         for history_key, series in neighborhood_history_series.items():
@@ -1181,7 +1239,12 @@ async def fetch_zone_dashboard_analytics(
                 zone_yearly_change_pct = round(((last_zone_price - first_zone_price) / first_zone_price) * 100.0, 2)
 
         selected_neighborhood_key: tuple[str, str] | None = None
-        if dominant_filtered_price_row is not None:
+        if dominant_zone_price_row is not None:
+            selected_neighborhood_key = (
+                str(dominant_zone_price_row.get("city_name") or ""),
+                str(dominant_zone_price_row.get("neighborhood_name") or ""),
+            )
+        elif dominant_filtered_price_row is not None:
             selected_neighborhood_key = (
                 str(dominant_filtered_price_row.get("city_name") or ""),
                 str(dominant_filtered_price_row.get("neighborhood_name") or ""),
@@ -1210,11 +1273,7 @@ async def fetch_zone_dashboard_analytics(
         ]
 
         scope_phrase = _price_dashboard_scope_phrase(spatial_scope)
-        ranking_scope_label = (
-            f"Bairros com anuncios ativos filtrados {scope_phrase} em {selected_city}"
-            if selected_city
-            else f"Bairros com anuncios ativos filtrados {scope_phrase}"
-        )
+        ranking_scope_label = f"Bairros com anuncios ativos na base carregada {scope_phrase}"
         neighborhood_unit_price_ranking = _build_dashboard_ranking_items(
             [
                 {
@@ -1229,7 +1288,7 @@ async def fetch_zone_dashboard_analytics(
                     and str(row.get("city_name") or "") == selected_neighborhood_key[0]
                     and str(row.get("neighborhood_name") or "") == selected_neighborhood_key[1],
                 }
-                for row in filtered_grouped_price_rows
+                for row in ranking_price_rows
                 if row.get("neighborhood_name")
             ],
             value_key="avg_unit_price",
@@ -1239,7 +1298,7 @@ async def fetch_zone_dashboard_analytics(
         selected_neighborhood_row = next(
             (
                 row
-                for row in filtered_grouped_price_rows
+                for row in ranking_price_rows
                 if selected_neighborhood_key is not None
                 and str(row.get("city_name") or "") == selected_neighborhood_key[0]
                 and str(row.get("neighborhood_name") or "") == selected_neighborhood_key[1]
@@ -1250,7 +1309,7 @@ async def fetch_zone_dashboard_analytics(
             neighborhood_average_unit_price = _safe_float(selected_neighborhood_row.get("avg_unit_price"))
             neighborhood_rank = build_rank_summary(
                 neighborhood_average_unit_price,
-                [_safe_float(row.get("avg_unit_price")) for row in filtered_grouped_price_rows],
+                [_safe_float(row.get("avg_unit_price")) for row in ranking_price_rows],
                 higher_is_better=False,
                 scope_label=ranking_scope_label,
                 note=_PRICE_ZONE_NEIGHBORHOOD_SCOPE_NOTE,
@@ -1260,7 +1319,7 @@ async def fetch_zone_dashboard_analytics(
                     yearly_change_pct,
                     [
                         yearly_changes.get((str(row.get("city_name") or ""), str(row.get("neighborhood_name") or "")))
-                        for row in filtered_grouped_price_rows
+                        for row in ranking_price_rows
                     ],
                     higher_is_better=False,
                     scope_label=ranking_scope_label,
@@ -1281,7 +1340,7 @@ async def fetch_zone_dashboard_analytics(
         price_note = None
         if zone_active_listing_count == 0:
             price_note = f"Sem anuncios ativos {scope_phrase} para montar o dashboard de preco."
-        elif selected_city and not filtered_grouped_price_rows:
+        elif selected_city and not ranking_price_rows:
             price_note = f"Sem anuncios ativos na cidade filtrada {scope_phrase}."
         elif not neighborhood_unit_price_ranking:
             price_note = f"Sem bairros suficientes com anuncios ativos {scope_phrase} para montar o ranking de preco."

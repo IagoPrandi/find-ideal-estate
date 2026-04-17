@@ -186,6 +186,7 @@ async def upsert_property_and_ad(
 
 
 async def fetch_listing_cards_for_zone(
+    journey_id: UUID,
     zone_fingerprint: str,
     search_type: str,
     usage_type: str,
@@ -193,17 +194,18 @@ async def fetch_listing_cards_for_zone(
     observed_since: Any | None = None,
     spatial_scope: str = "inside_zone",
     search_location_normalized: str | None = None,
+    address_scope: str = "all_addresses",
 ) -> list[dict[str, Any]]:
     """
         Return flattened listing cards for the given zone fingerprint.
 
-        The loaded set is the union of:
-            - active listings already known for properties inside the selected zone;
-            - active listings observed in the latest direct-search batch for the zone.
+        The loaded set depends on the selected address scope:
+            - all_addresses: all active listings already persisted in cache/database;
+            - selected_address: only listings whose scrape origin matches the seed
+              address selected in Step 5.
 
-        This keeps the panel grounded on the zone inventory already persisted in the
-        database while still exposing direct-search results that may fall outside the
-        polygon or still lack coordinates.
+        The zone fingerprint still controls spatial badges/order and the optional
+        inside-zone filter, but cache ownership itself is address-seed based.
     """
     engine = get_engine()
 
@@ -314,13 +316,21 @@ async def fetch_listing_cards_for_zone(
                       AND (ls.availability_state = 'active' OR ls.availability_state IS NULL)
                       AND (
                             (
-                                :has_search_location = TRUE
-                                AND ls.raw_payload->>'search_location_normalized' = :search_location_normalized
+                                :address_scope = 'selected_address'
+                                AND (
+                                    (
+                                        :has_search_location = TRUE
+                                        AND ls.raw_payload->>'search_location_normalized' = :search_location_normalized
+                                    )
+                                    OR (
+                                        CAST(:observed_since AS TIMESTAMPTZ) IS NOT NULL
+                                        AND COALESCE(ls.raw_payload->>'search_location_normalized', '') = ''
+                                        AND ls.observed_at >= CAST(:observed_since AS TIMESTAMPTZ)
+                                    )
+                                )
                             )
                             OR (
-                                CAST(:observed_since AS TIMESTAMPTZ) IS NOT NULL
-                                AND COALESCE(ls.raw_payload->>'search_location_normalized', '') = ''
-                                AND ls.observed_at >= CAST(:observed_since AS TIMESTAMPTZ)
+                                :address_scope = 'all_addresses'
                             )
                         )
                 ),
@@ -464,18 +474,29 @@ async def fetch_listing_cards_for_zone(
                                 LEFT JOIN neighborhood_medians nm
                                     ON nm.city_name = ppc.city_name
                                  AND nm.neighborhood_name = ppc.neighborhood_name
-                                WHERE (zp.inside_zone = true OR rsp.property_id IS NOT NULL)
+                                WHERE (
+                                    (
+                                        :address_scope = 'selected_address'
+                                        AND rsp.property_id IS NOT NULL
+                                    )
+                                    OR (
+                                        :address_scope = 'all_addresses'
+                                        AND (zp.inside_zone = true OR rsp.property_id IS NOT NULL)
+                                    )
+                                )
                                     AND (:spatial_scope = 'all' OR zp.inside_zone = true)
                 ORDER BY zp.inside_zone DESC, zp.has_coordinates DESC, bp.total_price ASC NULLS LAST
                 """
             ),
             {
                 "zone_fp": zone_fingerprint,
+                "journey_id": journey_id,
                 "usage_type": usage_type,
                 "platforms": platforms,
                 "search_type": search_type,
                 "observed_since": observed_since,
                 "spatial_scope": spatial_scope,
+                "address_scope": address_scope,
                 "has_search_location": bool(search_location_normalized),
                 "search_location_normalized": search_location_normalized,
             },

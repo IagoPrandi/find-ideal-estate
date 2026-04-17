@@ -121,6 +121,29 @@ def test_ensure_headful_display_starts_xvfb_when_missing(monkeypatch) -> None:
     assert scraper_base._XVFB_DISPLAY == ":105"
 
 
+def test_ensure_headful_display_reuses_existing_display(monkeypatch) -> None:
+    state = {"popen_called": False}
+
+    def _fake_popen(*args, **kwargs):
+        del args, kwargs
+        state["popen_called"] = True
+        raise AssertionError("Xvfb should not be started when DISPLAY is already available")
+
+    monkeypatch.setattr(scraper_base.sys, "platform", "linux")
+    monkeypatch.setenv("DISPLAY", ":99")
+    monkeypatch.delenv("SCRAPER_XVFB_DISPLAY", raising=False)
+    monkeypatch.setattr(scraper_base.shutil, "which", lambda name: None)
+    monkeypatch.setattr(scraper_base, "_is_x_server_available", lambda display: display == ":99")
+    monkeypatch.setattr(scraper_base.subprocess, "Popen", _fake_popen)
+    monkeypatch.setattr(scraper_base, "_XVFB_PROCESS", None)
+    monkeypatch.setattr(scraper_base, "_XVFB_DISPLAY", None)
+
+    scraper_base._ensure_headful_display()
+
+    assert state["popen_called"] is False
+    assert scraper_base._XVFB_DISPLAY == ":99"
+
+
 def test_ensure_headful_display_raises_when_xvfb_unavailable(monkeypatch) -> None:
     monkeypatch.setattr(scraper_base.sys, "platform", "linux")
     monkeypatch.setattr(scraper_base.shutil, "which", lambda name: None)

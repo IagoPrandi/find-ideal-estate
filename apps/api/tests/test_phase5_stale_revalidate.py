@@ -19,8 +19,35 @@ os.environ.setdefault("OTP_URL", "http://localhost:8080")
 
 from fastapi.testclient import TestClient  # noqa: E402
 import pytest  # noqa: E402
+from api.routes.auth import get_optional_auth_context  # noqa: E402
+from contracts import AuthUserRead  # noqa: E402
+from modules.auth.service import RequestAuthContext  # noqa: E402
 from modules.listings.cache import find_usable_cache_for_search_location  # noqa: E402
 from src.main import app  # noqa: E402
+
+
+def _authorized_auth_context(email: str = "iago.oliveira2478@gmail.com") -> RequestAuthContext:
+    return RequestAuthContext(
+        user=AuthUserRead(
+            id=uuid4(),
+            email=email,
+            display_name="Iago",
+            is_active=True,
+            created_at=datetime.now(tz=timezone.utc),
+        ),
+        session_expires_at=None,
+        session_token="session-token",
+        anonymous_session_id=None,
+    )
+
+
+async def _fake_accessible_journey(*_args, **_kwargs):
+    return object()
+
+
+@pytest.fixture(autouse=True)
+def _stub_accessible_journey(monkeypatch):
+    monkeypatch.setattr("api.routes.listings.get_accessible_journey", _fake_accessible_journey)
 
 
 def _payload() -> dict[str, object]:
@@ -161,6 +188,7 @@ def test_listings_search_without_address_cache_queues_new_scrape(monkeypatch) ->
         return None
 
     monkeypatch.setattr("api.routes.listings.get_platform_registry", lambda: _Registry())
+    monkeypatch.setattr("api.routes.listings.get_accessible_journey", _fake_accessible_journey)
     monkeypatch.setattr("api.routes.listings.get_cache_record", _fake_get_cache_record)
     monkeypatch.setattr(
         "api.routes.listings.find_usable_cache_for_search_location", _fake_address_cache
@@ -176,11 +204,15 @@ def test_listings_search_without_address_cache_queues_new_scrape(monkeypatch) ->
     monkeypatch.setattr("api.routes.listings._find_active_listings_job_id", _fake_find_active_job)
 
     journey_id = uuid4()
-    with TestClient(app) as client:
-        response = client.post(
-            f"/journeys/{journey_id}/listings/search",
-            json=_payload(),
-        )
+    app.dependency_overrides[get_optional_auth_context] = lambda: _authorized_auth_context()
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                f"/journeys/{journey_id}/listings/search",
+                json=_payload(),
+            )
+    finally:
+        app.dependency_overrides.pop(get_optional_auth_context, None)
 
     assert response.status_code == 200
     body = response.json()
@@ -399,6 +431,7 @@ def test_get_zone_listings_uses_cache_completed_platforms(monkeypatch) -> None:
     assert fetch_calls[0]["platforms"] == ["quintoandar"]
     assert fetch_calls[0]["observed_since"] == cache["created_at"]
     assert fetch_calls[0]["search_location_normalized"] == _payload()["search_location_normalized"]
+    assert fetch_calls[0]["address_scope"] == "all_addresses"
 
 
 def test_get_zone_listings_reuses_latest_search_address_cache_across_zones(monkeypatch) -> None:
@@ -456,6 +489,7 @@ def test_get_zone_listings_reuses_latest_search_address_cache_across_zones(monke
     assert fetch_calls[0]["platforms"] == ["quintoandar"]
     assert fetch_calls[0]["observed_since"] == reused_cache["created_at"]
     assert fetch_calls[0]["search_location_normalized"] == _payload()["search_location_normalized"]
+    assert fetch_calls[0]["address_scope"] == "all_addresses"
 
 
 def test_get_zone_listings_supports_all_spatial_scope(monkeypatch) -> None:
@@ -518,6 +552,59 @@ def test_get_zone_listings_supports_all_spatial_scope(monkeypatch) -> None:
     assert body["listings"][0]["has_coordinates"] is False
     assert fetch_calls[0]["spatial_scope"] == "all"
     assert fetch_calls[0]["search_location_normalized"] == _payload()["search_location_normalized"]
+    assert fetch_calls[0]["address_scope"] == "all_addresses"
+
+
+def test_get_zone_listings_can_scope_to_selected_address(monkeypatch) -> None:
+    cache = {
+        "status": "complete",
+        "zone_fingerprint": "zone-a",
+        "platforms_completed": ["quintoandar", "zapimoveis"],
+        "platforms_failed": [],
+        "expires_at": datetime.now(tz=timezone.utc) + timedelta(hours=6),
+        "scraped_at": datetime.now(tz=timezone.utc),
+        "created_at": datetime.now(tz=timezone.utc) - timedelta(minutes=4),
+    }
+    fetch_calls: list[dict[str, object]] = []
+
+    class _Registry:
+        def default_free_platforms(self):
+            return ["quintoandar", "zapimoveis"]
+
+        def resolve_names(self, names):
+            return list(names)
+
+    async def _fake_get_cache_record(_normalized):
+        return cache
+
+    async def _fake_latest_search(_journey_id, _zone_fp):
+        return {"search_location_normalized": _payload()["search_location_normalized"]}
+
+    def _fake_cache_is_usable(record):
+        return bool(record)
+
+    async def _fake_fetch_listing_cards_for_zone(**kwargs):
+        fetch_calls.append(kwargs)
+        return _fake_cards()
+
+    monkeypatch.setattr("api.routes.listings.get_platform_registry", lambda: _Registry())
+    monkeypatch.setattr("api.routes.listings.get_cache_record", _fake_get_cache_record)
+    monkeypatch.setattr("api.routes.listings.get_latest_search_request_for_zone", _fake_latest_search)
+    monkeypatch.setattr("api.routes.listings.cache_is_usable", _fake_cache_is_usable)
+    monkeypatch.setattr(
+        "api.routes.listings.fetch_listing_cards_for_zone",
+        _fake_fetch_listing_cards_for_zone,
+    )
+
+    journey_id = uuid4()
+    with TestClient(app) as client:
+        response = client.get(
+            f"/journeys/{journey_id}/zones/zone-a/listings?search_type=rent&usage_type=residential&address_scope=selected_address"
+        )
+
+    assert response.status_code == 200
+    assert response.json()["total_count"] == 1
+    assert fetch_calls[0]["address_scope"] == "selected_address"
 
 
 def test_listings_search_cache_miss_returns_job_id(monkeypatch) -> None:
@@ -552,6 +639,7 @@ def test_listings_search_cache_miss_returns_job_id(monkeypatch) -> None:
         return None
 
     monkeypatch.setattr("api.routes.listings.get_platform_registry", lambda: _Registry())
+    monkeypatch.setattr("api.routes.listings.get_accessible_journey", _fake_accessible_journey)
     monkeypatch.setattr("api.routes.listings.get_cache_record", _fake_get_cache_record)
     monkeypatch.setattr(
         "api.routes.listings.find_usable_cache_for_search_location", _fake_address_cache
@@ -563,17 +651,85 @@ def test_listings_search_cache_miss_returns_job_id(monkeypatch) -> None:
     monkeypatch.setattr("api.routes.listings._find_active_listings_job_id", _fake_find_active_job)
 
     journey_id = uuid4()
-    with TestClient(app) as client:
-        response = client.post(
-            f"/journeys/{journey_id}/listings/search",
-            json=_payload(),
-        )
+    app.dependency_overrides[get_optional_auth_context] = lambda: _authorized_auth_context()
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                f"/journeys/{journey_id}/listings/search",
+                json=_payload(),
+            )
+    finally:
+        app.dependency_overrides.pop(get_optional_auth_context, None)
 
     assert response.status_code == 200
     body = response.json()
     assert body["source"] == "none"
     assert body["job_id"] == str(created_job_id)
     assert body["freshness_status"] == "queued_for_next_prewarm"
+
+
+def test_listings_search_cache_miss_registers_deferred_address_for_non_authorized_account(monkeypatch) -> None:
+    class _Registry:
+        def default_free_platforms(self):
+            return ["quintoandar", "vivareal", "zapimoveis"]
+
+        def resolve_names(self, names):
+            return list(names)
+
+    calls = {"record": 0}
+
+    async def _fake_address_cache(_normalized, **_kwargs):
+        return None
+
+    def _fake_cache_is_usable(record):
+        return bool(record)
+
+    async def _fake_record_search_request(**_kwargs):
+        calls["record"] += 1
+
+    async def _fake_create_cache_record(_normalized, **_kwargs):
+        raise AssertionError("create_cache_record should not run when scrape is blocked")
+
+    async def _fake_enqueue(**_kwargs):
+        raise AssertionError("_enqueue_listings_scrape_job should not run when scrape is blocked")
+
+    async def _fake_find_active_job(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr("api.routes.listings.get_platform_registry", lambda: _Registry())
+    monkeypatch.setattr("api.routes.listings.get_accessible_journey", _fake_accessible_journey)
+    monkeypatch.setattr(
+        "api.routes.listings.find_usable_cache_for_search_location", _fake_address_cache
+    )
+    monkeypatch.setattr("api.routes.listings.cache_is_usable", _fake_cache_is_usable)
+    monkeypatch.setattr("api.routes.listings.record_search_request", _fake_record_search_request)
+    monkeypatch.setattr("api.routes.listings.create_cache_record", _fake_create_cache_record)
+    monkeypatch.setattr("api.routes.listings._enqueue_listings_scrape_job", _fake_enqueue)
+    monkeypatch.setattr("api.routes.listings._find_active_listings_job_id", _fake_find_active_job)
+
+    journey_id = uuid4()
+    app.dependency_overrides[get_optional_auth_context] = lambda: _authorized_auth_context("outra-conta@example.com")
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                f"/journeys/{journey_id}/listings/search",
+                json=_payload(),
+            )
+    finally:
+        app.dependency_overrides.pop(get_optional_auth_context, None)
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "source": "none",
+        "job_id": None,
+        "freshness_status": "queued_for_next_prewarm",
+        "upgrade_reason": "address_search_registered",
+        "next_refresh_window": "até 24 horas",
+        "listings": [],
+        "total_count": 0,
+        "cache_age_hours": None,
+    }
+    assert calls["record"] == 1
 
 def test_listings_search_reuses_cache_across_different_zones_and_configs(monkeypatch) -> None:
     """

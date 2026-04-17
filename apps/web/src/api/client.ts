@@ -1,58 +1,38 @@
 import { z, ZodSchema } from "zod";
 import {
-  AuthStatusReadSchema,
-  FavoriteListingBackendSchema,
-  FinalListingsJson,
-  FinalizeResponse,
   JobRead,
   JobReadSchema,
   JourneyRead,
   JourneyReadSchema,
+  FinalizeResponse,
+  FinalListingsJson,
+  FinalListingsJsonSchema,
+  FinalizeResponseSchema,
   ListingsCollection,
-  ListingsScrapePlanResponseSchema,
+  ListingsCollectionSchema,
   ListingsScrapeResponse,
+  ListingsScrapeResponseSchema,
   PriceRollupRead,
   PriceRollupReadSchema,
-  ZoneDashboardAnalytics,
-  ZoneDashboardAnalyticsBackendSchema,
   RunCreateResponse,
+  RunCreateResponseSchema,
   RunStatusResponse,
-  SafetyIncidentsCollection,
-  SafetyIncidentsCollectionSchema,
+  RunStatusResponseSchema,
   SimpleMessageResponse,
-  TransportBusDetailResponse,
-  TransportBusDetailResponseSchema,
+  SimpleMessageResponseSchema,
   TransportLayersResponse,
   TransportLayersResponseSchema,
   TransportPointRead,
   TransportPointReadSchema,
-  TransportTraceResponseSchema,
   TransportStopsResponse,
   TransportStopsResponseSchema,
   ZoneDetailResponse,
+  ZoneDetailResponseSchema,
   ZonesCollection,
-  ZonesCollectionSchema,
-  JourneyZonesListResponseSchema,
-  SearchAddressSuggestionBackendSchema,
-  ListingPlatformVariantBackendSchema,
-  ListingCardReadBackendSchema,
-  ListingsRequestResultBackendSchema
-  ,ZoneFavoriteAnalytics,
-  ZoneFavoriteAnalyticsBackendSchema
+  ZonesCollectionSchema
 } from "./schemas";
 
-export const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
-
-export type ZoneDashboardAnalyticsOptions = {
-  cityName?: string | null;
-  page?: "preco" | "seguranca" | "ambiente" | null;
-  minPrice?: string | null;
-  maxPrice?: string | null;
-  usageType?: string | null;
-  spatialScope?: string | null;
-  minSize?: string | null;
-  maxSize?: string | null;
-};
+const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
 
 type RequestOptions = {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
@@ -70,37 +50,6 @@ export class ApiError extends Error {
   }
 }
 
-export type AuthStatusRead = z.output<typeof AuthStatusReadSchema>;
-export type FavoriteListingEntry = {
-  listingKey: string;
-  journeyId: string;
-  zoneFingerprint: string;
-  searchType: string;
-  usageType: string;
-  savedAt: string;
-  listing: ListingCardRead;
-};
-
-function mapFavoriteListingEntry(entry: z.output<typeof FavoriteListingBackendSchema>): FavoriteListingEntry {
-  return {
-    listingKey: entry.listing_key,
-    journeyId: entry.journey_id,
-    zoneFingerprint: entry.zone_fingerprint,
-    searchType: entry.search_type,
-    usageType: entry.usage_type,
-    savedAt: entry.saved_at,
-    listing: ListingCardReadBackendSchema.parse(entry.listing),
-  };
-}
-
-function legacyRunNotSupported(action: string): never {
-  throw new ApiError(
-    `${action} usa o contrato legado de run e ainda não foi migrado para journey/jobs nesta tela.`,
-    501,
-    false
-  );
-}
-
 async function requestJson<T>(path: string, schema: ZodSchema<T>, options: RequestOptions = {}): Promise<T> {
   const method = options.method || "GET";
   const url = `${API_BASE}${path}`;
@@ -109,47 +58,24 @@ async function requestJson<T>(path: string, schema: ZodSchema<T>, options: Reque
     console.debug("[API →]", method, url, options.body ?? null);
   }
 
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      method,
-      credentials: "include",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: options.body ? JSON.stringify(options.body) : undefined
-    });
-  } catch {
-      throw new ApiError(
-        "Não foi possível conectar com a API. Verifique se o backend está ativo e se CORS/rede estão configurados.",
-      0,
-      true
-    );
-  }
+  const response = await fetch(url, {
+    method,
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: options.body ? JSON.stringify(options.body) : undefined
+  });
 
   const text = await response.text();
-  let data: unknown = {};
-  if (text) {
-    try {
-      data = JSON.parse(text);
-    } catch {
-      throw new ApiError(
-        "A API respondeu com payload inválido (era esperado JSON).",
-        response.status || 500,
-        false
-      );
-    }
-  }
+  const data = text ? JSON.parse(text) : {};
 
   if (import.meta.env.DEV) {
     console.debug("[API ←]", response.status, method, url, data);
   }
 
   if (!response.ok) {
-    const detail =
-      typeof data === "object" && data !== null && "detail" in data && typeof (data as { detail?: unknown }).detail === "string"
-        ? ((data as { detail: string }).detail)
-        : "Erro inesperado da API.";
+    const detail = typeof data?.detail === "string" ? data.detail : "Erro inesperado da API.";
     const recoverable = response.status >= 500 || response.status === 429 || response.status === 408;
     throw new ApiError(detail, response.status, recoverable);
   }
@@ -168,7 +94,7 @@ export function apiActionHint(error: unknown): string {
       return `${error.message} Tente novamente em alguns segundos.`;
     }
     if (error.status === 404) {
-      return `${error.message} Verifique se o recurso existe e se a etapa anterior foi concluída.`;
+      return `${error.message} Verifique se o run_id existe e se a etapa anterior foi concluída.`;
     }
     if (error.status === 400) {
       return `${error.message} Revise os dados enviados e refaça a ação.`;
@@ -177,6 +103,69 @@ export function apiActionHint(error: unknown): string {
   }
 
   return "Falha de comunicação. Verifique API, rede e tente novamente.";
+}
+
+export async function createRun(payload: {
+  reference_points: Array<{ name: string; lat: number; lon: number }>;
+  params: Record<string, unknown>;
+}): Promise<RunCreateResponse> {
+  return (await requestJson("/runs", RunCreateResponseSchema, {
+    method: "POST",
+    body: payload
+  })) as RunCreateResponse;
+}
+
+export async function getRunStatus(runId: string): Promise<RunStatusResponse> {
+  return (await requestJson(`/runs/${runId}/status`, RunStatusResponseSchema)) as RunStatusResponse;
+}
+
+export async function getZones(runId: string): Promise<ZonesCollection> {
+  return (await requestJson(`/runs/${runId}/zones`, ZonesCollectionSchema)) as ZonesCollection;
+}
+
+export async function getZoneDetail(runId: string, zoneUid: string): Promise<ZoneDetailResponse> {
+  return (await requestJson(`/runs/${runId}/zones/${zoneUid}/detail`, ZoneDetailResponseSchema, {
+    method: "POST"
+  })) as ZoneDetailResponse;
+}
+
+export async function selectZones(runId: string, zoneUids: string[]): Promise<SimpleMessageResponse> {
+  return (await requestJson(`/runs/${runId}/zones/select`, SimpleMessageResponseSchema, {
+    method: "POST",
+    body: { zone_uids: zoneUids }
+  })) as SimpleMessageResponse;
+}
+
+export async function scrapeZoneListings(
+  runId: string,
+  zoneUid: string,
+  streetFilter?: string
+): Promise<ListingsScrapeResponse> {
+  return (await requestJson(`/runs/${runId}/zones/${zoneUid}/listings`, ListingsScrapeResponseSchema, {
+    method: "POST",
+    body: streetFilter ? { street_filter: streetFilter } : {}
+  })) as ListingsScrapeResponse;
+}
+
+export async function finalizeRun(runId: string): Promise<FinalizeResponse> {
+  return (await requestJson(`/runs/${runId}/finalize`, FinalizeResponseSchema, {
+    method: "POST"
+  })) as FinalizeResponse;
+}
+
+export async function getFinalListings(runId: string): Promise<ListingsCollection> {
+  return (await requestJson(`/runs/${runId}/final/listings`, ListingsCollectionSchema)) as ListingsCollection;
+}
+
+export async function getFinalListingsJson(runId: string): Promise<FinalListingsJson> {
+  return (await requestJson(`/runs/${runId}/final/listings.json`, FinalListingsJsonSchema)) as FinalListingsJson;
+}
+
+export async function getTransportLayers(runId: string): Promise<TransportLayersResponse> {
+  return (await requestJson(
+    `/runs/${runId}/transport/routes`,
+    TransportLayersResponseSchema
+  )) as TransportLayersResponse;
 }
 
 export async function getTransportStops(
@@ -194,320 +183,11 @@ export async function getTransportStops(
   )) as TransportStopsResponse;
 }
 
-export async function getPublicSafetyIncidentsForViewport(
-  viewport: { minLon: number; minLat: number; maxLon: number; maxLat: number },
-  zoom: number,
-  groups?: string[],
-): Promise<SafetyIncidentsCollection> {
-  const bbox = `${viewport.minLon},${viewport.minLat},${viewport.maxLon},${viewport.maxLat}`;
-  const groupsQuery = groups && groups.length > 0
-    ? `&groups=${encodeURIComponent(groups.join(","))}`
-    : "";
+export async function getZoneStreets(runId: string, zoneUid: string): Promise<{ zone_uid: string; streets: string[] }> {
   return (await requestJson(
-    `/transport/safety-incidents?bbox=${encodeURIComponent(bbox)}&zoom=${encodeURIComponent(String(zoom))}${groupsQuery}`,
-    SafetyIncidentsCollectionSchema
-  )) as SafetyIncidentsCollection;
-}
-
-function computeGeoJsonCentroid(geom: any): { lon: number; lat: number } | null {
-  // Aproximação simples: média de vértices para colocar elementos no mapa.
-  if (!geom || typeof geom !== "object") return null;
-
-  const points: Array<[number, number]> = [];
-
-  const collect = (g: any) => {
-    if (!g || typeof g !== "object") return;
-    if (g.type === "Polygon") {
-      const ring = g.coordinates?.[0];
-      if (!Array.isArray(ring)) return;
-      for (const p of ring) {
-        if (Array.isArray(p) && p.length >= 2) points.push([Number(p[0]), Number(p[1])]);
-      }
-      return;
-    }
-    if (g.type === "MultiPolygon") {
-      const polys = g.coordinates;
-      if (!Array.isArray(polys)) return;
-      for (const poly of polys) collect({ type: "Polygon", coordinates: poly });
-    }
-  };
-
-  collect(geom);
-  const valid = points.filter((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]));
-  if (!valid.length) return null;
-
-  const sum = valid.reduce(
-    (acc, [lon, lat]) => ({ lon: acc.lon + lon, lat: acc.lat + lat }),
-    { lon: 0, lat: 0 }
-  );
-
-  return { lon: sum.lon / valid.length, lat: sum.lat / valid.length };
-}
-
-export async function getJourneyZonesCollection(journeyId: string): Promise<ZonesCollection> {
-  const backend = await requestJson(`/journeys/${journeyId}/zones`, JourneyZonesListResponseSchema);
-
-  const fc = {
-    type: "FeatureCollection" as const,
-    features: backend.zones.map((zj) => {
-      const geometryRaw = (zj.isochrone_geom || {}) as Record<string, unknown>;
-      const geometry = {
-        ...geometryRaw,
-        type: typeof geometryRaw.type === "string" ? geometryRaw.type : "Polygon",
-        coordinates: geometryRaw.coordinates ?? []
-      };
-      const centroid = computeGeoJsonCentroid(zj.isochrone_geom);
-      return {
-        type: "Feature" as const,
-        geometry,
-        properties: {
-          zone_uid: zj.fingerprint,
-          centroid_lon: centroid?.lon,
-          centroid_lat: centroid?.lat,
-          time_agg: zj.travel_time_minutes ?? undefined,
-          green_area_ratio: zj.green_area_m2 ?? undefined,
-          flood_area_ratio: zj.flood_area_m2 ?? undefined,
-          poi_counts: zj.poi_counts ?? undefined,
-          badges_provisional: zj.badges_provisional ?? undefined
-        }
-      };
-    })
-  };
-
-  return ZonesCollectionSchema.parse(fc) as ZonesCollection;
-}
-
-export async function getAuthStatus(): Promise<AuthStatusRead> {
-  return await requestJson("/auth/me", AuthStatusReadSchema);
-}
-
-export async function registerAuth(payload: {
-  email: string;
-  password: string;
-  display_name?: string;
-}): Promise<AuthStatusRead> {
-  return await requestJson("/auth/register", AuthStatusReadSchema, {
-    method: "POST",
-    body: payload
-  });
-}
-
-export async function loginAuth(payload: { email: string; password: string }): Promise<AuthStatusRead> {
-  return await requestJson("/auth/login", AuthStatusReadSchema, {
-    method: "POST",
-    body: payload
-  });
-}
-
-export async function logoutAuth(): Promise<AuthStatusRead> {
-  return await requestJson("/auth/logout", AuthStatusReadSchema, {
-    method: "POST"
-  });
-}
-
-export async function getAccountFavorites(): Promise<FavoriteListingEntry[]> {
-  const response = await requestJson("/favorites", z.array(FavoriteListingBackendSchema));
-  return response.map(mapFavoriteListingEntry);
-}
-
-export async function saveAccountFavorite(payload: {
-  journeyId: string;
-  zoneFingerprint: string;
-  searchType: string;
-  usageType: string;
-  listing: ListingCardRead;
-}): Promise<FavoriteListingEntry> {
-  const response = await requestJson("/favorites", FavoriteListingBackendSchema, {
-    method: "POST",
-    body: {
-      journey_id: payload.journeyId,
-      zone_fingerprint: payload.zoneFingerprint,
-      search_type: payload.searchType,
-      usage_type: payload.usageType,
-      listing: payload.listing,
-    },
-  });
-  return mapFavoriteListingEntry(response);
-}
-
-export async function deleteAccountFavorite(listingKey: string): Promise<void> {
-  await requestJson(`/favorites/${encodeURIComponent(listingKey)}`, z.object({ message: z.string() }), {
-    method: "DELETE",
-  });
-}
-
-export type SearchAddressSuggestion = z.output<typeof SearchAddressSuggestionBackendSchema>;
-export async function getZoneAddressSuggestions(
-  journeyId: string,
-  zoneFingerprint: string,
-  q: string
-): Promise<SearchAddressSuggestion[]> {
-  return await requestJson(
-    `/journeys/${journeyId}/listings/address-suggest?zone_fingerprint=${encodeURIComponent(zoneFingerprint)}&q=${encodeURIComponent(q)}`,
-    z.array(SearchAddressSuggestionBackendSchema)
-  );
-}
-
-export type ListingsScrapePlanResponse = z.output<typeof ListingsScrapePlanResponseSchema>;
-export type ListingPlatformVariantRead = z.output<typeof ListingPlatformVariantBackendSchema>;
-export async function getListingsScrapePlan(
-  journeyId: string,
-  searchType: string,
-  usageType: string = "residential"
-): Promise<ListingsScrapePlanResponse> {
-  return await requestJson(
-    `/journeys/${journeyId}/listings/scrape-plan?search_type=${encodeURIComponent(searchType)}&usage_type=${encodeURIComponent(usageType)}`,
-    ListingsScrapePlanResponseSchema
-  );
-}
-
-export type ListingCardRead = z.output<typeof ListingCardReadBackendSchema>;
-export type ListingsRequestResult = z.output<typeof ListingsRequestResultBackendSchema>;
-export async function searchZoneListings(
-  journeyId: string,
-  zoneFingerprint: string,
-  payload: {
-    search_location_normalized: string;
-    search_location_label: string;
-    search_location_type: string;
-    search_type: string;
-    usage_type?: string;
-  }
-): Promise<ListingsRequestResult> {
-  return (await requestJson(
-    `/journeys/${journeyId}/listings/search`,
-    ListingsRequestResultBackendSchema,
-    {
-      method: "POST",
-      body: {
-        zone_fingerprint: zoneFingerprint,
-        ...payload
-      }
-    }
-  )) as ListingsRequestResult;
-}
-
-// Compat layer while legacy run-based UI flow is being migrated to journey/jobs.
-export async function createRun(payload: {
-  reference_points: Array<{ name: string; lat: number; lon: number }>;
-  params: Record<string, unknown>;
-}): Promise<RunCreateResponse> {
-  const first = payload.reference_points[0];
-  if (!first) {
-    throw new ApiError("reference_points vazio", 400, false);
-  }
-
-  const journey = await createJourney({
-    input_snapshot: {
-      reference_point: { lat: first.lat, lon: first.lon },
-      ...payload.params
-    }
-  });
-
-  return {
-    run_id: journey.id,
-    status: {
-      state: journey.state,
-      stage: "journey_created"
-    }
-  };
-}
-
-export async function getRunStatus(runId: string): Promise<RunStatusResponse> {
-  const journey = await requestJson(`/journeys/${runId}`, JourneyReadSchema);
-  return {
-    run_id: runId,
-    status: {
-      state: String(journey.state || "running"),
-      stage: "journey"
-    }
-  };
-}
-
-export async function getZones(runId: string): Promise<ZonesCollection> {
-  return getJourneyZonesCollection(runId);
-}
-
-export async function getZoneDetail(runId: string, zoneUid: string): Promise<ZoneDetailResponse> {
-  const zones = await requestJson(`/journeys/${runId}/zones`, JourneyZonesListResponseSchema);
-  const zone = zones.zones.find((item) => item.fingerprint === zoneUid);
-  if (!zone) {
-    throw new ApiError("Zona não encontrada na jornada atual.", 404, false);
-  }
-
-  return {
-    zone_uid: zoneUid,
-    zone_name: `Zona ${zoneUid.slice(0, 8)}`,
-    green_area_ratio: Number(zone.green_area_m2 || 0),
-    flood_area_ratio: Number(zone.flood_area_m2 || 0),
-    poi_count_by_category: zone.poi_counts || {},
-    bus_lines_count: 0,
-    train_lines_count: 0,
-    bus_stop_count: 0,
-    train_station_count: 0,
-    lines_used_for_generation: [],
-    transport_points: [],
-    poi_points: (zone.poi_points || []).map((point) => ({
-      ...point,
-      kind: point.kind || "poi",
-    })),
-    streets_count: 0,
-    has_street_data: false,
-    has_poi_data: Boolean((zone.poi_points && zone.poi_points.length > 0) || (zone.poi_counts && Object.keys(zone.poi_counts).length > 0)),
-    has_transport_data: false,
-    public_safety: null
-  };
-}
-
-export async function selectZones(_runId: string, _zoneUids: string[]): Promise<SimpleMessageResponse> {
-  legacyRunNotSupported("Selecao de zonas");
-}
-
-export async function getZoneStreets(_runId: string, _zoneUid: string): Promise<{ zone_uid: string; streets: string[] }> {
-  legacyRunNotSupported("Consulta de ruas da zona");
-}
-
-export async function getTransportLayers(viewport: {
-  minLon: number;
-  minLat: number;
-  maxLon: number;
-  maxLat: number;
-}): Promise<TransportLayersResponse> {
-  const bbox = `${viewport.minLon},${viewport.minLat},${viewport.maxLon},${viewport.maxLat}`;
-  return (await requestJson(
-    `/transport/layers?bbox=${encodeURIComponent(bbox)}`,
-    TransportLayersResponseSchema
-  )) as TransportLayersResponse;
-}
-
-export async function scrapeZoneListings(
-  runId: string,
-  zoneUid: string,
-  streetFilter?: string
-): Promise<ListingsScrapeResponse> {
-  const payload = {
-    search_location_normalized: (streetFilter || "zona").trim().toLowerCase(),
-    search_location_label: (streetFilter || "Zona selecionada").trim(),
-    search_location_type: "street",
-    search_type: "rent"
-  };
-  const result = await searchZoneListings(runId, zoneUid, payload);
-  return {
-    zone_uid: zoneUid,
-    listings_count: result.total_count
-  };
-}
-
-export async function finalizeRun(_runId: string): Promise<FinalizeResponse> {
-  legacyRunNotSupported("Finalizacao de run");
-}
-
-export async function getFinalListings(_runId: string): Promise<ListingsCollection> {
-  legacyRunNotSupported("Leitura de listings finalizados");
-}
-
-export async function getFinalListingsJson(_runId: string): Promise<FinalListingsJson> {
-  legacyRunNotSupported("Leitura de listings finalizados em JSON");
+    `/runs/${runId}/zones/${zoneUid}/streets`,
+    z.object({ zone_uid: z.string(), streets: z.array(z.string()) })
+  )) as { zone_uid: string; streets: string[] };
 }
 
 export async function createJourney(payload: {
@@ -528,96 +208,12 @@ export async function getJourneyTransportPoints(journeyId: string): Promise<Tran
   )) as TransportPointRead[];
 }
 
-export async function getSelectedTransportTrace(
-  sourceKind: string,
-  externalId: string,
-  routeIds: string[] = []
-): Promise<GeoJSON.FeatureCollection<GeoJSON.Geometry>> {
-  const params = new URLSearchParams({
-    source_kind: sourceKind,
-    external_id: externalId,
-  });
-  for (const routeId of routeIds) {
-    params.append("route_ids", routeId);
-  }
-  return await requestJson(
-    `/transport/selected-trace?${params.toString()}`,
-    TransportTraceResponseSchema
-  ) as GeoJSON.FeatureCollection<GeoJSON.Geometry>;
-}
-
-export async function getBusStopDetails(stopId: string): Promise<TransportBusDetailResponse> {
-  return (await requestJson(
-    `/transport/details/bus-stop?stop_id=${encodeURIComponent(stopId)}`,
-    TransportBusDetailResponseSchema
-  )) as TransportBusDetailResponse;
-}
-
-export async function getTransportStopDetails(stopId: string, sourceKind: string): Promise<TransportBusDetailResponse> {
-  return (await requestJson(
-    `/transport/details/transport-stop?stop_id=${encodeURIComponent(stopId)}&source_kind=${encodeURIComponent(sourceKind)}`,
-    TransportBusDetailResponseSchema
-  )) as TransportBusDetailResponse;
-}
-
-export async function getBusLineDetails(lineId: string): Promise<TransportBusDetailResponse> {
-  return (await requestJson(
-    `/transport/details/bus-line?line_id=${encodeURIComponent(lineId)}`,
-    TransportBusDetailResponseSchema
-  )) as TransportBusDetailResponse;
-}
-
-export async function updateJourney(
-  journeyId: string,
-  payload: {
-    input_snapshot?: Record<string, unknown>;
-    selected_transport_point_id?: string | null;
-    selected_zone_id?: string | null;
-    selected_property_id?: string | null;
-    last_completed_step?: number | null;
-    secondary_reference_label?: string | null;
-    secondary_reference_point?: { lat: number; lon: number } | null;
-  }
-): Promise<JourneyRead> {
-  return (await requestJson(`/journeys/${journeyId}`, JourneyReadSchema, {
-    method: "PATCH",
-    body: payload
-  })) as JourneyRead;
-}
-
-export async function getJourneyZonesList(journeyId: string) {
-  return (await requestJson(
-    `/journeys/${journeyId}/zones`,
-    JourneyZonesListResponseSchema
-  )) as z.output<typeof JourneyZonesListResponseSchema>;
-}
-
-export async function getJourneyZoneSafetyIncidents(
-  journeyId: string,
-  zoneFingerprint: string
-): Promise<SafetyIncidentsCollection> {
-  return (await requestJson(
-    `/journeys/${encodeURIComponent(journeyId)}/zones/${encodeURIComponent(zoneFingerprint)}/safety-incidents`,
-    SafetyIncidentsCollectionSchema
-  )) as SafetyIncidentsCollection;
-}
-
 export async function createZoneGenerationJob(journeyId: string): Promise<JobRead> {
   return (await requestJson("/jobs", JobReadSchema, {
     method: "POST",
     body: {
       journey_id: journeyId,
       job_type: "zone_generation"
-    }
-  })) as JobRead;
-}
-
-export async function createZoneEnrichmentJob(journeyId: string): Promise<JobRead> {
-  return (await requestJson("/jobs", JobReadSchema, {
-    method: "POST",
-    body: {
-      journey_id: journeyId,
-      job_type: "zone_enrichment"
     }
   })) as JobRead;
 }
@@ -648,65 +244,4 @@ export async function getPriceRollups(
   )) as PriceRollupRead[];
 }
 
-export async function getZoneDashboardAnalytics(
-  journeyId: string,
-  zoneFingerprint: string,
-  searchType: string = "rent",
-  options?: ZoneDashboardAnalyticsOptions | null,
-): Promise<ZoneDashboardAnalytics> {
-  const normalizedOptions = options || {};
-  const params = new URLSearchParams({
-    search_type: searchType,
-  });
-
-  const appendIfPresent = (name: string, value: string | null | undefined) => {
-    if (typeof value !== "string") {
-      return;
-    }
-    const trimmed = value.trim();
-    if (!trimmed) {
-      return;
-    }
-    params.set(name, trimmed);
-  };
-
-  appendIfPresent("city_name", normalizedOptions.cityName);
-  appendIfPresent("page", normalizedOptions.page);
-  appendIfPresent("min_price", normalizedOptions.minPrice);
-  appendIfPresent("max_price", normalizedOptions.maxPrice);
-  appendIfPresent("usage_type", normalizedOptions.usageType);
-  appendIfPresent("spatial_scope", normalizedOptions.spatialScope);
-  appendIfPresent("min_size", normalizedOptions.minSize);
-  appendIfPresent("max_size", normalizedOptions.maxSize);
-
-  return (await requestJson(
-    `/journeys/${encodeURIComponent(journeyId)}/zones/${encodeURIComponent(zoneFingerprint)}/dashboard-analytics?${params.toString()}`,
-    ZoneDashboardAnalyticsBackendSchema,
-  )) as ZoneDashboardAnalytics;
-}
-
-export async function getZoneFavoriteAnalytics(
-  journeyId: string,
-  zoneFingerprint: string,
-  searchType: string = "rent",
-  usageType: string = "all",
-): Promise<ZoneFavoriteAnalytics> {
-  return (await requestJson(
-    `/journeys/${encodeURIComponent(journeyId)}/zones/${encodeURIComponent(zoneFingerprint)}/favorite-analytics?search_type=${encodeURIComponent(searchType)}&usage_type=${encodeURIComponent(usageType)}`,
-    ZoneFavoriteAnalyticsBackendSchema,
-  )) as ZoneFavoriteAnalytics;
-}
-
-export async function getZoneListings(
-  journeyId: string,
-  zoneFingerprint: string,
-  searchType: string,
-  usageType: string = "residential",
-  spatialScope: "inside_zone" | "all" = "inside_zone"
-): Promise<ListingsRequestResult> {
-  return (await requestJson(
-    `/journeys/${encodeURIComponent(journeyId)}/zones/${encodeURIComponent(zoneFingerprint)}/listings?search_type=${encodeURIComponent(searchType)}&usage_type=${encodeURIComponent(usageType)}&spatial_scope=${encodeURIComponent(spatialScope)}`,
-    ListingsRequestResultBackendSchema
-  )) as ListingsRequestResult;
-}
-
+export { API_BASE };

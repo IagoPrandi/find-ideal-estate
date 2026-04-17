@@ -205,11 +205,13 @@ async def _cleanup_fetch_listing_cards_rows(*, fingerprint: str, platform_listin
 async def test_fetch_listing_cards_for_zone_supports_all_spatial_scope() -> None:
     init_db(os.environ["DATABASE_URL"])
 
+    journey_id = uuid4()
     zone_fingerprint = f"zone-dedup-{uuid4().hex[:8]}"
     platform_listing_ids = [f"dedup-qa-{uuid4().hex[:8]}", f"dedup-zap-{uuid4().hex[:8]}"]
     base_lat = -22.3215
     base_lon = -45.1843
     address_label = "Rua Teste Dedup, Bairro Dedup QA, Cidade Dedup, SP"
+    search_location_normalized = f"seed-dedup-{uuid4().hex[:8]}"
     fingerprint = compute_property_fingerprint(
         address_normalized=address_label,
         lat=base_lat,
@@ -276,7 +278,7 @@ async def test_fetch_listing_cards_for_zone_supports_all_spatial_scope() -> None
             price=Decimal("3500"),
             condo_fee=Decimal("500"),
             iptu=Decimal("100"),
-            raw_payload={"image_url": "https://example.org/quintoandar.jpg"},
+            raw_payload={"image_url": "https://example.org/quintoandar.jpg", "search_location_normalized": search_location_normalized},
         )
         await upsert_property_and_ad(
             fingerprint=fingerprint,
@@ -295,16 +297,19 @@ async def test_fetch_listing_cards_for_zone_supports_all_spatial_scope() -> None
             price=Decimal("3300"),
             condo_fee=Decimal("800"),
             iptu=Decimal("90"),
-            raw_payload={"image_url": "https://example.org/zap.jpg"},
+            raw_payload={"image_url": "https://example.org/zap.jpg", "search_location_normalized": search_location_normalized},
         )
 
         cards = await fetch_listing_cards_for_zone(
+            journey_id=journey_id,
             zone_fingerprint=zone_fingerprint,
             search_type="rent",
             usage_type="residential",
             platforms=["quintoandar", "zapimoveis"],
             observed_since=observed_since,
             spatial_scope="all",
+            search_location_normalized=search_location_normalized,
+            address_scope="selected_address",
         )
 
         assert len(cards) == 1
@@ -349,11 +354,13 @@ async def test_fetch_listing_cards_for_zone_supports_all_spatial_scope() -> None
 async def test_fetch_listing_cards_for_zone_falls_back_to_variant_image() -> None:
     init_db(os.environ["DATABASE_URL"])
 
+    journey_id = uuid4()
     zone_fingerprint = f"zone-dedup-{uuid4().hex[:8]}"
     platform_listing_ids = [f"dedup-noimg-{uuid4().hex[:8]}", f"dedup-withimg-{uuid4().hex[:8]}"]
     base_lat = -22.3215
     base_lon = -45.1843
     address_label = "Rua Imagem Compartilhada, Bairro Dedup Img, Cidade Dedup, SP"
+    search_location_normalized = f"seed-image-{uuid4().hex[:8]}"
     fingerprint = compute_property_fingerprint(
         address_normalized=address_label,
         lat=base_lat,
@@ -420,7 +427,7 @@ async def test_fetch_listing_cards_for_zone_falls_back_to_variant_image() -> Non
             price=Decimal("3100"),
             condo_fee=Decimal("250"),
             iptu=Decimal("80"),
-            raw_payload={"image_url": None},
+            raw_payload={"image_url": None, "search_location_normalized": search_location_normalized},
         )
         await upsert_property_and_ad(
             fingerprint=fingerprint,
@@ -439,16 +446,19 @@ async def test_fetch_listing_cards_for_zone_falls_back_to_variant_image() -> Non
             price=Decimal("3200"),
             condo_fee=Decimal("260"),
             iptu=Decimal("90"),
-            raw_payload={"image_url": "https://example.org/shared-image.jpg"},
+            raw_payload={"image_url": "https://example.org/shared-image.jpg", "search_location_normalized": search_location_normalized},
         )
 
         cards = await fetch_listing_cards_for_zone(
+            journey_id=journey_id,
             zone_fingerprint=zone_fingerprint,
             search_type="rent",
             usage_type="residential",
             platforms=["zapimoveis", "quintoandar"],
             observed_since=observed_since,
             spatial_scope="all",
+            search_location_normalized=search_location_normalized,
+            address_scope="selected_address",
         )
 
         assert len(cards) == 1
@@ -472,11 +482,13 @@ async def test_fetch_listing_cards_for_zone_falls_back_to_variant_image() -> Non
 async def test_fetch_listing_cards_for_zone_reuses_previous_snapshot_image() -> None:
     init_db(os.environ["DATABASE_URL"])
 
+    journey_id = uuid4()
     zone_fingerprint = f"zone-dedup-{uuid4().hex[:8]}"
     platform_listing_id = f"dedup-history-{uuid4().hex[:8]}"
     base_lat = -22.3715
     base_lon = -45.2343
     address_label = "Rua Histórico de Imagem, Bairro Dedup Histórico, Cidade Dedup, SP"
+    search_location_normalized = f"seed-history-{uuid4().hex[:8]}"
     fingerprint = compute_property_fingerprint(
         address_normalized=address_label,
         lat=base_lat,
@@ -543,7 +555,7 @@ async def test_fetch_listing_cards_for_zone_reuses_previous_snapshot_image() -> 
             price=Decimal("3600"),
             condo_fee=Decimal("420"),
             iptu=Decimal("120"),
-            raw_payload={"image_url": "https://example.org/previous-image.jpg"},
+            raw_payload={"image_url": "https://example.org/previous-image.jpg", "search_location_normalized": search_location_normalized},
         )
         await upsert_property_and_ad(
             fingerprint=fingerprint,
@@ -562,7 +574,7 @@ async def test_fetch_listing_cards_for_zone_reuses_previous_snapshot_image() -> 
             price=Decimal("3550"),
             condo_fee=Decimal("420"),
             iptu=Decimal("120"),
-            raw_payload={"image_url": None},
+            raw_payload={"image_url": None, "search_location_normalized": search_location_normalized},
         )
 
         async with engine.begin() as conn:
@@ -594,12 +606,15 @@ async def test_fetch_listing_cards_for_zone_reuses_previous_snapshot_image() -> 
             )
 
         cards = await fetch_listing_cards_for_zone(
+            journey_id=journey_id,
             zone_fingerprint=zone_fingerprint,
             search_type="rent",
             usage_type="residential",
             platforms=["vivareal"],
             observed_since=observed_since,
             spatial_scope="all",
+            search_location_normalized=search_location_normalized,
+            address_scope="selected_address",
         )
 
         assert len(cards) == 1
@@ -620,12 +635,14 @@ async def test_fetch_listing_cards_for_zone_reuses_previous_snapshot_image() -> 
 async def test_fetch_listing_cards_for_zone_reuses_image_from_same_property_history() -> None:
     init_db(os.environ["DATABASE_URL"])
 
+    journey_id = uuid4()
     zone_fingerprint = f"zone-dedup-{uuid4().hex[:8]}"
     current_listing_id = f"zap-current-{uuid4().hex[:8]}"
     previous_listing_id = f"zap-previous-{uuid4().hex[:8]}"
     base_lat = -22.3315
     base_lon = -45.1943
     address_label = "Rua Teste Imagem, Vila Leopoldina, São Paulo, SP"
+    search_location_normalized = f"seed-property-history-{uuid4().hex[:8]}"
     fingerprint = compute_property_fingerprint(
         address_normalized=address_label,
         lat=base_lat,
@@ -692,7 +709,7 @@ async def test_fetch_listing_cards_for_zone_reuses_image_from_same_property_hist
             price=Decimal("3600"),
             condo_fee=Decimal("300"),
             iptu=Decimal("100"),
-            raw_payload={"image_url": "https://example.org/property-image.jpg"},
+            raw_payload={"image_url": "https://example.org/property-image.jpg", "search_location_normalized": search_location_normalized},
         )
         await upsert_property_and_ad(
             fingerprint=fingerprint,
@@ -711,16 +728,19 @@ async def test_fetch_listing_cards_for_zone_reuses_image_from_same_property_hist
             price=Decimal("3500"),
             condo_fee=Decimal("300"),
             iptu=Decimal("100"),
-            raw_payload={"image_url": None},
+            raw_payload={"image_url": None, "search_location_normalized": search_location_normalized},
         )
 
         cards = await fetch_listing_cards_for_zone(
+            journey_id=journey_id,
             zone_fingerprint=zone_fingerprint,
             search_type="rent",
             usage_type="residential",
             platforms=["zapimoveis"],
             observed_since=observed_since,
             spatial_scope="all",
+            search_location_normalized=search_location_normalized,
+            address_scope="selected_address",
         )
 
         assert len(cards) == 1
@@ -739,9 +759,10 @@ async def test_fetch_listing_cards_for_zone_reuses_image_from_same_property_hist
 
 
 @pytest.mark.anyio
-async def test_fetch_listing_cards_for_zone_all_scope_limits_outside_zone_to_recent_direct_search() -> None:
+async def test_fetch_listing_cards_for_zone_selected_address_scope_filters_to_step5_address() -> None:
     init_db(os.environ["DATABASE_URL"])
 
+    journey_id = uuid4()
     zone_fingerprint = f"zone-dedup-{uuid4().hex[:8]}"
     inside_listing_id = f"inside-{uuid4().hex[:8]}"
     direct_listing_id = f"direct-{uuid4().hex[:8]}"
@@ -938,6 +959,7 @@ async def test_fetch_listing_cards_for_zone_all_scope_limits_outside_zone_to_rec
             )
 
         cards = await fetch_listing_cards_for_zone(
+            journey_id=journey_id,
             zone_fingerprint=zone_fingerprint,
             search_type="rent",
             usage_type="residential",
@@ -945,25 +967,28 @@ async def test_fetch_listing_cards_for_zone_all_scope_limits_outside_zone_to_rec
             observed_since=observed_since,
             spatial_scope="all",
             search_location_normalized=direct_search_location,
+            address_scope="all_addresses",
         )
 
         addresses = {card["address_normalized"] for card in cards}
         assert "Rua Dentro, Itaim Bibi, São Paulo, SP" in addresses
         assert "Rua Fora, Vila Olímpia, São Paulo, SP" in addresses
-        assert "Rua Distante, Moema, São Paulo, SP" not in addresses
+        assert "Rua Distante, Moema, São Paulo, SP" in addresses
 
-        cards_inside_only = await fetch_listing_cards_for_zone(
+        cards_selected_address = await fetch_listing_cards_for_zone(
+            journey_id=journey_id,
             zone_fingerprint=zone_fingerprint,
             search_type="rent",
             usage_type="residential",
             platforms=["quintoandar", "zapimoveis", "vivareal"],
-            observed_since=None,
+            observed_since=observed_since,
             spatial_scope="all",
-            search_location_normalized=None,
+            search_location_normalized=direct_search_location,
+            address_scope="selected_address",
         )
 
-        inside_only_addresses = {card["address_normalized"] for card in cards_inside_only}
-        assert inside_only_addresses == {"Rua Dentro, Itaim Bibi, São Paulo, SP"}
+        selected_address_addresses = {card["address_normalized"] for card in cards_selected_address}
+        assert selected_address_addresses == {"Rua Fora, Vila Olímpia, São Paulo, SP"}
     finally:
         if schema_ready:
             await _cleanup()
@@ -1108,12 +1133,14 @@ async def test_upsert_property_and_ad_stores_usage_type_per_listing_ad() -> None
 async def test_fetch_listing_cards_for_zone_filters_by_listing_ad_usage_type() -> None:
     init_db(os.environ["DATABASE_URL"])
 
+    journey_id = uuid4()
     zone_fingerprint = f"zone-usage-filter-{uuid4().hex[:8]}"
     residential_listing_id = f"usage-filter-res-{uuid4().hex[:8]}"
     commercial_listing_id = f"usage-filter-com-{uuid4().hex[:8]}"
     address_label = "Rua Uso Misto, Sumaré, São Paulo, SP"
     lat = -11.1111
     lon = -47.2222
+    search_location_normalized = f"seed-usage-filter-{uuid4().hex[:8]}"
     fingerprint = compute_property_fingerprint(
         address_normalized=address_label,
         lat=lat,
@@ -1180,7 +1207,7 @@ async def test_fetch_listing_cards_for_zone_filters_by_listing_ad_usage_type() -
             price=Decimal("4500"),
             condo_fee=Decimal("300"),
             iptu=Decimal("100"),
-            raw_payload={"url": "https://www.zapimoveis.com.br/imovel/aluguel-apartamento-sumare-sao-paulo-sp-80m2-id-1/"},
+            raw_payload={"url": "https://www.zapimoveis.com.br/imovel/aluguel-apartamento-sumare-sao-paulo-sp-80m2-id-1/", "search_location_normalized": search_location_normalized},
         )
 
         await upsert_property_and_ad(
@@ -1200,20 +1227,26 @@ async def test_fetch_listing_cards_for_zone_filters_by_listing_ad_usage_type() -
             price=Decimal("5200"),
             condo_fee=Decimal("0"),
             iptu=Decimal("0"),
-            raw_payload={"url": "https://www.vivareal.com.br/imovel/ponto-comercial-sumare-sao-paulo-80m2-aluguel-id-2/"},
+            raw_payload={"url": "https://www.vivareal.com.br/imovel/ponto-comercial-sumare-sao-paulo-80m2-aluguel-id-2/", "search_location_normalized": search_location_normalized},
         )
 
         residential_cards = await fetch_listing_cards_for_zone(
+            journey_id=journey_id,
             zone_fingerprint=zone_fingerprint,
             search_type="rent",
             usage_type="residential",
             platforms=["zapimoveis", "vivareal"],
+            search_location_normalized=search_location_normalized,
+            address_scope="selected_address",
         )
         commercial_cards = await fetch_listing_cards_for_zone(
+            journey_id=journey_id,
             zone_fingerprint=zone_fingerprint,
             search_type="rent",
             usage_type="commercial",
             platforms=["zapimoveis", "vivareal"],
+            search_location_normalized=search_location_normalized,
+            address_scope="selected_address",
         )
 
         assert len(residential_cards) == 1

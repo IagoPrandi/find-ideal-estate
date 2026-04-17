@@ -4,6 +4,7 @@ export type SearchType = "rent" | "sale";
 export type TravelMode = "transit" | "walk" | "car";
 export type PublicTransportMode = "bus" | "rail" | "mixed";
 export type ListingsSpatialScope = "all" | "inside_zone";
+export type ListingsAddressScope = "all_addresses" | "selected_address";
 export type ListingsUsageFilter = "all" | "residential" | "commercial";
 export type ListingsSortField = "price" | "size";
 export type ListingsSortDirection = "asc" | "desc";
@@ -72,6 +73,7 @@ type JourneyState = {
   journeyId: string | null;
   config: JourneyConfig;
   listingsFilters: ListingsPanelFilters;
+  listingsAddressScope: ListingsAddressScope;
   selectedListingKey: string | null;
   selectedPoiKey: string | null;
   activePoiCategory: string;
@@ -96,6 +98,7 @@ type JourneyState = {
   setSelectedAddress: (address: SelectedAddress | null) => void;
   setAddressQuery: (query: string) => void;
   setListingsFilters: (updater: Partial<ListingsPanelFilters>) => void;
+  setListingsAddressScope: (scope: ListingsAddressScope) => void;
   resetListingsFilters: () => void;
   setSelectedListingKey: (selectedListingKey: string | null) => void;
   setSelectedPoiKey: (selectedPoiKey: string | null) => void;
@@ -147,6 +150,7 @@ export const useJourneyStore = create<JourneyState>((set) => ({
   journeyId: null,
   config: defaultConfig,
   listingsFilters: defaultListingsPanelFilters,
+  listingsAddressScope: "all_addresses",
   selectedListingKey: null,
   selectedPoiKey: null,
   activePoiCategory: "all",
@@ -170,6 +174,7 @@ export const useJourneyStore = create<JourneyState>((set) => ({
       return {
         journeyId,
         listingsFilters: buildDefaultListingsPanelFilters(state.config),
+        listingsAddressScope: "all_addresses",
         selectedListingKey: null,
         selectedPoiKey: null,
         activePoiCategory: "all",
@@ -224,6 +229,7 @@ export const useJourneyStore = create<JourneyState>((set) => ({
         selectedZoneId,
         selectedZoneFingerprint,
         listingsFilters: buildDefaultListingsPanelFilters(state.config),
+        listingsAddressScope: "all_addresses",
         selectedListingKey: null,
         selectedPoiKey: null,
         activePoiCategory: "all",
@@ -241,6 +247,7 @@ export const useJourneyStore = create<JourneyState>((set) => ({
         ...updater
       }
     })),
+  setListingsAddressScope: (listingsAddressScope) => set({ listingsAddressScope }),
   resetListingsFilters: () => set((state) => ({ listingsFilters: buildDefaultListingsPanelFilters(state.config) })),
   setSelectedListingKey: (selectedListingKey) => set({ selectedListingKey }),
   setSelectedPoiKey: (selectedPoiKey) => set({ selectedPoiKey }),
@@ -251,6 +258,7 @@ export const useJourneyStore = create<JourneyState>((set) => ({
       journeyId: null,
       config: defaultConfig,
       listingsFilters: buildDefaultListingsPanelFilters(defaultConfig),
+      listingsAddressScope: "all_addresses",
       selectedListingKey: null,
       selectedPoiKey: null,
       activePoiCategory: "all",

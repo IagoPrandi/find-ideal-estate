@@ -162,13 +162,18 @@ function arePriceDashboardFiltersEqual(left: ListingsPanelFilters, right: Listin
     && left.maxSize === right.maxSize;
 }
 
-function buildPriceDashboardAnalyticsOptions(filters: ListingsPanelFilters, cityName: string | null = null) {
+function buildPriceDashboardAnalyticsOptions(
+  filters: ListingsPanelFilters,
+  cityName: string | null = null,
+  addressScope: "all_addresses" | "selected_address" = "all_addresses",
+) {
   return {
     cityName,
     minPrice: filters.minPrice || null,
     maxPrice: filters.maxPrice || null,
     usageType: filters.usageType,
     spatialScope: filters.spatialScope,
+    addressScope,
     minSize: filters.minSize || null,
     maxSize: filters.maxSize || null,
   };
@@ -181,8 +186,11 @@ export function Step6Analysis() {
   const zoneFingerprint = useJourneyStore((state) => state.selectedZoneFingerprint);
   const listingsJobId = useJourneyStore((state) => state.listingsJobId);
   const listingsFilters = useJourneyStore((state) => state.listingsFilters);
+  const listingsAddressScope = useJourneyStore((state) => state.listingsAddressScope);
   const selectedListingKey = useJourneyStore((state) => state.selectedListingKey);
+  const selectedAddress = useJourneyStore((state) => state.selectedAddress);
   const setListingsFilters = useJourneyStore((state) => state.setListingsFilters);
+  const setListingsAddressScope = useJourneyStore((state) => state.setListingsAddressScope);
   const setSelectedListingKey = useJourneyStore((state) => state.setSelectedListingKey);
   const config = useJourneyStore((state) => state.config);
   const activeTab = useUIStore((state) => state.activeTab);
@@ -220,8 +228,8 @@ export function Step6Analysis() {
   }, [listingsFilters]);
 
   const listingsQuery = useQuery({
-    queryKey: ["zone-listings", journeyId, zoneFingerprint, config.type, "all"],
-    queryFn: async () => getZoneListings(journeyId as string, zoneFingerprint as string, config.type, "all", "all"),
+    queryKey: ["zone-listings", journeyId, zoneFingerprint, config.type, "all", listingsAddressScope],
+    queryFn: async () => getZoneListings(journeyId as string, zoneFingerprint as string, config.type, "all", "all", listingsAddressScope),
     enabled: Boolean(journeyId && zoneFingerprint),
     refetchInterval: (query) => {
       const data = query.state.data;
@@ -314,6 +322,14 @@ export function Step6Analysis() {
   const noMatchesInZoneForScope = listingsFilters.spatialScope === "inside_zone"
     && rawListings.length > 0
     && listingsForScope.length === 0;
+  const showDeferredAddressInventoryNotice = Boolean(
+    selectedAddress
+    && !effectiveListingsJobId
+    && listingsQuery.data?.freshness_status === "no_cache"
+  );
+  const deferredAddressInventoryNotice = selectedAddress
+    ? `Os imóveis ligados a "${selectedAddress.label}" serão adicionados em até 24 horas. Enquanto isso, exibimos os imóveis já persistidos no banco para ${listingsAddressScope === "selected_address" ? "esse endereço pesquisado" : "todos os endereços pesquisados nesta jornada"}.`
+    : null;
 
   const displayedListings = applyListingsPanelFilters(rawListings, listingsFilters);
   const favoriteListingKeySet = useMemo(() => new Set(favoriteListings.map((favorite) => favorite.listingKey)), [favoriteListings]);
@@ -325,7 +341,7 @@ export function Step6Analysis() {
       zoneFingerprint as string,
       config.type,
       {
-        ...buildPriceDashboardAnalyticsOptions(debouncedPriceComparisonFilters),
+        ...buildPriceDashboardAnalyticsOptions(debouncedPriceComparisonFilters, null, listingsAddressScope),
         page: "preco",
       },
     ),
@@ -344,6 +360,7 @@ export function Step6Analysis() {
       zoneFingerprint,
       config.type,
       "price-panel",
+      listingsAddressScope,
       cityName || "default",
       filters.spatialScope,
       filters.usageType,
@@ -387,7 +404,7 @@ export function Step6Analysis() {
         zoneFingerprint,
         config.type,
         {
-          ...buildPriceDashboardAnalyticsOptions(listingsFilters),
+          ...buildPriceDashboardAnalyticsOptions(listingsFilters, null, listingsAddressScope),
           page: "preco",
         },
       ),
@@ -491,7 +508,7 @@ export function Step6Analysis() {
     return () => {
       cancelled = true;
     };
-  }, [config.type, journeyId, queryClient, zoneFingerprint]);
+  }, [config.type, journeyId, listingsAddressScope, queryClient, zoneFingerprint]);
 
   useEffect(() => {
     if (!selectedListingKey) {
@@ -704,6 +721,23 @@ export function Step6Analysis() {
                 <div id="listings-filters-body" className="mt-3" data-testid="listings-filters-body">
                   <div className="grid grid-cols-2 gap-3">
                     <div className="col-span-2 flex flex-col gap-1">
+                      <label className="text-xs text-slate-500">Origem da coleta dos imóveis</label>
+                      <select
+                        aria-label="Origem da coleta dos imóveis"
+                        value={listingsAddressScope}
+                        onChange={(e) => setListingsAddressScope(e.target.value as "all_addresses" | "selected_address")}
+                        className="rounded-md border border-slate-200 px-2 py-1.5 text-sm text-slate-700 outline-none focus:border-pastel-violet-400 focus:ring-1 focus:ring-pastel-violet-200"
+                      >
+                        <option value="all_addresses">Todos os imóveis</option>
+                        <option value="selected_address" disabled={!selectedAddress}>Somente imóveis do endereço selecionado</option>
+                      </select>
+                      <p className="text-xs text-slate-500">
+                        {selectedAddress
+                          ? `Endereço pesquisado atual: ${selectedAddress.label}. Este filtro usa a origem da busca do passo 5, não o endereço do imóvel.`
+                          : "Selecione um endereço no passo 5 para restringir os imóveis à origem dessa busca."}
+                      </p>
+                    </div>
+                    <div className="col-span-2 flex flex-col gap-1">
                       <label className="text-xs text-slate-500">Escopo espacial</label>
                       <select
                         aria-label="Escopo espacial"
@@ -814,12 +848,22 @@ export function Step6Analysis() {
                 </div>
               ) : null}
             </div>
+            {showDeferredAddressInventoryNotice && deferredAddressInventoryNotice ? (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 shadow-sm">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                  <p>{deferredAddressInventoryNotice}</p>
+                </div>
+              </div>
+            ) : null}
             {listingsQuery.isLoading ? <p className="rounded-xl bg-white p-4 text-sm text-slate-500">Carregando imóveis...</p> : null}
             {listingsQuery.error ? <p className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{apiActionHint(listingsQuery.error)}</p> : null}
             {!listingsQuery.isLoading && rawListings.length === 0 ? (
               <div className="rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-600 shadow-sm">
-                {listingsQuery.data?.freshness_status === "no_cache"
-                  ? "A busca foi iniciada. Esta tela é atualizada automaticamente assim que os primeiros imóveis estiverem prontos."
+                {showDeferredAddressInventoryNotice && deferredAddressInventoryNotice
+                  ? deferredAddressInventoryNotice
+                  : listingsQuery.data?.freshness_status === "no_cache"
+                    ? "A busca foi iniciada. Esta tela é atualizada automaticamente assim que os primeiros imóveis estiverem prontos."
                   : scrapedButNoCards
                     ? `A busca terminou e encontrou ${diagnosticsSummary?.total_scraped || 0} anúncios, mas nenhum permaneceu elegível após os filtros da busca. Tente outra rua ou outra zona.`
                     : "Nenhum imóvel disponível ainda para esta busca."}
@@ -1155,6 +1199,7 @@ export function Step6Analysis() {
               zoneFingerprint={zoneFingerprint}
               searchType={config.type}
               listingsFilters={listingsFilters}
+              listingsAddressScope={listingsAddressScope}
             />
           ) : null
         )}

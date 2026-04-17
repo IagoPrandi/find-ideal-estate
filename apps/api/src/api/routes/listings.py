@@ -1,4 +1,4 @@
-﻿"""Listings API routes.
+"""Listings API routes.
 
 POST /journeys/{journey_id}/listings/search
     Step 5: confirm address search, record demand, return cache or enqueue scraping.
@@ -44,6 +44,27 @@ from sqlalchemy import text
 from modules.jobs.service import enqueue_job, get_job
 
 router = APIRouter(prefix="/journeys", tags=["listings"])
+
+_ALLOWED_LISTINGS_SCRAPE_EMAIL = "iago.oliveira2478@gmail.com"
+_DEFERRED_ADDRESS_NOTICE_REASON = "address_search_registered"
+
+
+def _is_scrape_authorized(auth_context: object) -> bool:
+    user = getattr(auth_context, "user", None)
+    email = getattr(user, "email", None)
+    return isinstance(email, str) and email.strip().lower() == _ALLOWED_LISTINGS_SCRAPE_EMAIL
+
+
+def _build_deferred_address_response() -> ListingsRequestResult:
+    return ListingsRequestResult(
+        source="none",
+        job_id=None,
+        freshness_status="queued_for_next_prewarm",
+        upgrade_reason=_DEFERRED_ADDRESS_NOTICE_REASON,
+        next_refresh_window="até 24 horas",
+        listings=[],
+        total_count=0,
+    )
 
 
 def _cache_display_platforms(
@@ -237,6 +258,15 @@ async def listings_search(
     else:
         result_source = "cache_miss"
 
+    active_job_id: UUID | None = None
+    scrape_authorized = True
+    if result_source == "cache_miss":
+        active_job_id = await _find_active_listings_job_id(
+            journey_id,
+            search_location_normalized=normalized_search_location,
+        )
+        scrape_authorized = active_job_id is not None or _is_scrape_authorized(auth_context)
+
     # Always record demand (including misses -- drives prewarm)
     await record_search_request(
         journey_id=journey_id,
@@ -253,10 +283,6 @@ async def listings_search(
     )
 
     if result_source == "cache_miss":
-        active_job_id = await _find_active_listings_job_id(
-            journey_id,
-            search_location_normalized=normalized_search_location,
-        )
         if active_job_id is not None:
             return ListingsRequestResult(
                 source="none",
@@ -267,6 +293,9 @@ async def listings_search(
                 listings=[],
                 total_count=0,
             )
+
+        if not scrape_authorized:
+            return _build_deferred_address_response()
 
         # Ensure cache row exists (for lock coordination) and enqueue scrape job
         await create_cache_record(
@@ -299,11 +328,14 @@ async def listings_search(
     # Cache hit or partial hit -- return listings
     display_platforms = _cache_display_platforms(cache, platforms)
     listing_cards_raw = await fetch_listing_cards_for_zone(
+        journey_id=journey_id,
         zone_fingerprint=body.zone_fingerprint,
         search_type=body.search_type,
         usage_type=body.usage_type,
         platforms=display_platforms,
         observed_since=cache.get("created_at"),
+        search_location_normalized=normalized_search_location,
+        address_scope="selected_address",
     )
 
     age_hours = cache_age_hours(cache)
@@ -317,7 +349,7 @@ async def listings_search(
             journey_id,
             search_location_normalized=normalized_search_location,
         )
-        if active_job_id is None:
+        if active_job_id is None and _is_scrape_authorized(auth_context):
             await create_cache_record(
                 normalized_search_location,
                 zone_fingerprint=body.zone_fingerprint,
@@ -482,6 +514,7 @@ async def get_zone_listings(
     usage_type: str = Query(default="residential"),
     platforms: list[str] | None = Query(default=None),
     spatial_scope: str = Query(default="inside_zone"),
+    address_scope: str = Query(default="all_addresses"),
     auth_context=Depends(get_optional_auth_context),
 ) -> ListingsRequestResult:
     """
@@ -502,6 +535,8 @@ async def get_zone_listings(
 
     if spatial_scope not in {"inside_zone", "all"}:
         raise HTTPException(status_code=400, detail="spatial_scope deve ser 'inside_zone' ou 'all'")
+    if address_scope not in {"all_addresses", "selected_address"}:
+        raise HTTPException(status_code=400, detail="address_scope deve ser 'all_addresses' ou 'selected_address'")
 
     latest_search = await get_latest_search_request_for_zone(journey_id, zone_fingerprint)
     latest_search_location = (
@@ -514,6 +549,7 @@ async def get_zone_listings(
 
     display_platforms = _cache_display_platforms(usable_cache, canonical_platforms)
     listing_cards_raw = await fetch_listing_cards_for_zone(
+        journey_id=journey_id,
         zone_fingerprint=zone_fingerprint,
         search_type=search_type,
         usage_type=usage_type,
@@ -521,6 +557,7 @@ async def get_zone_listings(
         observed_since=usable_cache.get("created_at") if usable_cache else None,
         spatial_scope=spatial_scope,
         search_location_normalized=latest_search_location,
+        address_scope=address_scope,
     )
 
     if usable_cache is None:

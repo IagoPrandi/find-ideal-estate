@@ -38,6 +38,7 @@ type Step6DashboardProps = {
   zoneFingerprint: string;
   searchType: string;
   listingsFilters: ListingsPanelFilters;
+  listingsAddressScope: "all_addresses" | "selected_address";
 };
 
 type DashboardRankingItem = {
@@ -122,13 +123,18 @@ function formatHourLabel(hour: number) {
   return `${String(hour).padStart(2, "0")}h`;
 }
 
-function buildPriceDashboardAnalyticsOptions(filters: ListingsPanelFilters, cityName: string | null = null) {
+function buildPriceDashboardAnalyticsOptions(
+  filters: ListingsPanelFilters,
+  cityName: string | null = null,
+  addressScope: "all_addresses" | "selected_address" = "all_addresses",
+) {
   return {
     cityName,
     minPrice: filters.minPrice || null,
     maxPrice: filters.maxPrice || null,
     usageType: filters.usageType,
     spatialScope: filters.spatialScope,
+    addressScope,
     minSize: filters.minSize || null,
     maxSize: filters.maxSize || null,
   };
@@ -183,7 +189,7 @@ function buildPriceDashboardFilterSummary(filters: ListingsPanelFilters) {
 function priceRankingDescription(selectedCity: string | null | undefined, scopeLabel: string | null | undefined) {
   const scope = scopeLabel || "Valor médio do m² por bairro";
   const cityLabel = selectedCity ? `cidade: ${selectedCity}` : "sem filtro de cidade";
-  return `${scope} · ${cityLabel} · exibição resumida com 2 do topo, 2 do entorno do bairro com mais imóveis no recorte atual e 2 da base.`;
+  return `${scope} · ${cityLabel} · exibição resumida com 2 do topo, 2 do entorno do bairro dominante dentro da zona e 2 da base.`;
 }
 
 function priceRankingEmptyMessage(selectedCity: string | null | undefined) {
@@ -360,7 +366,7 @@ function DashboardPriceFiltersHero(props: {
   );
 }
 
-export function Step6Dashboard({ journeyId, zoneFingerprint, searchType, listingsFilters }: Step6DashboardProps) {
+export function Step6Dashboard({ journeyId, zoneFingerprint, searchType, listingsFilters, listingsAddressScope }: Step6DashboardProps) {
   const [activePage, setActivePage] = useState<DashboardPage>("preco");
   const [selectedPriceCityFilter, setSelectedPriceCityFilter] = useState<string | null>(null);
   const [selectedSafetyCityFilter, setSelectedSafetyCityFilter] = useState<string | null>(null);
@@ -413,6 +419,7 @@ export function Step6Dashboard({ journeyId, zoneFingerprint, searchType, listing
       searchType,
       "price-panel",
       selectedPriceCityFilter || "default",
+      listingsAddressScope,
       debouncedPriceFilters.spatialScope,
       debouncedPriceFilters.usageType,
       debouncedPriceFilters.minPrice || "",
@@ -425,7 +432,7 @@ export function Step6Dashboard({ journeyId, zoneFingerprint, searchType, listing
       zoneFingerprint,
       searchType,
       {
-        ...buildPriceDashboardAnalyticsOptions(debouncedPriceFilters, selectedPriceCityFilter),
+        ...buildPriceDashboardAnalyticsOptions(debouncedPriceFilters, selectedPriceCityFilter, listingsAddressScope),
         page: "preco",
       },
     ),
@@ -570,8 +577,8 @@ export function Step6Dashboard({ journeyId, zoneFingerprint, searchType, listing
               eyebrow="Valor médio do m²"
               value={formatCurrencyPerSquareMeter(priceData?.price.zone_average_unit_price)}
               detail={priceData?.price.selected_neighborhood_name
-                ? `Bairro destacado no recorte: ${priceData.price.selected_neighborhood_name}`
-                : "Sem bairro predominante no recorte atual"}
+                ? `Bairro dominante na zona: ${priceData.price.selected_neighborhood_name}`
+                : "Sem bairro predominante na zona atual"}
               tone="emerald"
               size="sm"
             />
@@ -596,7 +603,7 @@ export function Step6Dashboard({ journeyId, zoneFingerprint, searchType, listing
             isFetching={priceDashboardQuery.isFetching}
             formatValue={formatCurrencyPerSquareMeter}
             secondaryValueFormatter={(item) => `${formatListingCountInline(item.listing_count)} · ${formatYearlyChangeInline(item.yearly_change_pct)}`}
-            selectedLabel={listingsFilters.spatialScope === "inside_zone" ? "Bairro com mais imóveis na zona" : "Bairro com mais imóveis no recorte"}
+            selectedLabel="Bairro com mais imóveis na zona"
             emptyMessage={priceDashboardQuery.isFetching ? "Atualizando ranking da cidade selecionada..." : priceRankingEmptyMessage(selectedPriceCityFilter)}
             testId="dashboard-price-ranking"
           />
@@ -605,7 +612,7 @@ export function Step6Dashboard({ journeyId, zoneFingerprint, searchType, listing
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
                 <h4 className="text-sm font-bold text-slate-800">Preço médio ao longo do tempo</h4>
-                <p className="mt-1 text-xs text-slate-500">Série diária do recorte atual e do bairro destacado nos últimos 365 dias.</p>
+                <p className="mt-1 text-xs text-slate-500">Série diária do recorte atual e do bairro dominante da zona nos últimos 365 dias.</p>
               </div>
               <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">365 dias</span>
             </div>
@@ -627,7 +634,7 @@ export function Step6Dashboard({ journeyId, zoneFingerprint, searchType, listing
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
                 <h4 className="text-sm font-bold text-slate-800">Histograma do bairro destacado</h4>
-                <p className="mt-1 text-xs text-slate-500">Distribuição do preço atual por faixa para o bairro com mais imóveis no recorte filtrado atual.</p>
+                <p className="mt-1 text-xs text-slate-500">Distribuição do preço atual por faixa para o bairro com mais imóveis dentro da zona.</p>
               </div>
               <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">Preço atual</span>
             </div>

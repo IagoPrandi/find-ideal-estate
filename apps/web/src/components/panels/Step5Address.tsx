@@ -48,6 +48,13 @@ export function Step5Address() {
         usage_type: config.propertyUsageType
       });
       setJobIds({ listingsJobId: result.job_id || null });
+
+      if (!result.job_id && result.upgrade_reason === "address_search_registered") {
+        setMaxStep(6);
+        goToStep(6);
+        return;
+      }
+
       setMaxStep(6);
       goToStep(6);
     } catch (caughtError) {

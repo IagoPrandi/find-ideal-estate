@@ -113,7 +113,7 @@ const DEFAULT_LAYER_VISIBILITY: Record<MapOverlayLayerKey, boolean> = {
   transportCandidates: true,
   zones: true,
   pois: true,
-  listings: true,
+  listings: false,
   safety: true,
   flood: true,
   green: true,
@@ -796,6 +796,7 @@ export function FindIdealApp() {
   const activePoiCategory = useJourneyStore((state) => state.activePoiCategory);
   const listingsJobId = useJourneyStore((state) => state.listingsJobId);
   const listingsFilters = useJourneyStore((state) => state.listingsFilters);
+  const listingsAddressScope = useJourneyStore((state) => state.listingsAddressScope);
   const config = useJourneyStore((state) => state.config);
   const isFavoritesPanelOpen = useFavoritesStore((state) => state.isPanelOpen);
   const setSelectedTransportId = useJourneyStore((state) => state.setSelectedTransportId);
@@ -903,8 +904,8 @@ export function FindIdealApp() {
   }, [isLayerMenuOpen]);
 
   const listingsQuery = useQuery({
-    queryKey: ["zone-listings", journeyId, selectedZoneFingerprint, config.type, "all"],
-    queryFn: async () => getZoneListings(journeyId as string, selectedZoneFingerprint as string, config.type, "all", "all"),
+    queryKey: ["zone-listings", journeyId, selectedZoneFingerprint, config.type, "all", listingsAddressScope],
+    queryFn: async () => getZoneListings(journeyId as string, selectedZoneFingerprint as string, config.type, "all", "all", listingsAddressScope),
     enabled: Boolean(journeyId && selectedZoneFingerprint && step >= 6),
     refetchInterval: (query) => {
       if (step < 6) {

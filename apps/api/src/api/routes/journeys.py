@@ -562,6 +562,7 @@ async def get_zone_dashboard_analytics_endpoint(
     search_type: str = "rent",
     usage_type: str = "all",
     spatial_scope: str = "all",
+    address_scope: str = "all_addresses",
     min_price: float | None = None,
     max_price: float | None = None,
     min_size: float | None = None,
@@ -574,6 +575,8 @@ async def get_zone_dashboard_analytics_endpoint(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="usage_type deve ser 'all', 'residential' ou 'commercial'")
     if spatial_scope not in {"all", "inside_zone"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="spatial_scope deve ser 'all' ou 'inside_zone'")
+    if address_scope not in {"all_addresses", "selected_address"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="address_scope deve ser 'all_addresses' ou 'selected_address'")
     if page is not None and page not in {"preco", "seguranca", "ambiente"}:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="page deve ser 'preco', 'seguranca' ou 'ambiente'")
 
@@ -588,6 +591,7 @@ async def get_zone_dashboard_analytics_endpoint(
             search_type=search_type,
             usage_type=usage_type,
             spatial_scope=spatial_scope,
+            address_scope=address_scope,
             min_price=min_price,
             max_price=max_price,
             min_size=min_size,

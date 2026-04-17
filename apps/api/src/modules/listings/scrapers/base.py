@@ -273,17 +273,28 @@ def _managed_xvfb_displays() -> list[str]:
     return deduped
 
 
+def _existing_display_candidates() -> list[str]:
+    candidates: list[str] = []
+    current_display = (os.getenv("DISPLAY") or "").strip()
+    if current_display:
+        candidates.append(current_display)
+    candidates.extend(_managed_xvfb_displays())
+
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        deduped.append(candidate)
+    return deduped
+
+
 def _ensure_headful_display() -> None:
     global _XVFB_PROCESS, _XVFB_DISPLAY
 
     if not sys.platform.startswith("linux"):
         return
-
-    xvfb_path = shutil.which("Xvfb")
-    if not xvfb_path:
-        raise ScraperError(
-            "Headful browser requested but Xvfb is unavailable"
-        )
 
     with _XVFB_LOCK:
         if (
@@ -294,6 +305,19 @@ def _ensure_headful_display() -> None:
         ):
             os.environ["DISPLAY"] = _XVFB_DISPLAY
             return
+
+        for display in _existing_display_candidates():
+            if not _is_x_server_available(display):
+                continue
+            _XVFB_DISPLAY = display
+            os.environ["DISPLAY"] = display
+            return
+
+        xvfb_path = shutil.which("Xvfb")
+        if not xvfb_path:
+            raise ScraperError(
+                "Headful browser requested but Xvfb is unavailable"
+            )
 
         for display in _managed_xvfb_displays():
             socket_path = _display_socket_path(display)

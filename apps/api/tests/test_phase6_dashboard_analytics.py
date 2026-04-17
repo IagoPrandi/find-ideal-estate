@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -127,6 +127,7 @@ def test_get_zone_dashboard_analytics_route_returns_contract(monkeypatch):
         assert kwargs["zone_fingerprint"] == "zone-fp-1"
         assert kwargs["usage_type"] == "commercial"
         assert kwargs["spatial_scope"] == "inside_zone"
+        assert kwargs["address_scope"] == "selected_address"
         assert kwargs["min_price"] == 5000
         assert kwargs["max_price"] == 12000
         assert kwargs["min_size"] == 40
@@ -215,7 +216,7 @@ def test_get_zone_dashboard_analytics_route_returns_contract(monkeypatch):
     with TestClient(app) as client:
         response = client.get(
             f"/journeys/{sample.id}/zones/zone-fp-1/dashboard-analytics"
-            "?search_type=rent&usage_type=commercial&spatial_scope=inside_zone"
+            "?search_type=rent&usage_type=commercial&spatial_scope=inside_zone&address_scope=selected_address"
             "&min_price=5000&max_price=12000&min_size=40&max_size=120"
         )
 
@@ -503,6 +504,7 @@ def test_fetch_zone_dashboard_analytics_scopes_price_ranking_to_loaded_zone_list
             search_type="rent",
             usage_type="residential",
             spatial_scope="inside_zone",
+            address_scope="all_addresses",
             min_price=None,
             max_price=None,
             min_size=None,
@@ -526,3 +528,529 @@ def test_fetch_zone_dashboard_analytics_scopes_price_ranking_to_loaded_zone_list
     assert "zp.inside_zone = TRUE OR rsp.property_id IS NOT NULL" in history_sql
     assert history_params["search_location_normalized"] == "rua-domingos-de-morais-vila-mariana-sao-paulo-sp"
     assert history_params["observed_since"] == cache_created_at
+
+
+def test_fetch_zone_dashboard_analytics_keeps_zone_dominant_neighborhood_even_with_city_filtered_ranking(monkeypatch):
+    cache_created_at = datetime.now(tz=timezone.utc) - timedelta(days=3)
+
+    class _FakeMappingsResult:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def first(self):
+            return self._rows[0] if self._rows else None
+
+        def all(self):
+            return self._rows
+
+    class _FakeExecuteResult:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def mappings(self):
+            return _FakeMappingsResult(self._rows)
+
+    class _FakeConnection:
+        def __init__(self):
+            self._call_index = 0
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def execute(self, statement, params=None):
+            del statement, params
+            self._call_index += 1
+
+            if self._call_index == 1:
+                return _FakeExecuteResult([
+                    {
+                        "fingerprint": "zone-fp-1",
+                        "zone_area_m2": 125000.0,
+                        "green_area_m2": 0.0,
+                        "flood_area_m2": 0.0,
+                    }
+                ])
+
+            if self._call_index == 2:
+                return _FakeExecuteResult([
+                    {
+                        "property_id": "prop-moema-1",
+                        "city_name": "São Paulo",
+                        "neighborhood_name": "Moema",
+                        "current_total_price": 5000.0,
+                        "unit_price": 50.0,
+                        "inside_zone": True,
+                    },
+                    {
+                        "property_id": "prop-moema-2",
+                        "city_name": "São Paulo",
+                        "neighborhood_name": "Moema",
+                        "current_total_price": 5200.0,
+                        "unit_price": 52.0,
+                        "inside_zone": True,
+                    },
+                    {
+                        "property_id": "prop-alphaville-1",
+                        "city_name": "Barueri",
+                        "neighborhood_name": "Alphaville",
+                        "current_total_price": 8000.0,
+                        "unit_price": 80.0,
+                        "inside_zone": True,
+                    },
+                    {
+                        "property_id": "prop-alphaville-2",
+                        "city_name": "Barueri",
+                        "neighborhood_name": "Alphaville",
+                        "current_total_price": 8200.0,
+                        "unit_price": 82.0,
+                        "inside_zone": True,
+                    },
+                    {
+                        "property_id": "prop-alphaville-3",
+                        "city_name": "Barueri",
+                        "neighborhood_name": "Alphaville",
+                        "current_total_price": 8100.0,
+                        "unit_price": 81.0,
+                        "inside_zone": True,
+                    },
+                ])
+
+            if self._call_index == 3:
+                return _FakeExecuteResult([
+                    {
+                        "city_name": "São Paulo",
+                        "neighborhood_name": "Moema",
+                        "day": datetime(2026, 4, 1, tzinfo=timezone.utc).date(),
+                        "average_price": 4800.0,
+                        "sample_count": 2,
+                    },
+                    {
+                        "city_name": "São Paulo",
+                        "neighborhood_name": "Moema",
+                        "day": datetime(2026, 4, 2, tzinfo=timezone.utc).date(),
+                        "average_price": 5100.0,
+                        "sample_count": 2,
+                    },
+                    {
+                        "city_name": "Barueri",
+                        "neighborhood_name": "Alphaville",
+                        "day": datetime(2026, 4, 1, tzinfo=timezone.utc).date(),
+                        "average_price": 7800.0,
+                        "sample_count": 3,
+                    },
+                    {
+                        "city_name": "Barueri",
+                        "neighborhood_name": "Alphaville",
+                        "day": datetime(2026, 4, 2, tzinfo=timezone.utc).date(),
+                        "average_price": 8100.0,
+                        "sample_count": 3,
+                    },
+                ])
+
+            raise AssertionError(f"Unexpected execute call {self._call_index}")
+
+    class _FakeEngine:
+        def connect(self):
+            return _FakeConnection()
+
+    async def _get_latest_search_request_for_zone(_journey_id, _zone_fingerprint):
+        return {
+            "search_location_normalized": "avenida-moema-sao-paulo-sp",
+        }
+
+    async def _get_cache_record(_search_location_normalized):
+        return {
+            "created_at": cache_created_at,
+            "status": "complete",
+        }
+
+    monkeypatch.setattr("modules.dashboard.analytics.get_latest_search_request_for_zone", _get_latest_search_request_for_zone)
+    monkeypatch.setattr("modules.dashboard.analytics.get_cache_record", _get_cache_record)
+    monkeypatch.setattr("modules.dashboard.analytics.cache_is_usable", lambda cache: bool(cache))
+    monkeypatch.setattr("modules.dashboard.analytics.get_engine", lambda: _FakeEngine())
+
+    payload = __import__("asyncio").run(
+        fetch_zone_dashboard_analytics(
+            journey_id=uuid4(),
+            zone_fingerprint="zone-fp-1",
+            property_id=None,
+            neighborhood_name=None,
+            city_name="São Paulo",
+            page="preco",
+            search_type="rent",
+            usage_type="residential",
+            spatial_scope="inside_zone",
+            address_scope="all_addresses",
+            min_price=None,
+            max_price=None,
+            min_size=None,
+            max_size=None,
+        )
+    )
+
+    ranking = payload["price"]["neighborhood_unit_price_ranking"]
+    rank_summary = payload["price"]["neighborhood_unit_price_rank"]
+
+    assert payload["price"]["selected_city"] == "São Paulo"
+    assert payload["price"]["selected_neighborhood_name"] == "Alphaville"
+    assert [item["neighborhood_name"] for item in ranking] == ["Moema"]
+    assert [item["city_name"] for item in ranking] == ["São Paulo"]
+    assert ranking[0]["is_selected"] is False
+    assert rank_summary is None
+
+
+def test_fetch_zone_dashboard_analytics_keeps_zone_dominant_neighborhood_when_scope_is_all(monkeypatch):
+    cache_created_at = datetime.now(tz=timezone.utc) - timedelta(days=3)
+
+    class _FakeMappingsResult:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def first(self):
+            return self._rows[0] if self._rows else None
+
+        def all(self):
+            return self._rows
+
+    class _FakeExecuteResult:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def mappings(self):
+            return _FakeMappingsResult(self._rows)
+
+    class _FakeConnection:
+        def __init__(self):
+            self._call_index = 0
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def execute(self, statement, params=None):
+            del statement, params
+            self._call_index += 1
+
+            if self._call_index == 1:
+                return _FakeExecuteResult([
+                    {
+                        "fingerprint": "zone-fp-1",
+                        "zone_area_m2": 125000.0,
+                        "green_area_m2": 0.0,
+                        "flood_area_m2": 0.0,
+                    }
+                ])
+
+            if self._call_index == 2:
+                return _FakeExecuteResult([
+                    {
+                        "property_id": "prop-moema-1",
+                        "city_name": "São Paulo",
+                        "neighborhood_name": "Moema",
+                        "current_total_price": 5000.0,
+                        "unit_price": 50.0,
+                        "inside_zone": True,
+                    },
+                    {
+                        "property_id": "prop-moema-2",
+                        "city_name": "São Paulo",
+                        "neighborhood_name": "Moema",
+                        "current_total_price": 5200.0,
+                        "unit_price": 52.0,
+                        "inside_zone": True,
+                    },
+                    {
+                        "property_id": "prop-itaim-out-1",
+                        "city_name": "São Paulo",
+                        "neighborhood_name": "Itaim Bibi",
+                        "current_total_price": 9000.0,
+                        "unit_price": 90.0,
+                        "inside_zone": False,
+                    },
+                    {
+                        "property_id": "prop-itaim-out-2",
+                        "city_name": "São Paulo",
+                        "neighborhood_name": "Itaim Bibi",
+                        "current_total_price": 9100.0,
+                        "unit_price": 91.0,
+                        "inside_zone": False,
+                    },
+                    {
+                        "property_id": "prop-itaim-out-3",
+                        "city_name": "São Paulo",
+                        "neighborhood_name": "Itaim Bibi",
+                        "current_total_price": 9200.0,
+                        "unit_price": 92.0,
+                        "inside_zone": False,
+                    },
+                ])
+
+            if self._call_index == 3:
+                return _FakeExecuteResult([
+                    {
+                        "city_name": "São Paulo",
+                        "neighborhood_name": "Moema",
+                        "day": datetime(2026, 4, 1, tzinfo=timezone.utc).date(),
+                        "average_price": 4800.0,
+                        "sample_count": 2,
+                    },
+                    {
+                        "city_name": "São Paulo",
+                        "neighborhood_name": "Moema",
+                        "day": datetime(2026, 4, 2, tzinfo=timezone.utc).date(),
+                        "average_price": 5100.0,
+                        "sample_count": 2,
+                    },
+                    {
+                        "city_name": "São Paulo",
+                        "neighborhood_name": "Itaim Bibi",
+                        "day": datetime(2026, 4, 1, tzinfo=timezone.utc).date(),
+                        "average_price": 8800.0,
+                        "sample_count": 3,
+                    },
+                    {
+                        "city_name": "São Paulo",
+                        "neighborhood_name": "Itaim Bibi",
+                        "day": datetime(2026, 4, 2, tzinfo=timezone.utc).date(),
+                        "average_price": 9100.0,
+                        "sample_count": 3,
+                    },
+                ])
+
+            raise AssertionError(f"Unexpected execute call {self._call_index}")
+
+    class _FakeEngine:
+        def connect(self):
+            return _FakeConnection()
+
+    async def _get_latest_search_request_for_zone(_journey_id, _zone_fingerprint):
+        return {
+            "search_location_normalized": "avenida-moema-sao-paulo-sp",
+        }
+
+    async def _get_cache_record(_search_location_normalized):
+        return {
+            "created_at": cache_created_at,
+            "status": "complete",
+        }
+
+    monkeypatch.setattr("modules.dashboard.analytics.get_latest_search_request_for_zone", _get_latest_search_request_for_zone)
+    monkeypatch.setattr("modules.dashboard.analytics.get_cache_record", _get_cache_record)
+    monkeypatch.setattr("modules.dashboard.analytics.cache_is_usable", lambda cache: bool(cache))
+    monkeypatch.setattr("modules.dashboard.analytics.get_engine", lambda: _FakeEngine())
+
+    payload = __import__("asyncio").run(
+        fetch_zone_dashboard_analytics(
+            journey_id=uuid4(),
+            zone_fingerprint="zone-fp-1",
+            property_id=None,
+            neighborhood_name=None,
+            city_name=None,
+            page="preco",
+            search_type="rent",
+            usage_type="residential",
+            spatial_scope="all",
+            address_scope="all_addresses",
+            min_price=None,
+            max_price=None,
+            min_size=None,
+            max_size=None,
+        )
+    )
+
+    ranking = payload["price"]["neighborhood_unit_price_ranking"]
+
+    assert payload["price"]["selected_neighborhood_name"] == "Moema"
+    assert [item["neighborhood_name"] for item in ranking] == ["Moema", "Itaim Bibi"]
+    assert ranking[0]["is_selected"] is True
+    assert ranking[1]["is_selected"] is False
+
+
+def test_fetch_zone_dashboard_analytics_reloads_ranking_for_selected_address_but_keeps_zone_dominant(monkeypatch):
+    cache_created_at = datetime.now(tz=timezone.utc) - timedelta(days=2)
+
+    class _FakeMappingsResult:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def first(self):
+            return self._rows[0] if self._rows else None
+
+        def all(self):
+            return self._rows
+
+    class _FakeExecuteResult:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def mappings(self):
+            return _FakeMappingsResult(self._rows)
+
+    class _FakeConnection:
+        def __init__(self):
+            self._call_index = 0
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def execute(self, statement, params=None):
+            del statement, params
+            self._call_index += 1
+
+            if self._call_index == 1:
+                return _FakeExecuteResult([
+                    {
+                        "fingerprint": "zone-fp-1",
+                        "zone_area_m2": 125000.0,
+                        "green_area_m2": 0.0,
+                        "flood_area_m2": 0.0,
+                    }
+                ])
+
+            if self._call_index == 2:
+                return _FakeExecuteResult([
+                    {
+                        "property_id": "prop-moema-zone-1",
+                        "city_name": "São Paulo",
+                        "neighborhood_name": "Moema",
+                        "current_total_price": 6400.0,
+                        "unit_price": 64.0,
+                        "inside_zone": True,
+                        "in_loaded_scope": False,
+                    },
+                    {
+                        "property_id": "prop-moema-zone-2",
+                        "city_name": "São Paulo",
+                        "neighborhood_name": "Moema",
+                        "current_total_price": 6600.0,
+                        "unit_price": 66.0,
+                        "inside_zone": True,
+                        "in_loaded_scope": False,
+                    },
+                    {
+                        "property_id": "prop-brooklin-seed-1",
+                        "city_name": "São Paulo",
+                        "neighborhood_name": "Brooklin",
+                        "current_total_price": 9100.0,
+                        "unit_price": 91.0,
+                        "inside_zone": False,
+                        "in_loaded_scope": True,
+                    },
+                    {
+                        "property_id": "prop-vila-olimpia-seed-1",
+                        "city_name": "São Paulo",
+                        "neighborhood_name": "Vila Olímpia",
+                        "current_total_price": 9800.0,
+                        "unit_price": 98.0,
+                        "inside_zone": False,
+                        "in_loaded_scope": True,
+                    },
+                ])
+
+            if self._call_index == 3:
+                return _FakeExecuteResult([
+                    {
+                        "city_name": "São Paulo",
+                        "neighborhood_name": "Moema",
+                        "in_loaded_scope": False,
+                        "day": datetime(2026, 4, 1, tzinfo=timezone.utc).date(),
+                        "average_price": 6300.0,
+                        "sample_count": 2,
+                    },
+                    {
+                        "city_name": "São Paulo",
+                        "neighborhood_name": "Moema",
+                        "in_loaded_scope": False,
+                        "day": datetime(2026, 4, 2, tzinfo=timezone.utc).date(),
+                        "average_price": 6500.0,
+                        "sample_count": 2,
+                    },
+                    {
+                        "city_name": "São Paulo",
+                        "neighborhood_name": "Brooklin",
+                        "in_loaded_scope": True,
+                        "day": datetime(2026, 4, 1, tzinfo=timezone.utc).date(),
+                        "average_price": 9000.0,
+                        "sample_count": 1,
+                    },
+                    {
+                        "city_name": "São Paulo",
+                        "neighborhood_name": "Brooklin",
+                        "in_loaded_scope": True,
+                        "day": datetime(2026, 4, 2, tzinfo=timezone.utc).date(),
+                        "average_price": 9100.0,
+                        "sample_count": 1,
+                    },
+                    {
+                        "city_name": "São Paulo",
+                        "neighborhood_name": "Vila Olímpia",
+                        "in_loaded_scope": True,
+                        "day": datetime(2026, 4, 1, tzinfo=timezone.utc).date(),
+                        "average_price": 9700.0,
+                        "sample_count": 1,
+                    },
+                    {
+                        "city_name": "São Paulo",
+                        "neighborhood_name": "Vila Olímpia",
+                        "in_loaded_scope": True,
+                        "day": datetime(2026, 4, 2, tzinfo=timezone.utc).date(),
+                        "average_price": 9800.0,
+                        "sample_count": 1,
+                    },
+                ])
+
+            raise AssertionError(f"Unexpected execute call {self._call_index}")
+
+    class _FakeEngine:
+        def connect(self):
+            return _FakeConnection()
+
+    async def _get_latest_search_request_for_zone(_journey_id, _zone_fingerprint):
+        return {
+            "search_location_normalized": "avenida-ibirapuera-sao-paulo-sp",
+        }
+
+    async def _get_cache_record(_search_location_normalized):
+        return {
+            "created_at": cache_created_at,
+            "status": "complete",
+        }
+
+    monkeypatch.setattr("modules.dashboard.analytics.get_latest_search_request_for_zone", _get_latest_search_request_for_zone)
+    monkeypatch.setattr("modules.dashboard.analytics.get_cache_record", _get_cache_record)
+    monkeypatch.setattr("modules.dashboard.analytics.cache_is_usable", lambda cache: bool(cache))
+    monkeypatch.setattr("modules.dashboard.analytics.get_engine", lambda: _FakeEngine())
+
+    payload = __import__("asyncio").run(
+        fetch_zone_dashboard_analytics(
+            journey_id=uuid4(),
+            zone_fingerprint="zone-fp-1",
+            property_id=None,
+            neighborhood_name=None,
+            city_name=None,
+            page="preco",
+            search_type="rent",
+            usage_type="residential",
+            spatial_scope="all",
+            address_scope="selected_address",
+            min_price=None,
+            max_price=None,
+            min_size=None,
+            max_size=None,
+        )
+    )
+
+    ranking = payload["price"]["neighborhood_unit_price_ranking"]
+
+    assert payload["price"]["selected_neighborhood_name"] == "Moema"
+    assert payload["price"]["zone_active_listing_count"] == 2
+    assert [item["neighborhood_name"] for item in ranking] == ["Brooklin", "Vila Olímpia"]
+    assert all(item["is_selected"] is False for item in ranking)

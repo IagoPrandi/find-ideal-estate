@@ -69,7 +69,7 @@ describe("Step5Address", () => {
       expect(getZoneAddressSuggestions).toHaveBeenCalledWith("journey-1", "zone-fp-1", "");
     });
 
-    expect(screen.getByText(/Paginação estimada do scraping web: 12 páginas/i)).toBeInTheDocument();
+    expect(getListingsScrapePlan).toHaveBeenCalledWith("journey-1", "rent", "residential");
 
     expect(screen.getByTestId("zone-street-suggestions")).toBeInTheDocument();
     expect(screen.getByRole("option", { name: /Rua Schilling/i })).toBeInTheDocument();
@@ -119,5 +119,38 @@ describe("Step5Address", () => {
 
     expect(useUIStore.getState().step).toBe(6);
     expect(useJourneyStore.getState().listingsJobId).toBe("listings-job-1");
+  });
+
+  it("allows proceeding to step 6 when the address is only scheduled for later prewarm", async () => {
+    vi.mocked(getZoneAddressSuggestions).mockResolvedValue([
+      {
+        label: "Rua Guaipa, Vila Leopoldina, Sao Paulo-SP",
+        normalized: "rua guaipa vila leopoldina sao paulo-sp",
+        location_type: "street",
+        lat: -23.520908,
+        lon: -46.727037
+      }
+    ]);
+    vi.mocked(searchZoneListings).mockResolvedValue({
+      source: "none",
+      job_id: null,
+      freshness_status: "queued_for_next_prewarm",
+      upgrade_reason: "address_search_registered",
+      next_refresh_window: "até 24 horas",
+      listings: [],
+      total_count: 0,
+    } as never);
+
+    const user = userEvent.setup();
+    render(<Step5Address />);
+
+    const input = screen.getByLabelText("Endereço de busca na zona");
+    await user.click(input);
+
+    const option = await screen.findByRole("option", { name: /Rua Guaipa/i });
+    await user.click(option);
+
+    expect(useJourneyStore.getState().listingsJobId).toBeNull();
+    expect(useUIStore.getState().step).toBe(6);
   });
 });

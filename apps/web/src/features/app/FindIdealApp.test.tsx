@@ -303,7 +303,7 @@ describe("FindIdealApp", () => {
     renderWithQueryClient();
 
     await waitFor(() => {
-      expect(getZoneListings).toHaveBeenCalledWith("journey-1", "zone-fp-1", "rent", "all", "all");
+      expect(getZoneListings).toHaveBeenCalledWith("journey-1", "zone-fp-1", "rent", "all", "all", "all_addresses");
     });
 
     await act(async () => {
@@ -335,12 +335,38 @@ describe("FindIdealApp", () => {
     expect(useJourneyStore.getState().selectedListingKey).toBe("property:prop-1");
   });
 
+  it("uses the selected address scope for map listings when the shared filter changes", async () => {
+    useJourneyStore.setState((state) => ({
+      ...state,
+      listingsAddressScope: "selected_address",
+    }));
+
+    renderWithQueryClient();
+
+    await waitFor(() => {
+      expect(getZoneListings).toHaveBeenCalledWith("journey-1", "zone-fp-1", "rent", "all", "all", "selected_address");
+    });
+  });
+
   it("renders transport and listing points as pin symbols and animates the selected listing pin", async () => {
     renderWithQueryClient();
 
     await waitFor(() => {
       expect(mapAddedLayers.find((layer) => layer.id === "transport-candidate-layer")?.type).toBe("symbol");
       expect(mapAddedLayers.find((layer) => layer.id === "journey-listings-layer")?.type).toBe("symbol");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Camadas" }));
+
+    const panel = screen.getByText(/Camadas do mapa/i).closest("div");
+    if (!panel) {
+      throw new Error("Layers panel not rendered.");
+    }
+
+    fireEvent.click(within(panel).getByRole("checkbox", { name: "Imóveis" }));
+
+    await waitFor(() => {
+      expect(mapSetLayoutPropertyMock).toHaveBeenCalledWith("journey-listings-layer", "visibility", "visible");
     });
 
     await act(async () => {
@@ -405,6 +431,7 @@ describe("FindIdealApp", () => {
     await waitFor(() => {
       expect(mapSetLayoutPropertyMock).toHaveBeenCalledWith("bus-stop-layer", "visibility", "visible");
       expect(mapSetLayoutPropertyMock).toHaveBeenCalledWith("bus-line-layer", "visibility", "none");
+      expect(mapSetLayoutPropertyMock).toHaveBeenCalledWith("journey-listings-layer", "visibility", "none");
       expect(mapSetLayoutPropertyMock).toHaveBeenCalledWith("green-layer", "visibility", "none");
       expect(mapSetLayoutPropertyMock).toHaveBeenCalledWith("flood-layer", "visibility", "none");
     });
