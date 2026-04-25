@@ -115,3 +115,71 @@ class ZoneSafetyIncidentCollectionRead(BaseModel):
 
     type: Literal["FeatureCollection"] = "FeatureCollection"
     features: list[ZoneSafetyIncidentFeatureRead]
+
+
+class FavoriteZoneMetricsSnapshot(BaseModel):
+    """Snapshot of zone metrics captured when the user saves the zone."""
+
+    zone_area_m2: float | None = None
+    green_area_m2: float | None = None
+    green_percentage: float | None = None
+    flood_area_m2: float | None = None
+    flood_percentage: float | None = None
+    flood_risk_label: str | None = None
+    safety_incidents_count: int | None = None
+    homicide_density_per_km2: float | None = None
+    robbery_density_per_km2: float | None = None
+    theft_density_per_km2: float | None = None
+    crime_density_per_km2: float | None = None
+    zone_average_price: float | None = None
+    zone_average_unit_price: float | None = None
+    travel_time_minutes: int | None = None
+
+
+class FavoriteZoneTransportPoint(BaseModel):
+    """Transport seed (stop/station) used to generate a zone."""
+
+    id: UUID | None = None
+    name: str | None = None
+    source: str | None = None
+    external_id: str | None = None
+    lat: float | None = None
+    lon: float | None = None
+    walk_distance_m: int | None = None
+    walk_time_sec: int | None = None
+    modal_types: list[str] = []
+
+
+class FavoriteZonePayload(BaseModel):
+    """Full snapshot of a zone + related listings when saved by the user."""
+
+    fingerprint: str
+    journey_id: UUID
+    transport_point_id: UUID | None = None
+    transport_point: FavoriteZoneTransportPoint | None = None
+    neighborhood_name: str | None = None
+    city_name: str | None = None
+    state_code: str | None = None
+    isochrone_geom: dict[str, Any] | None = None
+    poi_counts: dict[str, int] | None = None
+    poi_points: list[ZonePOIPointRead] = []
+    metrics: FavoriteZoneMetricsSnapshot
+    listings: list[dict[str, Any]] = []
+
+
+class FavoriteZoneCreate(BaseModel):
+    journey_id: UUID
+    zone_fingerprint: str
+    search_type: str
+    usage_type: str
+    payload: FavoriteZonePayload | None = None
+
+
+class FavoriteZoneRead(BaseModel):
+    zone_key: str
+    journey_id: UUID
+    zone_fingerprint: str
+    search_type: str
+    usage_type: str
+    saved_at: datetime
+    payload: FavoriteZonePayload

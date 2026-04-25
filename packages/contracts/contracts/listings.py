@@ -128,6 +128,14 @@ class FavoriteListingCreate(BaseModel):
     listing: ListingCardRead
 
 
+class ManualFavoriteCreate(BaseModel):
+    url: str
+    journey_id: UUID | None = None
+    zone_fingerprint: str | None = None
+    search_type: str = "rent"
+    usage_type: str = "residential"
+
+
 class FavoriteListingRead(BaseModel):
     listing_key: str
     journey_id: UUID

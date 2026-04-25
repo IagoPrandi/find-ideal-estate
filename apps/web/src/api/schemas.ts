@@ -200,6 +200,16 @@ export const FavoriteListingBackendSchema = z.object({
   listing: ListingCardReadBackendSchema,
 });
 
+export const FavoriteZoneBackendSchema = z.object({
+  zone_key: z.string(),
+  journey_id: z.string(),
+  zone_fingerprint: z.string(),
+  search_type: z.string(),
+  usage_type: z.string(),
+  saved_at: z.string(),
+  payload: z.any(),
+});
+
 export const ListingsScrapePlatformDiagnosticsSchema = z.object({
   status: z.string().optional(),
   sequence: z.number().nullable().optional(),

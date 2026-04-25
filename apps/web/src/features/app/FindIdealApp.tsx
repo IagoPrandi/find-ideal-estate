@@ -8,7 +8,7 @@ import { FavoritesPanel, WizardPanel } from "../../components/panels";
 import { AuthAccessCard } from "../auth/AuthAccessCard";
 import { getPoiCategoryMeta, getZonePoiSelectionKey, sortPoiPoints, ZonePoiPointLike, zoneNeedsPoiBackfill } from "../../domain/poi";
 import { applyListingsPanelFilters, getListingDisplayPrice, getListingSelectionKey } from "../../lib/listingFormat";
-import { getIncludedGreenVegetationLevels, useFavoritesStore, useJourneyStore, useUIStore } from "../../state";
+import { getIncludedGreenVegetationLevels, useFavoritesStore, useJourneyStore, useUIStore, useZoneFavoritesStore } from "../../state";
 
 const MAPTILER_KEY =
   import.meta.env.VITE_MAPTILER_API_KEY || (import.meta.env.MODE === "test" ? "test-maptiler-key" : "");
@@ -23,6 +23,10 @@ const TRANSPORT_CANDIDATES_SOURCE_ID = "transport-candidates-source-runtime";
 const SELECTED_TRANSPORT_TRACE_SOURCE_ID = "selected-transport-trace-source-runtime";
 const ZONES_SOURCE_ID = "journey-zones-source-runtime";
 const ZONE_POIS_SOURCE_ID = "journey-zone-pois-source-runtime";
+const SAVED_ZONES_SOURCE_ID = "saved-zones-source-runtime";
+const SAVED_ZONE_POIS_SOURCE_ID = "saved-zone-pois-source-runtime";
+const SAVED_ZONE_TRANSPORT_SOURCE_ID = "saved-zone-transport-source-runtime";
+const SAVED_LISTINGS_SOURCE_ID = "saved-listings-source-runtime";
 const LISTINGS_SOURCE_ID = "journey-listings-source-runtime";
 const SAFETY_SOURCE_ID = "public-safety-source-runtime";
 const PIN_INTERACTIVE_LAYER_LIST = ["transport-candidate-layer", "journey-listings-layer"] as const;
@@ -30,6 +34,8 @@ const TRANSPORT_CANDIDATE_PIN_ICON_ID = "transport-candidate-pin-icon";
 const TRANSPORT_CANDIDATE_SELECTED_PIN_ICON_ID = "transport-candidate-pin-selected-icon";
 const LISTING_PIN_ICON_ID = "listing-pin-icon";
 const LISTING_SELECTED_PIN_ICON_ID = "listing-pin-selected-icon";
+const SAVED_LISTING_PIN_ICON_ID = "saved-listing-pin-icon";
+const SAVED_LISTING_SELECTED_PIN_ICON_ID = "saved-listing-pin-selected-icon";
 const SELECTED_PIN_MARKER_STYLE_ID = "selected-map-pin-marker-styles";
 const POPUP_PERSIST_LAYER_LIST = [...BUS_LAYER_LIST, "zone-pois-highlight-layer", "zone-pois-layer", "safety-incident-layer"] as const;
 const LAYER_TOGGLE_BUTTON_CLASS = "pointer-events-auto flex h-8 w-8 items-center justify-center rounded-lg border border-slate-100 bg-white/95 text-slate-500 shadow-md backdrop-blur-md transition-colors hover:bg-pastel-violet-50 hover:text-pastel-violet-600";
@@ -73,9 +79,11 @@ type MapOverlayLayerKey =
   | "listings"
   | "safety"
   | "flood"
-  | "green";
+  | "green"
+  | "savedZones"
+  | "savedListings";
 
-type LayerLegendMarkerKind = "line" | "dot" | "fill" | "pin";
+type LayerLegendMarkerKind = "line" | "dot" | "fill" | "pin" | "square" | "diamond";
 
 type LayerLegendItem = {
   id: string;
@@ -117,6 +125,8 @@ const DEFAULT_LAYER_VISIBILITY: Record<MapOverlayLayerKey, boolean> = {
   safety: true,
   flood: true,
   green: true,
+  savedZones: true,
+  savedListings: true,
 };
 
 const MAP_LAYER_MENU_ITEMS: Array<{ key: MapOverlayLayerKey; label: string }> = [
@@ -131,6 +141,8 @@ const MAP_LAYER_MENU_ITEMS: Array<{ key: MapOverlayLayerKey; label: string }> = 
   { key: "safety", label: "Segurança" },
   { key: "flood", label: "Alagamento" },
   { key: "green", label: "Áreas verdes" },
+  { key: "savedZones", label: "Zonas salvas" },
+  { key: "savedListings", label: "Imóveis salvos" },
 ];
 
 const DEFAULT_LAYER_LEGEND_EXPANSION = Object.fromEntries(
@@ -150,8 +162,8 @@ const BASE_LAYER_LEGEND_ITEMS: Record<Exclude<MapOverlayLayerKey, "safety">, Lay
   busStops: [
     { id: "bus-stop", label: "Ponto", markerKind: "dot", color: "#845ef7" },
     { id: "bus-terminal", label: "Terminal", markerKind: "dot", color: "#f97316" },
-    { id: "metro-station", label: "Estação de metrô", markerKind: "dot", color: "#e11d48" },
-    { id: "train-station", label: "Estação de trem", markerKind: "dot", color: "#0f766e" },
+    { id: "metro-station", label: "Estação de metrô", markerKind: "diamond", color: "#e11d48" },
+    { id: "train-station", label: "Estação de trem", markerKind: "diamond", color: "#0f766e" },
   ],
   transportCandidates: [
     { id: "transport-candidate", label: "Disponível", markerKind: "pin", color: "#64748b" },
@@ -178,6 +190,14 @@ const BASE_LAYER_LEGEND_ITEMS: Record<Exclude<MapOverlayLayerKey, "safety">, Lay
   ],
   green: [
     { id: "green-fill", label: "Cobertura vegetal", markerKind: "fill", color: "rgba(106,159,43,0.24)", borderColor: "#6a9f2b" },
+  ],
+  savedZones: [
+    { id: "saved-zone-fill", label: "Zona salva", markerKind: "fill", color: "rgba(14,165,233,0.18)", borderColor: "#0369a1", dashed: true },
+    { id: "saved-zone-transport", label: "Ponto seed", markerKind: "pin", color: "#1001b4" },
+  ],
+  savedListings: [
+    { id: "saved-listing", label: "Imóvel salvo", markerKind: "pin", color: "#d33ff4" },
+    { id: "saved-listing-selected", label: "Selecionado", markerKind: "pin", color: "#ea2afc" },
   ],
 };
 
@@ -248,6 +268,23 @@ const EMPTY_FEATURE_COLLECTION: GeoJSON.FeatureCollection<GeoJSON.Geometry> = {
   type: "FeatureCollection",
   features: []
 };
+
+function collectGeometryCoordinates(geom: GeoJSON.Geometry | null | undefined): [number, number][] {
+  if (!geom) return [];
+  const out: [number, number][] = [];
+  const visit = (node: unknown): void => {
+    if (!Array.isArray(node)) return;
+    if (typeof node[0] === "number" && typeof node[1] === "number") {
+      out.push([node[0] as number, node[1] as number]);
+      return;
+    }
+    for (const item of node) visit(item);
+  };
+  if ("coordinates" in geom) {
+    visit((geom as { coordinates: unknown }).coordinates);
+  }
+  return out;
+}
 
 const setGeoJsonSourceData = (map: maplibregl.Map, sourceId: string, data: GeoJSON.FeatureCollection<GeoJSON.Geometry>) => {
   const source = map.getSource(sourceId) as maplibregl.GeoJSONSource | undefined;
@@ -799,6 +836,10 @@ export function FindIdealApp() {
   const listingsAddressScope = useJourneyStore((state) => state.listingsAddressScope);
   const config = useJourneyStore((state) => state.config);
   const isFavoritesPanelOpen = useFavoritesStore((state) => state.isPanelOpen);
+  const favoriteListings = useFavoritesStore((state) => state.favorites);
+  const selectedSavedListingKey = useFavoritesStore((state) => state.selectedSavedListingKey);
+  const savedZoneFavorites = useZoneFavoritesStore((state) => state.zoneFavorites);
+  const selectedSavedZoneKey = useZoneFavoritesStore((state) => state.selectedZoneKey);
   const setSelectedTransportId = useJourneyStore((state) => state.setSelectedTransportId);
   const setSelectedListingKey = useJourneyStore((state) => state.setSelectedListingKey);
   const setSelectedPoiKey = useJourneyStore((state) => state.setSelectedPoiKey);
@@ -974,6 +1015,13 @@ export function FindIdealApp() {
       if (!map.hasImage(LISTING_SELECTED_PIN_ICON_ID)) {
         map.addImage(LISTING_SELECTED_PIN_ICON_ID, createPinIcon("#5b21b6"));
       }
+      if (!map.hasImage(SAVED_LISTING_PIN_ICON_ID)) {
+        // Rosa dos botões "salvar/remover" (rose-500).
+        map.addImage(SAVED_LISTING_PIN_ICON_ID, createPinIcon("#f43f5e"));
+      }
+      if (!map.hasImage(SAVED_LISTING_SELECTED_PIN_ICON_ID)) {
+        map.addImage(SAVED_LISTING_SELECTED_PIN_ICON_ID, createPinIcon("#be123c"));
+      }
       for (const category of ["school", "supermarket", "pharmacy", "park", "restaurant", "gym", "default"] as const) {
         const meta = getPoiCategoryMeta(category === "default" ? undefined : category);
         if (!map.hasImage(meta.iconId)) {
@@ -1039,6 +1087,26 @@ export function FindIdealApp() {
       });
 
       map.addSource(SAFETY_SOURCE_ID, {
+        type: "geojson",
+        data: EMPTY_FEATURE_COLLECTION,
+      });
+
+      map.addSource(SAVED_ZONES_SOURCE_ID, {
+        type: "geojson",
+        data: EMPTY_FEATURE_COLLECTION,
+      });
+
+      map.addSource(SAVED_ZONE_POIS_SOURCE_ID, {
+        type: "geojson",
+        data: EMPTY_FEATURE_COLLECTION,
+      });
+
+      map.addSource(SAVED_ZONE_TRANSPORT_SOURCE_ID, {
+        type: "geojson",
+        data: EMPTY_FEATURE_COLLECTION,
+      });
+
+      map.addSource(SAVED_LISTINGS_SOURCE_ID, {
         type: "geojson",
         data: EMPTY_FEATURE_COLLECTION,
       });
@@ -1313,6 +1381,92 @@ export function FindIdealApp() {
           "text-color": ["case", ["boolean", ["get", "selected"], false], "#581c87", ["coalesce", ["get", "label_color"], "#0f172a"]],
           "text-halo-color": "#ffffff",
           "text-halo-width": 1.2,
+        },
+      });
+
+      map.addLayer({
+        id: "saved-zones-fill-layer",
+        type: "fill",
+        source: SAVED_ZONES_SOURCE_ID,
+        paint: {
+          "fill-color": "#0ea5e9",
+          "fill-opacity": 0.12,
+        },
+      });
+
+      map.addLayer({
+        id: "saved-zones-outline-layer",
+        type: "line",
+        source: SAVED_ZONES_SOURCE_ID,
+        paint: {
+          "line-color": "#0369a1",
+          "line-width": 2.0,
+          "line-dasharray": [2, 2],
+          "line-opacity": 0.9,
+        },
+      });
+
+      map.addLayer({
+        id: "saved-zone-pois-layer",
+        type: "circle",
+        source: SAVED_ZONE_POIS_SOURCE_ID,
+        paint: {
+          "circle-color": ["coalesce", ["get", "color"], "#0ea5e9"],
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 10, 2.5, 14, 4.5, 17, 6],
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 1.2,
+          "circle-opacity": 0.92,
+        },
+      });
+
+      map.addLayer({
+        id: "saved-zone-transport-layer",
+        type: "circle",
+        source: SAVED_ZONE_TRANSPORT_SOURCE_ID,
+        paint: {
+          "circle-color": "#f97316",
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 9, 6, 14, 10, 17, 14],
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 2,
+          "circle-opacity": 0.96,
+        },
+      });
+
+      map.addLayer({
+        id: "saved-zone-transport-label-layer",
+        type: "symbol",
+        source: SAVED_ZONE_TRANSPORT_SOURCE_ID,
+        layout: {
+          "text-field": ["coalesce", ["get", "name"], "Ponto seed"],
+          "text-size": 11,
+          "text-font": ["Open Sans Bold", "Arial Unicode MS Bold"],
+          "text-offset": [0, 1.6],
+          "text-anchor": "top",
+          "text-allow-overlap": true,
+          "text-ignore-placement": true,
+        },
+        paint: {
+          "text-color": "#9a3412",
+          "text-halo-color": "#ffffff",
+          "text-halo-width": 1.6,
+        },
+      });
+
+      map.addLayer({
+        id: "saved-listings-layer",
+        type: "symbol",
+        source: SAVED_LISTINGS_SOURCE_ID,
+        layout: {
+          "icon-image": [
+            "case",
+            ["boolean", ["get", "selected"], false],
+            SAVED_LISTING_SELECTED_PIN_ICON_ID,
+            SAVED_LISTING_PIN_ICON_ID,
+          ],
+          "icon-size": ["interpolate", ["linear"], ["zoom"], 10, 0.45, 14, 0.58, 17, 0.72],
+          "icon-anchor": "bottom",
+          "icon-allow-overlap": true,
+          "icon-ignore-placement": true,
         },
       });
 
@@ -2072,6 +2226,134 @@ export function FindIdealApp() {
 
   useEffect(() => {
     const map = mapRef.current;
+    if (!map || !isMapReady) {
+      return;
+    }
+
+    const zoneFeatures: GeoJSON.Feature<GeoJSON.Geometry>[] = savedZoneFavorites
+      .filter((entry) => entry.payload.isochrone_geom)
+      .map((entry) => ({
+        type: "Feature" as const,
+        geometry: entry.payload.isochrone_geom as GeoJSON.Geometry,
+        properties: {
+          zone_key: entry.zoneKey,
+          label: `Zona ${entry.zoneFingerprint.slice(0, 8)}`,
+        },
+      }));
+
+    const poiFeatures: GeoJSON.Feature<GeoJSON.Point>[] = savedZoneFavorites.flatMap((entry) =>
+      (entry.payload.poi_points || []).map((poi, index) => {
+        const meta = getPoiCategoryMeta(poi.category || null);
+        return {
+          type: "Feature" as const,
+          geometry: { type: "Point" as const, coordinates: [poi.lon, poi.lat] },
+          properties: {
+            zone_key: entry.zoneKey,
+            id: poi.id || `${entry.zoneKey}:${index}`,
+            name: poi.name || meta.singularLabel,
+            category: poi.category || null,
+            address: poi.address || null,
+            color: meta.color,
+          },
+        };
+      }),
+    );
+
+    const transportFeatures: GeoJSON.Feature<GeoJSON.Point>[] = savedZoneFavorites
+      .filter((entry) => entry.payload.transport_point?.lat != null && entry.payload.transport_point?.lon != null)
+      .map((entry) => {
+        const tp = entry.payload.transport_point!;
+        return {
+          type: "Feature" as const,
+          geometry: { type: "Point" as const, coordinates: [tp.lon as number, tp.lat as number] },
+          properties: {
+            zone_key: entry.zoneKey,
+            name: tp.name || `Seed ${entry.zoneFingerprint.slice(0, 6)}`,
+          },
+        };
+      });
+
+    setGeoJsonSourceData(map, SAVED_ZONES_SOURCE_ID, { type: "FeatureCollection", features: zoneFeatures });
+    setGeoJsonSourceData(map, SAVED_ZONE_POIS_SOURCE_ID, { type: "FeatureCollection", features: poiFeatures });
+    setGeoJsonSourceData(map, SAVED_ZONE_TRANSPORT_SOURCE_ID, { type: "FeatureCollection", features: transportFeatures });
+  }, [isMapReady, savedZoneFavorites]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isMapReady) {
+      return;
+    }
+    const features: GeoJSON.Feature<GeoJSON.Point>[] = favoriteListings
+      .filter((entry) => typeof entry.listing.lat === "number" && typeof entry.listing.lon === "number")
+      .map((entry) => ({
+        type: "Feature" as const,
+        geometry: { type: "Point" as const, coordinates: [entry.listing.lon as number, entry.listing.lat as number] },
+        properties: {
+          listing_key: entry.listingKey,
+          address: entry.listing.address_normalized || "",
+          selected: entry.listingKey === selectedSavedListingKey,
+        },
+      }));
+    setGeoJsonSourceData(map, SAVED_LISTINGS_SOURCE_ID, { type: "FeatureCollection", features });
+  }, [favoriteListings, isMapReady, selectedSavedListingKey]);
+
+  function panelRightOffsetPx(): number {
+    if (typeof window === "undefined" || !isFavoritesPanelOpen) return 0;
+    // Igual ao CSS .favorites-panel: width: min(50vw, 54rem)
+    const vw = window.innerWidth;
+    const maxPx = 54 * 16;
+    return Math.min(vw * 0.5, maxPx);
+  }
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isMapReady || !selectedSavedZoneKey) {
+      return;
+    }
+    const entry = savedZoneFavorites.find((item) => item.zoneKey === selectedSavedZoneKey);
+    if (!entry) {
+      return;
+    }
+    const padding = { top: 40, bottom: 40, left: 40, right: panelRightOffsetPx() + 40 };
+    const currentZoom = map.getZoom();
+    const tp = entry.payload.transport_point;
+    if (tp?.lat != null && tp?.lon != null) {
+      // Zoom preservado — só recentra.
+      map.easeTo({ center: [tp.lon, tp.lat], duration: 700, padding });
+    } else if (entry.payload.isochrone_geom) {
+      try {
+        const coords = collectGeometryCoordinates(entry.payload.isochrone_geom as GeoJSON.Geometry);
+        if (coords.length > 0) {
+          const bounds = coords.reduce(
+            (box, c) => box.extend(c as [number, number]),
+            new maplibregl.LngLatBounds(coords[0] as [number, number], coords[0] as [number, number]),
+          );
+          map.fitBounds(bounds, { padding, duration: 700, maxZoom: currentZoom });
+        }
+      } catch {
+        /* noop */
+      }
+    }
+  }, [isMapReady, savedZoneFavorites, selectedSavedZoneKey, isFavoritesPanelOpen]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isMapReady || !selectedSavedListingKey) {
+      return;
+    }
+    const entry = favoriteListings.find((item) => item.listingKey === selectedSavedListingKey);
+    const lat = entry?.listing.lat;
+    const lon = entry?.listing.lon;
+    if (typeof lat !== "number" || typeof lon !== "number") return;
+    map.easeTo({
+      center: [lon, lat],
+      duration: 700,
+      padding: { top: 40, bottom: 40, left: 40, right: panelRightOffsetPx() + 40 },
+    });
+  }, [isMapReady, favoriteListings, selectedSavedListingKey, isFavoritesPanelOpen]);
+
+  useEffect(() => {
+    const map = mapRef.current;
     if (!map || !isMapReady) return;
 
     const sequentialLayerSettings: SequentialLayerSettings = {
@@ -2107,6 +2389,13 @@ export function FindIdealApp() {
     map.setLayoutProperty("journey-listings-layer", "visibility", layerVisibility.listings ? "visible" : "none");
     map.setLayoutProperty("safety-incident-heatmap-layer", "visibility", layerVisibility.safety && config.enrichments.safety ? "visible" : "none");
     map.setLayoutProperty("safety-incident-layer", "visibility", layerVisibility.safety && config.enrichments.safety ? "visible" : "none");
+    const savedZonesVisible = layerVisibility.savedZones ? "visible" : "none";
+    map.setLayoutProperty("saved-zones-fill-layer", "visibility", savedZonesVisible);
+    map.setLayoutProperty("saved-zones-outline-layer", "visibility", savedZonesVisible);
+    map.setLayoutProperty("saved-zone-pois-layer", "visibility", savedZonesVisible);
+    map.setLayoutProperty("saved-zone-transport-layer", "visibility", savedZonesVisible);
+    map.setLayoutProperty("saved-zone-transport-label-layer", "visibility", savedZonesVisible);
+    map.setLayoutProperty("saved-listings-layer", "visibility", layerVisibility.savedListings ? "visible" : "none");
     map.setLayoutProperty("flood-layer", "visibility", floodVisible ? "visible" : "none");
     map.setLayoutProperty("green-layer", "visibility", greenVisible ? "visible" : "none");
     map.setFilter("green-layer", ["in", "vegetation_level", ...getIncludedGreenVegetationLevels(config.greenVegetationLevel)] as never);

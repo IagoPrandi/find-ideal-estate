@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Search } from "lucide-react";
+import { AlertTriangle, Heart, Search } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { apiActionHint, createZoneEnrichmentJob, getJob, getJourneyZonesList, updateJourney } from "../../api/client";
 import { getPoiCategoryMeta, getZonePoiSelectionKey, POI_CATEGORY_ORDER, sortPoiPoints, ZonePoiPointLike, zoneNeedsPoiBackfill } from "../../domain/poi";
 import { formatCurrencyBr } from "../../lib/listingFormat";
-import { useJourneyStore, useUIStore } from "../../state";
+import { useJourneyStore, useUIStore, useZoneFavoritesStore } from "../../state";
 
 type JourneyRank = {
   position?: number | null;
@@ -235,10 +235,16 @@ function ZoneCard({
   zone,
   isSelected,
   onSelect,
+  journeyId,
+  searchType,
+  usageType,
 }: {
   zone: Awaited<ReturnType<typeof getJourneyZonesList>>["zones"][number];
   isSelected: boolean;
   onSelect: () => void;
+  journeyId: string | null;
+  searchType: string;
+  usageType: string;
 }) {
   const showGreen = zone.green_vegetation_label !== null && zone.green_vegetation_label !== undefined;
   const poiPoints = zone.poi_points || [];
@@ -247,6 +253,24 @@ function ZoneCard({
   const priceTooltip = priceP50 != null
     ? "Metade dos imóveis está abaixo desse valor e metade está acima, considerando o recorte padrão de imóveis para venda dentro da zona."
     : undefined;
+
+  const isAuthenticated = useZoneFavoritesStore((state) => state.isAuthenticated);
+  const isZoneFavorite = useZoneFavoritesStore((state) => state.isZoneFavorite);
+  const toggleZoneFavorite = useZoneFavoritesStore((state) => state.toggleZoneFavorite);
+  const isSaved = journeyId ? isZoneFavorite(journeyId, zone.fingerprint) : false;
+
+  async function handleToggleSave(event: React.MouseEvent<HTMLButtonElement>) {
+    event.stopPropagation();
+    if (!journeyId || !isAuthenticated) {
+      return;
+    }
+    await toggleZoneFavorite({
+      journeyId,
+      zoneFingerprint: zone.fingerprint,
+      searchType,
+      usageType,
+    });
+  }
 
   return (
     <div
@@ -261,6 +285,17 @@ function ZoneCard({
             <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700" title="Zona circular aproximada porque o serviço de rotas está indisponível.">Círculo aproximado</span>
           ) : null}
           <span className="rounded bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600">Até {zone.travel_time_minutes ?? "--"} min</span>
+          <button
+            type="button"
+            aria-label={isSaved ? "Remover zona da lista de interesse" : "Salvar zona na lista de interesse"}
+            onClick={handleToggleSave}
+            disabled={!isAuthenticated}
+            title={isAuthenticated ? (isSaved ? "Remover zona salva" : "Salvar zona") : "Entre na sua conta para salvar zonas"}
+            className={`inline-flex h-7 w-7 items-center justify-center rounded-lg border transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${isSaved ? "border-rose-300 bg-rose-50 text-rose-600 hover:bg-rose-100" : "border-slate-200 bg-white text-slate-500 hover:border-pastel-violet-300 hover:text-pastel-violet-700"}`}
+            data-testid={`zone-save-${zone.id}`}
+          >
+            <Heart className={`h-3.5 w-3.5 ${isSaved ? "fill-current" : ""}`} />
+          </button>
         </div>
       </div>
 
@@ -291,6 +326,7 @@ export function Step4Compare() {
   const journeyId = useJourneyStore((state) => state.journeyId);
   const selectedZoneFingerprint = useJourneyStore((state) => state.selectedZoneFingerprint);
   const setSelectedZone = useJourneyStore((state) => state.setSelectedZone);
+  const config = useJourneyStore((state) => state.config);
   const goToStep = useUIStore((state) => state.goToStep);
   const setMaxStep = useUIStore((state) => state.setMaxStep);
   const [poiBackfillJobId, setPoiBackfillJobId] = useState<string | null>(null);
@@ -462,6 +498,9 @@ export function Step4Compare() {
                 zone={zone}
                 isSelected={isSelected}
                 onSelect={() => void handleSelect(zone.id, zone.fingerprint)}
+                journeyId={journeyId}
+                searchType={config.type}
+                usageType={config.propertyUsageType}
               />
             );
           })}

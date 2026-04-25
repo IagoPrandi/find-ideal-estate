@@ -231,6 +231,7 @@ export function Step6Analysis() {
     queryKey: ["zone-listings", journeyId, zoneFingerprint, config.type, "all", listingsAddressScope],
     queryFn: async () => getZoneListings(journeyId as string, zoneFingerprint as string, config.type, "all", "all", listingsAddressScope),
     enabled: Boolean(journeyId && zoneFingerprint),
+    placeholderData: keepPreviousData,
     refetchInterval: (query) => {
       const data = query.state.data;
       if (!data) {

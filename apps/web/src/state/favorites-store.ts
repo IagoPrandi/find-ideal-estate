@@ -4,6 +4,7 @@ import { ALL_FAVORITE_METRIC_IDS, DEFAULT_FAVORITE_METRIC_IDS, type FavoriteMetr
 import { getListingSelectionKey } from "../lib/listingFormat";
 
 export type FavoritesPanelTab = "saved" | "compare";
+export type FavoritesPanelScope = "listings" | "zones";
 
 type FavoritesPreferenceState = {
   selectedMetricIds: FavoriteMetricId[];
@@ -19,6 +20,8 @@ type FavoritesState = {
   selectedMetricIds: FavoriteMetricId[];
   isPanelOpen: boolean;
   activeTab: FavoritesPanelTab;
+  activeScope: FavoritesPanelScope;
+  selectedSavedListingKey: string | null;
   isAuthenticated: boolean;
   isHydrating: boolean;
   accountUserId: string | null;
@@ -31,6 +34,13 @@ type FavoritesState = {
     searchType: string;
     usageType: string;
   }) => Promise<boolean>;
+  addManualFavorite: (payload: {
+    url: string;
+    searchType?: string;
+    usageType?: string;
+    journeyId?: string | null;
+    zoneFingerprint?: string | null;
+  }) => Promise<{ ok: boolean; error?: string }>;
   removeFavorite: (listingKey: string) => Promise<boolean>;
   toggleFavorite: (payload: {
     listing: ListingCardRead;
@@ -42,6 +52,8 @@ type FavoritesState = {
   setPanelOpen: (value: boolean) => void;
   togglePanel: () => void;
   setActiveTab: (value: FavoritesPanelTab) => void;
+  setActiveScope: (value: FavoritesPanelScope) => void;
+  setSelectedSavedListingKey: (value: string | null) => void;
   toggleMetric: (metricId: FavoriteMetricId) => void;
   setSelectedMetricIds: (metricIds: FavoriteMetricId[]) => void;
   resetFavoritesState: () => void;
@@ -141,6 +153,17 @@ async function deleteAccountFavoriteApi(listingKey: string) {
   await client.deleteAccountFavorite(listingKey);
 }
 
+async function addManualListingFavoriteApi(payload: {
+  url: string;
+  searchType?: string;
+  usageType?: string;
+  journeyId?: string | null;
+  zoneFingerprint?: string | null;
+}) {
+  const client = await import("../api/client");
+  return client.addManualListingFavorite(payload);
+}
+
 const initialPreferenceState = loadPreferenceState();
 
 export const useFavoritesStore = create<FavoritesState>((set, get) => ({
@@ -148,6 +171,8 @@ export const useFavoritesStore = create<FavoritesState>((set, get) => ({
   selectedMetricIds: initialPreferenceState.selectedMetricIds,
   isPanelOpen: false,
   activeTab: "saved",
+  activeScope: "listings",
+  selectedSavedListingKey: null,
   isAuthenticated: false,
   isHydrating: false,
   accountUserId: null,
@@ -239,6 +264,31 @@ export const useFavoritesStore = create<FavoritesState>((set, get) => ({
       return false;
     }
   },
+  addManualFavorite: async ({ url, searchType, usageType, journeyId, zoneFingerprint }) => {
+    if (!get().isAuthenticated) {
+      return { ok: false, error: "Entre na sua conta para adicionar imóveis por link." };
+    }
+    const trimmed = (url || "").trim();
+    if (!trimmed) {
+      return { ok: false, error: "Informe a URL do anúncio." };
+    }
+    try {
+      const saved = await addManualListingFavoriteApi({
+        url: trimmed,
+        searchType,
+        usageType,
+        journeyId,
+        zoneFingerprint,
+      });
+      set((state) => ({
+        favorites: [saved, ...state.favorites.filter((favorite) => favorite.listingKey !== saved.listingKey)],
+      }));
+      return { ok: true };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Falha ao adicionar imóvel pelo link.";
+      return { ok: false, error: message };
+    }
+  },
   removeFavorite: async (listingKey) => {
     if (!get().isAuthenticated) {
       return false;
@@ -267,6 +317,8 @@ export const useFavoritesStore = create<FavoritesState>((set, get) => ({
   setPanelOpen: (value) => set({ isPanelOpen: value }),
   togglePanel: () => set((state) => ({ isPanelOpen: !state.isPanelOpen })),
   setActiveTab: (value) => set({ activeTab: value }),
+  setActiveScope: (value) => set({ activeScope: value }),
+  setSelectedSavedListingKey: (value) => set({ selectedSavedListingKey: value }),
   toggleMetric: (metricId) => {
     set((state) => {
       const hasMetric = state.selectedMetricIds.includes(metricId);
@@ -297,6 +349,8 @@ export const useFavoritesStore = create<FavoritesState>((set, get) => ({
       selectedMetricIds: DEFAULT_FAVORITE_METRIC_IDS,
       isPanelOpen: false,
       activeTab: "saved",
+      activeScope: "listings",
+      selectedSavedListingKey: null,
       isAuthenticated: false,
       isHydrating: false,
       accountUserId: null,

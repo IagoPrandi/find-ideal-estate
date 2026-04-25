@@ -462,11 +462,18 @@ export function Step6Dashboard({ journeyId, zoneFingerprint, searchType, listing
     gcTime: DASHBOARD_ANALYTICS_GC_TIME,
     refetchOnMount: false,
     refetchOnWindowFocus: false,
+    placeholderData: keepPreviousData,
   });
 
   const zoneData = zoneDashboardQuery.data;
   const priceData = priceDashboardQuery.data;
-  const safetyData = selectedSafetyCityFilter ? safetyDashboardQuery.data : zoneData;
+  // Fallback cascading: manter zoneData visível enquanto safety-city carrega,
+  // e quando vier, preservar o bloco de ambiente/price do zoneData mesclando só o ranking filtrado.
+  const safetyData = selectedSafetyCityFilter
+    ? (safetyDashboardQuery.data && zoneData
+        ? { ...zoneData, safety: { ...zoneData.safety, ...safetyDashboardQuery.data.safety } }
+        : safetyDashboardQuery.data || zoneData)
+    : zoneData;
   const activeData = activePage === "preco"
     ? priceData
     : activePage === "seguranca"

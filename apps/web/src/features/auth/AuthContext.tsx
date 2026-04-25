@@ -1,6 +1,6 @@
 import { createContext, ReactNode, startTransition, useContext, useEffect, useMemo, useState } from "react";
 import { ApiError, AuthStatusRead, getAuthStatus, loginAuth, logoutAuth, registerAuth } from "../../api/client";
-import { useFavoritesStore } from "../../state";
+import { useFavoritesStore, useZoneFavoritesStore } from "../../state";
 
 type AuthMode = "login" | "register";
 
@@ -38,6 +38,7 @@ function toMessage(error: unknown): string {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const syncFavoritesWithAuthStatus = useFavoritesStore((state) => state.syncWithAuthStatus);
+  const syncZoneFavoritesWithAuthStatus = useZoneFavoritesStore((state) => state.syncWithAuthStatus);
   const [authStatus, setAuthStatus] = useState<AuthStatusRead>(GUEST_STATUS);
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -68,7 +69,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     void syncFavoritesWithAuthStatus(authStatus);
-  }, [authStatus, syncFavoritesWithAuthStatus]);
+    void syncZoneFavoritesWithAuthStatus(authStatus);
+  }, [authStatus, syncFavoritesWithAuthStatus, syncZoneFavoritesWithAuthStatus]);
 
   const login = async (payload: { email: string; password: string }) => {
     setIsSubmitting(true);

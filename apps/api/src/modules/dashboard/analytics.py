@@ -963,6 +963,71 @@ async def fetch_zone_dashboard_analytics(
         )
         current_zone_price_rows = [dict(row) for row in current_zone_prices_result.mappings().all()]
 
+        citywide_filters_sql, citywide_filter_params = _build_price_dashboard_filter_sql(
+            spatial_scope="all",
+            usage_type=usage_type,
+            min_price=min_price,
+            max_price=max_price,
+            min_size=min_size,
+            max_size=max_size,
+            price_alias="lap.current_total_price",
+            usage_alias=None,
+            area_alias="p.area_m2",
+            inside_zone_alias="FALSE",
+        )
+
+        citywide_prices_result = await conn.execute(
+            text(
+                _PARSED_ADDRESS_CTE
+                + f"""
+                , latest_active_prices AS (
+                    SELECT
+                        la.property_id,
+                        MIN(COALESCE(snapshot.price, 0) + COALESCE(snapshot.condo_fee, 0) + COALESCE(snapshot.iptu, 0))::DOUBLE PRECISION AS current_total_price
+                    FROM listing_ads la
+                    JOIN LATERAL (
+                        SELECT ls.price, ls.condo_fee, ls.iptu
+                        FROM listing_snapshots ls
+                        WHERE ls.listing_ad_id = la.id
+                          AND ls.price IS NOT NULL
+                          AND (ls.availability_state = 'active' OR ls.availability_state IS NULL)
+                        ORDER BY ls.observed_at DESC
+                        LIMIT 1
+                    ) snapshot ON TRUE
+                    WHERE la.is_active = TRUE
+                      AND la.advertised_usage_type = :search_type
+                      AND (:usage_type = 'all' OR la.usage_type IS NULL OR la.usage_type = :usage_type)
+                    GROUP BY la.property_id
+                )
+                SELECT
+                    pa.city_name,
+                    pa.neighborhood_name,
+                    COUNT(*)::INT AS listing_count,
+                    AVG(lap.current_total_price)::DOUBLE PRECISION AS avg_price,
+                    AVG(
+                        CASE
+                            WHEN p.area_m2 IS NOT NULL AND p.area_m2 > 0
+                            THEN lap.current_total_price / p.area_m2::DOUBLE PRECISION
+                            ELSE NULL
+                        END
+                    )::DOUBLE PRECISION AS avg_unit_price
+                FROM parsed_addresses pa
+                JOIN properties p ON p.id = pa.property_id
+                JOIN latest_active_prices lap ON lap.property_id = pa.property_id
+                WHERE pa.city_name IS NOT NULL
+                  AND pa.neighborhood_name IS NOT NULL
+                  {citywide_filters_sql}
+                GROUP BY pa.city_name, pa.neighborhood_name
+                """
+            ),
+            {
+                "usage_type": usage_type,
+                "search_type": search_type,
+                **citywide_filter_params,
+            },
+        )
+        citywide_price_rows = [dict(row) for row in citywide_prices_result.mappings().all()]
+
         neighborhood_history: dict[str, float | None] = {}
         zone_history: dict[str, float | None] = {}
         yearly_change_rank = None
@@ -1018,6 +1083,10 @@ async def fetch_zone_dashboard_analytics(
 
         zone_average_price = sum(zone_current_prices) / len(zone_current_prices) if zone_current_prices else None
         zone_average_unit_price = sum(zone_unit_prices) / len(zone_unit_prices) if zone_unit_prices else None
+        for citywide_row in citywide_price_rows:
+            citywide_city = str(citywide_row.get("city_name") or "")
+            if citywide_city:
+                price_city_options.append(citywide_city)
         price_city_options = sorted(set(price_city_options))
         selected_city = _resolve_location_context_match(requested_city, price_city_options)
         if selected_city is None and requested_city is not None:
@@ -1070,10 +1139,18 @@ async def fetch_zone_dashboard_analytics(
 
         dominant_zone_price_row = _dominant_price_row(list(zone_dominant_group_map.values()))
         dominant_price_row = _dominant_price_row(grouped_price_rows)
-        filtered_grouped_price_rows = [
-            row for row in grouped_price_rows if selected_city is None or row.get("city_name") == selected_city
+        ranking_price_rows = [
+            {
+                "city_name": str(citywide_row.get("city_name") or "") or None,
+                "neighborhood_name": str(citywide_row.get("neighborhood_name") or "") or None,
+                "avg_price": _safe_float(citywide_row.get("avg_price")),
+                "avg_unit_price": _safe_float(citywide_row.get("avg_unit_price")),
+                "listing_count": int(citywide_row.get("listing_count") or 0),
+            }
+            for citywide_row in citywide_price_rows
+            if citywide_row.get("neighborhood_name")
+            and (selected_city is None or str(citywide_row.get("city_name") or "") == selected_city)
         ]
-        ranking_price_rows = filtered_grouped_price_rows if selected_city is not None else grouped_price_rows
         dominant_filtered_price_row = _dominant_price_row(ranking_price_rows)
 
         if dominant_zone_price_row is not None:
@@ -1780,6 +1857,7 @@ async def fetch_zone_favorite_analytics(
         search_type=search_type,
         usage_type=usage_type,
         spatial_scope="inside_zone",
+        address_scope="all_addresses",
         min_price=None,
         max_price=None,
         min_size=None,
@@ -1795,6 +1873,7 @@ async def fetch_zone_favorite_analytics(
         search_type=search_type,
         usage_type=usage_type,
         spatial_scope="inside_zone",
+        address_scope="all_addresses",
         min_price=None,
         max_price=None,
         min_size=None,
@@ -1810,6 +1889,7 @@ async def fetch_zone_favorite_analytics(
         search_type=search_type,
         usage_type=usage_type,
         spatial_scope="inside_zone",
+        address_scope="all_addresses",
         min_price=None,
         max_price=None,
         min_size=None,

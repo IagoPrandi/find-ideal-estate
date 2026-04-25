@@ -1,7 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueries } from "@tanstack/react-query";
-import { ChevronsLeft, ChevronsRight, ExternalLink, Heart, Loader2, Trash2 } from "lucide-react";
+import { ArrowRight, ChevronsLeft, ChevronsRight, ExternalLink, Heart, Link2, Loader2, MapPin, Trash2 } from "lucide-react";
+import type { FavoriteZoneEntry } from "../../api/client";
 import { getZoneFavoriteAnalytics } from "../../api/client";
+import { getPoiCategoryMeta, POI_CATEGORY_ORDER } from "../../domain/poi";
 import {
   buildFavoriteRanking,
   buildFavoriteMetricWinCounts,
@@ -13,21 +15,153 @@ import {
   getFavoriteMetricDefinition,
 } from "../../lib/favorites";
 import { formatCurrencyBr, getListingDisplayPrice, resolveListingCardImageUrls, resolvePlatformUrl } from "../../lib/listingFormat";
-import { useFavoritesStore } from "../../state";
+import { useFavoritesStore, useJourneyStore, useUIStore, useZoneFavoritesStore } from "../../state";
 
 const FAVORITES_ANALYTICS_STALE_TIME = 30 * 60_000;
 const FAVORITES_ANALYTICS_GC_TIME = 60 * 60_000;
+
+type ZoneCompareColumnKey =
+  | "travel"
+  | "avg_price"
+  | "avg_unit_price"
+  | "green_pct"
+  | "flood_pct"
+  | "homicide"
+  | "robbery"
+  | "crime"
+  | "pois";
+
+const ZONE_COMPARE_COLUMNS: Array<{ key: ZoneCompareColumnKey; label: string; format: (entry: FavoriteZoneEntry) => string }> = [
+  {
+    key: "travel",
+    label: "Tempo",
+    format: (entry) => (entry.payload.metrics.travel_time_minutes != null ? `${entry.payload.metrics.travel_time_minutes} min` : "--"),
+  },
+  {
+    key: "avg_price",
+    label: "Preço médio",
+    format: (entry) => (entry.payload.metrics.zone_average_price != null ? formatCurrencyBr(entry.payload.metrics.zone_average_price) : "--"),
+  },
+  {
+    key: "avg_unit_price",
+    label: "Preço m²",
+    format: (entry) => (entry.payload.metrics.zone_average_unit_price != null ? `${formatCurrencyBr(entry.payload.metrics.zone_average_unit_price)}/m²` : "--"),
+  },
+  {
+    key: "green_pct",
+    label: "Verde (%)",
+    format: (entry) => (entry.payload.metrics.green_percentage != null ? `${entry.payload.metrics.green_percentage.toFixed(1)}%` : "--"),
+  },
+  {
+    key: "flood_pct",
+    label: "Alagamento (%)",
+    format: (entry) => (entry.payload.metrics.flood_percentage != null ? `${entry.payload.metrics.flood_percentage.toFixed(1)}%` : "--"),
+  },
+  {
+    key: "homicide",
+    label: "Homicídios/km²",
+    format: (entry) => (entry.payload.metrics.homicide_density_per_km2 != null ? entry.payload.metrics.homicide_density_per_km2.toFixed(2) : "--"),
+  },
+  {
+    key: "robbery",
+    label: "Roubos/km²",
+    format: (entry) => (entry.payload.metrics.robbery_density_per_km2 != null ? entry.payload.metrics.robbery_density_per_km2.toFixed(2) : "--"),
+  },
+  {
+    key: "crime",
+    label: "Crimes/km²",
+    format: (entry) => (entry.payload.metrics.crime_density_per_km2 != null ? entry.payload.metrics.crime_density_per_km2.toFixed(2) : "--"),
+  },
+  {
+    key: "pois",
+    label: "POIs",
+    format: (entry) => String(entry.payload.poi_points?.length ?? 0),
+  },
+];
+
+function MetricChip({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-lg bg-white px-2.5 py-1.5">
+      <span className="font-semibold text-slate-500">{label}</span>
+      <span className="text-slate-800">{value}</span>
+    </div>
+  );
+}
 
 export function FavoritesPanel() {
   const favorites = useFavoritesStore((state) => state.favorites);
   const selectedMetricIds = useFavoritesStore((state) => state.selectedMetricIds);
   const isPanelOpen = useFavoritesStore((state) => state.isPanelOpen);
   const activeTab = useFavoritesStore((state) => state.activeTab);
+  const activeScope = useFavoritesStore((state) => state.activeScope);
   const isAuthenticated = useFavoritesStore((state) => state.isAuthenticated);
   const togglePanel = useFavoritesStore((state) => state.togglePanel);
   const setActiveTab = useFavoritesStore((state) => state.setActiveTab);
+  const setActiveScope = useFavoritesStore((state) => state.setActiveScope);
   const removeFavorite = useFavoritesStore((state) => state.removeFavorite);
   const toggleMetric = useFavoritesStore((state) => state.toggleMetric);
+  const zoneFavorites = useZoneFavoritesStore((state) => state.zoneFavorites);
+  const removeZoneFavorite = useZoneFavoritesStore((state) => state.removeZoneFavorite);
+  const selectedZoneKey = useZoneFavoritesStore((state) => state.selectedZoneKey);
+  const setSelectedZoneKey = useZoneFavoritesStore((state) => state.setSelectedZoneKey);
+  const selectedSavedListingKey = useFavoritesStore((state) => state.selectedSavedListingKey);
+  const setSelectedSavedListingKey = useFavoritesStore((state) => state.setSelectedSavedListingKey);
+  const setJourneyId = useJourneyStore((state) => state.setJourneyId);
+  const setSelectedZone = useJourneyStore((state) => state.setSelectedZone);
+  const setJourneyConfig = useJourneyStore((state) => state.setConfig);
+  const setPanelOpen = useFavoritesStore((state) => state.setPanelOpen);
+  const goToStep = useUIStore((state) => state.goToStep);
+  const setMaxStep = useUIStore((state) => state.setMaxStep);
+  const [expandedZoneKey, setExpandedZoneKey] = useState<string | null>(null);
+  const [poiCategoryFilter, setPoiCategoryFilter] = useState<Record<string, string | "all">>({});
+  const zoneCardRefs = useRef<Record<string, HTMLElement | null>>({});
+  const addManualFavorite = useFavoritesStore((state) => state.addManualFavorite);
+  const [manualUrl, setManualUrl] = useState("");
+  const [manualSubmitting, setManualSubmitting] = useState(false);
+  const [manualError, setManualError] = useState<string | null>(null);
+
+  async function handleSubmitManualUrl(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (manualSubmitting) return;
+    setManualSubmitting(true);
+    setManualError(null);
+    const result = await addManualFavorite({ url: manualUrl });
+    setManualSubmitting(false);
+    if (result.ok) {
+      setManualUrl("");
+    } else {
+      setManualError(result.error || "Não foi possível adicionar pelo link.");
+    }
+  }
+
+  useEffect(() => {
+    if (!selectedZoneKey) return;
+    const node = zoneCardRefs.current[selectedZoneKey];
+    if (node) {
+      node.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [selectedZoneKey]);
+
+  const orderedZones = useMemo(
+    () => [...zoneFavorites].sort((left, right) => right.savedAt.localeCompare(left.savedAt)),
+    [zoneFavorites],
+  );
+
+  function handleSelectZone(zoneKey: string) {
+    setSelectedZoneKey(selectedZoneKey === zoneKey ? null : zoneKey);
+  }
+
+  function handleContinueFromZone(entry: FavoriteZoneEntry) {
+    const searchType = (entry.searchType === "sale" ? "sale" : "rent") as "rent" | "sale";
+    const usageType = (entry.usageType === "commercial" ? "commercial" : entry.usageType === "all" ? "all" : "residential") as "residential" | "commercial" | "all";
+    setJourneyId(entry.journeyId);
+    setJourneyConfig({ type: searchType, propertyUsageType: usageType });
+    setSelectedZone(null, entry.zoneFingerprint);
+    setSelectedZoneKey(entry.zoneKey);
+    setMaxStep(5);
+    goToStep(5);
+    setPanelOpen(false);
+  }
   const [failedImageKeys, setFailedImageKeys] = useState<Record<string, true>>({});
 
   const analyticsTargets = useMemo(() => {
@@ -167,37 +301,101 @@ export function FavoritesPanel() {
       </button>
 
       <aside className={`favorites-panel ${isPanelOpen ? "favorites-panel--open" : "favorites-panel--closed"}`} aria-hidden={!isPanelOpen} data-testid="favorites-panel">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-5 py-4">
-          <div className="min-w-0">
-            <h2 className="text-sm font-semibold text-slate-900">Painel de interesse</h2>
-            <p className="mt-1 text-xs text-slate-500">
-              {favorites.length === 0
-                ? (isAuthenticated
-                    ? "Salve imóveis na etapa 6 para montar ranking e matriz comparativa na sua conta."
-                    : "Entre na sua conta para salvar imóveis e comparar favoritos em qualquer navegador.")
-                : `${favorites.length} ${favorites.length === 1 ? "imóvel salvo" : "imóveis salvos"} na sua conta.`}
-            </p>
+        <div className="border-b border-slate-200 bg-white px-5 pt-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold text-slate-900">Painel de interesse</h2>
+              <p className="mt-1 text-xs text-slate-500">
+                {activeScope === "listings"
+                  ? favorites.length === 0
+                    ? isAuthenticated
+                      ? "Salve imóveis na etapa 6 para montar ranking e matriz comparativa na sua conta."
+                      : "Entre na sua conta para salvar imóveis e comparar favoritos em qualquer navegador."
+                    : `${favorites.length} ${favorites.length === 1 ? "imóvel salvo" : "imóveis salvos"} na sua conta.`
+                  : orderedZones.length === 0
+                    ? isAuthenticated
+                      ? "Salve zonas na etapa 4 para comparar POIs e métricas em qualquer navegador."
+                      : "Entre na sua conta para salvar zonas da análise."
+                    : `${orderedZones.length} ${orderedZones.length === 1 ? "zona salva" : "zonas salvas"} na sua conta.`}
+              </p>
+            </div>
+            <div className="inline-flex rounded-2xl border border-slate-200 bg-slate-50 p-1 text-xs font-semibold text-slate-600">
+              <button
+                type="button"
+                onClick={() => setActiveTab("saved")}
+                className={`rounded-xl px-3 py-2 transition ${activeTab === "saved" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+              >
+                Lista salva
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("compare")}
+                className={`rounded-xl px-3 py-2 transition ${activeTab === "compare" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
+              >
+                Comparação
+              </button>
+            </div>
           </div>
-          <div className="inline-flex rounded-2xl border border-slate-200 bg-slate-50 p-1 text-xs font-semibold text-slate-600">
-            <button
-              type="button"
-              onClick={() => setActiveTab("saved")}
-              className={`rounded-xl px-3 py-2 transition ${activeTab === "saved" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
-            >
-              Lista salva
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab("compare")}
-              className={`rounded-xl px-3 py-2 transition ${activeTab === "compare" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}`}
-            >
-              Comparação
-            </button>
+          <div className="mt-3 overflow-x-auto" data-testid="favorites-scope-tabs">
+            <div className="flex min-w-max gap-6">
+              <button
+                type="button"
+                onClick={() => setActiveScope("listings")}
+                className={`pb-3 text-sm font-medium border-b-2 transition-colors ${activeScope === "listings" ? "border-pastel-violet-500 text-pastel-violet-600" : "border-transparent text-slate-500 hover:text-slate-700"}`}
+                data-testid="favorites-scope-tab-listings"
+              >
+                {`Imóveis${favorites.length ? ` (${favorites.length})` : ""}`}
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveScope("zones")}
+                className={`pb-3 text-sm font-medium border-b-2 transition-colors ${activeScope === "zones" ? "border-pastel-violet-500 text-pastel-violet-600" : "border-transparent text-slate-500 hover:text-slate-700"}`}
+                data-testid="favorites-scope-tab-zones"
+              >
+                {`Zonas${orderedZones.length ? ` (${orderedZones.length})` : ""}`}
+              </button>
+            </div>
           </div>
         </div>
 
-        {activeTab === "saved" ? (
+        {activeScope === "listings" ? (
+          activeTab === "saved" ? (
           <div className="panel-scroll flex-1 space-y-3 overflow-y-auto px-5 py-4">
+            <form
+              onSubmit={handleSubmitManualUrl}
+              className="rounded-[20px] border border-slate-200 bg-white p-3 shadow-sm"
+              data-testid="manual-favorite-form"
+            >
+              <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                <Link2 className="h-3.5 w-3.5" />
+                Adicionar por link
+              </div>
+              <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                <input
+                  type="url"
+                  inputMode="url"
+                  placeholder="https://www.quintoandar.com.br/imovel/..."
+                  value={manualUrl}
+                  onChange={(event) => setManualUrl(event.target.value)}
+                  disabled={manualSubmitting || !isAuthenticated}
+                  className="flex-1 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-800 outline-none transition focus:border-pastel-violet-400 focus:ring-1 focus:ring-pastel-violet-200 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-400"
+                />
+                <button
+                  type="submit"
+                  disabled={manualSubmitting || !isAuthenticated || !manualUrl.trim()}
+                  className="inline-flex items-center justify-center gap-1.5 rounded-xl bg-pastel-violet-500 px-4 py-2 text-xs font-semibold text-white transition hover:bg-pastel-violet-600 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
+                >
+                  {manualSubmitting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                  Adicionar
+                </button>
+              </div>
+              {!isAuthenticated ? (
+                <p className="mt-2 text-[11px] text-slate-500">Entre na sua conta para salvar imóveis por link.</p>
+              ) : null}
+              {manualError ? (
+                <p className="mt-2 text-[11px] text-rose-600">{manualError}</p>
+              ) : null}
+            </form>
             {favorites.length === 0 ? (
               <div className="rounded-[24px] border border-dashed border-slate-300 bg-slate-50/80 px-5 py-8 text-center">
                 <p className="text-sm font-semibold text-slate-700">{isAuthenticated ? "Nenhum imóvel salvo ainda" : "Entre para usar favoritos"}</p>
@@ -216,8 +414,14 @@ export function FavoritesPanel() {
                 const unitPriceLabel = typeof favorite.listing.current_unit_price === "number"
                   ? `${formatCurrencyBr(favorite.listing.current_unit_price)}/m²`
                   : "m² indisponível";
+                const isCardSelected = selectedSavedListingKey === favorite.listingKey;
                 return (
-                  <article key={favorite.listingKey} className="overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-sm">
+                  <article
+                    key={favorite.listingKey}
+                    onClick={() => setSelectedSavedListingKey(isCardSelected ? null : favorite.listingKey)}
+                    className={`cursor-pointer overflow-hidden rounded-[24px] border bg-white shadow-sm transition-colors ${isCardSelected ? "border-pastel-violet-400 ring-1 ring-pastel-violet-300" : "border-slate-200 hover:border-slate-300"}`}
+                    data-testid={`saved-listing-card-${favorite.listingKey}`}
+                  >
                     <div className="grid min-h-[10rem] grid-cols-[7.5rem_minmax(0,1fr)]">
                       <div className="h-full w-full bg-slate-100">
                         {renderFavoritePreviewImage(
@@ -245,7 +449,8 @@ export function FavoritesPanel() {
                           <button
                             type="button"
                             aria-label="Remover da lista de interesse"
-                            onClick={() => {
+                            onClick={(event) => {
+                              event.stopPropagation();
                               void removeFavorite(favorite.listingKey);
                             }}
                             className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 text-rose-600 transition hover:border-rose-300 hover:bg-rose-100"
@@ -267,6 +472,7 @@ export function FavoritesPanel() {
                               href={adUrl}
                               target="_blank"
                               rel="noreferrer"
+                              onClick={(event) => event.stopPropagation()}
                               className="inline-flex items-center gap-1.5 rounded-xl border border-pastel-violet-200 bg-pastel-violet-50 px-3 py-2 text-xs font-semibold text-pastel-violet-700 transition hover:bg-pastel-violet-100"
                             >
                               Abrir anúncio
@@ -325,8 +531,13 @@ export function FavoritesPanel() {
                   {ranking.map((item, index) => {
                     const adUrl = resolvePlatformUrl(item.listing.url, item.listing.platform);
                     const metricWins = metricWinCounts.get(item.listingKey) || 0;
+                    const isRankingSelected = selectedSavedListingKey === item.listingKey;
                     return (
-                      <div key={item.listingKey} className={`grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-2xl border px-3 py-3 ${index === 0 ? "border-emerald-200 bg-emerald-50/70" : "border-slate-200 bg-slate-50/70"}`}>
+                      <div
+                        key={item.listingKey}
+                        onClick={() => setSelectedSavedListingKey(isRankingSelected ? null : item.listingKey)}
+                        className={`grid cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-2xl border px-3 py-3 transition-colors ${isRankingSelected ? "border-pastel-violet-400 bg-pastel-violet-50 ring-1 ring-pastel-violet-200" : index === 0 ? "border-emerald-200 bg-emerald-50/70 hover:border-emerald-300" : "border-slate-200 bg-slate-50/70 hover:border-slate-300"}`}
+                      >
                         <div className={`flex h-8 w-8 items-center justify-center rounded-xl text-xs font-extrabold ${index === 0 ? "bg-emerald-600 text-white" : "bg-slate-200 text-slate-700"}`}>#{index + 1}</div>
                         <div className="min-w-0">
                           <p className="truncate text-sm font-semibold text-slate-900">{item.listing.address_normalized || "Endereço não informado"}</p>
@@ -339,6 +550,7 @@ export function FavoritesPanel() {
                             href={adUrl}
                             target="_blank"
                             rel="noreferrer"
+                            onClick={(event) => event.stopPropagation()}
                             className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition hover:border-pastel-violet-300 hover:text-pastel-violet-700"
                             aria-label="Abrir anúncio salvo"
                           >
@@ -377,8 +589,13 @@ export function FavoritesPanel() {
                     <tbody>
                       {ranking.map((item, index) => {
                         const adUrl = resolvePlatformUrl(item.listing.url, item.listing.platform);
+                        const isRowSelected = selectedSavedListingKey === item.listingKey;
                         return (
-                          <tr key={item.listingKey} className={index % 2 === 0 ? "bg-white" : "bg-slate-50/60"}>
+                          <tr
+                            key={item.listingKey}
+                            onClick={() => setSelectedSavedListingKey(isRowSelected ? null : item.listingKey)}
+                            className={`cursor-pointer ${isRowSelected ? "bg-pastel-violet-50" : index % 2 === 0 ? "bg-white hover:bg-slate-50" : "bg-slate-50/60 hover:bg-slate-100"}`}
+                          >
                             <td className="sticky left-0 z-[1] w-[8.4rem] min-w-[8.4rem] max-w-[8.4rem] border-r border-slate-200 bg-inherit px-2.5 py-2.5 align-top">
                               <div className="w-[8.4rem] min-w-[8.4rem] max-w-[8.4rem]">
                                 <div className="flex items-start justify-between gap-2">
@@ -390,6 +607,7 @@ export function FavoritesPanel() {
                                       href={adUrl}
                                       target="_blank"
                                       rel="noreferrer"
+                                      onClick={(event) => event.stopPropagation()}
                                       className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition hover:border-pastel-violet-300 hover:text-pastel-violet-700"
                                       aria-label="Abrir anúncio na matriz"
                                     >
@@ -407,6 +625,230 @@ export function FavoritesPanel() {
                           </tr>
                         );
                       })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          </div>
+          )
+        ) : activeTab === "saved" ? (
+          <div className="panel-scroll flex-1 space-y-3 overflow-y-auto px-5 py-4">
+            {orderedZones.length === 0 ? (
+              <div className="rounded-[24px] border border-dashed border-slate-300 bg-slate-50/80 px-5 py-8 text-center">
+                <p className="text-sm font-semibold text-slate-700">
+                  {isAuthenticated ? "Nenhuma zona salva ainda" : "Entre para usar zonas salvas"}
+                </p>
+                <p className="mt-2 text-xs leading-relaxed text-slate-500">
+                  {isAuthenticated
+                    ? "Use o coração ao lado do título da zona, na Etapa 4, para incluir aqui com POIs e métricas."
+                    : "As zonas salvas ficam na sua conta, não no navegador atual."}
+                </p>
+              </div>
+            ) : (
+              orderedZones.map((entry) => {
+                const isExpanded = expandedZoneKey === entry.zoneKey;
+                const isSelected = selectedZoneKey === entry.zoneKey;
+                const poiPoints = entry.payload.poi_points || [];
+                const activeFilter = poiCategoryFilter[entry.zoneKey] || "all";
+                const categoryCounts = new Map<string, number>();
+                for (const poi of poiPoints) {
+                  const categoryKey = poi.category || "other";
+                  categoryCounts.set(categoryKey, (categoryCounts.get(categoryKey) || 0) + 1);
+                }
+                const orderedCategoryKeys = [
+                  ...POI_CATEGORY_ORDER.filter((key) => categoryCounts.has(key)),
+                  ...Array.from(categoryCounts.keys()).filter((key) => !POI_CATEGORY_ORDER.includes(key as typeof POI_CATEGORY_ORDER[number])),
+                ];
+                const filteredPois = activeFilter === "all"
+                  ? poiPoints
+                  : poiPoints.filter((poi) => (poi.category || "other") === activeFilter);
+                const transport = entry.payload.transport_point;
+                const metrics = entry.payload.metrics;
+                return (
+                  <article
+                    key={entry.zoneKey}
+                    ref={(node) => {
+                      zoneCardRefs.current[entry.zoneKey] = node;
+                    }}
+                    className={`overflow-hidden rounded-[24px] border bg-white shadow-sm transition-colors ${isSelected ? "border-pastel-violet-400 ring-1 ring-pastel-violet-300" : "border-slate-200"}`}
+                    data-testid={`saved-zone-card-${entry.zoneKey}`}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => handleSelectZone(entry.zoneKey)}
+                      className="flex w-full items-start justify-between gap-3 px-4 py-4 text-left hover:bg-slate-50/60"
+                      aria-pressed={isSelected}
+                    >
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">Zona salva</p>
+                        <h3 className="mt-1 line-clamp-2 text-sm font-bold text-slate-900">
+                          {entry.payload.neighborhood_name
+                            ? `${entry.payload.neighborhood_name}${entry.payload.city_name ? ` · ${entry.payload.city_name}` : ""}`
+                            : `Zona ${entry.zoneFingerprint.slice(0, 8)}`}
+                        </h3>
+                        <p className="mt-1 text-[11px] text-slate-500">
+                          Salvo em {new Date(entry.savedAt).toLocaleDateString("pt-BR")}
+                          {transport?.name ? ` · Seed: ${transport.name}` : transport?.lat && transport?.lon ? ` · Seed: ${transport.lat.toFixed(4)}, ${transport.lon.toFixed(4)}` : ""}
+                        </p>
+                      </div>
+                      <span
+                        role="button"
+                        aria-label="Remover zona salva"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void removeZoneFavorite(entry.zoneKey);
+                        }}
+                        className="inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-xl border border-rose-200 bg-rose-50 text-rose-600 transition hover:border-rose-300 hover:bg-rose-100"
+                        title="Remover zona salva"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </span>
+                    </button>
+                    <div className="grid grid-cols-2 gap-2 border-t border-slate-100 bg-slate-50/60 px-4 py-3 text-[11px] text-slate-600 sm:grid-cols-3">
+                      <MetricChip label="Tempo" value={metrics.travel_time_minutes != null ? `${metrics.travel_time_minutes} min` : "--"} />
+                      <MetricChip label="Área" value={metrics.zone_area_m2 != null ? `${(metrics.zone_area_m2 / 1_000_000).toFixed(2)} km²` : "--"} />
+                      <MetricChip label="Verde" value={metrics.green_percentage != null ? `${metrics.green_percentage.toFixed(1)}%` : "--"} />
+                      <MetricChip label="Alagamento" value={metrics.flood_percentage != null ? `${metrics.flood_percentage.toFixed(1)}%` : "--"} />
+                      <MetricChip label="Preço m²" value={metrics.zone_average_unit_price != null ? `${formatCurrencyBr(metrics.zone_average_unit_price)}/m²` : "--"} />
+                      <MetricChip label="Preço médio" value={metrics.zone_average_price != null ? formatCurrencyBr(metrics.zone_average_price) : "--"} />
+                      <MetricChip label="Homicídios/km²" value={metrics.homicide_density_per_km2 != null ? metrics.homicide_density_per_km2.toFixed(2) : "--"} />
+                      <MetricChip label="Roubos/km²" value={metrics.robbery_density_per_km2 != null ? metrics.robbery_density_per_km2.toFixed(2) : "--"} />
+                      <MetricChip label="Crimes/km²" value={metrics.crime_density_per_km2 != null ? metrics.crime_density_per_km2.toFixed(2) : "--"} />
+                    </div>
+                    {orderedCategoryKeys.length > 0 ? (
+                      <div className="flex flex-wrap gap-1.5 border-t border-slate-100 px-4 py-3">
+                        <button
+                          type="button"
+                          onClick={() => setPoiCategoryFilter((current) => ({ ...current, [entry.zoneKey]: "all" }))}
+                          className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition ${activeFilter === "all" ? "border-pastel-violet-300 bg-pastel-violet-50 text-pastel-violet-700" : "border-slate-200 bg-slate-50 text-slate-600 hover:border-slate-300"}`}
+                        >
+                          Todos <span className="text-[10px] text-slate-500">{poiPoints.length}</span>
+                        </button>
+                        {orderedCategoryKeys.map((categoryKey) => {
+                          const meta = getPoiCategoryMeta(categoryKey);
+                          const count = categoryCounts.get(categoryKey) || 0;
+                          const isActive = activeFilter === categoryKey;
+                          return (
+                            <button
+                              key={categoryKey}
+                              type="button"
+                              onClick={() => setPoiCategoryFilter((current) => ({ ...current, [entry.zoneKey]: categoryKey }))}
+                              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition ${isActive ? "text-white" : "bg-slate-50 text-slate-700 hover:bg-slate-100"}`}
+                              style={{
+                                borderColor: meta.color,
+                                backgroundColor: isActive ? meta.color : undefined,
+                              }}
+                            >
+                              <span
+                                className="inline-block h-2 w-2 rounded-full"
+                                style={{ backgroundColor: isActive ? "#ffffff" : meta.color }}
+                              />
+                              {meta.label}
+                              <span className={`text-[10px] ${isActive ? "text-white/80" : "text-slate-500"}`}>{count}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                    <div className="flex items-center justify-between gap-2 border-t border-slate-100 px-4 py-3">
+                      <button
+                        type="button"
+                        onClick={() => setExpandedZoneKey(isExpanded ? null : entry.zoneKey)}
+                        className="text-xs font-semibold text-pastel-violet-700 transition hover:text-pastel-violet-900"
+                      >
+                        {isExpanded ? `Ocultar ${filteredPois.length} POIs` : `Ver ${filteredPois.length} POIs`}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleContinueFromZone(entry)}
+                        className="inline-flex items-center gap-1.5 rounded-xl bg-pastel-violet-500 px-3 py-2 text-xs font-semibold text-white transition hover:bg-pastel-violet-600"
+                        data-testid={`saved-zone-continue-${entry.zoneKey}`}
+                      >
+                        Continuar para endereços
+                        <ArrowRight className="h-3.5 w-3.5" />
+                      </button>
+                      {isExpanded ? (
+                        <ul className="mt-3 space-y-2 text-[11px] text-slate-600">
+                          {filteredPois.length === 0 ? (
+                            <li className="text-slate-400">Nenhum POI nesta categoria.</li>
+                          ) : (
+                            filteredPois.map((poi, index) => {
+                              const meta = getPoiCategoryMeta(poi.category || "other");
+                              return (
+                                <li key={`${entry.zoneKey}:poi:${poi.id || index}`} className="flex items-start gap-2 rounded-lg border border-slate-100 bg-slate-50/80 px-2.5 py-1.5">
+                                  <MapPin className="mt-0.5 h-3.5 w-3.5" style={{ color: meta.color }} />
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex flex-wrap items-center gap-1.5">
+                                      <p className="truncate font-semibold text-slate-800">{poi.name || meta.singularLabel || "POI sem nome"}</p>
+                                      <span
+                                        className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold text-white"
+                                        style={{ backgroundColor: meta.color }}
+                                      >
+                                        {meta.label}
+                                      </span>
+                                    </div>
+                                    <p className="truncate text-slate-500">
+                                      {poi.address || `${poi.lat.toFixed(5)}, ${poi.lon.toFixed(5)}`}
+                                    </p>
+                                  </div>
+                                </li>
+                              );
+                            })
+                          )}
+                        </ul>
+                      ) : null}
+                    </div>
+                  </article>
+                );
+              })
+            )}
+          </div>
+        ) : (
+          <div className="panel-scroll flex-1 overflow-y-auto px-5 py-4">
+            <section className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm" data-testid="saved-zones-compare">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Matriz</p>
+                  <h3 className="mt-1 text-sm font-bold text-slate-800">Métricas comparativas das zonas salvas</h3>
+                </div>
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
+                  {orderedZones.length} linha{orderedZones.length === 1 ? "" : "s"}
+                </span>
+              </div>
+              {orderedZones.length === 0 ? (
+                <p className="mt-3 text-xs leading-relaxed text-slate-500">
+                  Salve zonas para comparar métricas lado a lado.
+                </p>
+              ) : (
+                <div className="mt-4 overflow-x-auto rounded-2xl border border-slate-200">
+                  <table className="w-max min-w-full border-collapse text-[11px] text-slate-700">
+                    <thead className="bg-slate-50 text-left text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">
+                      <tr>
+                        <th className="sticky left-0 z-10 w-[8.4rem] min-w-[8.4rem] max-w-[8.4rem] border-b border-r border-slate-200 bg-slate-50 px-2.5 py-2">Zona</th>
+                        {ZONE_COMPARE_COLUMNS.map((column) => (
+                          <th key={column.key} className="whitespace-nowrap border-b border-slate-200 px-3 py-2">
+                            {column.label}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {orderedZones.map((entry, index) => (
+                        <tr key={entry.zoneKey} className={index % 2 === 0 ? "bg-white" : "bg-slate-50/60"}>
+                          <td className="sticky left-0 z-[1] w-[8.4rem] min-w-[8.4rem] max-w-[8.4rem] border-r border-slate-200 bg-inherit px-2.5 py-2.5 align-top">
+                            <p className="break-words whitespace-normal font-semibold leading-snug text-slate-900">
+                              {`Zona ${entry.zoneFingerprint.slice(0, 8)}`}
+                            </p>
+                            <p className="mt-0.5 text-[10px] text-slate-500">{`${entry.payload.poi_points?.length ?? 0} POIs`}</p>
+                          </td>
+                          {ZONE_COMPARE_COLUMNS.map((column) => (
+                            <td key={`${entry.zoneKey}:${column.key}`} className="whitespace-nowrap border-l border-slate-100 px-3 py-2.5 align-top text-slate-700">
+                              {column.format(entry)}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>

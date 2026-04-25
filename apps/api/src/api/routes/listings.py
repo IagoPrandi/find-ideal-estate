@@ -45,14 +45,13 @@ from modules.jobs.service import enqueue_job, get_job
 
 router = APIRouter(prefix="/journeys", tags=["listings"])
 
-_ALLOWED_LISTINGS_SCRAPE_EMAIL = "iago.oliveira2478@gmail.com"
 _DEFERRED_ADDRESS_NOTICE_REASON = "address_search_registered"
 
 
 def _is_scrape_authorized(auth_context: object) -> bool:
-    user = getattr(auth_context, "user", None)
-    email = getattr(user, "email", None)
-    return isinstance(email, str) and email.strip().lower() == _ALLOWED_LISTINGS_SCRAPE_EMAIL
+    # Scraping liberado para todos os usuários autenticados ou anônimos.
+    _ = auth_context
+    return True
 
 
 def _build_deferred_address_response() -> ListingsRequestResult:
@@ -520,8 +519,10 @@ async def get_zone_listings(
     """
     M5.7 Step 6: Return cached listing cards for a zone, plus freshness info.
     """
-    if await get_accessible_journey(journey_id, auth_context) is None:
-        raise HTTPException(status_code=404, detail="Journey not found")
+    # Leitura tolerante a sessão: enquanto o journey_id + zone_fingerprint existirem,
+    # retornamos o inventário persistido mesmo quando a sessão do navegador foi perdida
+    # entre o início do scraping e a releitura do painel.
+    _ = auth_context
 
     try:
         registry = get_platform_registry()
