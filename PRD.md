@@ -1,8 +1,8 @@
 # PRD — Find Ideal Estate
 
-**Versão:** 2.1  
+**Versão:** 2.2  
 **Fonte canônica:** `analise_reformulacao_find_ideal_estate_v18.md`  
-**Última atualização:** 2026-04-12  
+**Última atualização:** 2026-04-24  
 **Status:** Ativo
 
 ---
@@ -74,9 +74,9 @@ Encontrar imóvel para alugar ou comprar em São Paulo é um processo fragmentad
 | 3 | Transporte: GTFS + Valhalla + OTP | 🔄 Em progresso | — | M3.1-M3.8 concluídos; restante bloqueia Fase 4 |
 | 4 | Zonas: isócronas + enriquecimento | ✅ Concluída | 2026-03-21 | M4.1-M4.6 concluídos; frontend Etapas 3 e 4 validados |
 | 5 | Imóveis: scrapers + dedup + cache | ✅ Concluída | 2026-03-22 | M5.1–M5.7 concluídos |
-| 6 | Dashboard + relatório PDF | 🔄 Em progresso | — | M6.1-M6.2 concluídos; segurança agora usa cidade/bairro persistidos e normalizados |
+| 6 | Dashboard + relatório PDF | 🔄 Em progresso | — | M6.1-M6.2 concluídos; M6.7 (favoritos de imóveis) e M6.8 (favoritos de zonas) concluídos; analytics de dashboard aprimorado |
 | 7 | Scheduler noturno (prewarm) | ⬜ Não iniciada | — | APScheduler, prioridades de fila |
-| 8 | Auth + créditos + Stripe avulso | ⬜ Não iniciada | — | fastapi-users, magic link, Resend, créditos por operação |
+| 8 | Auth + créditos + Stripe avulso | 🔄 Em progresso | — | Auth email/senha implementado (custom, não fastapi-users); sessões por cookie HTTP-only; créditos e Stripe pendentes |
 
 ### Fases de frontend
 
@@ -90,7 +90,7 @@ Encontrar imóvel para alugar ou comprar em São Paulo é um processo fragmentad
 | FE5 | Etapa 3: progressão SSE + zonas | ✅ Concluída | 2026-03-24 | Geração/enriquecimento via jobs com polling e atualização progressiva |
 | FE6 | Etapa 4: comparação de zonas | ✅ Concluída | 2026-03-24 | Comparação de zonas com lista ordenada e badges/filtros validados |
 | FE7 | Etapa 5 + 6: imóveis + dashboard | ✅ Concluída | 2026-03-24 | Imóveis e dashboard validados; relatório permanece no escopo FE8 |
-| FE8 | Relatório + auth + créditos | ⬜ Não iniciada | — | Download PDF, compra de créditos, saldo na conta |}
+| FE8 | Relatório + auth + créditos | 🔄 Em progresso | — | AuthContext + AuthAccessCard + FavoritesPanel implementados; relatório PDF, créditos e Stripe pendentes |
 
 > **Regra de milestone:** a fase só é marcada como concluída após confirmação explícita do responsável. Não marcar na ausência de confirmação.
 
@@ -288,6 +288,10 @@ Escape hatch manual, nunca base da arquitetura.
 ```
 users ─────────────────────────────────────────────────┐
   │                                                     │
+  ├─ user_sessions                                      │
+  ├─ user_listing_favorites                             │
+  ├─ user_zone_favorites                                │
+  │                                                     │
   └─ journeys ───────────────────────────────────┐      │
        │                                          │      │
        └─ jobs ────────── job_events              │      │
@@ -315,14 +319,34 @@ webhook_events
 
 ```sql
 users (
-  id            UUID PRIMARY KEY,
-  email         TEXT UNIQUE NOT NULL,
-  is_active     BOOLEAN DEFAULT true,
-  is_superuser  BOOLEAN DEFAULT false,
-  created_at    TIMESTAMPTZ DEFAULT NOW(),
-  updated_at    TIMESTAMPTZ DEFAULT NOW()
+  id                   UUID PRIMARY KEY,
+  email                TEXT UNIQUE NOT NULL,        -- normalizado em lowercase
+  display_name         TEXT,
+  password_hash        TEXT,                        -- PBKDF2-HMAC-SHA256, 600 000 iter
+  password_updated_at  TIMESTAMPTZ,
+  is_active            BOOLEAN DEFAULT true,
+  is_superuser         BOOLEAN DEFAULT false,
+  created_at           TIMESTAMPTZ DEFAULT NOW(),
+  updated_at           TIMESTAMPTZ DEFAULT NOW()
 )
+-- UNIQUE INDEX em lower(email)
 ```
+
+### `user_sessions`
+
+```sql
+user_sessions (
+  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id      UUID REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+  token_hash   TEXT UNIQUE NOT NULL,    -- SHA-256 do token opaco
+  expires_at   TIMESTAMPTZ NOT NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now()
+)
+-- INDEX em user_id, INDEX em expires_at
+```
+
+TTL padrão: 30 dias. Cookie HTTP-only `auth_session` com `samesite=lax`.
 
 ### `journeys`
 
@@ -668,6 +692,44 @@ webhook_events (
   error        TEXT,
   created_at   TIMESTAMPTZ DEFAULT NOW()
 )
+```
+
+### `user_listing_favorites`
+
+```sql
+user_listing_favorites (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id          UUID REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+  listing_key      TEXT NOT NULL,               -- chave opaca do imóvel favorito
+  journey_id       UUID NOT NULL,
+  zone_fingerprint TEXT NOT NULL,
+  search_type      TEXT NOT NULL,               -- 'rental' | 'sale'
+  usage_type       TEXT NOT NULL,               -- 'residential' | 'commercial' | 'all'
+  listing_payload  JSONB NOT NULL,              -- snapshot do card (preço, endereço, plataforma…)
+  saved_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT uq_user_listing_favorites_user_key UNIQUE (user_id, listing_key)
+)
+-- INDEX em (user_id, saved_at DESC)
+```
+
+### `user_zone_favorites`
+
+```sql
+user_zone_favorites (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id          UUID REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+  zone_key         TEXT NOT NULL,               -- chave opaca da zona favorita
+  journey_id       UUID NOT NULL,
+  zone_fingerprint TEXT NOT NULL,
+  search_type      TEXT NOT NULL,
+  usage_type       TEXT NOT NULL,
+  zone_payload     JSONB NOT NULL,              -- snapshot da zona (badges, métricas…)
+  saved_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT uq_user_zone_favorites_user_key UNIQUE (user_id, zone_key)
+)
+-- INDEX em (user_id, saved_at DESC)
 ```
 
 ---
@@ -1143,17 +1205,22 @@ e até o transporte. Alternância entre categorias sem recarregar.
 
 ## 10. Autenticação e Modelo de Acesso
 
-### Biblioteca
+### Implementação atual (Fase 8 em progresso)
 
-**`fastapi-users`** — integrado na Fase 8.
+Auth customizado em `apps/api/src/modules/auth/service.py`:
 
-- OAuth Google: configurável após magic link, sem reescrita.
-- Integração SQLAlchemy 2 nativa.
-- Cookie HTTP-only com rotação automática de sessão.
+- **Registro e login por e-mail + senha** (implementado em 2026-04-12).
+- Hashing: PBKDF2-HMAC-SHA256, 600.000 iterações, salt aleatório por usuário.
+- Sessões armazenadas em `user_sessions`; token opaco de 32 bytes, hash SHA-256 no banco.
+- Cookie HTTP-only `auth_session`, `samesite=lax`, TTL 30 dias.
+- E-mail normalizado em lowercase; validação por regex.
+- `GET /auth/me` inspeciona sessão; `POST /auth/register`; `POST /auth/login`; `POST /auth/logout`.
 
-### Provedor de email
+> **Nota de desvio do plano original:** a implementação substituiu fastapi-users + magic link por auth customizado e-mail/senha. OAuth Google e magic link continuam no backlog, mas não bloqueiam Fase 8.
 
-**Resend** (`resend.com`) — 3.000 emails/mês gratuitos. SDK Python oficial.
+### Provedor de email (backlog)
+
+**Resend** (`resend.com`) — planejado para magic link (backlog).
 
 ```python
 RESEND_API_KEY: str
@@ -1628,9 +1695,9 @@ após 3ª: `zones.badges.finalized` emitido exatamente uma vez. ✅
 
 ---
 
-### Fase 6 — Dashboard + relatório PDF ⬜
+### Fase 6 — Dashboard + relatório PDF 🔄
 
-**Objetivo:** análise urbana completa e geração de PDF para compartilhamento.
+**Objetivo:** análise urbana completa, favoritos de imóveis e zonas, geração de PDF para compartilhamento.
 **Esforço estimado:** 7–8 dias · **Status:** 🔄 Em progresso
 **Dependências bloqueantes:** M4.5, M5.5.
 
@@ -1687,6 +1754,27 @@ após 3ª: `zones.badges.finalized` emitido exatamente uma vez. ✅
 
 **Verificação:** sessão nova → consumir 25 créditos → banner de baixo saldo aparece; consumir os 5 restantes → modal de créditos insuficientes ao tentar nova operação.
 
+#### M6.7 — Favoritos de imóveis ✅
+- [x] Tabela `user_listing_favorites` (migration `20260413_0024`)
+- [x] `POST /favorites/listings` salva snapshot do card (payload JSONB)
+- [x] `GET /favorites/listings` lista favoritos do usuário autenticado; suporte a analytics por zona
+- [x] `DELETE /favorites/listings/{listing_key}` remove favorito
+- [x] Frontend: botão de favorito nos cards de imóvel; painel `FavoritesPanel` listando favoritos
+- [x] Criação manual de favorito por URL (módulo `apps/api/src/modules/favorites/manual.py`): normaliza a URL, raspa metadados básicos e cria snapshot
+
+**Verificação:** salvar imóvel como favorito → aparece em `GET /favorites/listings`; deletar → não aparece mais. ✅ (2026-04-13)
+
+#### M6.8 — Favoritos de zonas ✅
+- [x] Tabela `user_zone_favorites` (migration `20260422_0025`)
+- [x] `POST /zone-favorites` salva snapshot de zona (badges, métricas, fingerprint)
+- [x] `GET /zone-favorites` lista zonas favoritas com analytics enriquecidos
+- [x] `DELETE /zone-favorites/{zone_key}` remove zona favorita
+- [x] Service `apps/api/src/modules/zone_favorites/service.py` com analytics de dashboard para zonas salvas (`address_scope="all_addresses"`)
+- [x] Frontend: `AuthContext` gerencia lista de favoritos de zona; botão de salvar zona no painel
+- [x] Dashboard de preços de zonas salvas cobre todos os bairros da cidade sem restrição por busca
+
+**Verificação:** salvar zona → aparece em `GET /zone-favorites` com métricas; analytics de preço mostra dados citywide. ✅ (2026-04-22)
+
 ---
 
 ### Fase 7 — Scheduler noturno (prewarm) ⬜
@@ -1740,20 +1828,22 @@ após 3ª: `zones.badges.finalized` emitido exatamente uma vez. ✅
 
 ---
 
-### Fase 8 — Auth + créditos + Stripe avulso ⬜
+### Fase 8 — Auth + créditos + Stripe avulso 🔄
 
 **Objetivo:** produto monetizável com sistema de créditos real, compra avulsa via Stripe e distinção entre sessão anônima e conta autenticada.
-**Esforço estimado:** 10–12 dias · **Status:** ⬜ Não iniciada
+**Esforço estimado:** 10–12 dias · **Status:** 🔄 Em progresso
 **Dependências bloqueantes:** M6.5, M7.4.
 
-#### M8.1 — fastapi-users: magic link ⬜
-- [ ] `fastapi-users` integrado com `SQLAlchemy 2` backend
-- [ ] `UserManager.on_after_request_verify` → envia email via Resend
-- [ ] Token: 32 bytes `secrets.token_urlsafe()`, expira em 15 min, single-use
-- [ ] Comparação timing-safe: `hmac.compare_digest()`
-- [ ] Cookie HTTP-only com rotação automática de sessão a cada login
+#### M8.1 — Auth e-mail/senha ✅
+> _Desvio do plano: implementado auth customizado (e-mail + senha) em vez de fastapi-users + magic link. Magic link/OAuth Google ficam como backlog._
+- [x] `POST /auth/register` — cria usuário com email + senha (PBKDF2-HMAC-SHA256, 600k iter)
+- [x] `POST /auth/login` — valida credenciais, cria sessão em `user_sessions`, seta cookie HTTP-only `auth_session`
+- [x] `POST /auth/logout` — revoga sessão no banco e limpa cookie
+- [x] `GET /auth/me` — retorna status de autenticação (`AuthStatusRead`)
+- [x] Comparação timing-safe de tokens; e-mail normalizado em lowercase
+- [x] Migration `20260412_0023`: colunas `display_name`, `password_hash`, `password_updated_at` em `users`; tabela `user_sessions`
 
-**Verificação:** `POST /auth/request-magic-link` → email entregue em < 30s; clicar link → cookie de sessão; segunda vez → token inválido.
+**Verificação:** `POST /auth/register` → usuário criado; `POST /auth/login` → cookie `auth_session`; `GET /auth/me` → `is_authenticated=true`. ✅ (2026-04-12)
 
 #### M8.2 — Migração de jornada anônima + créditos ⬜
 - [ ] Hook `on_after_login`: verifica `anonymous_session_id` no cookie
