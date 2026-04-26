@@ -23,6 +23,7 @@ class AuthUserRead(BaseModel):
     display_name: str | None = None
     is_active: bool
     created_at: datetime
+    role: str = "user"
 
 
 class AuthStatusRead(BaseModel):

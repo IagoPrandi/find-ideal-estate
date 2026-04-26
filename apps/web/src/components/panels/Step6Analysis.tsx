@@ -18,7 +18,7 @@ import {
   SlidersHorizontal,
   Building2,
 } from "lucide-react";
-import { apiActionHint, getJob, getZoneDashboardAnalytics, getZoneFavoriteAnalytics, getZoneListings, type ListingPlatformVariantRead } from "../../api/client";
+import { apiActionHint, getJob, getZoneDashboardAnalytics, getZoneFavoriteAnalytics, getZoneListings, searchZoneListings, type ListingPlatformVariantRead } from "../../api/client";
 import { ListingsScrapeDiagnosticsSchema, type ListingsScrapeDiagnostics, type ListingsScrapePlatformDiagnostics } from "../../api/schemas";
 import { useAuth } from "../../features/auth/AuthContext";
 import { buildZoneFavoriteAnalyticsQueryKey } from "../../lib/favorites";
@@ -205,6 +205,7 @@ export function Step6Analysis() {
   const lastProgressRunKeyRef = useRef<string | null>(null);
   const autoCollapsedProgressRunKeyRef = useRef<string | null>(null);
   const lastListingsAvailabilityRef = useRef<{ runKey: string; freshnessStatus: string | null } | null>(null);
+  const scrapeTriggeredRunKeyRef = useRef<string | null>(null);
   const [isProgressCollapsed, setIsProgressCollapsed] = useState(false);
   const [isFiltersCollapsed, setIsFiltersCollapsed] = useState(false);
   const [isPreparingDashboard, setIsPreparingDashboard] = useState(false);
@@ -229,7 +230,7 @@ export function Step6Analysis() {
 
   const listingsQuery = useQuery({
     queryKey: ["zone-listings", journeyId, zoneFingerprint, config.type, "all", listingsAddressScope],
-    queryFn: async () => getZoneListings(journeyId as string, zoneFingerprint as string, config.type, "all", "all", listingsAddressScope),
+    queryFn: async () => getZoneListings(journeyId as string, zoneFingerprint as string, config.type, "all", "all", listingsAddressScope, 100, 0),
     enabled: Boolean(journeyId && zoneFingerprint),
     placeholderData: keepPreviousData,
     refetchInterval: (query) => {
@@ -262,15 +263,35 @@ export function Step6Analysis() {
     }
   });
 
-  const rawListings = listingsQuery.data?.listings || [];
-  const listingsInZone = rawListings.filter((listing) => listing.inside_zone);
-  const listingsOutsideZone = rawListings.filter((listing) => listing.has_coordinates && !listing.inside_zone);
-  const listingsWithoutCoordinates = rawListings.filter((listing) => !listing.has_coordinates);
-
   const scrapeDiagnostics = extractListingsScrapeDiagnostics((listingsJobQuery.data?.result_ref as Record<string, unknown> | null | undefined) || undefined);
   const listingsJobState = listingsJobQuery.data?.state || null;
   const hasActiveListingsJob = listingsJobState ? ACTIVE_LISTINGS_JOB_STATES.has(listingsJobState) : false;
   const hasInterruptedListingsJob = listingsJobState === "failed" || listingsJobState === "cancelled" || listingsJobState === "cancelled_partial";
+  const isScraping = listingsQuery.isLoading
+    || hasActiveListingsJob
+    || (Boolean(effectiveListingsJobId) && !listingsJobQuery.data)
+    || (listingsQuery.data?.freshness_status === "no_cache" && !hasInterruptedListingsJob && !listingsJobState);
+
+  const bgListingsQuery = useQuery({
+    queryKey: ["zone-listings-bg", journeyId, zoneFingerprint, config.type, listingsAddressScope],
+    queryFn: async () => getZoneListings(journeyId as string, zoneFingerprint as string, config.type, "all", "all", listingsAddressScope, 9999, 100),
+    enabled: Boolean(journeyId && zoneFingerprint && listingsQuery.data?.has_more && !isScraping),
+    staleTime: 5 * 60_000,
+    gcTime: 10 * 60_000,
+  });
+
+  const rawListings = useMemo(() => {
+    const p1 = listingsQuery.data?.listings ?? [];
+    const bg = bgListingsQuery.data?.listings ?? [];
+    if (bg.length === 0) return p1;
+    const seen = new Set(p1.map((l) => l.property_id));
+    return [...p1, ...bg.filter((l) => !seen.has(l.property_id))];
+  }, [listingsQuery.data?.listings, bgListingsQuery.data?.listings]);
+
+  const listingsInZone = rawListings.filter((listing) => listing.inside_zone);
+  const listingsOutsideZone = rawListings.filter((listing) => listing.has_coordinates && !listing.inside_zone);
+  const listingsWithoutCoordinates = rawListings.filter((listing) => !listing.has_coordinates);
+
   const platformEntries = useMemo(() => {
     if (!scrapeDiagnostics) {
       return [] as Array<{ platform: string; details: ListingsScrapePlatformDiagnostics }>;
@@ -288,11 +309,6 @@ export function Step6Analysis() {
       details: platformMap[platform] || {}
     }));
   }, [scrapeDiagnostics]);
-
-  const isScraping = listingsQuery.isLoading
-    || hasActiveListingsJob
-    || (Boolean(effectiveListingsJobId) && !listingsJobQuery.data)
-    || (listingsQuery.data?.freshness_status === "no_cache" && !hasInterruptedListingsJob && !listingsJobState);
   const diagnosticsSummary = scrapeDiagnostics?.summary;
   const overallDuration = formatDuration(scrapeDiagnostics?.total_duration_ms);
   const freshnessStatusLabel = hasInterruptedListingsJob
@@ -489,6 +505,44 @@ export function Step6Analysis() {
   useEffect(() => {
     setFailedListingImageKeys({});
   }, [journeyId, zoneFingerprint]);
+
+  // Trigger scraping only after the first cache batch has loaded in the frontend.
+  // Step5 records demand with start_scraping=false; this effect fires the real
+  // scrape POST once the GET response confirms there's no usable cache.
+  useEffect(() => {
+    if (!journeyId || !zoneFingerprint || !selectedAddress) return;
+    if (listingsQuery.isLoading || listingsQuery.isError) return;
+    if (listingsQuery.data?.freshness_status !== "no_cache") return;
+    if (effectiveListingsJobId) return;
+
+    const runKey = `${journeyId}:${zoneFingerprint}:${selectedAddress.normalized}`;
+    if (scrapeTriggeredRunKeyRef.current === runKey) return;
+    scrapeTriggeredRunKeyRef.current = runKey;
+
+    void searchZoneListings(journeyId, zoneFingerprint, {
+      search_location_normalized: selectedAddress.normalized,
+      search_location_label: selectedAddress.label,
+      search_location_type: selectedAddress.locationType,
+      search_type: config.type,
+      usage_type: config.propertyUsageType,
+      start_scraping: true,
+    }).then((result) => {
+      setJobIds({ listingsJobId: result.job_id || null });
+    }).catch(() => {
+      scrapeTriggeredRunKeyRef.current = null;
+    });
+  }, [
+    journeyId,
+    zoneFingerprint,
+    selectedAddress,
+    listingsQuery.isLoading,
+    listingsQuery.isError,
+    listingsQuery.data?.freshness_status,
+    effectiveListingsJobId,
+    config.type,
+    config.propertyUsageType,
+    setJobIds,
+  ]);
 
   useEffect(() => {
     if (!journeyId || !zoneFingerprint) {
@@ -689,7 +743,7 @@ export function Step6Analysis() {
 
           <div className="flex gap-6 border-b border-transparent">
             <button type="button" onClick={() => setActiveTab("imoveis")} className={`pb-3 text-sm font-medium border-b-2 transition-colors ${activeTab === "imoveis" ? "border-pastel-violet-500 text-pastel-violet-600" : "border-transparent text-slate-500 hover:text-slate-700"}`}>
-              Imóveis ({displayedListings.length}{displayedListings.length !== (listingsQuery.data?.total_count || 0) ? ` de ${listingsQuery.data?.total_count || 0}` : ""})
+              Imóveis ({displayedListings.length}{displayedListings.length !== rawListings.length ? ` de ${rawListings.length}${bgListingsQuery.isFetching ? "+" : ""}` : ""})
             </button>
             <button type="button" onClick={() => { void handleOpenDashboardTab(); }} disabled={isPreparingDashboard} className={`pb-3 text-sm font-medium border-b-2 transition-colors disabled:cursor-wait disabled:opacity-80 ${activeTab === "dashboard" ? "border-pastel-violet-500 text-pastel-violet-600" : "border-transparent text-slate-500 hover:text-slate-700"}`}>
               {isPreparingDashboard ? "Preparando dashboard..." : "Dashboard analítico"}

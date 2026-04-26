@@ -91,6 +91,10 @@ class ListingsSearchRequest(BaseModel):
     usage_type: str = "residential"
     # PRO plan future: pass platform list; for now always FREE
     platforms: list[str] | None = None
+    # If False, records demand only without enqueuing a scrape job.
+    # Frontend uses this to separate demand recording (Step 5) from
+    # the actual scrape trigger (Step 6, after first cache batch loads).
+    start_scraping: bool = True
 
 
 class ListingsScrapePlanPlatform(BaseModel):
@@ -286,9 +290,18 @@ async def listings_search(
             return ListingsRequestResult(
                 source="none",
                 job_id=active_job_id,
-                freshness_status="queued_for_next_prewarm",
-                upgrade_reason="fresh_listings",
-                next_refresh_window="03:00-05:30",
+                freshness_status="no_cache",
+                listings=[],
+                total_count=0,
+            )
+
+        if not body.start_scraping:
+            # Demand recorded; caller will trigger scraping separately (after first
+            # cache batch loads in the frontend).
+            return ListingsRequestResult(
+                source="none",
+                job_id=None,
+                freshness_status="no_cache",
                 listings=[],
                 total_count=0,
             )
@@ -317,9 +330,7 @@ async def listings_search(
         return ListingsRequestResult(
             source="none",
             job_id=job_id,
-            freshness_status="queued_for_next_prewarm",
-            upgrade_reason="fresh_listings",
-            next_refresh_window="03:00-05:30",
+            freshness_status="no_cache",
             listings=[],
             total_count=0,
         )
@@ -514,6 +525,8 @@ async def get_zone_listings(
     platforms: list[str] | None = Query(default=None),
     spatial_scope: str = Query(default="inside_zone"),
     address_scope: str = Query(default="all_addresses"),
+    limit: int = Query(default=100, ge=1, le=9999),
+    offset: int = Query(default=0, ge=0),
     auth_context=Depends(get_optional_auth_context),
 ) -> ListingsRequestResult:
     """
@@ -549,6 +562,12 @@ async def get_zone_listings(
     usable_cache = cache if cache and cache_is_usable(cache) else None
 
     display_platforms = _cache_display_platforms(usable_cache, canonical_platforms)
+
+    # Paginação só se aplica ao inventário de cache consolidado.
+    # Durante scraping (sem cache usável), retornamos tudo que já foi raspado.
+    effective_limit = limit if usable_cache else 9999
+    effective_offset = offset if usable_cache else 0
+
     listing_cards_raw = await fetch_listing_cards_for_zone(
         journey_id=journey_id,
         zone_fingerprint=zone_fingerprint,
@@ -559,6 +578,8 @@ async def get_zone_listings(
         spatial_scope=spatial_scope,
         search_location_normalized=latest_search_location,
         address_scope=address_scope,
+        limit=effective_limit,
+        offset=effective_offset,
     )
 
     if usable_cache is None:
@@ -577,13 +598,15 @@ async def get_zone_listings(
 
     age_hours = cache_age_hours(cache)
     freshness = "fresh"
+    has_more = len(listing_cards_raw) == limit
 
     return ListingsRequestResult(
         source="cache",
         freshness_status=freshness,
         listings=listing_cards_raw,  # type: ignore[arg-type]
-        total_count=len(listing_cards_raw),
+        total_count=effective_offset + len(listing_cards_raw),
         cache_age_hours=age_hours,
+        has_more=has_more,
     )
 
 

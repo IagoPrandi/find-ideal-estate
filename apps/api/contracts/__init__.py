@@ -17,6 +17,17 @@ if str(_SHARED_CONTRACTS_DIR) not in __path__:
     __path__.append(str(_SHARED_CONTRACTS_DIR))
 
 from .auth import AuthLoginRequest, AuthRegisterRequest, AuthStatusRead, AuthUserRead
+from .billing import (
+    AccountCreditsRead,
+    AccountPlanRead,
+    PaymentStatusRead,
+    PixCheckoutRequest,
+    PixCheckoutResponse,
+    PixConfirmRequest,
+    PlanEntitlementsRead,
+    PlanRead,
+    ResolvedEntitlements,
+)
 from .dashboard import (
     DashboardDistributionBucketRead,
     DashboardPriceHistoryPointRead,
@@ -67,10 +78,19 @@ from .zones import (
 __version__ = "0.1.0"
 
 __all__ = [
+    "AccountCreditsRead",
+    "AccountPlanRead",
     "AuthLoginRequest",
     "AuthRegisterRequest",
     "AuthStatusRead",
     "AuthUserRead",
+    "PaymentStatusRead",
+    "PixCheckoutRequest",
+    "PixCheckoutResponse",
+    "PixConfirmRequest",
+    "PlanEntitlementsRead",
+    "PlanRead",
+    "ResolvedEntitlements",
     "FavoriteListingCreate",
     "FavoriteListingRead",
     "FavoriteZoneCreate",

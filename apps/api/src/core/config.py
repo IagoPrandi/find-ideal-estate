@@ -36,6 +36,15 @@ class Settings(BaseSettings):
     stripe_secret_key: str | None = None
     stripe_webhook_secret: str | None = None
 
+    pix_provider: str = "manual"
+    pix_key: str | None = None
+    pix_merchant_name: str | None = None
+    pix_merchant_city: str | None = None
+    pix_payment_expiration_minutes: int = 60
+    pix_static_qr_code_url: str | None = None
+    pix_copy_paste_payload: str | None = None
+    pix_callback_secret: str | None = None
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

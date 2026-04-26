@@ -118,6 +118,7 @@ class ListingsRequestResult(BaseModel):
     listings: list[ListingCardRead] = []
     total_count: int = 0
     cache_age_hours: float | None = None
+    has_more: bool = False
 
 
 class FavoriteListingCreate(BaseModel):

@@ -195,6 +195,8 @@ async def fetch_listing_cards_for_zone(
     spatial_scope: str = "inside_zone",
     search_location_normalized: str | None = None,
     address_scope: str = "all_addresses",
+    limit: int = 100,
+    offset: int = 0,
 ) -> list[dict[str, Any]]:
     """
         Return flattened listing cards for the given zone fingerprint.
@@ -237,7 +239,53 @@ async def fetch_listing_cards_for_zone(
         rows = await conn.execute(
             text(
                 """
-                WITH ranked_prices AS (
+                WITH zone_geom AS (
+                    -- Fetch zone geometry once; all spatial ops reference this.
+                    SELECT isochrone_geom
+                    FROM zones
+                    WHERE fingerprint = :zone_fp
+                    LIMIT 1
+                ),
+                selected_address_props AS (
+                    -- Only populated for selected_address mode; empty otherwise.
+                    -- Finds properties that were scraped for this specific search address.
+                    SELECT DISTINCT la.property_id
+                    FROM listing_ads la
+                    JOIN listing_snapshots ls ON ls.listing_ad_id = la.id
+                    WHERE :address_scope = 'selected_address'
+                      AND la.is_active = true
+                      AND la.platform = ANY(:platforms)
+                      AND (la.advertised_usage_type = :search_type OR la.advertised_usage_type IS NULL)
+                      AND (:usage_type = 'all' OR la.usage_type IS NULL OR la.usage_type = :usage_type)
+                      AND (ls.availability_state = 'active' OR ls.availability_state IS NULL)
+                      AND (
+                          (
+                              :has_search_location = TRUE
+                              AND ls.raw_payload->>'search_location_normalized' = :search_location_normalized
+                          )
+                          OR (
+                              CAST(:observed_since AS TIMESTAMPTZ) IS NOT NULL
+                              AND COALESCE(ls.raw_payload->>'search_location_normalized', '') = ''
+                              AND ls.observed_at >= CAST(:observed_since AS TIMESTAMPTZ)
+                          )
+                      )
+                ),
+                eligible_props AS (
+                    -- Restrict to properties within the zone bounding box (uses GIST index
+                    -- on properties.location via && operator) plus address-scoped properties
+                    -- that may lack coordinates or sit just outside the bbox.
+                    SELECT p.id AS property_id
+                    FROM properties p
+                    CROSS JOIN zone_geom z
+                    WHERE (p.location IS NOT NULL AND p.location && z.isochrone_geom)
+                       OR (
+                           :address_scope = 'selected_address'
+                           AND p.id IN (SELECT property_id FROM selected_address_props)
+                       )
+                ),
+                ranked_prices AS (
+                    -- Per-listing snapshot prices, restricted to eligible properties only.
+                    -- Window functions compute best-price rank per property and per platform.
                     SELECT
                         la.property_id,
                         la.platform,
@@ -261,25 +309,25 @@ async def fetch_listing_cards_for_zone(
                                   AND COALESCE(prev.raw_payload->>'image_url', '') <> ''
                                 ORDER BY prev.observed_at DESC
                                 LIMIT 1
-                                                        ),
-                                                        (
-                                                                SELECT prev.raw_payload->>'image_url'
-                                                                FROM listing_snapshots prev
-                                                                JOIN listing_ads prev_la ON prev_la.id = prev.listing_ad_id
-                                                                WHERE prev_la.property_id = la.property_id
-                                                                    AND prev_la.platform = la.platform
-                                                                    AND COALESCE(prev.raw_payload->>'image_url', '') <> ''
-                                                                ORDER BY prev.observed_at DESC
-                                                                LIMIT 1
-                                                        ),
-                                                        (
-                                                                SELECT prev.raw_payload->>'image_url'
-                                                                FROM listing_snapshots prev
-                                                                JOIN listing_ads prev_la ON prev_la.id = prev.listing_ad_id
-                                                                WHERE prev_la.property_id = la.property_id
-                                                                    AND COALESCE(prev.raw_payload->>'image_url', '') <> ''
-                                                                ORDER BY prev.observed_at DESC
-                                                                LIMIT 1
+                            ),
+                            (
+                                SELECT prev.raw_payload->>'image_url'
+                                FROM listing_snapshots prev
+                                JOIN listing_ads prev_la ON prev_la.id = prev.listing_ad_id
+                                WHERE prev_la.property_id = la.property_id
+                                  AND prev_la.platform = la.platform
+                                  AND COALESCE(prev.raw_payload->>'image_url', '') <> ''
+                                ORDER BY prev.observed_at DESC
+                                LIMIT 1
+                            ),
+                            (
+                                SELECT prev.raw_payload->>'image_url'
+                                FROM listing_snapshots prev
+                                JOIN listing_ads prev_la ON prev_la.id = prev.listing_ad_id
+                                WHERE prev_la.property_id = la.property_id
+                                  AND COALESCE(prev.raw_payload->>'image_url', '') <> ''
+                                ORDER BY prev.observed_at DESC
+                                LIMIT 1
                             )
                         ) AS image_url,
                         ls.observed_at,
@@ -302,39 +350,13 @@ async def fetch_listing_cards_for_zone(
                     WHERE la.is_active = true
                       AND la.platform = ANY(:platforms)
                       AND (la.advertised_usage_type = :search_type OR la.advertised_usage_type IS NULL)
-                                            AND (:usage_type = 'all' OR la.usage_type IS NULL OR la.usage_type = :usage_type)
+                      AND (:usage_type = 'all' OR la.usage_type IS NULL OR la.usage_type = :usage_type)
+                      AND la.property_id IN (SELECT property_id FROM eligible_props)
                       AND (ls.availability_state = 'active' OR ls.availability_state IS NULL)
-                ),
-                recent_search_properties AS (
-                    SELECT DISTINCT la.property_id
-                    FROM listing_ads la
-                    JOIN listing_snapshots ls ON ls.listing_ad_id = la.id
-                    WHERE la.is_active = true
-                      AND la.platform = ANY(:platforms)
-                      AND (la.advertised_usage_type = :search_type OR la.advertised_usage_type IS NULL)
-                                            AND (:usage_type = 'all' OR la.usage_type IS NULL OR la.usage_type = :usage_type)
-                      AND (ls.availability_state = 'active' OR ls.availability_state IS NULL)
-                      AND (
-                            (
-                                :address_scope = 'selected_address'
-                                AND (
-                                    (
-                                        :has_search_location = TRUE
-                                        AND ls.raw_payload->>'search_location_normalized' = :search_location_normalized
-                                    )
-                                    OR (
-                                        CAST(:observed_since AS TIMESTAMPTZ) IS NOT NULL
-                                        AND COALESCE(ls.raw_payload->>'search_location_normalized', '') = ''
-                                        AND ls.observed_at >= CAST(:observed_since AS TIMESTAMPTZ)
-                                    )
-                                )
-                            )
-                            OR (
-                                :address_scope = 'all_addresses'
-                            )
-                        )
                 ),
                 zone_props AS (
+                    -- Properties restricted to eligible_props; computes inside_zone via
+                    -- ST_Within (exact containment, uses GIST recheck on bbox candidates).
                     SELECT
                         p.id AS property_id,
                         p.address_normalized,
@@ -371,7 +393,8 @@ async def fetch_listing_cards_for_zone(
                             ELSE ST_Within(p.location, z.isochrone_geom)
                         END AS inside_zone
                     FROM properties p
-                    JOIN zones z ON z.fingerprint = :zone_fp
+                    CROSS JOIN zone_geom z
+                    WHERE p.id IN (SELECT property_id FROM eligible_props)
                 ),
                 property_price_context AS (
                     SELECT
@@ -380,7 +403,8 @@ async def fetch_listing_cards_for_zone(
                         zp.city_name,
                         bp.total_price AS current_total_price,
                         CASE
-                            WHEN zp.area_m2 IS NOT NULL AND zp.area_m2 > 0 AND bp.total_price IS NOT NULL THEN bp.total_price::DOUBLE PRECISION / zp.area_m2::DOUBLE PRECISION
+                            WHEN zp.area_m2 IS NOT NULL AND zp.area_m2 > 0 AND bp.total_price IS NOT NULL
+                            THEN bp.total_price::DOUBLE PRECISION / zp.area_m2::DOUBLE PRECISION
                             ELSE NULL
                         END AS current_unit_price
                     FROM zone_props zp
@@ -388,6 +412,8 @@ async def fetch_listing_cards_for_zone(
                     WHERE zp.address_normalized IS NOT NULL
                 ),
                 neighborhood_medians AS (
+                    -- Median unit price per neighbourhood, computed over all eligible zone
+                    -- properties so each page shows a consistent reference value.
                     SELECT
                         ppc.city_name,
                         ppc.neighborhood_name,
@@ -468,24 +494,25 @@ async def fetch_listing_cards_for_zone(
                           AND bp2.platform_rank = 1
                     )                  AS platform_variants
                 FROM zone_props zp
-                                LEFT JOIN recent_search_properties rsp ON rsp.property_id = zp.property_id
+                LEFT JOIN selected_address_props sap ON sap.property_id = zp.property_id
                 JOIN ranked_prices bp ON bp.property_id = zp.property_id AND bp.price_rank = 1
-                                LEFT JOIN property_price_context ppc ON ppc.property_id = zp.property_id
-                                LEFT JOIN neighborhood_medians nm
-                                    ON nm.city_name = ppc.city_name
-                                 AND nm.neighborhood_name = ppc.neighborhood_name
-                                WHERE (
-                                    (
-                                        :address_scope = 'selected_address'
-                                        AND rsp.property_id IS NOT NULL
-                                    )
-                                    OR (
-                                        :address_scope = 'all_addresses'
-                                        AND (zp.inside_zone = true OR rsp.property_id IS NOT NULL)
-                                    )
-                                )
-                                    AND (:spatial_scope = 'all' OR zp.inside_zone = true)
+                LEFT JOIN property_price_context ppc ON ppc.property_id = zp.property_id
+                LEFT JOIN neighborhood_medians nm
+                    ON nm.city_name = ppc.city_name
+                   AND nm.neighborhood_name = ppc.neighborhood_name
+                WHERE (
+                    (
+                        :address_scope = 'selected_address'
+                        AND sap.property_id IS NOT NULL
+                    )
+                    OR (
+                        :address_scope = 'all_addresses'
+                        AND (zp.inside_zone = true OR sap.property_id IS NOT NULL)
+                    )
+                )
+                AND (:spatial_scope = 'all' OR zp.inside_zone = true)
                 ORDER BY zp.inside_zone DESC, zp.has_coordinates DESC, bp.total_price ASC NULLS LAST
+                LIMIT :limit OFFSET :offset
                 """
             ),
             {
@@ -499,6 +526,8 @@ async def fetch_listing_cards_for_zone(
                 "address_scope": address_scope,
                 "has_search_location": bool(search_location_normalized),
                 "search_location_normalized": search_location_normalized,
+                "limit": limit,
+                "offset": offset,
             },
         )
 

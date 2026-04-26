@@ -1,5 +1,9 @@
 import { z, ZodSchema } from "zod";
 import {
+  AccountCreditsRead,
+  AccountCreditsReadSchema,
+  AccountPlanRead,
+  AccountPlanReadSchema,
   AuthStatusReadSchema,
   FavoriteListingBackendSchema,
   FinalListingsJson,
@@ -11,6 +15,12 @@ import {
   ListingsCollection,
   ListingsScrapePlanResponseSchema,
   ListingsScrapeResponse,
+  PaymentStatusRead,
+  PaymentStatusReadSchema,
+  PixCheckoutResponse,
+  PixCheckoutResponseSchema,
+  PlanRead,
+  PlanReadSchema,
   PriceRollupRead,
   PriceRollupReadSchema,
   ZoneDashboardAnalytics,
@@ -41,6 +51,8 @@ import {
   ZoneFavoriteAnalyticsBackendSchema,
   FavoriteZoneBackendSchema
 } from "./schemas";
+
+export type { PlanRead, AccountPlanRead, AccountCreditsRead, PixCheckoutResponse, PaymentStatusRead };
 
 export const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:8000";
 
@@ -557,6 +569,7 @@ export async function searchZoneListings(
     search_location_type: string;
     search_type: string;
     usage_type?: string;
+    start_scraping?: boolean;
   }
 ): Promise<ListingsRequestResult> {
   return (await requestJson(
@@ -888,11 +901,49 @@ export async function getZoneListings(
   searchType: string,
   usageType: string = "residential",
   spatialScope: "inside_zone" | "all" = "inside_zone",
-  addressScope: "all_addresses" | "selected_address" = "all_addresses"
+  addressScope: "all_addresses" | "selected_address" = "all_addresses",
+  limit: number = 100,
+  offset: number = 0,
 ): Promise<ListingsRequestResult> {
   return (await requestJson(
-    `/journeys/${encodeURIComponent(journeyId)}/zones/${encodeURIComponent(zoneFingerprint)}/listings?search_type=${encodeURIComponent(searchType)}&usage_type=${encodeURIComponent(usageType)}&spatial_scope=${encodeURIComponent(spatialScope)}&address_scope=${encodeURIComponent(addressScope)}`,
+    `/journeys/${encodeURIComponent(journeyId)}/zones/${encodeURIComponent(zoneFingerprint)}/listings?search_type=${encodeURIComponent(searchType)}&usage_type=${encodeURIComponent(usageType)}&spatial_scope=${encodeURIComponent(spatialScope)}&address_scope=${encodeURIComponent(addressScope)}&limit=${limit}&offset=${offset}`,
     ListingsRequestResultBackendSchema
   )) as ListingsRequestResult;
+}
+
+// Billing
+export async function getPlans(): Promise<PlanRead[]> {
+  return requestJson("/billing/plans", z.array(PlanReadSchema));
+}
+
+export async function getAccountPlan(): Promise<AccountPlanRead> {
+  return requestJson("/account/plan", AccountPlanReadSchema);
+}
+
+export async function getAccountCredits(): Promise<AccountCreditsRead> {
+  return requestJson("/account/credits", AccountCreditsReadSchema);
+}
+
+export async function createPixCheckout(planSlug: string, paymentType = "plan_activation"): Promise<PixCheckoutResponse> {
+  return requestJson("/billing/pix/checkout", PixCheckoutResponseSchema, {
+    method: "POST",
+    body: { plan_slug: planSlug, payment_type: paymentType },
+  });
+}
+
+export async function getPaymentStatus(paymentId: string): Promise<PaymentStatusRead> {
+  return requestJson(`/billing/payments/${encodeURIComponent(paymentId)}`, PaymentStatusReadSchema);
+}
+
+export async function cancelPayment(paymentId: string): Promise<PaymentStatusRead> {
+  return requestJson(`/billing/payments/${encodeURIComponent(paymentId)}/cancel`, PaymentStatusReadSchema, {
+    method: "POST",
+  });
+}
+
+export async function activateProprietarioPlan(planSlug: string): Promise<AccountPlanRead> {
+  return requestJson(`/admin/billing/plans/${encodeURIComponent(planSlug)}/activate`, AccountPlanReadSchema, {
+    method: "POST",
+  });
 }
 

@@ -5,7 +5,8 @@ export const AuthUserReadSchema = z.object({
   email: z.string().email(),
   display_name: z.string().nullable().optional(),
   is_active: z.boolean(),
-  created_at: z.string()
+  created_at: z.string(),
+  role: z.string().optional().default("user"),
 });
 
 export const AuthStatusReadSchema = z.object({
@@ -187,7 +188,8 @@ export const ListingsRequestResultBackendSchema = z.object({
   next_refresh_window: z.string().nullable().optional(),
   listings: z.array(ListingCardReadBackendSchema).default([]),
   total_count: z.number(),
-  cache_age_hours: z.number().nullable().optional()
+  cache_age_hours: z.number().nullable().optional(),
+  has_more: z.boolean().optional().default(false),
 });
 
 export const FavoriteListingBackendSchema = z.object({
@@ -799,3 +801,75 @@ export type JobRead = {
   error_message?: string | null;
   created_at: string;
 };
+
+// Billing schemas
+export const PlanReadSchema = z.object({
+  id: z.string(),
+  slug: z.string(),
+  name: z.string(),
+  price_brl: z.union([z.string(), z.number()]).nullable().optional(),
+  monthly_credits: z.number(),
+  is_paid: z.boolean(),
+  display_order: z.number(),
+});
+
+export const PlanEntitlementsReadSchema = z.object({
+  max_listing_favorites: z.number().nullable().optional(),
+  max_zone_favorites: z.number().nullable().optional(),
+  retention_days: z.number(),
+  can_customize_radius: z.boolean(),
+  can_customize_max_time: z.boolean(),
+  can_customize_distance: z.boolean(),
+  max_active_metrics: z.number().nullable().optional(),
+  transport_line_policy: z.string(),
+  zone_selection_policy: z.string(),
+  auto_refresh_policy: z.string(),
+  rollover_percent: z.number(),
+  rollover_cycles: z.number(),
+  cycle_length_days: z.number(),
+});
+
+export const AccountPlanReadSchema = z.object({
+  plan: PlanReadSchema,
+  status: z.string(),
+  started_at: z.string().nullable().optional(),
+  ends_at: z.string().nullable().optional(),
+  entitlements: PlanEntitlementsReadSchema,
+});
+
+export const AccountCreditsReadSchema = z.object({
+  cycle: z.number(),
+  rollover: z.number(),
+  legacy: z.number(),
+  total: z.number(),
+  cycle_ends_at: z.string().nullable().optional(),
+  monthly_quota: z.number().nullable().optional(),
+});
+
+export const PixCheckoutResponseSchema = z.object({
+  payment_id: z.string(),
+  pix_copy_paste: z.string(),
+  qr_code_payload: z.string(),
+  qr_code_image_url: z.string().nullable().optional(),
+  amount_brl: z.union([z.string(), z.number()]),
+  expires_at: z.string(),
+  status: z.string(),
+});
+
+export const PaymentStatusReadSchema = z.object({
+  id: z.string(),
+  status: z.string(),
+  payment_provider: z.string(),
+  payment_type: z.string(),
+  amount_brl: z.union([z.string(), z.number()]),
+  plan_id: z.string().nullable().optional(),
+  created_at: z.string(),
+  expires_at: z.string().nullable().optional(),
+  paid_at: z.string().nullable().optional(),
+});
+
+export type PlanRead = z.output<typeof PlanReadSchema>;
+export type AccountPlanRead = z.output<typeof AccountPlanReadSchema>;
+export type AccountCreditsRead = z.output<typeof AccountCreditsReadSchema>;
+export type PixCheckoutResponse = z.output<typeof PixCheckoutResponseSchema>;
+export type PaymentStatusRead = z.output<typeof PaymentStatusReadSchema>;

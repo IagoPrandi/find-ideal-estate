@@ -118,6 +118,7 @@ def _row_to_user(row) -> AuthUserRead:
         display_name=row.get("display_name"),
         is_active=row["is_active"],
         created_at=row["created_at"],
+        role=row.get("role", "user") or "user",
     )
 
 
@@ -136,7 +137,7 @@ async def get_user_by_email(email: str) -> tuple[AuthUserRead, str | None] | Non
         result = await conn.execute(
             text(
                 """
-                SELECT id, email, display_name, is_active, created_at, password_hash
+                SELECT id, email, display_name, is_active, created_at, role, password_hash
                 FROM users
                 WHERE lower(email) = :email
                 LIMIT 1
@@ -204,6 +205,50 @@ async def _create_session(conn, *, user_id: UUID) -> tuple[str, datetime]:
     return session_token, expires_at
 
 
+async def _activate_free_plan(conn, *, user_id: UUID) -> None:
+    plan_result = await conn.execute(
+        text("SELECT id, monthly_credits FROM plans WHERE slug = 'free' AND is_active = true LIMIT 1")
+    )
+    plan_row = plan_result.mappings().first()
+    if plan_row is None:
+        return
+
+    plan_id = plan_row["id"]
+    monthly_credits = plan_row["monthly_credits"]
+
+    await conn.execute(
+        text("""
+            INSERT INTO plan_activations (user_id, plan_id, source_payment_id, status, started_at, ends_at)
+            VALUES (:user_id, :plan_id, NULL, 'active', now(), now() + interval '30 days')
+            ON CONFLICT DO NOTHING
+        """),
+        {"user_id": user_id, "plan_id": plan_id},
+    )
+
+    await conn.execute(
+        text("""
+            INSERT INTO user_credits (user_id, plan_id, cycle_credits, monthly_quota, cycle_started_at, cycle_ends_at)
+            VALUES (:user_id, :plan_id, :credits, :credits, now(), now() + interval '30 days')
+            ON CONFLICT (user_id) DO NOTHING
+        """),
+        {"user_id": user_id, "plan_id": plan_id, "credits": monthly_credits},
+    )
+
+    balance_result = await conn.execute(
+        text("SELECT cycle_credits + rollover_balance + legacy_balance AS total FROM user_credits WHERE user_id = :user_id"),
+        {"user_id": user_id},
+    )
+    balance_after = balance_result.scalar() or monthly_credits
+
+    await conn.execute(
+        text("""
+            INSERT INTO credit_ledger (user_id, bucket, delta, reason, reference_id, balance_after)
+            VALUES (:user_id, 'cycle', :delta, 'signup_grant_free', NULL, :balance_after)
+        """),
+        {"user_id": user_id, "delta": monthly_credits, "balance_after": balance_after},
+    )
+
+
 async def register_user(
     payload: AuthRegisterRequest,
     *,
@@ -244,7 +289,7 @@ async def register_user(
                     now(),
                     now()
                 )
-                RETURNING id, email, display_name, is_active, created_at
+                RETURNING id, email, display_name, is_active, created_at, role
                 """
             ),
             {
@@ -256,7 +301,13 @@ async def register_user(
         row = result.mappings().one()
         user = _row_to_user(row)
         await _migrate_anonymous_state(conn, user_id=user.id, anonymous_session_id=anonymous_session_id)
+        await _activate_free_plan(conn, user_id=user.id)
         session_token, expires_at = await _create_session(conn, user_id=user.id)
+
+    if anonymous_session_id:
+        from core.redis import get_redis
+        redis = get_redis()
+        await redis.delete(f"credit:session:{anonymous_session_id}")
 
     return user, session_token, expires_at
 
@@ -296,6 +347,7 @@ async def get_authenticated_session_by_token(token: str) -> AuthenticatedSession
                     u.display_name,
                     u.is_active,
                     u.created_at,
+                    u.role,
                     s.expires_at
                 FROM user_sessions s
                 JOIN users u ON u.id = s.user_id

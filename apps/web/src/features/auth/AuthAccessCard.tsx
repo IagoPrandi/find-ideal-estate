@@ -1,6 +1,8 @@
 import { FormEvent, useMemo, useState } from "react";
-import { Loader2, LogIn, LogOut } from "lucide-react";
+import { Loader2, LogIn, LogOut, CreditCard, User } from "lucide-react";
 import { useAuth } from "./AuthContext";
+import { PlanosPage } from "../billing/PlanosPage";
+import { ContaPage } from "../billing/ContaPage";
 
 const GOOGLE_AUTH_URL = String(import.meta.env.VITE_GOOGLE_AUTH_URL || "").trim();
 
@@ -51,6 +53,8 @@ export function AuthAccessCard() {
   const [displayName, setDisplayName] = useState("");
   const [googleNotice, setGoogleNotice] = useState<string | null>(null);
   const [formNotice, setFormNotice] = useState<string | null>(null);
+  const [showPlanos, setShowPlanos] = useState(false);
+  const [showConta, setShowConta] = useState(false);
 
   const expiryLabel = useMemo(() => formatExpiry(authStatus.session_expires_at), [authStatus.session_expires_at]);
   const userName = authStatus.user?.display_name?.trim() || authStatus.user?.email?.split("@")[0] || "Conta";
@@ -121,11 +125,29 @@ export function AuthAccessCard() {
           {authStatus.is_authenticated ? (
             <>
               <div className="hidden rounded-full border border-white/80 bg-white/95 px-3 py-2 text-xs font-semibold text-slate-600 shadow-md backdrop-blur-md sm:flex sm:items-center sm:gap-2">
-                <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-pastel-violet-100 px-2 text-[11px] font-bold uppercase text-pastel-violet-700">
-                  {userName.slice(0, 1)}
+                <span className={`inline-flex h-6 min-w-6 items-center justify-center rounded-full px-2 text-[11px] font-bold uppercase ${authStatus.user?.role === "proprietario" ? "bg-amber-100 text-amber-700" : "bg-pastel-violet-100 text-pastel-violet-700"}`}>
+                  {authStatus.user?.role === "proprietario" ? "★" : userName.slice(0, 1)}
                 </span>
                 <span className="max-w-[10rem] truncate">{authStatus.user?.email}</span>
               </div>
+              <button
+                type="button"
+                aria-label="Planos"
+                title="Planos"
+                className="pointer-events-auto inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/80 bg-white/95 text-slate-600 shadow-md backdrop-blur-md transition hover:-translate-y-0.5 hover:text-pastel-violet-700"
+                onClick={() => setShowPlanos(true)}
+              >
+                <CreditCard className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                aria-label="Minha conta"
+                title="Conta"
+                className="pointer-events-auto inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/80 bg-white/95 text-slate-600 shadow-md backdrop-blur-md transition hover:-translate-y-0.5 hover:text-pastel-violet-700"
+                onClick={() => setShowConta(true)}
+              >
+                <User className="h-4 w-4" />
+              </button>
               <button
                 type="button"
                 aria-label="Sair da conta"
@@ -138,23 +160,39 @@ export function AuthAccessCard() {
               </button>
             </>
           ) : (
-            <button
-              type="button"
-              aria-label="Entrar na conta"
-              title="Entrar"
-              className="pointer-events-auto inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/80 bg-white/95 text-slate-600 shadow-md backdrop-blur-md transition hover:-translate-y-0.5 hover:text-pastel-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
-              onClick={() => {
-                setGoogleNotice(null);
-                setFormNotice(null);
-                openAuthModal("login");
-              }}
-              disabled={isLoading}
-            >
-              {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
-            </button>
+            <>
+              <button
+                type="button"
+                aria-label="Ver planos"
+                title="Planos"
+                className="pointer-events-auto inline-flex h-11 items-center justify-center gap-1.5 rounded-full border border-white/80 bg-white/95 px-4 text-xs font-semibold text-slate-600 shadow-md backdrop-blur-md transition hover:-translate-y-0.5 hover:text-pastel-violet-700"
+                onClick={() => setShowPlanos(true)}
+                disabled={isLoading}
+              >
+                <CreditCard className="h-3.5 w-3.5" />
+                Planos
+              </button>
+              <button
+                type="button"
+                aria-label="Entrar na conta"
+                title="Entrar"
+                className="pointer-events-auto inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/80 bg-white/95 text-slate-600 shadow-md backdrop-blur-md transition hover:-translate-y-0.5 hover:text-pastel-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={() => {
+                  setGoogleNotice(null);
+                  setFormNotice(null);
+                  openAuthModal("login");
+                }}
+                disabled={isLoading}
+              >
+                {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <LogIn className="h-4 w-4" />}
+              </button>
+            </>
           )}
         </div>
       </div>
+
+      {showPlanos && <PlanosPage onClose={() => setShowPlanos(false)} />}
+      {showConta && <ContaPage onClose={() => setShowConta(false)} />}
 
       {isAuthModalOpen ? (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/35 px-4 py-8 backdrop-blur-sm">

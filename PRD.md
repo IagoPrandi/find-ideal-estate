@@ -1,9 +1,13 @@
 # PRD — Find Ideal Estate
 
-**Versão:** 2.2  
-**Fonte canônica:** `analise_reformulacao_find_ideal_estate_v18.md`  
-**Última atualização:** 2026-04-24  
+**Versão:** 2.4  
+**Fonte canônica anterior:** `PRD v2.3 — Find Ideal Estate`  
+**Última atualização:** 2026-04-26  
 **Status:** Ativo
+
+> **Mudanças v2.3 (2026-04-26):** monetização migrada de "créditos avulsos" para **freemium + assinatura mensal por plano** (Anônimo, Free, Básico, Pro, Pro Max). Custo padronizado em 5 etapas monetizáveis × 20 créditos = 100 créditos por jornada completa. Stripe Billing (Subscriptions) substitui Payment Intent. Plano Pro inclui endereços de imóveis salvos na fila do prewarm noturno (mesmo run da atualização da base). Plano Pro Max ganha fila dedicada de refresh com cadência e franquia próprias. Adicionadas tabelas `plans`, `plan_entitlements`, `subscriptions`, `subscription_events`, `pro_max_refresh_targets`. Fase 8 reescopada e Fase 9 (Pro Max) adicionada ao roadmap.
+
+> **Mudanças v2.4 (2026-04-26):** mantém o modelo de monetização por **freemium + planos mensais + créditos por ciclo + entitlements**, mas altera a prioridade de implementação de cobrança. A ativação inicial dos planos pagos passa a ser feita por **Pix com QR Code / Pix Copia e Cola**. **Stripe não foi removido**: Stripe Billing permanece no roadmap como evolução futura para automação de assinatura, portal do cliente, retries, proration e cobrança recorrente. A Fase 8 foi reescopada para **Auth + planos + ativação por Pix**. Fase 10 adicionada para **Stripe Billing e automação de recorrência**. Tabelas `subscriptions` e `subscription_events` substituídas por `plan_activations`. Adicionadas `payments` e `pix_payment_data`. Preço do Pro Max corrigido para R$ 121,99.
 
 ---
 
@@ -20,7 +24,7 @@
 9. [Especificação do Frontend](#9-especificação-do-frontend)
 10. [Autenticação e Modelo de Acesso](#10-autenticação-e-modelo-de-acesso)
 11. [Monetização](#11-monetização)
-12. [Roadmap por Fase (0–8)](#12-roadmap-por-fase-08)
+12. [Roadmap por Fase (0–10)](#12-roadmap-por-fase-010)
 13. [Segurança](#13-segurança)
 14. [Observabilidade](#14-observabilidade)
 15. [Estratégia de Testes](#15-estratégia-de-testes)
@@ -33,32 +37,38 @@
 
 ### Problema
 
-Encontrar imóvel para alugar ou comprar em São Paulo é um processo fragmentado: o usuário compara plataformas separadas, faz cálculos de deslocamento mentalmente e não tem visão integrada de qualidade urbana (transporte, segurança, área verde, risco de alagamento) para os bairros candidatos.
+Encontrar imóvel para alugar ou comprar em São Paulo é um processo fragmentado: o usuário compara plataformas separadas, faz cálculos de deslocamento mentalmente e não tem visão integrada de qualidade urbana — transporte, segurança, área verde, risco de alagamento, preço e disponibilidade — para os bairros candidatos.
 
 ### Solução
 
-**Find Ideal Estate** é um ambiente de decisão imobiliária guiado por mapa. O usuário parte de um endereço de referência (trabalho, escola), configura seu perfil de deslocamento (modal, tempo máximo) e o produto:
+**Find Ideal Estate** é um ambiente de decisão imobiliária guiado por mapa. O usuário parte de um endereço de referência, como trabalho ou escola, configura seu perfil de deslocamento e o produto:
 
-1. Descobre pontos de transporte elegíveis no raio configurado;
+1. Descobre pontos de transporte elegíveis dentro do raio configurado;
 2. Gera zonas geoespaciais de isócrona para cada ponto selecionado;
-3. Enriquece cada zona com dados urbanos analíticos (segurança, verde, alagamento, POIs);
-4. Busca e deduplica imóveis das principais plataformas dentro de cada zona;
-5. Apresenta comparação objetiva com dados explicáveis — sem fórmulas opacas;
-6. Gera relatório PDF para compartilhamento e arquivo.
+3. Enriquece cada zona com dados urbanos analíticos;
+4. Busca, normaliza e deduplica imóveis dentro da zona;
+5. Permite salvar imóveis e zonas;
+6. Apresenta dashboards e comparações explicáveis;
+7. Permite comparar zonas e imóveis salvos;
+8. Futuramente, permite interação por agente de IA com ferramentas analíticas.
 
 ### Princípios
 
 1. **Mapa como plano principal.** A interface nunca esconde o mapa; o painel é auxiliar ao espaço.
-2. **Progresso real, nunca spinner vazio.** Cada etapa de processamento emite eventos SSE granulares — o usuário sempre sabe o que está acontecendo.
-3. **Dados explicáveis.** Nenhum indicador composto com pesos opacos. Métricas objetivas comparativas: tempo de viagem, m² de verde, ocorrências de segurança, preço mediano.
+2. **Progresso real, nunca spinner vazio.** Cada etapa de processamento emite eventos SSE granulares.
+3. **Dados explicáveis.** Nenhum indicador composto com pesos opacos. O produto apresenta métricas objetivas e comparativas.
+4. **Monetização proporcional ao valor e ao custo.** Créditos representam consumo de capacidade analítica; planos definem limites de acesso, persistência e atualização.
+5. **Cobrança simples no lançamento.** A primeira versão de cobrança usa Pix com QR Code. Automação de assinatura via Stripe fica para fase posterior.
 
 ### Personas
 
 | Persona | Situação | Necessidade principal |
 |---|---|---|
-| Relocador urbano | Mudar de bairro, manter emprego atual | Quais bairros permitem chegar ao trabalho em até 30 min de metrô? |
-| Comprador de primeiro imóvel | Busca ativa com prazo definido | Comparar regiões por preço, segurança e acesso ao transporte |
-| Profissional em mudança | Nova cidade ou cidade nova | Análise rápida sem conhecimento prévio dos bairros |
+| Relocador urbano | Mudar de bairro, manter emprego atual | Quais regiões permitem chegar ao trabalho em até X minutos? |
+| Comprador de primeiro imóvel | Busca ativa com prazo definido | Comparar regiões por preço, segurança, transporte e qualidade urbana |
+| Locatário em decisão rápida | Precisa escolher entre poucas opções | Comparar imóveis salvos e entender trade-offs |
+| Investidor pequeno | Avalia recorrência e oportunidade | Entender preço relativo ao mercado e liquidez da região |
+| Corretor/consultor | Apoia cliente na decisão | Gerar comparativos e explicações confiáveis |
 
 ---
 
@@ -66,33 +76,37 @@ Encontrar imóvel para alugar ou comprar em São Paulo é um processo fragmentad
 
 ### Fases de backend / infraestrutura
 
-| Fase | Título | Status | Concluída em | Observações |
-|---|---|---|---|---|
-| 0 | Fundação: monorepo, DB, CI | ✅ Concluída | 2026-03-16 | Stack validada no compose `onde_morar` (`api/postgres/redis`) + Alembic OK |
-| 1 | Core domain: journey, job, SSE | ✅ Concluída | 2026-03-16 | M1.1-M1.4 concluídos com migration aplicada e smoke SSE Redis real |
-| 2 | Dramatiq + worker infra | ✅ Concluída | 2026-03-17 | StubBroker/RedisBroker, retry policy, cancelamento cooperativo, watchdog, smoke SSE |
-| 3 | Transporte: GTFS + Valhalla + OTP | 🔄 Em progresso | — | M3.1-M3.8 concluídos; restante bloqueia Fase 4 |
-| 4 | Zonas: isócronas + enriquecimento | ✅ Concluída | 2026-03-21 | M4.1-M4.6 concluídos; frontend Etapas 3 e 4 validados |
-| 5 | Imóveis: scrapers + dedup + cache | ✅ Concluída | 2026-03-22 | M5.1–M5.7 concluídos |
-| 6 | Dashboard + relatório PDF | 🔄 Em progresso | — | M6.1-M6.2 concluídos; M6.7 (favoritos de imóveis) e M6.8 (favoritos de zonas) concluídos; analytics de dashboard aprimorado |
-| 7 | Scheduler noturno (prewarm) | ⬜ Não iniciada | — | APScheduler, prioridades de fila |
-| 8 | Auth + créditos + Stripe avulso | 🔄 Em progresso | — | Auth email/senha implementado (custom, não fastapi-users); sessões por cookie HTTP-only; créditos e Stripe pendentes |
+| Fase | Título | Status | Observações |
+|---|---|---|---|
+| 0 | Fundação: monorepo, DB, CI | ✅ Concluída | Base técnica criada |
+| 1 | Core domain: journey, job, SSE | ✅ Concluída | Jornada, jobs e progresso real-time |
+| 2 | Dramatiq + worker infra | ✅ Concluída | Filas, retry, watchdog, cancelamento |
+| 3 | Transporte: GTFS + Valhalla + OTP | 🔄 Em progresso | Núcleo de mobilidade |
+| 4 | Zonas: isócronas + enriquecimento | ✅ Concluída | Zonas, badges e enriquecimento |
+| 5 | Imóveis: scrapers + dedup + cache | ✅ Concluída | Scraping, cache e deduplicação |
+| 6 | Dashboard + favoritos | 🔄 Em progresso | Dashboard, favoritos de imóveis e zonas |
+| 7 | Scheduler noturno / prewarm | ⬜ Não iniciada | Prewarm por demanda real e salvos Pro Max |
+| 8 | Auth + planos + ativação por Pix | 🔄 Em progresso | M8.1–M8.8 implementados; M8.9 (E2E) pendente |
+| 9 | Plano Pro Max: refresh dedicado | ⬜ Não iniciada | Fila e cadência próprias |
+| 10 | Stripe Billing e automação de recorrência | ⬜ Backlog | Automação futura; não bloqueia lançamento Pix |
 
 ### Fases de frontend
 
-| Fase | Título | Status | Concluída em | Observações |
-|---|---|---|---|---|
-| FE0 | Setup Vite/React inicial | ✅ Concluída | 2026-03-24 | Base `apps/web` estabilizada em Vite + React |
-| FE1 | MapLibre + MapTiler integrado | ✅ Concluída | 2026-03-24 | Tiles e camadas principais validados no mapa |
-| FE2 | Etapa 1: formulário de config | ✅ Concluída | 2026-03-24 | Fluxo de criação de jornada validado |
-| FE3 | Migração para Next.js App Router | ⬜ Não iniciada | — | Replanejada; não bloqueia FE4+ no stack Vite atual |
-| FE4 | Etapa 2: seleção de transporte | ✅ Concluída | 2026-03-24 | Fluxo canônico `journeys/jobs` validado (sem fallback legado) |
-| FE5 | Etapa 3: progressão SSE + zonas | ✅ Concluída | 2026-03-24 | Geração/enriquecimento via jobs com polling e atualização progressiva |
-| FE6 | Etapa 4: comparação de zonas | ✅ Concluída | 2026-03-24 | Comparação de zonas com lista ordenada e badges/filtros validados |
-| FE7 | Etapa 5 + 6: imóveis + dashboard | ✅ Concluída | 2026-03-24 | Imóveis e dashboard validados; relatório permanece no escopo FE8 |
-| FE8 | Relatório + auth + créditos | 🔄 Em progresso | — | AuthContext + AuthAccessCard + FavoritesPanel implementados; relatório PDF, créditos e Stripe pendentes |
+| Fase | Título | Status | Observações |
+|---|---|---|---|
+| FE0 | Setup Vite/React inicial | ✅ Concluída | Base web |
+| FE1 | MapLibre + MapTiler | ✅ Concluída | Mapa e camadas |
+| FE2 | Etapa 1: formulário de config | ✅ Concluída | Criação de jornada |
+| FE3 | Migração para Next.js App Router | ⬜ Não iniciada | Não bloqueia MVP |
+| FE4 | Seleção de transporte | ✅ Concluída | Pontos e linhas |
+| FE5 | Progressão SSE + zonas | ✅ Concluída | Zonas progressivas |
+| FE6 | Comparação de zonas | ✅ Concluída | Lista, badges e filtros |
+| FE7 | Imóveis + dashboard | ✅ Concluída | Cards e dashboard |
+| FE8 | Auth + planos + Pix | 🔄 Em progresso | PlanosPage, ContaPage, PixModal, header badges implementados |
+| FE9 | UI Pro Max | ⬜ Não iniciada | Refresh, prioridade e badges |
+| FE10 | Stripe customer portal | ⬜ Backlog | Portal, checkout recorrente e proration |
 
-> **Regra de milestone:** a fase só é marcada como concluída após confirmação explícita do responsável. Não marcar na ausência de confirmação.
+> **Regra de milestone:** uma fase só é marcada como concluída após confirmação explícita do responsável.
 
 ---
 
@@ -100,98 +114,86 @@ Encontrar imóvel para alugar ou comprar em São Paulo é um processo fragmentad
 
 ### Diagrama de alto nível
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  VERCEL (CDN global, gratuito)                                  │
-│  Next.js App Router                                             │
-│  MapLibre GL JS + MapTiler tiles                                │
-│  TanStack Query + Zustand + shadcn/ui                           │
-│  SSE client / REST commands                                     │
-└────────────────────────┬────────────────────────────────────────┘
-                         │ HTTPS
-┌────────────────────────▼────────────────────────────────────────┐
-│  HOSTINGER — topologia inicial: 1× VPS KVM 4                    │
-│                                                                 │
-│  Reverse proxy + TLS                                            │
-│  api (FastAPI + Uvicorn)                                        │
-│  worker-general (Dramatiq)                                      │
-│  worker-scheduler                                               │
-│  PostgreSQL 16 + PostGIS                                        │
-│  Redis                                                          │
-│  Valhalla                                                       │
-│  OTP 2                                                          │
-│  OSM/GTFS importados localmente                                 │
-│  worker-scrape-browser (Dramatiq + Playwright, conc. 1)         │
-│                                                                 │
-│  Escalação: 2º VPS na Hostinger apenas por contenção medida     │
-└─────────────────────────────┬───────────────────────────────────┘
-                              │
-                  ┌───────────▼──────────┐
-                  │  Object Storage      │
-                  │  R2 / S3             │
-                  │  relatórios PDF      │
-                  │  artefatos exportados│
-                  └──────────────────────┘
+```text
+┌───────────────────────────────────────────────────────────────┐
+│ Frontend — Vercel / CDN                                       │
+│ Vite/React ou Next.js App Router                              │
+│ MapLibre + MapTiler                                           │
+│ TanStack Query + Zustand                                      │
+│ SSE client / REST commands                                    │
+└───────────────────────┬───────────────────────────────────────┘
+                        │ HTTPS
+┌───────────────────────▼───────────────────────────────────────┐
+│ Backend — Hostinger VPS KVM 4                                 │
+│ FastAPI + Uvicorn                                             │
+│ Dramatiq workers                                              │
+│ PostgreSQL 16 + PostGIS                                       │
+│ Redis                                                         │
+│ Valhalla                                                      │
+│ OTP 2                                                         │
+│ Playwright worker                                             │
+│ Billing atual: Pix                                            │
+│ Billing futuro: Stripe                                        │
+└───────────────────────┬───────────────────────────────────────┘
+                        │
+              ┌─────────▼─────────┐
+              │ R2 / S3           │
+              │ relatórios        │
+              │ artefatos         │
+              └───────────────────┘
 ```
 
 ### Estrutura do monorepo
 
-```
+```text
 find-ideal-estate/
   apps/
-    web/          ← Next.js App Router
-    api/          ← FastAPI monólito
+    web/
+    api/
   packages/
-    contracts/    ← DTOs compartilhados (nunca modelos internos)
+    contracts/
     design-system/
   infra/
     docker/
-    migrations/   ← Alembic
+    migrations/
     seeds/
   docs/
 ```
 
-### Estrutura do backend (`apps/api`)
+### Módulos principais do backend
 
-```
+```text
 apps/api/src/
-  core/
-    config.py · logging.py · security.py
-    db.py · redis.py · sse.py · errors.py
   modules/
-    auth/         journeys/     jobs/
-    transport/    zones/        urban_analysis/
-    pois/         listings/     deduplication/
-    reports/      usage_limits/ datasets/
-  adapters/
-    mapbox/       otp/          osm/
-    scraping/     legacy_scripts/
-  workers/
-    queue.py
-    handlers/
-  api/
-    routes/
-    schemas/
+    auth/
+    billing/              ← Pix agora; Stripe depois
+    plans/
+    usage_limits/
+    journeys/
+    jobs/
+    transport/
+    zones/
+    urban_analysis/
+    pois/
+    listings/
+    favorites/
+    reports/
+    datasets/
 ```
 
-### Estrutura do frontend (`apps/web`)
+### Regra arquitetural de billing
 
-```
-apps/web/src/
-  app/
-  features/
-    map/              search/      transport-selection/
-    zones/            listings/    reports/
-    dashboard/
-  components/
-    shell/     panel/    map-controls/
-    cards/     charts/   feedback/
-  state/
-    ui-store.ts      ← Zustand: painel, abas, hover, popups
-    journey-store.ts ← Zustand: parâmetros, seleções, etapas stale
-    map-store.ts     ← Zustand: layers, viewport
-  lib/
-    api/  sse/  formatters/  validators/
+A lógica de plano não deve depender de Stripe ou Pix diretamente.
+
+Separação obrigatória:
+
+```text
+plans/entitlements  → define o que o usuário pode fazer
+billing/            → recebe pagamento e ativa plano
+credits/            → concede e consome créditos
+subscriptions/      → representa ciclo ativo do plano
+providers/pix       → implementação Pix
+providers/stripe    → implementação futura
 ```
 
 ### Regras de dependência entre módulos
@@ -222,53 +224,50 @@ Toda comunicação entre módulos usa DTOs de `packages/contracts/`.
 
 ## 4. Infraestrutura e Deploy
 
-### Topologia
+### Topologia inicial
 
-| Serviço | Plataforma | Custo estimado | Observações |
-|---|---|---|---|
-| Frontend Next.js | Vercel (free) | R$ 0 | CDN global, preview por branch |
-| Backend completo inicial (`api`, `worker-general`, `worker-scheduler`, PostgreSQL/PostGIS, Redis, Valhalla, OTP, Playwright) | Hostinger VPS KVM 4 | R$ 59,99/mês promocional · R$ 149,99/mês renovação | Topologia inicial canônica |
-| Object Storage (relatórios) | R2 / S3 | ~R$ 0–10/mês | Depende do volume de PDFs |
-| **Total estimado inicial** | | **~R$ 60–70/mês promocional** · **~R$ 150–170/mês renovação** | Sem Bright Data, sem 2º VPS |
-
-### Escalação prevista na própria Hostinger
-
-| Situação | Topologia | Critério de entrada |
+| Serviço | Plataforma | Observação |
 |---|---|---|
-| Inicial | **1× VPS KVM 4** | Sem usuários ou baixa concorrência |
-| Escala 1 | **2 VPS**: APP/DATA + GEO/SCRAPE | Contenção medida entre API/DB e Playwright/Valhalla/OTP |
-| Escala 2 | **2 VPS + ajuste de plano** | `queue_depth(scrape_browser)` sustentado alto ou saturação de CPU/RAM |
+| Frontend | Vercel | CDN, preview e deploy simples |
+| API + workers + DB + Redis | Hostinger VPS KVM 4 | Topologia inicial |
+| Valhalla / OTP | Hostinger VPS | Self-hosted |
+| Object Storage | R2 / S3 | Relatórios e artefatos |
+| Billing atual | Pix | QR Code / copia e cola |
+| Billing futuro | Stripe | Automação de recorrência |
 
-### Processos
+### Variáveis de ambiente obrigatórias — fase Pix
 
-| Processo | Localização | Filas consumidas |
-|---|---|---|
-| `api` | Hostinger VPS KVM 4 (topologia inicial) | — (recebe HTTP + SSE) |
-| `worker-general` | Hostinger VPS KVM 4 (topologia inicial) | transport, zones, enrichment, dedup, reports, prewarm |
-| `worker-scheduler` | Hostinger VPS KVM 4 (topologia inicial) | agenda jobs noturnos e watchdog |
-| `worker-scrape-browser` | Hostinger VPS KVM 4 (topologia inicial) | scrape_browser (conc. 1) |
-| `worker-scrape-browser` | Hostinger VPS GEO/SCRAPE (quando escalado) | scrape_browser / scrape_http |
+```env
+DATABASE_URL=
+REDIS_URL=
+MAPBOX_ACCESS_TOKEN=
+MAPTILER_API_KEY=
+VALHALLA_URL=
+OTP_URL=
+R2_BUCKET=
+S3_BUCKET=
 
-### Variáveis de ambiente obrigatórias
-
-```
-DATABASE_URL
-REDIS_URL
-MAPBOX_ACCESS_TOKEN     ← apenas backend, nunca frontend
-MAPTILER_API_KEY        ← apenas frontend via Next.js env
-VALHALLA_URL            ← URL interna Hostinger VPS
-OTP_URL                 ← URL interna Hostinger VPS
-R2_BUCKET / S3_BUCKET
-RESEND_API_KEY          ← Fase 8
-STRIPE_SECRET_KEY       ← Fase 8 (Payment Intent, compra avulsa)
-STRIPE_WEBHOOK_SECRET   ← Fase 8
+PIX_PROVIDER=manual
+PIX_KEY=
+PIX_MERCHANT_NAME=
+PIX_MERCHANT_CITY=
+PIX_PAYMENT_EXPIRATION_MINUTES=60
+PIX_STATIC_QR_CODE_URL=
+PIX_COPY_PASTE_PAYLOAD=
+PIX_CALLBACK_SECRET=
 ```
 
-### Escalação do VPS
+### Variáveis de ambiente futuras — Stripe
 
-Separar `worker-scrape-browser` em VPS próprio somente quando `p95` de isócrona walking
-subir acima de 500ms no horário de prewarm (03:00–05:30).
-Monitorar via métrica `valhalla_isochrone_p95_ms`.
+```env
+STRIPE_SECRET_KEY=
+STRIPE_WEBHOOK_SECRET=
+STRIPE_PRICE_BASICO=
+STRIPE_PRICE_PRO=
+STRIPE_PRICE_PRO_MAX=
+```
+
+> As variáveis Stripe permanecem documentadas, mas não são requisito da primeira versão de cobrança.
 
 ### Bright Data
 
@@ -285,35 +284,48 @@ Escape hatch manual, nunca base da arquitetura.
 
 ### Diagrama de relações
 
-```
-users ─────────────────────────────────────────────────┐
-  │                                                     │
-  ├─ user_sessions                                      │
-  ├─ user_listing_favorites                             │
-  ├─ user_zone_favorites                                │
-  │                                                     │
-  └─ journeys ───────────────────────────────────┐      │
-       │                                          │      │
-       └─ jobs ────────── job_events              │      │
-                                                  │      │
-transport_points ──────────────────────────────── │──┐   │
-                                                  │  │   │
-zones ─────────────────────────────────────────── ┘  │   │
-  │                                                   │   │
-  ├─ zone_listing_caches ── properties ── listing_ads─┘───┘
-  │                              │
-  │                         listing_snapshots
-  │
-  ├─ listing_search_requests
-  └─ dataset_versions
+```text
+users
+  ├─ user_sessions
+  ├─ journeys
+  ├─ user_listing_favorites
+  ├─ user_zone_favorites
+  ├─ user_credits
+  ├─ plan_activations
+  └─ payments
 
-user_credits ── credit_ledger ── users
-credit_packages ── credit_purchases ── users
+plans
+  └─ plan_entitlements
 
+payments
+  ├─ pix_payment_data
+  └─ (future stripe references)
+
+plan_activations
+  └─ credit_ledger
+
+pro_max_refresh_targets
+  └─ user favorites
+
+journeys
+  └─ jobs ── job_events
+
+transport_points ── zones
+zones
+  ├─ zone_listing_caches ── properties ── listing_ads
+  │                              └─ listing_snapshots
+  └─ listing_search_requests
+
+dataset_versions
 external_usage_ledger
 scraping_degradation_events
 webhook_events
+pro_max_refresh_runs
 ```
+
+### Diretriz de dados
+
+O modelo de dados deve suportar Pix agora e Stripe depois. Portanto, pagamentos devem ser modelados de forma genérica, e o plano ativo do usuário não deve depender do método de pagamento.
 
 ### `users`
 
@@ -545,14 +557,24 @@ zone_listing_caches (
 
 ```sql
 user_credits (
-  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id    UUID REFERENCES users(id) UNIQUE NOT NULL,
-  balance    INT NOT NULL DEFAULT 0,
-  updated_at TIMESTAMPTZ DEFAULT NOW()
+  id                     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id                UUID REFERENCES users(id) UNIQUE NOT NULL,
+  plan_id                UUID REFERENCES plans(id),
+
+  -- Buckets independentes (consumo FIFO: cycle → rollover → legacy)
+  cycle_credits          INT NOT NULL DEFAULT 0,    -- cota mensal do plano (expira no fim do ciclo)
+  rollover_balance       INT NOT NULL DEFAULT 0,    -- até 25% da cota anterior, expira no fim do ciclo seguinte
+  legacy_balance         INT NOT NULL DEFAULT 0,    -- top-ups avulsos / migração de créditos pré-2.3 (não expira)
+
+  cycle_started_at       TIMESTAMPTZ,
+  cycle_ends_at          TIMESTAMPTZ,
+  monthly_quota          INT,                       -- cache da cota do plano vigente
+  updated_at             TIMESTAMPTZ DEFAULT NOW()
 )
+-- INDEX em cycle_ends_at para o job noturno de expiração/concessão
 ```
 
-Saldo atômico por usuário. Toda alteração passa por `credit_ledger`.
+Saldo total = `cycle_credits + rollover_balance + legacy_balance`. Toda alteração passa por `credit_ledger` em transação atômica.
 
 ### `credit_ledger`
 
@@ -560,53 +582,86 @@ Saldo atômico por usuário. Toda alteração passa por `credit_ledger`.
 credit_ledger (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id       UUID REFERENCES users(id) NOT NULL,
+  bucket        TEXT NOT NULL,          -- 'cycle' | 'rollover' | 'legacy'
   delta         INT NOT NULL,           -- positivo = crédito; negativo = débito
-  reason        TEXT NOT NULL,          -- 'initial_session' | 'signup_bonus' | 'purchase'
-                                        -- | 'zone_transit' | 'zone_walking' | 'zone_car'
-                                        -- | 'listing_cache' | 'scraping_fresh' | 'report'
-                                        -- | 'refund'
-  reference_id  UUID,                   -- job_id, journey_id ou credit_purchase_id
-  balance_after INT NOT NULL,
+  reason        TEXT NOT NULL,
+  -- Razões válidas:
+  --   'signup_grant_free' | 'anonymous_balance_discarded'
+  --   'pix_plan_activation' | 'pix_plan_renewal' | 'manual_plan_adjustment'
+  --   'monthly_grant' | 'monthly_expire' | 'rollover_grant' | 'rollover_expire'
+  --   'topup_purchase' | 'legacy_migration'
+  --   'step_zone_generation' | 'step_zone_enrichment' | 'step_listings_cache'
+  --   'step_listings_scrape' | 'step_report'
+  --   'pro_max_refresh'
+  reference_id  UUID,                   -- job_id, journey_id, payment_id, activation_id
+  balance_after INT NOT NULL,           -- saldo total após a operação
   created_at    TIMESTAMPTZ DEFAULT NOW()
 )
+-- INDEX em (user_id, created_at DESC)
 ```
 
-### `credit_packages`
+> **Nota:** operações de refresh (`pro_max_refresh`) são registradas como entradas com `delta = 0` para manter histórico auditável sem afetar saldo.
+
+### `payments`
+
+Tabela genérica para Pix agora e Stripe depois.
 
 ```sql
-credit_packages (
-  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  slug        TEXT UNIQUE NOT NULL,   -- 'starter' | 'explorer' | 'pro'
-  name        TEXT NOT NULL,
-  credits     INT NOT NULL,
-  price_brl   NUMERIC(8,2) NOT NULL,
-  is_active   BOOLEAN DEFAULT true,
-  created_at  TIMESTAMPTZ DEFAULT NOW()
+payments (
+  id                    UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id               UUID REFERENCES users(id) NOT NULL,
+  plan_id               UUID REFERENCES plans(id),
+  payment_provider      TEXT NOT NULL, -- pix | stripe
+  payment_method        TEXT NOT NULL, -- pix_qr_code | stripe_checkout
+  payment_type          TEXT NOT NULL, -- plan_activation | plan_renewal | topup
+  amount_brl            NUMERIC(8,2) NOT NULL,
+  status                TEXT NOT NULL DEFAULT 'pending',
+  -- pending | paid | failed | expired | cancelled | refunded
+
+  external_reference    TEXT,
+  external_payment_id   TEXT,
+
+  created_at            TIMESTAMPTZ DEFAULT NOW(),
+  expires_at            TIMESTAMPTZ,
+  paid_at               TIMESTAMPTZ,
+  cancelled_at          TIMESTAMPTZ,
+  refunded_at           TIMESTAMPTZ
 )
 ```
 
-Seed inicial:
-
-| slug | name | credits | price_brl |
-|---|---|---|---|
-| starter | Starter | 60 | 9,90 |
-| explorer | Explorer | 150 | 19,90 |
-| pro | Pro | 400 | 44,90 |
-
-### `credit_purchases`
+### `pix_payment_data`
 
 ```sql
-credit_purchases (
-  id                        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id                   UUID REFERENCES users(id) NOT NULL,
-  package_id                UUID REFERENCES credit_packages(id) NOT NULL,
-  stripe_payment_intent_id  TEXT UNIQUE,
-  stripe_checkout_session_id TEXT UNIQUE,
-  status                    TEXT NOT NULL DEFAULT 'pending',  -- 'pending' | 'completed' | 'failed' | 'refunded'
-  credits_granted           INT,
-  amount_brl                NUMERIC(8,2),
-  created_at                TIMESTAMPTZ DEFAULT NOW(),
-  completed_at              TIMESTAMPTZ
+pix_payment_data (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  payment_id          UUID REFERENCES payments(id) ON DELETE CASCADE NOT NULL,
+  pix_key             TEXT,
+  merchant_name       TEXT,
+  merchant_city       TEXT,
+  qr_code_payload     TEXT,
+  pix_copy_paste      TEXT,
+  qr_code_image_url   TEXT,
+  provider_payload    JSONB,
+  created_at          TIMESTAMPTZ DEFAULT NOW()
+)
+```
+
+### `plan_activations`
+
+Representa o ciclo ativo de plano, independentemente do método de pagamento.
+
+```sql
+plan_activations (
+  id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id            UUID REFERENCES users(id) NOT NULL,
+  plan_id            UUID REFERENCES plans(id) NOT NULL,
+  source_payment_id  UUID REFERENCES payments(id),
+  status             TEXT NOT NULL DEFAULT 'active',
+  -- active | expired | cancelled | replaced | manual
+  started_at         TIMESTAMPTZ NOT NULL,
+  ends_at            TIMESTAMPTZ NOT NULL,
+  created_at         TIMESTAMPTZ DEFAULT NOW(),
+  updated_at         TIMESTAMPTZ DEFAULT NOW()
 )
 ```
 
@@ -682,15 +737,16 @@ scraping_degradation_events (
 
 ```sql
 webhook_events (
-  id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  provider     TEXT NOT NULL,   -- 'stripe' | 'mobility_db'
-  event_type   TEXT NOT NULL,   -- 'payment_intent.succeeded' | 'charge.refunded' | ...
-  stripe_event_id TEXT UNIQUE,  -- idempotência: segundo recebimento ignorado silenciosamente
-  payload      JSONB,
-  processed    BOOLEAN DEFAULT false,
-  processed_at TIMESTAMPTZ,
-  error        TEXT,
-  created_at   TIMESTAMPTZ DEFAULT NOW()
+  id             UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  provider       TEXT NOT NULL, -- pix | stripe | mobility_db
+  event_id       TEXT,
+  event_type     TEXT NOT NULL,
+  payload        JSONB,
+  processed      BOOLEAN DEFAULT false,
+  processed_at   TIMESTAMPTZ,
+  error          TEXT,
+  created_at     TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE (provider, event_id)
 )
 ```
 
@@ -698,38 +754,218 @@ webhook_events (
 
 ```sql
 user_listing_favorites (
-  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id          UUID REFERENCES users(id) ON DELETE CASCADE NOT NULL,
-  listing_key      TEXT NOT NULL,               -- chave opaca do imóvel favorito
-  journey_id       UUID NOT NULL,
-  zone_fingerprint TEXT NOT NULL,
-  search_type      TEXT NOT NULL,               -- 'rental' | 'sale'
-  usage_type       TEXT NOT NULL,               -- 'residential' | 'commercial' | 'all'
-  listing_payload  JSONB NOT NULL,              -- snapshot do card (preço, endereço, plataforma…)
-  saved_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id             UUID REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+  listing_key         TEXT NOT NULL,               -- chave opaca do imóvel favorito
+  journey_id          UUID NOT NULL,
+  zone_fingerprint    TEXT NOT NULL,
+  search_type         TEXT NOT NULL,               -- 'rental' | 'sale'
+  usage_type          TEXT NOT NULL,               -- 'residential' | 'commercial' | 'all'
+  listing_payload     JSONB NOT NULL,              -- snapshot do card (preço, endereço, plataforma…)
+
+  -- Endereço normalizado (usado pelo prewarm Pro e pelo refresh Pro Max)
+  address_normalized  TEXT,
+  property_id         UUID REFERENCES properties(id),
+
+  -- Versionamento de snapshot
+  snapshot_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_refreshed_at   TIMESTAMPTZ,                 -- atualizado pela run noturna (Pro) ou refresh dedicado (Pro Max)
+  last_viewed_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  priority_flag       BOOLEAN NOT NULL DEFAULT false,
+
+  -- Retenção por plano (Free=7 dias, Básico/Pro/Pro Max=30 dias)
+  view_window_ends_at TIMESTAMPTZ,                 -- saved_at + retention_days do plano vigente no save
+  view_state          TEXT NOT NULL DEFAULT 'visible', -- 'visible' | 'expired_for_view' | 'over_limit_grace' | 'archived'
+
+  saved_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT uq_user_listing_favorites_user_key UNIQUE (user_id, listing_key)
 )
 -- INDEX em (user_id, saved_at DESC)
+-- INDEX em (user_id, view_window_ends_at) WHERE view_state = 'visible'
+-- INDEX em (address_normalized) WHERE address_normalized IS NOT NULL
 ```
 
 ### `user_zone_favorites`
 
 ```sql
 user_zone_favorites (
-  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id          UUID REFERENCES users(id) ON DELETE CASCADE NOT NULL,
-  zone_key         TEXT NOT NULL,               -- chave opaca da zona favorita
-  journey_id       UUID NOT NULL,
-  zone_fingerprint TEXT NOT NULL,
-  search_type      TEXT NOT NULL,
-  usage_type       TEXT NOT NULL,
-  zone_payload     JSONB NOT NULL,              -- snapshot da zona (badges, métricas…)
-  saved_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id             UUID REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+  zone_key            TEXT NOT NULL,               -- chave opaca da zona favorita
+  journey_id          UUID NOT NULL,
+  zone_fingerprint    TEXT NOT NULL,
+  search_type         TEXT NOT NULL,
+  usage_type          TEXT NOT NULL,
+  zone_payload        JSONB NOT NULL,              -- snapshot da zona (badges, métricas…)
+
+  snapshot_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_refreshed_at   TIMESTAMPTZ,
+  last_viewed_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  priority_flag       BOOLEAN NOT NULL DEFAULT false,
+
+  view_window_ends_at TIMESTAMPTZ,
+  view_state          TEXT NOT NULL DEFAULT 'visible',
+
+  saved_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT uq_user_zone_favorites_user_key UNIQUE (user_id, zone_key)
 )
 -- INDEX em (user_id, saved_at DESC)
+-- INDEX em (user_id, view_window_ends_at) WHERE view_state = 'visible'
+```
+
+### `plans`
+
+```sql
+plans (
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  slug              TEXT UNIQUE NOT NULL, -- anonymous | free | basico | pro | pro_max
+  name              TEXT NOT NULL,
+  price_brl         NUMERIC(8,2),
+  monthly_credits   INT NOT NULL DEFAULT 0,
+  is_paid           BOOLEAN NOT NULL DEFAULT false,
+  stripe_price_id   TEXT, -- futuro, opcional
+  display_order     INT NOT NULL DEFAULT 0,
+  is_active         BOOLEAN NOT NULL DEFAULT true,
+  created_at        TIMESTAMPTZ DEFAULT NOW()
+)
+```
+
+### Seed inicial de planos
+
+| slug | name | price_brl | monthly_credits | is_paid |
+|---|---|---:|---:|---|
+| anonymous | Anônimo | NULL | 350 | false |
+| free | Free cadastrado | 0 | 350 | false |
+| basico | Básico | 21.99 | 800 | true |
+| pro | Pro | 90.99 | 4000 | true |
+| pro_max | Pro Max | 321.99 | 20000 | true |
+
+### `plan_entitlements`
+
+```sql
+plan_entitlements (
+  plan_id                         UUID PRIMARY KEY REFERENCES plans(id) ON DELETE CASCADE,
+
+  max_listing_favorites           INT,
+  max_zone_favorites              INT,
+  retention_days                  INT NOT NULL,
+
+  can_customize_radius            BOOLEAN NOT NULL DEFAULT false,
+  can_customize_max_time          BOOLEAN NOT NULL DEFAULT false,
+  can_customize_distance          BOOLEAN NOT NULL DEFAULT false,
+
+  max_active_metrics              INT,
+  transport_line_policy           TEXT NOT NULL, -- locked_default | top_2_lines | unlocked
+  zone_selection_policy           TEXT NOT NULL, -- restricted | any
+
+  auto_refresh_policy             TEXT NOT NULL, -- none | managed_queue
+  pro_max_refresh_max_zones       INT,
+  pro_max_refresh_max_listings    INT,
+  pro_max_refresh_cadence_days    INT,
+  pro_max_refresh_eligibility_days INT,
+
+  rollover_percent                INT NOT NULL DEFAULT 0,
+  rollover_cycles                 INT NOT NULL DEFAULT 0,
+  cycle_length_days               INT NOT NULL DEFAULT 30
+)
+```
+
+### Entitlements por plano
+
+| Plano | Imóveis | Zonas | Retenção | Parametrização | Métricas | Zonas | Refresh |
+|---|---:|---:|---:|---|---|---|---|
+| Anônimo | 0 | 0 | 7 dias sessão | travada | default | restrito | none |
+| Free | 5 | 2 | 7 dias | travada | default | 2 linhas | none |
+| Básico | 20 | 4 | 30 dias | liberada com limite | 4 | qualquer zona | none |
+| Pro | 100 | 20 | 30 dias | liberada | ilimitadas | qualquer zona | none |
+| Pro Max | 100 | 20 | 30 dias | liberada | ilimitadas | qualquer zona | managed_queue |
+
+### `plan_activations` (v2.4 — substitui `subscriptions`)
+
+> **v2.4:** as tabelas `subscriptions` e `subscription_events` foram substituídas por `plan_activations`. A lógica de ciclo ativo de plano não depende mais de Stripe; pagamentos são modelados em `payments` + `pix_payment_data`.
+
+```sql
+plan_activations (
+  id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id            UUID REFERENCES users(id) NOT NULL,
+  plan_id            UUID REFERENCES plans(id) NOT NULL,
+  source_payment_id  UUID REFERENCES payments(id),
+  status             TEXT NOT NULL DEFAULT 'active',
+  -- active | expired | cancelled | replaced | manual
+  started_at         TIMESTAMPTZ NOT NULL,
+  ends_at            TIMESTAMPTZ NOT NULL,
+  created_at         TIMESTAMPTZ DEFAULT NOW(),
+  updated_at         TIMESTAMPTZ DEFAULT NOW()
+)
+```
+
+> **Nota de compatibilidade:** referências a `subscriptions` no código legado devem ser migradas para `plan_activations`. Referências a `subscription_events` devem ser migradas para `credit_ledger` + `webhook_events`.
+
+### `subscription_events` (legado — removido em v2.4)
+
+> Mantido apenas para referência de migração. A tabela foi substituída pelo fluxo `payments → plan_activations → credit_ledger`. O campo `stripe_event_id` foi absorvido por `webhook_events (provider, event_id)`.
+
+```sql
+-- LEGADO: não criar em novos ambientes
+subscription_events (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  subscription_id     UUID,  -- era REFERENCES subscriptions(id)
+  event_type          TEXT NOT NULL,
+  from_plan_id        UUID REFERENCES plans(id),
+  to_plan_id          UUID REFERENCES plans(id),
+  stripe_event_id     TEXT,
+  payload             JSONB,
+  created_at          TIMESTAMPTZ DEFAULT NOW()
+)
+```
+
+### `pro_max_refresh_targets`
+
+Itens elegíveis ao refresh automático do plano Pro Max. Atualizado via triggers de favorito (insert/update/delete) e por job de revisão de elegibilidade.
+
+```sql
+pro_max_refresh_targets (
+  id                       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id                  UUID REFERENCES users(id) ON DELETE CASCADE NOT NULL,
+  target_kind              TEXT NOT NULL,   -- 'listing' | 'zone'
+  listing_favorite_id      UUID REFERENCES user_listing_favorites(id) ON DELETE CASCADE,
+  zone_favorite_id         UUID REFERENCES user_zone_favorites(id) ON DELETE CASCADE,
+  is_active                BOOLEAN NOT NULL DEFAULT true,
+  is_priority              BOOLEAN NOT NULL DEFAULT false,
+  last_refreshed_at        TIMESTAMPTZ,
+  next_refresh_due_at      TIMESTAMPTZ NOT NULL,
+  last_attempt_status      TEXT,            -- 'success' | 'partial' | 'failed' | 'skipped_quota'
+  failure_count            INT NOT NULL DEFAULT 0,
+  created_at               TIMESTAMPTZ DEFAULT NOW(),
+  updated_at               TIMESTAMPTZ DEFAULT NOW(),
+  CONSTRAINT chk_target_xor CHECK (
+    (target_kind = 'listing' AND listing_favorite_id IS NOT NULL AND zone_favorite_id IS NULL)
+    OR (target_kind = 'zone' AND zone_favorite_id IS NOT NULL AND listing_favorite_id IS NULL)
+  )
+)
+-- INDEX em (user_id, is_active, next_refresh_due_at)
+-- INDEX em (next_refresh_due_at) WHERE is_active = true
+```
+
+### `pro_max_refresh_runs`
+
+Log de execuções do scheduler dedicado do Pro Max — telemetria e auditoria.
+
+```sql
+pro_max_refresh_runs (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  started_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  finished_at         TIMESTAMPTZ,
+  status              TEXT NOT NULL DEFAULT 'running',
+  -- 'running' | 'success' | 'success_empty' | 'partial' | 'failed'
+  targets_total       INT NOT NULL DEFAULT 0,
+  targets_succeeded   INT NOT NULL DEFAULT 0,
+  targets_failed      INT NOT NULL DEFAULT 0,
+  targets_skipped     INT NOT NULL DEFAULT 0,
+  notes               TEXT
+)
 ```
 
 ---
@@ -864,6 +1100,12 @@ mais frequente do produto; sem índice vira full scan de 22k linhas.
 | `deduplication` | 2 | worker-general (Hostinger) | CPU + DB |
 | `reports` | 1 | worker-general (Hostinger) | WeasyPrint: 400–600MB RAM |
 | `prewarm` | — | worker-general (Hostinger) | Prioridade LOW, cede para USER_REQUEST |
+| `pro_max_refresh` | 1 | worker-general (Hostinger) | Prioridade entre PREWARM e USER_REQUEST; cadência semanal por item |
+| `billing` | 2 | worker-general (Hostinger) | Pix agora; Stripe depois — ativação/expiração de ciclo |
+
+**Prioridades:** `USER_REQUEST = 0` (mais alto) · `PRO_MAX_REFRESH = 3` · `PREWARM = 5` (mais baixo). `BILLING = 0` (mesma prioridade que USER_REQUEST). Pro Max precisa terminar dentro da janela noturna (03:00–05:30) sem competir com requisições de usuário; o prewarm geral cede para ambos.
+
+**JobType estendido (v2.4):** `pro_max_refresh_listing`, `pro_max_refresh_zone`, `monthly_grant`, `monthly_expire`, `pix_payment_confirm`, `plan_activation`.
 
 ### Política de retry
 
@@ -930,63 +1172,158 @@ t=30s    Watchdog: força cancelled_partial se worker não confirmou
 Watchdog: scheduler a cada 60s, detecta jobs `running` sem heartbeat > 2min
 (`job_heartbeat:{job_id}` no Redis, TTL 120s; worker publica a cada 30s).
 
-### Controle de créditos antes de operações custosas
+### Controle de créditos por etapa monetizável
+
+A v2.3 substitui custos finos por modal por **5 etapas monetizáveis × 20 créditos** (decisão de produto — ver Seção 11).
 
 ```python
-CREDIT_COSTS: dict[CreditOperation, int] = {
-    CreditOperation.ZONE_TRANSIT:    9,   # geração (7) + enriquecimento (2)
-    CreditOperation.ZONE_WALKING:   28,   # geração (24) + enriquecimento (4)
-    CreditOperation.ZONE_CAR:       28,   # geração (24) + enriquecimento (4)
-    CreditOperation.LISTING_CACHE:   1,   # acesso a imóveis em cache (transporte)
-    CreditOperation.LISTING_CACHE_WALK: 2, # acesso a imóveis em cache (a pé/carro)
-    CreditOperation.SCRAPING_FRESH:  5,   # scraping sob demanda (adicional ao cache)
-    CreditOperation.REPORT:          5,   # geração de relatório PDF
-}
+class JourneyStep(str, Enum):
+    ZONE_GENERATION   = "step_zone_generation"
+    ZONE_ENRICHMENT   = "step_zone_enrichment"
+    LISTINGS_CACHE    = "step_listings_cache"
+    LISTINGS_SCRAPE   = "step_listings_scrape"
+    REPORT            = "step_report"
 
+STEP_COST = 20  # créditos por etapa monetizável (uniforme, independente de modal)
+
+# Helpers de classificação
+NON_MONETIZED_OPS = {"journey_config", "transport_search", "dashboard_view"}
+```
+
+**Consumo FIFO entre buckets** (`cycle_credits` → `rollover_balance` → `legacy_balance`).
+
+```python
 async def check_and_consume_credits(
     user_id: UUID | None,
     session_id: str | None,
-    operation: CreditOperation,
+    step: JourneyStep,
+    reference_id: UUID | None = None,
 ) -> CreditResult:
-    cost = CREDIT_COSTS[operation]
-    if user_id:
-        async with db.transaction():
-            row = await db.fetchrow(
-                "SELECT balance FROM user_credits WHERE user_id=$1 FOR UPDATE",
-                user_id,
-            )
-            if not row or row["balance"] < cost:
-                raise InsufficientCreditsError(required=cost, balance=row["balance"] if row else 0)
-            new_balance = row["balance"] - cost
-            await db.execute(
-                "UPDATE user_credits SET balance=$1 WHERE user_id=$2",
-                new_balance, user_id,
-            )
-            await db.execute(
-                """INSERT INTO credit_ledger (user_id, delta, reason, reference_id, balance_after)
-                   VALUES ($1, $2, $3, NULL, $4)""",
-                user_id, -cost, operation.value, new_balance,
-            )
-        return CreditResult(consumed=cost, balance=new_balance)
-    else:
-        # sessão anônima: saldo rastreado em Redis KEY credit:session:{session_id}
+    cost = STEP_COST
+
+    if user_id is None:
+        # Sessão anônima: 1 bucket único em Redis
         balance = int(await redis.get(f"credit:session:{session_id}") or 0)
         if balance < cost:
             raise InsufficientCreditsError(required=cost, balance=balance)
         new_balance = balance - cost
         await redis.set(f"credit:session:{session_id}", new_balance, ex=7 * 86400)
-        return CreditResult(consumed=cost, balance=new_balance)
+        return CreditResult(consumed=cost, balance=new_balance, plan="anonymous")
 
+    # Usuário autenticado: lock de linha + débito FIFO
+    async with db.transaction():
+        row = await db.fetchrow(
+            """SELECT cycle_credits, rollover_balance, legacy_balance, plan_id
+                 FROM user_credits WHERE user_id=$1 FOR UPDATE""",
+            user_id,
+        )
+        total = (row["cycle_credits"] or 0) + (row["rollover_balance"] or 0) + (row["legacy_balance"] or 0)
+        if total < cost:
+            raise InsufficientCreditsError(required=cost, balance=total)
+
+        # FIFO: consome cycle, depois rollover, depois legacy
+        remaining = cost
+        debits: list[tuple[str, int]] = []
+        for bucket in ("cycle_credits", "rollover_balance", "legacy_balance"):
+            available = row[bucket] or 0
+            if available <= 0:
+                continue
+            take = min(available, remaining)
+            debits.append((bucket, take))
+            remaining -= take
+            if remaining == 0:
+                break
+        assert remaining == 0
+
+        new_cycle    = row["cycle_credits"]    - sum(t for b, t in debits if b == "cycle_credits")
+        new_rollover = row["rollover_balance"] - sum(t for b, t in debits if b == "rollover_balance")
+        new_legacy   = row["legacy_balance"]   - sum(t for b, t in debits if b == "legacy_balance")
+        new_total    = new_cycle + new_rollover + new_legacy
+
+        await db.execute(
+            """UPDATE user_credits
+                  SET cycle_credits=$2, rollover_balance=$3, legacy_balance=$4, updated_at=NOW()
+                WHERE user_id=$1""",
+            user_id, new_cycle, new_rollover, new_legacy,
+        )
+        for bucket, take in debits:
+            ledger_bucket = bucket.replace("_credits", "").replace("_balance", "")
+            await db.execute(
+                """INSERT INTO credit_ledger (user_id, bucket, delta, reason, reference_id, balance_after)
+                   VALUES ($1, $2, $3, $4, $5, $6)""",
+                user_id, ledger_bucket, -take, step.value, reference_id, new_total,
+            )
+
+    return CreditResult(consumed=cost, balance=new_total, debits=debits)
+```
+
+### Enforcement de entitlements antes de operações de plano
+
+Capabilities resolvidas no início de cada request por `PlanEntitlementService.resolve(user_id) → ResolvedEntitlements`. Cache em Redis (TTL 60s, invalidado em `subscription_events`).
+
+```python
+@dataclass(frozen=True)
+class ResolvedEntitlements:
+    plan_slug: str
+    max_listing_favorites: int | None
+    max_zone_favorites: int | None
+    retention_days: int
+    can_customize_radius: bool
+    can_customize_max_time: bool
+    can_customize_distance: bool
+    max_active_metrics: int | None
+    transport_line_policy: str          # 'locked_default' | 'top_2_lines' | 'unlocked'
+    zone_selection_policy: str          # 'restricted' | 'any'
+    auto_refresh_policy: str            # 'none' | 'nightly_inclusion' | 'managed_queue'
+    pro_max_refresh_max_zones: int | None
+    pro_max_refresh_max_listings: int | None
+    pro_max_refresh_cadence_days: int | None
+    pro_max_refresh_eligibility_days: int | None
+    rollover_percent: int
+    rollover_cycles: int
+    cycle_length_days: int
+
+class PlanEntitlementService:
+    async def assert_can_save_listing(self, user_id: UUID) -> None:
+        ent = await self.resolve(user_id)
+        if ent.max_listing_favorites is None:
+            return
+        count = await self._listing_count(user_id)
+        if count >= ent.max_listing_favorites:
+            raise EntitlementExceeded(
+                kind="max_listing_favorites",
+                plan=ent.plan_slug,
+                current=count,
+                limit=ent.max_listing_favorites,
+            )
+
+    async def assert_can_customize(self, user_id: UUID, field: str) -> None:
+        ent = await self.resolve(user_id)
+        flag = {
+            "radius": ent.can_customize_radius,
+            "max_time": ent.can_customize_max_time,
+            "distance": ent.can_customize_distance,
+        }[field]
+        if not flag:
+            raise EntitlementExceeded(kind=f"customize_{field}", plan=ent.plan_slug)
+
+    async def assert_view_window_valid(self, favorite) -> None:
+        if favorite.view_state == "expired_for_view":
+            raise ViewWindowExpired(plan=favorite.plan_at_save)
+```
+
+**Roteiro de aplicação:**
+- `POST /favorites/listings` → `assert_can_save_listing` antes do insert.
+- `PATCH /journeys/{id}` (campos de raio/tempo/distância) → `assert_can_customize`.
+- `GET /favorites/listings/{key}` → `assert_view_window_valid` (retorna 410 Gone com CTA de upgrade).
+- Métricas habilitadas (`POST /journeys/{id}/metrics`) → checa `max_active_metrics`.
+
+### Integração de listings com etapas monetizáveis
+
+```python
 async def request_listings(journey_id, zone_id, user_id, session_id, config):
-    modal = config.modal  # 'transit' | 'walking' | 'car'
-    op = (
-        CreditOperation.LISTING_CACHE
-        if modal == "transit"
-        else CreditOperation.LISTING_CACHE_WALK
-    )
-    await check_and_consume_credits(user_id=user_id, session_id=session_id, operation=op)
-
     cache = await zone_listing_caches.get(zone_id, config)
+    cache_usable = cache is not None and cache.is_usable()
 
     await listing_search_requests.record(
         journey_id=journey_id,
@@ -999,39 +1336,296 @@ async def request_listings(journey_id, zone_id, user_id, session_id, config):
         search_type=config.search_type,
         usage_type=config.usage_type,
         platforms_hash=config.platforms_hash,
-        result_source=(
-            "cache_hit" if cache and cache.is_usable() else "cache_miss"
-        ),
+        result_source="cache_hit" if cache_usable else "cache_miss",
     )
 
-    if not cache or not cache.is_usable():
-        # sem cache: usuário pode pagar créditos extras por scraping fresco
-        return ListingsRequestResult(
-            source="none",
-            freshness_status="queued_for_next_prewarm",
-            upgrade_reason="fresh_listings_requires_credits",
-            next_refresh_window="03:00–05:30",
+    if cache_usable:
+        # Etapa monetizável #3: acesso a imóveis em cache (20 créditos)
+        await check_and_consume_credits(
+            user_id=user_id, session_id=session_id,
+            step=JourneyStep.LISTINGS_CACHE, reference_id=journey_id,
         )
+        return ListingsRequestResult(source="cache", ...)
 
-    return ListingsRequestResult(source="cache", ...)
+    if config.allow_fresh_scrape:
+        # Etapa monetizável #4: scraping fresco (20 créditos) — somente se o usuário confirmou na UI
+        await check_and_consume_credits(
+            user_id=user_id, session_id=session_id,
+            step=JourneyStep.LISTINGS_SCRAPE, reference_id=journey_id,
+        )
+        await scrape_lock_and_enqueue(zone_id, config)
+        return ListingsRequestResult(source="fresh_scrape", freshness_status="scraping_now")
+
+    # Sem cache e sem opt-in para scraping fresco: cai no prewarm da próxima janela
+    return ListingsRequestResult(
+        source="none",
+        freshness_status="queued_for_next_prewarm",
+        next_refresh_window="03:00–05:30",
+    )
 ```
 
-### Prewarm noturno
+### Prewarm noturno (com inclusão Pro Max)
 
 ```python
-# APScheduler
+# APScheduler — único cron noturno
 scheduler.add_job(
-    prewarm_requested_search_locations_24h,
-    trigger="cron",
-    hour=3,
-    kwargs={"lookback_hours": 24, "limit": 100},
+    prewarm_run_nightly,
+    trigger="cron", hour=3,
+    kwargs={"lookback_hours": 24, "limit_demand": 100, "limit_pro_max": 500},
 )
+
+async def prewarm_run_nightly(lookback_hours: int, limit_demand: int, limit_pro_max: int):
+    # 1) Demanda das últimas 24 horas (regra v2.2 mantida)
+    demand = await listing_search_requests.aggregate_last_24h(limit=limit_demand)
+
+    # 2) NOVO v2.3: endereços de imóveis salvos por usuários do plano Pro Max
+    #    (a base inteira é atualizada nesta mesma run; os endereços Pro Max entram junto)
+    #    Pro (sem Pro Max) é EXCLUÍDO daqui.
+    pro_addresses = await db.fetch(
+        """
+        SELECT DISTINCT f.address_normalized AS address,
+               MAX(f.last_viewed_at) AS last_viewed_at
+          FROM user_listing_favorites f
+          JOIN subscriptions s ON s.user_id = f.user_id
+          JOIN plans p ON p.id = s.plan_id
+         WHERE s.status IN ('active', 'past_due')
+           AND p.slug = 'pro_max'              -- exclui pro
+           AND f.address_normalized IS NOT NULL
+           AND f.view_state = 'visible'
+         GROUP BY f.address_normalized
+         ORDER BY last_viewed_at DESC
+         LIMIT $1
+        """,
+        limit_pro_max,
+    )
+
+    # 3) Conjunto-alvo final = união (deduplicada por endereço)
+    target_set = build_target_set(demand_rows=demand, pro_rows=pro_addresses)
+
+    # 4) Enfileirar com PREWARM priority (LOW)
+    for item in target_set:
+        await dramatiq.send(
+            "listings_prewarm",
+            queue="prewarm",
+            priority=Priority.PREWARM,
+            kwargs={
+                "address_normalized": item.address,
+                "search_type": item.search_type,
+                "usage_type": item.usage_type,
+                "trigger_source": item.source,  # 'demand_24h' | 'pro_max_saved'
+            },
+        )
 ```
 
-- O conjunto-alvo do prewarm é composto **somente** pelos endereços/search locations pesquisados na Etapa 5 nas últimas 24 horas.
-- Ordenação de prioridade: `COUNT(*) DESC`, `MAX(requested_at) DESC` e, em empate, cache mais antigo primeiro.
-- Não existe fallback por zona popular, geohash, região, hot list manual ou cold start artificial.
-- **Alerta crítico:** prewarm não iniciou em 30 min do horário, ou < 60% dos endereços-alvo processados com sucesso.
+- O conjunto-alvo do prewarm é a **união** de:
+  - **Demanda real**: endereços/search locations pesquisados na Etapa 5 nas últimas 24 h (regra original).
+  - **Plano Pro Max (novo em v2.3)**: endereços (`address_normalized`) dos imóveis salvos por usuários com assinatura Pro Max ativa (status `active` ou `past_due` dentro do grace), independente de pesquisa recente.
+- **Pro (sem Pro Max) é excluído** desta união.
+- Ordenação por origem: demanda 24h primeiro (`COUNT(*) DESC`, `MAX(requested_at) DESC`); depois saved_pro_max (`MAX(last_viewed_at) DESC`); empate por cache mais antigo.
+- Não existe fallback por zona popular, geohash, região ou cold start artificial.
+- **Limites operacionais:** `limit_demand=100` + `limit_pro_max=500` por run inicial (ajustável). Excedente fica para a próxima janela.
+- **Alerta crítico:** prewarm não iniciou em 30 min do horário, ou `prewarm_coverage_rate < 60%` dos endereços-alvo processados com sucesso.
+
+### Refresh dedicado do Pro Max
+
+```python
+# APScheduler — fila dedicada, run noturna após o prewarm geral
+scheduler.add_job(
+    pro_max_refresh_run,
+    trigger="cron", hour=4, minute=30,
+    kwargs={"max_per_run": 200},
+)
+
+async def pro_max_refresh_run(max_per_run: int):
+    run_id = await db.fetchval(
+        "INSERT INTO pro_max_refresh_runs (status) VALUES ('running') RETURNING id"
+    )
+
+    # 1) Seleção: alvos Pro Max devidos hoje, dentro de quota e elegíveis
+    targets = await db.fetch(
+        """
+        SELECT t.id, t.user_id, t.target_kind, t.listing_favorite_id, t.zone_favorite_id,
+               t.is_priority, t.next_refresh_due_at
+          FROM pro_max_refresh_targets t
+          JOIN subscriptions s ON s.user_id = t.user_id
+          JOIN plans p ON p.id = s.plan_id
+         WHERE p.slug = 'pro_max'
+           AND s.status IN ('active', 'past_due')
+           AND t.is_active = true
+           AND t.next_refresh_due_at <= NOW()
+         ORDER BY t.is_priority DESC, t.next_refresh_due_at ASC
+         LIMIT $1
+        """,
+        max_per_run,
+    )
+
+    for t in targets:
+        await dramatiq.send(
+            f"pro_max_refresh_{t['target_kind']}",
+            queue="pro_max_refresh",
+            priority=Priority.PRO_MAX_REFRESH,
+            kwargs={"target_id": str(t["id"]), "run_id": str(run_id)},
+        )
+```
+
+**Política de elegibilidade e franquia (mantida em sincronia com `plan_entitlements`):**
+
+```python
+async def reconcile_pro_max_targets(user_id: UUID) -> None:
+    """Idempotente. Roda em on_favorite_change, on_subscription_change e no início do refresh run."""
+    ent = await entitlements.resolve(user_id)
+    if ent.auto_refresh_policy != "managed_queue":
+        await db.execute(
+            "UPDATE pro_max_refresh_targets SET is_active=false WHERE user_id=$1",
+            user_id,
+        )
+        return
+
+    eligibility_cutoff = now() - timedelta(days=ent.pro_max_refresh_eligibility_days)
+
+    # Listings: ativo se visualizado nos últimos N dias OU priority_flag = true
+    candidates_listing = await db.fetch(
+        """SELECT id, last_viewed_at, priority_flag
+             FROM user_listing_favorites
+            WHERE user_id=$1 AND view_state='visible'
+              AND (last_viewed_at >= $2 OR priority_flag = true)
+            ORDER BY priority_flag DESC, last_viewed_at DESC
+            LIMIT $3""",
+        user_id, eligibility_cutoff, ent.pro_max_refresh_max_listings,
+    )
+    candidates_zone = await db.fetch(
+        """SELECT id, last_viewed_at, priority_flag
+             FROM user_zone_favorites
+            WHERE user_id=$1 AND view_state='visible'
+              AND (last_viewed_at >= $2 OR priority_flag = true)
+            ORDER BY priority_flag DESC, last_viewed_at DESC
+            LIMIT $3""",
+        user_id, eligibility_cutoff, ent.pro_max_refresh_max_zones,
+    )
+    await upsert_targets(user_id, candidates_listing, candidates_zone, ent)
+```
+
+**Cadência:** ao concluir um refresh com sucesso, o handler atualiza
+`last_refreshed_at = NOW()` e `next_refresh_due_at = NOW() + cadence_days * INTERVAL '1 day'`. Falhas: backoff `[1d, 2d, 4d]` em `failure_count`; 3 falhas → `is_active = false`, badge "Refresh manual" exibido na UI.
+
+**Idempotência:** o handler reaproveita o cache do scraping geral quando aplicável (deduplicação por `address_normalized + search_type + usage_type`).
+
+### Billing atual — Pix
+
+Fluxo de ativação por Pix:
+
+```text
+Usuário escolhe plano
+  → POST /billing/pix/checkout
+  → backend cria payment pending
+  → backend gera QR Code / copia e cola
+  → frontend exibe pagamento
+  → confirmação manual ou callback
+  → backend marca payment paid
+  → ativa plan_activation por 30 dias
+  → concede créditos do ciclo
+  → registra credit_ledger
+```
+
+### Endpoints Pix
+
+```http
+POST /billing/pix/checkout
+GET  /billing/payments/{payment_id}
+POST /billing/pix/confirm
+POST /billing/pix/callback
+POST /billing/payments/{payment_id}/cancel
+```
+
+#### `POST /billing/pix/checkout`
+
+Entrada:
+
+```json
+{
+  "plan_slug": "basico",
+  "payment_type": "plan_activation"
+}
+```
+
+Saída:
+
+```json
+{
+  "payment_id": "uuid",
+  "plan_slug": "basico",
+  "amount_brl": 21.99,
+  "status": "pending",
+  "expires_at": "2026-04-26T23:59:00-03:00",
+  "qr_code_payload": "...",
+  "pix_copy_paste": "...",
+  "qr_code_image_url": "..."
+}
+```
+
+#### Confirmação Pix
+
+Na primeira versão, pode ser manual/admin:
+
+```http
+POST /admin/billing/pix/{payment_id}/confirm
+```
+
+Regras:
+- só admins podem confirmar manualmente;
+- confirmação é idempotente;
+- um pagamento confirmado não pode ser confirmado de novo;
+- um pagamento expirado não pode ativar plano sem recriação.
+
+#### Ativação do plano por Pix
+
+```python
+async def activate_plan_from_pix(payment_id: UUID):
+    async with db.transaction():
+        payment = await lock_payment(payment_id)
+
+        if payment.status == "paid":
+            return AlreadyProcessed()
+
+        if payment.status != "pending":
+            raise InvalidPaymentState()
+
+        if payment.expires_at < now():
+            raise PaymentExpired()
+
+        await mark_payment_paid(payment_id)
+
+        activation = await create_plan_activation(
+            user_id=payment.user_id,
+            plan_id=payment.plan_id,
+            source_payment_id=payment.id,
+            started_at=now(),
+            ends_at=now() + timedelta(days=30),
+        )
+
+        plan = await get_plan(payment.plan_id)
+
+        await grant_cycle_credits(
+            user_id=payment.user_id,
+            plan_id=plan.id,
+            amount=plan.monthly_credits,
+            reason="pix_plan_activation",
+            reference_id=activation.id,
+        )
+
+        await emit_event("billing.plan_activated", user_id=payment.user_id)
+```
+
+### Billing futuro — Stripe (Fase 10)
+
+Stripe fica em Fase 10. Escopo futuro:
+- Stripe Billing;
+- assinatura recorrente;
+- portal do cliente;
+- upgrades/downgrades com proration;
+- dunning e retries;
+- Payment Intent para top-up avulso;
+- webhooks `customer.subscription.*` e `invoice.*`.
 
 ### Geração de relatório PDF
 
@@ -1118,14 +1712,16 @@ Mobile: painel vira bottom sheet arrastável; mapa continua principal.
 - Ponto de referência principal (clique no mapa ou busca textual)
 - Ponto secundário opcional (trabalho, escola — não afeta isócronas)
 - Aluguel / Compra
-- Raio da zona (metros)
-- Modal: Transporte público | A pé | Carro (PRO — lock + CTA gratuito)
-- Tempo máximo (minutos)
-- Distância máxima até seed de transporte
-- Checkboxes de análise: verde, alagamento, segurança, POIs
+- Raio da zona (metros) — **lock visual** com tooltip "Disponível a partir do plano Básico" para Anônimo/Free
+- Modal: Transporte público | A pé | Carro
+- Tempo máximo (minutos) — mesma regra de lock por plano
+- Distância máxima até seed de transporte — mesma regra de lock
+- Checkboxes de análise: verde, alagamento, segurança, POIs — limitados a `max_active_metrics` do plano (Básico=4; Pro/Pro Max sem limite). Tentar ativar a 5ª métrica no Básico abre modal "Atualize para Pro".
 - Botão "Achar pontos de transporte"
 
 **Mapa:** cursor vira pin somente sobre o mapa ao entrar em modo de seleção.
+
+**Bloqueio por entitlement:** campos travados exibem ícone 🔒 com tooltip do plano necessário. O lock é visual + servidor (`assert_can_customize`); cliente não envia o campo se não tiver permissão.
 
 #### Etapa 2 — Seleção do ponto de transporte
 
@@ -1148,6 +1744,8 @@ subtarefas concluídas, botão cancelar.
 
 **Painel:** lista por `travel_time_minutes` asc (empates por `walk_distance_meters` asc),
 badges incrementais, filtros, detalhes da zona selecionada, grupos de POIs, CTA "buscar imóveis".
+
+**Restrição Free cadastrado:** quando `transport_line_policy = 'top_2_lines'`, a UI exibe somente as zonas geradas a partir das 2 linhas selecionadas pelo algoritmo de priorização (linha com maior densidade + linha com segunda menor densidade). Banner persistente: "Veja todas as zonas com o plano Básico (R$ 21,99/mês)."
 
 **Mapa:** rótulos numéricos nos polígonos, ponto de transporte persistente,
 rotas visíveis, POIs sob demanda.
@@ -1183,6 +1781,88 @@ Segurança, área verde, área alagável, contagem de POIs, resumo transporte.
 **Mapa (ao clicar "ver acessibilidade"):** melhor rota a pé até cada categoria de POI
 e até o transporte. Alternância entre categorias sem recarregar.
 
+### UI/UX de planos, salvos e billing (v2.4 — Pix)
+
+#### Telas principais
+
+| Tela | Objetivo |
+|---|---|
+| Mapa / jornada | Execução da análise |
+| Favoritos | Imóveis e zonas salvas |
+| Comparação | Comparar salvos dentro da janela do plano |
+| `/planos` | Escolha do plano e Pix |
+| `/conta` | Plano atual, créditos e histórico |
+| Modal Pix | QR Code, copia e cola, status |
+
+#### Header e estado global de plano
+
+- **Badge de plano** no header: chip colorido por tier (`Free` neutro, `Básico` azul, `Pro` roxo, `Pro Max` dourado).
+- **Saldo dual**: pílula `cycle_credits` (com ícone de relógio para indicar expiração) + `legacy_balance` (com ícone de pacote). Hover abre tooltip com `rollover_balance` separado e dias restantes do ciclo.
+- `useEntitlements()` hook centraliza acesso aos limites resolvidos no servidor. SSE event `entitlements.changed` (emitido em `plan_activations`) força refetch e invalida caches dependentes.
+
+#### Página `/planos`
+
+Cada plano exibe: preço, créditos, número de jornadas equivalentes, limite de imóveis salvos, limite de zonas salvas, retenção, métricas, parâmetros e refresh.
+
+- 4 cards lado a lado: Free, Básico, Pro, Pro Max. Plano atual destaca-se com borda + chip "Seu plano".
+- CTA primária por card varia: `Plano atual` (Free), `Pagar via Pix` (Básico/Pro/Pro Max).
+- Linha por linha de comparação alinhada à tabela da Seção 11.
+
+#### Modal Pix
+
+Estados:
+
+| Estado | UI |
+|---|---|
+| pending | QR Code + copia e cola + timer |
+| paid | "Pagamento confirmado. Plano ativado." |
+| expired | "QR Code expirado. Gerar novo Pix." |
+| cancelled | "Pagamento cancelado." |
+
+#### Painel de favoritos
+
+`FavoritesPanel` com 3 estados por item:
+
+| Estado | Indicador visual | Texto |
+|---|---|---|
+| `visible` + recente | borda neutra | `Snapshot há 3h` |
+| `visible` + Pro Max | badge azul "Atualizado" | `Refresh em 3 dias` |
+| `expired_for_view` | overlay 30% opaco + lock | `Janela de visualização expirou. Atualize seu plano.` |
+| `over_limit_grace` | banner amarelo | `Excedeu o limite do plano. Será arquivado em 5 dias.` |
+
+- **Star de prioridade (Pro Max)**: ícone toggle no canto do card. Click → `PATCH /favorites/listings/{key} {priority_flag: true}` → reconcilia `pro_max_refresh_targets`.
+- **Aba "Sob refresh automático"** (somente Pro Max): lista os itens dentro da franquia com `next_refresh_due_at`.
+
+#### Página `/conta`
+
+Deve exibir:
+- plano atual;
+- data de início e fim do ciclo;
+- créditos restantes e buckets de crédito;
+- histórico de pagamentos Pix;
+- histórico de créditos (`credit_ledger` paginado);
+- botão "Renovar via Pix" quando próximo do fim do ciclo.
+
+#### Modais críticos
+
+- **Limite de salvos atingido**: título "Você atingiu seu limite", lista os limites do próximo tier, CTA "Ativar via Pix". Inclui opção secundária "Remover um existente".
+- **Saldo insuficiente**: mostra etapa pretendida, custo (20), saldo atual, próximo refresh do ciclo, CTA "Ativar plano via Pix".
+- **Janela de retenção expirada**: título "Visualização expirada", explica a regra do plano atual, CTA "Ativar Pro via Pix".
+
+#### UX de Stripe futuro
+
+Não exibir portal Stripe nem proration nesta fase. Os textos devem falar em:
+- "ativar via Pix";
+- "renovar via Pix";
+- "pagamento aguardando confirmação";
+- "Stripe será usado futuramente para automação de cobrança".
+
+#### Acessibilidade e i18n
+
+- Todos os textos em pt-BR. Variáveis monetárias em `Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' })`.
+- Estados de lock têm `aria-disabled="true"` + descrição via `aria-describedby` apontando para o tooltip.
+- Cores de plano respeitam contraste WCAG AA mesmo no badge dourado (Pro Max).
+
 ### Gerenciamento de estado
 
 | Store | Biblioteca | Conteúdo |
@@ -1190,8 +1870,9 @@ e até o transporte. Alternância entre categorias sem recarregar.
 | `ui-store` | Zustand | painel, aba ativa, layer menu, popups, hover |
 | `journey-store` | Zustand | ponto principal, seleções, parâmetros, etapas stale |
 | `map-store` | Zustand | layers visíveis, viewport, instância mapa |
-| Server state | TanStack Query | zonas, imóveis, métricas, progresso de jobs |
-| SSE bridge | custom hook | invalida queries TanStack ao receber eventos SSE |
+| `plan-store` | Zustand | entitlements resolvidos, plano vigente, saldos por bucket, status da assinatura |
+| Server state | TanStack Query | zonas, imóveis, métricas, progresso de jobs, salvos com `last_refreshed_at` |
+| SSE bridge | custom hook | invalida queries TanStack ao receber `entitlements.changed`, `favorites.refreshed`, `subscription.changed` |
 
 ### Regras de performance do mapa
 
@@ -1232,119 +1913,232 @@ EMAIL_FROM: str = "noreply@find-ideal-estate.com.br"
 O usuário acessa sem cadastro. Jornada associa-se a `anonymous_session_id` (cookie).
 Autenticação exigida apenas em momentos de alto valor:
 - Download do relatório PDF.
-- Salvar jornada.
+- Salvar jornada / favoritos persistentes.
 - Acessar histórico.
-- Comprar créditos.
+- Assinar plano pago / comprar pacote avulso.
 
-No cadastro, jornada anônima migrada atomicamente e créditos de sessão transferidos com bônus:
+**Regra de migração (decisão fechada):** o saldo anônimo remanescente **NÃO é somado** ao saldo do plano Free. O usuário recém-cadastrado recebe **saldo fixo de 350 créditos** no bucket `cycle_credits` do plano Free; o saldo anônimo é descartado (com auditoria). Apenas jornadas e contexto da sessão anônima são preservados.
 
 ```sql
 BEGIN;
+
 UPDATE journeys
    SET user_id = :new_user_id, anonymous_session_id = NULL
  WHERE anonymous_session_id = :session_id AND user_id IS NULL;
--- cria conta de créditos com saldo de sessão + bônus de cadastro (30)
-INSERT INTO user_credits (user_id, balance)
-VALUES (:new_user_id, :session_balance + 30)
-ON CONFLICT (user_id) DO UPDATE SET balance = EXCLUDED.balance;
-INSERT INTO credit_ledger (user_id, delta, reason, balance_after)
-VALUES  (:new_user_id, :session_balance, 'initial_session', :session_balance),
-        (:new_user_id, 30, 'signup_bonus', :session_balance + 30);
+
+INSERT INTO plan_activations (user_id, plan_id, status, started_at, ends_at)
+SELECT :new_user_id, p.id, 'active', NOW(), NOW() + INTERVAL '30 days'
+  FROM plans p
+ WHERE p.slug = 'free';
+
+INSERT INTO user_credits (
+  user_id, plan_id, cycle_credits, monthly_quota, cycle_started_at, cycle_ends_at
+)
+SELECT :new_user_id, p.id, 350, 350, NOW(), NOW() + INTERVAL '30 days'
+  FROM plans p
+ WHERE p.slug = 'free'
+ON CONFLICT (user_id) DO UPDATE
+  SET cycle_credits = 350,
+      monthly_quota = 350,
+      cycle_started_at = NOW(),
+      cycle_ends_at = NOW() + INTERVAL '30 days';
+
+INSERT INTO credit_ledger (user_id, bucket, delta, reason, balance_after)
+VALUES (:new_user_id, 'cycle', 350, 'signup_grant_free', 350);
+
+INSERT INTO credit_ledger (user_id, bucket, delta, reason, balance_after)
+VALUES (:new_user_id, 'cycle', 0, 'anonymous_balance_discarded', 350);
+
 COMMIT;
 ```
+
+**Migração de usuários pré-2.4:** usuários com assinatura Stripe migram para `plan_activations` com `status = 'active'` e `source_payment_id = NULL`. O saldo legado é preservado em `legacy_balance`.
 
 **TTL de sessão anônima:** 7 dias de inatividade.
 Jornadas com relatório gerado: 30 dias.
 
-### Mapa de dependência de auth por fase
+### Resolução de plano por usuário
 
-| Feature | Fase | Depende de auth? |
-|---|---|---|
-| Análise de transporte e zonas | 4 | Não (créditos de sessão) |
-| Cache de imóveis | 6 | Não (créditos de sessão) |
-| Badge de frescor | 6 | Não |
-| Scraping fresco (créditos extras) | 6 | Não (créditos de sessão) |
-| Download do relatório PDF | 7 | Sim (CTA de cadastro + crédito de sessão ou conta) |
-| Histórico de análises | 7 | Sim |
-| Compra de créditos (Stripe) | 8 | Sim |
-| Saldo e extrato de créditos | 8 | Sim |
+Toda request autenticada passa por middleware que injeta `request.state.entitlements`:
 
-**Fases 6–7 sem auth completa:** créditos de sessão trackeados por Redis `credit:session:{session_id}` com TTL 7 dias.
-A conta de créditos real (com `user_credits` + `credit_ledger`) só é criada na Fase 8.
-Sessões anônimas que se cadastram recebem: créditos de sessão migrados + 30 de bônus.
+```python
+async def entitlements_middleware(request, call_next):
+    user_id = getattr(request.state, "user_id", None)
+    if user_id:
+        request.state.entitlements = await entitlements.resolve(user_id)
+    else:
+        request.state.entitlements = ANONYMOUS_DEFAULT_ENTITLEMENTS
+    return await call_next(request)
+```
+
+`ANONYMOUS_DEFAULT_ENTITLEMENTS` é um singleton imutável que reflete a linha do plano `anonymous` em `plan_entitlements`.
+
+### Mapa de dependência de auth por fase (v2.3)
+
+| Feature | Fase | Depende de auth? | Plano mínimo |
+|---|---|---|---|
+| Análise de transporte e zonas | 4 | Não (créditos de sessão) | anônimo |
+| Cache de imóveis | 6 | Não (créditos de sessão) | anônimo |
+| Badge de frescor | 6 | Não | anônimo |
+| Scraping fresco | 6 | Não (mesma lógica de etapa monetizável) | anônimo |
+| Download do relatório PDF | 7 | Sim (CTA de cadastro) | free |
+| Histórico de análises | 7 | Sim | free |
+| Salvar imóvel/zona | 6 | Sim | free (5/2) |
+| Customizar raio/tempo/distância | 4 | Sim | basico |
+| Selecionar qualquer zona | 4 | Sim | basico |
+| > 4 métricas simultâneas | 4 | Sim | pro |
+| Inclusão noturna no prewarm | 7 | Sim | pro |
+| Refresh automático semanal de salvos | 9 | Sim | pro_max |
+| Assinatura recorrente / billing | 8 | Sim | qualquer pago |
+
+**Fases 6–7 sem auth completa:** créditos de sessão trackeados por Redis `credit:session:{session_id}` com TTL 7 dias. A assinatura real é criada na Fase 8.
 
 ---
 
 ## 11. Monetização
 
-### Modelo de créditos
+### Modelo comercial
 
-O único modelo de monetização implementado é a **venda de cotas de crédito**. Não há assinatura recorrente.
+O produto opera em modelo:
 
-Cada operação da jornada consome uma quantidade definida de créditos. O saldo é pessoal e não expira.
+```text
+freemium + planos mensais + créditos por ciclo + entitlements por plano
+```
 
-#### Créditos iniciais
+A cobrança prioritária da primeira versão é:
 
-| Momento | Créditos concedidos | Observação |
-|---|---|---|
-| Primeiro acesso (sem cadastro) | **30 créditos** | Rastreados por sessão (cookie) |
-| Cadastro (magic link) | **+30 créditos** | Bônus de boas-vindas; créditos de sessão migrados automaticamente |
-| **Total após cadastro** | **60 créditos** | Suficiente para 6 análises via transporte público ou 2 análises a pé/carro |
+```text
+Pix com QR Code / Pix Copia e Cola
+```
 
-> **Proporcionalidade garantida:** 30 créditos de sessão permitem exatamente 3 análises completas via transporte público **ou** 1 análise completa a pé/carro.
+Stripe permanece no roadmap, mas não bloqueia o lançamento da monetização.
 
-#### Custo por operação
+### Unidade de consumo
 
-| Etapa | Operação | Créditos |
-|---|---|---|
-| 1 | Configuração da jornada | 0 |
-| 2 | Busca de pontos de transporte | 0 |
-| 3 | Geração de zona — transporte público | 7 |
-| 3–4 | Enriquecimento de zona — transporte público | 2 |
-| 3 | Geração de zona — a pé ou carro | 24 |
-| 3–4 | Enriquecimento de zona — a pé ou carro | 4 |
-| 5 | Acesso a imóveis em cache (por zona) | 1 (transporte) / 2 (a pé/carro) |
-| 5 | Scraping fresco de imóveis (por zona) | +5 (além do custo de cache) |
-| 6 | Geração de relatório PDF | 5 |
+| Etapa | Créditos |
+|---|---:|
+| Geração de zona | 20 |
+| Enriquecimento de zona | 20 |
+| Acesso a imóveis em cache | 20 |
+| Scraping fresco sob demanda | 20 |
+| Relatório/export analítico | 20 |
 
-**Custo total típico por análise completa (sem relatório):**
+Total:
 
-| Modal | Geração + Enriquecimento + Cache | Total |
-|---|---|---|
-| Transporte público | 7 + 2 + 1 | **10 créditos** |
-| A pé | 24 + 4 + 2 | **30 créditos** |
-| Carro | 24 + 4 + 2 | **30 créditos** |
+```text
+1 jornada completa = 100 créditos
+```
 
-#### Pacotes de créditos (compra avulsa)
+### Planos
 
-| Pacote | Créditos | Preço | Equivalência |
-|---|---|---|---|
-| Starter | 60 créditos | R$ 9,90 | 6 análises de transporte público ou 2 a pé/carro |
-| Explorer | 150 créditos | R$ 19,90 | 15 análises de transporte público ou 5 a pé/carro |
-| Pro | 400 créditos | R$ 44,90 | 40 análises de transporte público ou ~13 a pé/carro |
+| Plano | Preço | Créditos | Imóveis salvos | Zonas salvas | Retenção | Parametrização | Métricas | Atualização |
+|---|---:|---:|---:|---:|---:|---|---|---|
+| Anônimo | — | 350 sessão | 0 | 0 | 7 dias sessão | travada | default | não |
+| Free | R$ 0 | 350 | 5 | 2 | 7 dias | travada | default | não |
+| Básico | R$ 21,99 | 800 | 20 | 4 | 30 dias | limitada | 4 | não |
+| Pro | R$ 90,99 | 4000 | 100 | 20 | 30 dias | liberada | sem limite | não |
+| Pro Max | R$ 121,99 | 20000 | 100 | 20 | 30 dias | liberada | sem limite | sim, controlada |
 
-> Três pacotes Starter equivalem ao valor do pacote Pro — argumento natural de upgrade.
+### Plano Anônimo
 
-#### CTAs contextualizadas
+- 350 créditos de sessão;
+- até 3 jornadas completas;
+- parâmetros travados;
+- sem favoritos persistentes;
+- sem atualização automática.
 
-- Saldo insuficiente para zona a pé/carro: `"Você precisa de 30 créditos para esta análise — adquira créditos a partir de R$ 9,90"`
-- Saldo insuficiente para scraping fresco: `"Você precisa de mais 5 créditos para scraping agora — adquira créditos a partir de R$ 9,90"`
-- Saldo insuficiente para relatório: `"Você precisa de 5 créditos para gerar o relatório — adquira créditos a partir de R$ 9,90"`
-- Endereço sem cache e sem créditos suficientes: UI mostra saldo atual e botão de compra no momento de maior frustração (maior conversão).
-- Primeiro acesso sem cadastro próximo de zerar créditos: `"Cadastre-se agora e ganhe 30 créditos gratuitos extras"`
+### Plano Free
 
-### Stripe — eventos obrigatórios (Payment Intent, compra avulsa)
+- 350 créditos por ciclo;
+- não soma com saldo anônimo;
+- 5 imóveis salvos;
+- 2 zonas salvas;
+- retenção de 7 dias;
+- acesso à comparação por 7 dias;
+- parâmetros travados;
+- zonas limitadas a 2 linhas de transporte público escolhidas automaticamente.
 
-| Evento | Ação |
-|---|---|
-| `payment_intent.succeeded` | Creditar pacote em `user_credits`; registrar em `credit_ledger`; registrar em `credit_purchases` |
-| `payment_intent.payment_failed` | Marcar `credit_purchases.status = failed`; notificar usuário |
-| `charge.refunded` | Estornar créditos via `credit_ledger` (delta negativo com `reason = 'refund'`); marcar `credit_purchases.status = refunded` |
-| `checkout.session.completed` | Confirmação de sessão de checkout antecedendo o Payment Intent |
+### Plano Básico
+
+- R$ 21,99/mês;
+- 800 créditos;
+- 20 imóveis salvos;
+- 4 zonas salvas;
+- retenção e comparação por 30 dias;
+- customização de raio, tempo e distância dentro do limite do plano;
+- qualquer zona;
+- até 4 métricas.
+
+### Plano Pro
+
+- R$ 90,99/mês;
+- 4000 créditos;
+- 100 imóveis salvos;
+- 20 zonas salvas;
+- retenção e comparação por 30 dias;
+- qualquer zona;
+- métricas ilimitadas;
+- sem atualização automática.
+
+### Plano Pro Max
+
+- R$ 321,99/mês;
+- herda Pro;
+- refresh automático controlado:
+  - até 10 zonas ativas;
+  - até 30 imóveis ativos;
+  - cadência de 7 dias;
+  - elegibilidade por visualização nos últimos 30 dias ou prioridade manual.
+
+### Política de créditos
+
+- créditos do ciclo expiram no fim do ciclo;
+- rollover de até 25% por 1 ciclo;
+- créditos avulsos/top-up futuros entram em `legacy_balance`;
+- consumo FIFO:
+  - `cycle_credits`;
+  - `rollover_balance`;
+  - `legacy_balance`.
+
+### Pagamento via Pix
+
+#### Ativação
+
+1. Usuário escolhe plano.
+2. Sistema gera cobrança Pix.
+3. Usuário paga.
+4. Sistema confirma pagamento.
+5. Plano é ativado por 30 dias.
+6. Créditos são concedidos.
+
+#### Renovação
+
+Na primeira versão, a renovação é manual:
+- antes do vencimento, o usuário recebe CTA de renovação;
+- gera novo Pix;
+- ao pagar, novo ciclo é iniciado.
+
+#### Confirmação
+
+A confirmação pode ser:
+- manual por admin na primeira versão;
+- automática via callback de provedor Pix em versão seguinte.
+
+### Stripe futuro
+
+Stripe entra depois para:
+- assinatura recorrente;
+- portal do cliente;
+- upgrades e downgrades automáticos;
+- proration;
+- retries;
+- dunning;
+- webhooks de assinatura;
+- top-up automatizado.
 
 ---
 
-## 12. Roadmap por Fase (0–8)
+## 12. Roadmap por Fase (0–10)
 
 > **Convenção de milestones:**
 > Cada fase é dividida em marcos internos (M*fase*.*n*) que podem ser verificados
@@ -1721,7 +2515,7 @@ após 3ª: `zones.badges.finalized` emitido exatamente uma vez. ✅
 
 **Verificação:** Dashboard carrega com dados reais para zona de teste; LineChart mostra exatamente 30 pontos para sessão FREE. ✅ (2026-03-22: `ui/src/App.test.tsx` valida aba Dashboard, `Pontos exibidos: 30`, `Tempo médio ao ponto-semente: 41 min`, `7 linhas (3 usadas)` e top 6 categorias de POI com corte da 7ª categoria; milestone fechado por confirmação explícita do responsável)
 
-#### M6.3 — Job `REPORT_GENERATE` ⬜
+#### M6.3 — Job `REPORT_GENERATE` ⬜ -> **SUSPENSO**
 - [ ] Template Jinja2 HTML com seções: cabeçalho da jornada, mapa (imagem base64), lista de zonas comparativa, detalhes dos imóveis, dashboard
 - [ ] WeasyPrint: HTML → PDF
 - [ ] Upload para R2/S3; signed URL com TTL de 7 dias
@@ -1730,7 +2524,7 @@ após 3ª: `zones.badges.finalized` emitido exatamente uma vez. ✅
 
 **Verificação:** PDF gerado em < 20s para jornada com 5 zonas e 20 imóveis; tamanho < 5MB.
 
-#### M6.4 — Captura do mapa no frontend ⬜
+#### M6.4 — Captura do mapa no frontend ⬜-> **SUSPENSO**
 - [ ] `MapShell` inicializado com `preserveDrawingBuffer: true`
 - [ ] `map.getCanvas().toDataURL('image/png')` chamado antes de `POST /reports`
 - [ ] Imagem incluída no payload (base64); endpoint valida presença da imagem
@@ -1738,7 +2532,7 @@ após 3ª: `zones.badges.finalized` emitido exatamente uma vez. ✅
 
 **Verificação:** relatório gerado com imagem de mapa não-transparente.
 
-#### M6.5 — Mapa de acessibilidade de imóvel ⬜
+#### M6.5 — Mapa de acessibilidade de imóvel ⬜-> **SUSPENSO**
 - [ ] "Ver acessibilidade" em card de imóvel → mapa mostra rota a pé até ponto de transporte
 - [ ] Rotas para categorias de POI: escola, supermercado, farmácia, parque (top 4)
 - [ ] Alternância entre categorias sem recarregar (Zustand: categoria ativa → layer toggle)
@@ -1746,7 +2540,7 @@ após 3ª: `zones.badges.finalized` emitido exatamente uma vez. ✅
 
 **Verificação:** clicar "Ver acessibilidade" → 5 rotas aparecem no mapa sem piscar.
 
-#### M6.6 — Saldo de créditos e CTA de cadastro ⬜
+#### M6.6 — Saldo de créditos e CTA de cadastro ⬜-> **SUSPENSO**
 - [ ] Sessão anônima próxima de zerar créditos (≤ 15) → banner `"Cadastre-se e ganhe 30 créditos extras"`
 - [ ] Operação com créditos insuficientes → modal com saldo atual, custo da operação e botão "Comprar créditos" (redireciona para Fase 8)
 - [ ] `GET /account/credits/session` retorna `{balance}` para sessões anônimas (lê Redis)
@@ -1777,122 +2571,235 @@ após 3ª: `zones.badges.finalized` emitido exatamente uma vez. ✅
 
 ---
 
-### Fase 7 — Scheduler noturno (prewarm) ⬜
+### Fase 7 — Scheduler noturno (prewarm + inclusão Pro Max) ⬜
 
-**Objetivo:** usuários gratuitos recebem dados de imóveis apenas para os endereços/search locations realmente pesquisados na Etapa 5 nas últimas 24 horas.
-**Esforço estimado:** 4–5 dias · **Status:** ⬜ Não iniciada
-**Dependências bloqueantes:** M5.6, M6.5.
+**Objetivo:** atualizar a base de imóveis durante a janela noturna, cobrindo (1) endereços efetivamente pesquisados nas últimas 24 h e (2) endereços de imóveis salvos por usuários do plano Pro Max.
+**Esforço estimado:** 5–6 dias · **Status:** ⬜ Não iniciada
+**Dependências bloqueantes:** M5.6, M6.5, M8.3 (modelo de planos).
 
 #### M7.1 — APScheduler integrado ⬜
 - [ ] APScheduler em `worker-scheduler` dedicado
 - [ ] Jobs não bloqueiam API nem `worker-general`
-- [ ] Um cron registrado:
-  - `03:00`: `prewarm_requested_search_locations_24h(lookback_hours=24, limit=100)`
+- [ ] Um cron registrado: `03:00` → `prewarm_run_nightly(lookback_hours=24, limit_demand=100, limit_pro_max=500)`
 - [ ] Logs de início/fim de cada run com `prewarm_last_run_status`
 
 **Verificação:** scheduler inicia com o stack e o cron de 03:00 é registrado corretamente.
 
-#### M7.2 — `prewarm_requested_search_locations_24h` ⬜
-- [ ] Query agrega `listing_search_requests` com `requested_at >= now() - interval '24 hours'`
-- [ ] Ordenação: `COUNT(*) DESC`, `MAX(requested_at) DESC`, `cache_age DESC`
-- [ ] Limite inicial de 100 endereços/search locations por run
+#### M7.2 — Conjunto-alvo (demanda 24h ∪ saved Pro Max) ⬜
+- [ ] Query 1: agrega `listing_search_requests` com `requested_at >= now() - interval '24 hours'` (até `limit_demand`)
+- [ ] Query 2: `user_listing_favorites JOIN subscriptions JOIN plans` filtrando `plans.slug = 'pro_max'` e `subscriptions.status IN ('active','past_due')` (até `limit_pro_max`)
+- [ ] Pro (sem Pro Max) **excluído** (deduplicação por `user_id` no `WHERE`)
+- [ ] União deduplicada por `(address_normalized, search_type, usage_type)` com `trigger_source` registrado por linha
 - [ ] Cada item enfileira `LISTINGS_PREWARM` com `Priority.PREWARM = 5`
-- [ ] Job de prewarm cede imediatamente a qualquer `USER_REQUEST`
-- [ ] `last_prewarmed_at` do cache correspondente é atualizado ao concluir
+- [ ] `last_prewarmed_at` do cache + `last_refreshed_at` em `user_listing_favorites` atualizados ao concluir
 
-**Verificação:** endereço mais buscado nas últimas 24h tem cache renovado após o run do prewarm.
+**Verificação:** usuário Pro Max com 3 imóveis salvos sem busca recente → run noturna processa esses endereços e atualiza `last_refreshed_at`.
 
 #### M7.3 — Sem fallback e sem cold start artificial ⬜
 - [ ] Nenhuma query por zonas populares, geohash, região ou listas manuais
-- [ ] Se nenhum endereço foi pesquisado nas últimas 24h, o scheduler não enfileira scraping
+- [ ] Se ambos os conjuntos estão vazios, o scheduler não enfileira scraping
 - [ ] FREE sem cache recebe UI de fila para o próximo prewarm; não há scraping imediato
 
-**Verificação:** base zerada + nenhuma busca em 24h → prewarm executa sem itens e finaliza como `success_empty`.
+**Verificação:** base zerada + nenhuma busca em 24h + nenhum usuário Pro Max com salvos → prewarm executa sem itens e finaliza como `success_empty`.
 
 #### M7.4 — Métricas e alertas de prewarm ⬜
 - [ ] Métrica `prewarm_coverage_rate`: `enderecos_processados / enderecos_enfileirados`
-- [ ] Métrica `prewarm_target_count_24h`: quantidade de endereços distintos elegíveis no período
+- [ ] Métrica `prewarm_target_count_24h`: agora segmentada por `trigger_source` (`demand_24h`, `pro_max_saved`)
+- [ ] Métrica `prewarm_pro_max_inclusion_count`: número de endereços únicos vindos de salvos Pro Max por run
 - [ ] `prewarm_last_run_status`: `success | success_empty | partial | failed`
 - [ ] **Alerta crítico 1:** prewarm não inicia em 30 min → `prewarm_start_overdue`
-- [ ] **Alerta crítico 2:** `prewarm_coverage_rate < 0.60` ao fim do run quando `prewarm_target_count_24h > 0`
+- [ ] **Alerta crítico 2:** `prewarm_coverage_rate < 0.60` quando `prewarm_target_count_24h > 0`
 
 **Verificação:** matar `worker-scrape-browser` durante o prewarm → alerta gerado em < 35 min.
 
-#### M7.5 — UI para endereço sem cache (FREE) ⬜
-- [ ] FREE sem cache disponível → banner: `"Este endereço entrou na fila de atualização noturna."`
+#### M7.5 — UI para endereço sem cache ⬜
+- [ ] Free/Anônimo sem cache: banner `"Este endereço entrou na fila de atualização noturna."`
 - [ ] Linha secundária: `"Se houver anúncios disponíveis, eles aparecerão após a próxima atualização."`
-- [ ] CTA contextual: `"Veja agora com o plano Pro — scraping sob demanda"`
-- [ ] Endereço com cache fresco exibe badge explícito: `"Dados de 10h atrás"`
+- [ ] CTA contextual por plano:
+  - Anônimo/Free: `"Cadastre-se / Atualize para Básico — scraping sob demanda"`
+  - Básico: `"Atualize para Pro — seus salvos atualizados toda noite"`
+- [ ] Endereço com cache fresco exibe badge: `"Dados de 10h atrás"`
+- [ ] Pro: cards de imóveis salvos exibem `"Atualizado hoje · run noturna"` quando `last_refreshed_at` está dentro de 24 h
 
-**Verificação:** endereço pesquisado hoje sem cache mostra banner correto; após o prewarm seguinte, o banner some e a lista é servida do cache.
+**Verificação:** endereço pesquisado hoje sem cache mostra banner correto; após o prewarm seguinte, o banner some, a lista é servida do cache, e usuário Pro vê o badge "Atualizado hoje" em seus salvos correspondentes.
 
 ---
 
-### Fase 8 — Auth + créditos + Stripe avulso 🔄
+### Fase 8 — Auth + planos + ativação por Pix 🔄
 
-**Objetivo:** produto monetizável com sistema de créditos real, compra avulsa via Stripe e distinção entre sessão anônima e conta autenticada.
-**Esforço estimado:** 10–12 dias · **Status:** 🔄 Em progresso
+**Objetivo (v2.4 reescopo):** produto monetizável com **planos mensais ativados via Pix com QR Code / Pix Copia e Cola**, enforcement de entitlements em API+UI. Stripe Billing fica para Fase 10.
+**Esforço estimado:** 12–14 dias · **Status:** 🔄 Em progresso (M8.1–M8.8 implementados; M8.9 pendente)
 **Dependências bloqueantes:** M6.5, M7.4.
 
 #### M8.1 — Auth e-mail/senha ✅
-> _Desvio do plano: implementado auth customizado (e-mail + senha) em vez de fastapi-users + magic link. Magic link/OAuth Google ficam como backlog._
 - [x] `POST /auth/register` — cria usuário com email + senha (PBKDF2-HMAC-SHA256, 600k iter)
 - [x] `POST /auth/login` — valida credenciais, cria sessão em `user_sessions`, seta cookie HTTP-only `auth_session`
 - [x] `POST /auth/logout` — revoga sessão no banco e limpa cookie
-- [x] `GET /auth/me` — retorna status de autenticação (`AuthStatusRead`)
-- [x] Comparação timing-safe de tokens; e-mail normalizado em lowercase
-- [x] Migration `20260412_0023`: colunas `display_name`, `password_hash`, `password_updated_at` em `users`; tabela `user_sessions`
+- [x] `GET /auth/me` — retorna status de autenticação
 
 **Verificação:** `POST /auth/register` → usuário criado; `POST /auth/login` → cookie `auth_session`; `GET /auth/me` → `is_authenticated=true`. ✅ (2026-04-12)
 
-#### M8.2 — Migração de jornada anônima + créditos ⬜
-- [ ] Hook `on_after_login`: verifica `anonymous_session_id` no cookie
-- [ ] Transação atômica: migra jornadas + lê saldo de sessão do Redis + cria `user_credits` com saldo + 30 de bônus + registra ambos em `credit_ledger`
-- [ ] Cookie anônimo limpo após migração
-- [ ] Jornadas do usuário antes do cadastro ficam acessíveis no histórico
+#### M8.2 — Migração anônimo → Free ✅
+- [x] Hook `on_after_register`: detecta `anonymous_session_id` no cookie
+- [x] Transação atômica:
+  - Migra jornadas para `user_id`
+  - Cria `plan_activations(plan='free', status='active', 30 dias)`
+  - Insere `user_credits(cycle_credits=350, monthly_quota=350)` — **saldo anônimo NÃO somado**
+  - Audita ledger: `signup_grant_free` (+350)
+- [x] Cookie anônimo limpo + `DEL credit:session:{session_id}` no Redis
 
-**Verificação:** completar 2 etapas anonimamente (consumindo créditos de sessão) → fazer cadastro → histórico mostra ambas as jornadas; saldo em `user_credits` = créditos restantes de sessão + 30.
+**Verificação:** anônimo com 300/350 usados → cadastrar → `cycle_credits = 350`; ledger registra `signup_grant_free`. ✅ (2026-04-26)
 
-#### M8.3 — Tabelas de créditos e seed ⬜
-- [ ] Migrations: `user_credits`, `credit_ledger`, `credit_packages`, `credit_purchases`
-- [ ] Seed: 3 pacotes (`starter`, `explorer`, `pro`) com créditos e preços conforme seção 11
-- [ ] `CreditService.check_and_consume(user_id, operation)` → `InsufficientCreditsError` se saldo insuficiente
-- [ ] `CreditService.grant(user_id, delta, reason)` → atomicamente atualiza `user_credits` + registra em `credit_ledger`
-- [ ] `GET /account/credits` retorna `{balance, ledger_last_10}`
+#### M8.3 — Planos e entitlements ✅
+- [x] Migration `20260426_0027`: `plans`, `plan_entitlements`, `user_credits`, `credit_ledger`, `payments`, `pix_payment_data`, `plan_activations`, `pro_max_refresh_targets`, `pro_max_refresh_runs`, `webhook_events`
+- [x] Seed: 5 planos com `plan_entitlements` conforme Seção 5
+- [x] `resolve_entitlements(user_id) → ResolvedEntitlements` com cache Redis (TTL 60s, invalidado em `plan_activations`)
+- [x] `GET /account/plan` retorna `{plan, status, started_at, ends_at, entitlements}`
 
-**Verificação:** usuário sem saldo → `check_and_consume(ZONE_TRANSIT)` → `InsufficientCreditsError(required=9, balance=0)`.
+**Verificação:** seed aplicado com 5 planos e entitlements; `GET /account/plan` retorna plano ativo do usuário. ✅ (2026-04-26)
 
-#### M8.4 — Créditos de sessão anônima ⬜
-- [ ] `POST /journeys` inicializa `credit:session:{session_id}` no Redis com 30 créditos (apenas se chave inexistente), TTL 7 dias
-- [ ] `check_and_consume_credits` lê/decrementa do Redis para sessões anônimas
-- [ ] Saldo insuficiente na sessão anônima → resposta `402` com `{required, balance, upgrade_reason: "signup_for_bonus"}`
-- [ ] Banner na UI: `"Cadastre-se e ganhe 30 créditos extras"` quando saldo ≤ 15
+#### M8.4 — Créditos por ciclo ✅
+- [x] `check_and_consume(user_id, step)` consome FIFO: `cycle_credits → rollover_balance → legacy_balance`
+- [x] Anônimo: `credit:session:{session_id}` Redis com 350, TTL 7 dias
+- [x] Saldo insuficiente → `InsufficientCreditsError` com `{required, balance}`
+- [x] `GET /account/credits` retorna `{cycle, rollover, legacy, total, cycle_ends_at}`
 
-**Verificação:** nova sessão → consumir 30 créditos em zonas → próxima zona retorna 402; após cadastro → saldo migrado + 30 extras.
+**Verificação:** FIFO correto; `InsufficientCreditsError` lançado quando saldo < custo; ledger auditável. ✅ (2026-04-26)
 
-#### M8.5 — Integração Stripe (Payment Intent) ⬜
-- [ ] `POST /billing/checkout/{package_slug}` → cria Stripe Checkout Session com `mode=payment`; retorna `{checkout_url}`
-- [ ] `POST /webhooks/stripe` com `stripe.Webhook.construct_event()` obrigatório
-- [ ] 3 eventos mapeados (ver seção 11): `checkout.session.completed`, `payment_intent.succeeded`, `charge.refunded`
-- [ ] Idempotência: `webhook_events.stripe_event_id` UNIQUE; duplicado ignorado silenciosamente
-- [ ] Créditos creditados em < 5s após `payment_intent.succeeded`
+#### M8.5 — Pix checkout ✅
+- [x] `payments` e `pix_payment_data` criados via migration
+- [x] `POST /billing/pix/checkout` — gera payload Pix Copia e Cola, retorna `payment_id`
+- [x] TTL configurável via `PIX_PAYMENT_EXPIRATION_MINUTES`
+- [x] `GET /billing/payments/{id}` — retorna status; auto-expira pendentes vencidos
+- [x] `POST /billing/payments/{id}/cancel` — cancela pagamento pendente
 
-**Verificação:** teste com Stripe CLI `stripe trigger payment_intent.succeeded` → `user_credits.balance` aumenta pelo pacote comprado; mesmo evento duas vezes → sem duplicação.
+**Verificação:** checkout retorna `pix_copy_paste` e `status=pending`; GET após expiração retorna `status=expired`. ✅ (2026-04-26)
 
-#### M8.6 — Dashboard do usuário ⬜
-- [ ] Página `/conta`: saldo atual de créditos, extrato (últimas 10 operações), botões de compra por pacote
-- [ ] Botão "Comprar créditos" redireciona para checkout Stripe do pacote selecionado
-- [ ] `GET /account/credits` retorna `{balance, ledger_last_10}`
-- [ ] Saldo exibido no header da aplicação (badge)
+#### M8.6 — Confirmação Pix e ativação de plano ✅
+- [x] `POST /admin/billing/pix/{id}/confirm` — confirmação manual por admin
+- [x] `POST /billing/pix/callback` — callback com validação de assinatura HMAC (`PIX_CALLBACK_SECRET`)
+- [x] `activate_plan_from_pix(payment_id)` — transação atômica com idempotência (`PaymentAlreadyProcessedError`)
+- [x] Criação de `plan_activation` por 30 dias; replace de ativação anterior
+- [x] Upsert de `user_credits` com nova cota; ledger auditado com `reason='pix_plan_activation'`
 
-**Verificação:** comprar pacote Starter → saldo aumenta 60; extrato mostra entrada `purchase` + saídas de operações anteriores.
+**Verificação:** confirmar pagamento → `plan_activations.status=active`; reconfirmar → `AlreadyProcessed`. ✅ (2026-04-26)
 
-#### M8.7 — Testes E2E de auth e créditos ⬜
-- [ ] Playwright: fluxo completo `acesso anônimo → consumir créditos de sessão → cadastro → créditos migrados + bônus → compra de pacote (Stripe test) → créditos creditados`
-- [ ] Smoke Dataset A executado com sessão anônima e com usuário autenticado
-- [ ] Cenário de saldo zero: operação bloqueada com mensagem correta
+#### M8.7 — Renovação manual por Pix ✅
+- [x] CTA exibido 7 dias antes de `ends_at` na página `/conta`
+- [x] Novo `payment` Pix gerado com `payment_type='plan_renewal'`
+- [x] Ao confirmar: novo `plan_activation` com `replaced` no anterior; ledger com `reason='pix_plan_renewal'`
+
+**Verificação:** CTA de renovação aparece ≤ 7 dias antes do vencimento; novo ciclo iniciado após confirmação. ✅ (2026-04-26)
+
+#### M8.8 — UI `/planos` e `/conta` ✅
+- [x] `PlanosPage`: modal com cards dos 4 planos pagáveis, CTA "Assinar via Pix" ou "Plano atual"
+- [x] `PixModal`: Pix Copia e Cola, timer com countdown, polling 5s, estados pending/paid/expired/cancelled
+- [x] `ContaPage`: plano ativo, saldo de créditos (cycle/rollover/legacy), barra de uso, CTA "Renovar via Pix"
+- [x] Header: botões Planos (sempre visível) e Conta (logado) no `AuthAccessCard`
+
+**Verificação:** fluxo Free → Básico via PixModal; plano ativo e créditos exibidos em ContaPage. ✅ (2026-04-26)
+
+#### M8.9 — Testes E2E Pix
+- [ ] anônimo → Free (350 créditos);
+- [ ] Free → Básico por Pix;
+- [ ] confirmação do pagamento;
+- [ ] ativação do plano;
+- [ ] consumo de créditos;
+- [ ] expiração de Pix pendente.
+
+**Verificação:** todos os testes E2E passam em staging sem intervenção manual.
+
+---
+
+### Fase 9 — Plano Pro Max (refresh dedicado) ⬜
+
+**Objetivo:** entregar a atualização automática controlada dos favoritos do plano Pro Max via fila e scheduler dedicados, com franquia, cadência e elegibilidade explicitamente limitadas.
+**Esforço estimado:** 6–8 dias · **Status:** ⬜ Não iniciada
+**Dependências bloqueantes:** M7.2, M8.3, M8.5.
+
+#### M9.1 — Fila + scheduler dedicados ⬜
+- [ ] Fila Dramatiq `pro_max_refresh` (concorrência 1, prioridade `Priority.PRO_MAX_REFRESH = 3`)
+- [ ] APScheduler: cron `04:30` → `pro_max_refresh_run(max_per_run=200)` (após o prewarm geral)
+- [ ] Handlers `pro_max_refresh_listing` e `pro_max_refresh_zone` reaproveitam scrapers e queries de zona existentes (idempotente; cache hit não dispara scrape novo)
+
+**Verificação:** scheduler dispara às 04:30; cada item alvo emite `last_refreshed_at` atualizado.
+
+#### M9.2 — Reconciliação de targets ⬜
+- [ ] Função `reconcile_pro_max_targets(user_id)` chamada em:
+  - `on_favorite_change` (insert/update/delete em `user_listing_favorites`/`user_zone_favorites`)
+  - `on_subscription_change` (mudança de plano que afeta `auto_refresh_policy`)
+  - Início de cada `pro_max_refresh_run` (revalidação preventiva)
+- [ ] Política: ativos = `view_state='visible'` E (`last_viewed_at >= now() - eligibility_days` OU `priority_flag=true`); ordenados por `priority_flag DESC, last_viewed_at DESC`; cap em `max_zones`/`max_listings`
+- [ ] Excedente fica `is_active=false` mas mantém histórico para promoção manual
+
+**Verificação:** usuário Pro Max com 35 imóveis salvos: 30 em `pro_max_refresh_targets.is_active=true`; 5 mais antigos `is_active=false`. Marcar 1 deles como `priority_flag=true` → reconciliação promove + rebaixa o último não-priority.
+
+#### M9.3 — Cadência e backoff ⬜
+- [ ] Sucesso: `last_refreshed_at = NOW()`, `next_refresh_due_at = NOW() + 7d`, `failure_count = 0`
+- [ ] Falha: `failure_count++`, backoff `[1d, 2d, 4d]`; ao chegar a 3 falhas → `is_active=false`, badge UI "Refresh manual"
+- [ ] Run regista resumo em `pro_max_refresh_runs` (started_at, finished_at, totals, status)
+
+**Verificação:** simular falha 3x num target → após 3ª, item desativado e badge "Refresh manual" exibido.
+
+#### M9.4 — UI Pro Max ⬜
+- [ ] Aba "Sob refresh automático" no `FavoritesPanel` listando `pro_max_refresh_targets.is_active=true` com `next_refresh_due_at`
+- [ ] Toggle de `priority_flag` em cada card
+- [ ] Badge "Refresh em N dias" / "Atualizado há Xh" baseado em `last_refreshed_at`
+- [ ] Modal de promoção: "Você está usando 30/30. Promover este item rebaixará o item X (último visto há Y dias). Continuar?"
+- [ ] Página `/planos`: Pro Max mostra benefícios reais ("Atualização automática semanal · até 10 zonas + 30 imóveis · prioridade configurável")
+
+**Verificação:** usuário Pro upgrade → Pro Max → aba aparece com seus salvos elegíveis populados em < 5s; toggle de priority preserva estado entre reloads.
+
+#### M9.5 — Métricas e alertas ⬜
+- [ ] `pro_max_refresh_run_duration_seconds` (alvo: < 30 min)
+- [ ] `pro_max_refresh_success_rate` (alvo: > 90%)
+- [ ] `pro_max_refresh_skipped_quota` (gauge — itens ignorados por quota)
+- [ ] Alerta: `success_rate < 80%` em 2 runs consecutivas → investigar scrapers
+- [ ] Alerta: run não inicia em 30 min do horário programado
+
+**Verificação:** matar `worker-general` durante run → alerta gerado em < 35 min.
+
+#### M9.6 — Testes E2E Pro Max ⬜
+- [ ] Playwright: usuário Pro Max com 5 imóveis salvos → run noturna manual → `last_refreshed_at` atualizado em todos
+- [ ] Cenário de exceder franquia: salvar 35 → 30 ativos visíveis na aba; promover 1 do excedente
+- [ ] Cenário de downgrade Pro Max → Pro: targets desativados; aba some
 
 **Verificação:** testes E2E passam em staging sem intervenção manual.
+
+---
+
+### Fase 10 — Stripe Billing e automação de recorrência ⬜
+
+**Objetivo:** substituir a operação Pix manual por cobrança recorrente automatizada.
+**Esforço estimado:** 10–12 dias · **Status:** ⬜ Backlog
+**Dependências bloqueantes:** M8 concluída e validada comercialmente.
+
+#### M10.1 — Stripe Billing
+- [ ] criar produtos e prices no Stripe;
+- [ ] `POST /billing/stripe/subscribe`;
+- [ ] checkout de assinatura via Stripe Checkout Session.
+
+#### M10.2 — Customer Portal
+- [ ] `POST /billing/portal` → Stripe Customer Portal session;
+- [ ] cancelamento de assinatura;
+- [ ] troca de cartão.
+
+#### M10.3 — Webhooks Stripe
+- [ ] `customer.subscription.created`;
+- [ ] `customer.subscription.updated`;
+- [ ] `invoice.payment_succeeded` → renovar `plan_activation` + `monthly_grant`;
+- [ ] `invoice.payment_failed` → grace period 7 dias.
+
+#### M10.4 — Proration e mudança de plano
+- [ ] upgrade imediato com proration;
+- [ ] downgrade no fim do ciclo;
+- [ ] grace period past_due;
+- [ ] rebaixamento automático para Free após grace.
+
+#### M10.5 — Migração Pix → Stripe
+- [ ] usuários Pix podem migrar para recorrência Stripe;
+- [ ] preservar `plan_activation` atual;
+- [ ] preservar saldo e entitlements.
 
 ---
 
@@ -1929,11 +2836,30 @@ Hard limit → bloqueia a operação, mantém fluxo via cache/seleção manual.
 - `robots.txt` verificado durante desenvolvimento de cada adapter.
 - Bright Data somente como escape hatch por plataforma, por configuração.
 
-### Webhooks Stripe
+### Pix
 
-- `stripe.Webhook.construct_event()` obrigatório em todos os eventos recebidos.
-- Idempotência: `webhook_events` com `stripe_event_id` UNIQUE —
-  segundo recebimento do mesmo evento ignorado silenciosamente.
+Regras obrigatórias:
+- toda confirmação de pagamento deve ser idempotente;
+- pagamento expirado não ativa plano;
+- confirmação manual exige perfil admin;
+- callback Pix deve validar assinatura/secret (`PIX_CALLBACK_SECRET`);
+- `payment_id` não pode ser reutilizado;
+- um pagamento pago não pode ativar plano duas vezes;
+- Pix Copia e Cola não deve conter dados sensíveis além do necessário.
+
+### Webhooks Stripe (futuro — Fase 10)
+
+- `stripe.Webhook.construct_event()` obrigatório em todos os eventos.
+- Idempotência por `webhook_events (provider='stripe', event_id)` UNIQUE.
+- Validar `customer_id ↔ user_id` antes de mutar `plan_activations`/`user_credits`.
+- Nenhum crédito concedido sem evento validado.
+
+### Enforcement de entitlements
+
+- Toda capability de plano (limites de save, customização de parâmetros, métricas, refresh) é validada **no servidor**, nunca apenas no cliente.
+- Cache de entitlements (Redis, TTL 60s) é invalidado por `plan_activations` ao ativar/expirar ciclo.
+- Endpoints de billing (`/billing/pix/checkout`, `/billing/pix/confirm`) exigem autenticação.
+- `priority_flag` e reconciliação `pro_max_refresh_targets` rejeitam requests de planos sem `auto_refresh_policy='managed_queue'` com `403`.
 
 ### Cookies
 
@@ -1964,6 +2890,19 @@ Campos obrigatórios: `request_id · journey_id · job_id · user_id|session_id 
 | `scraping_empty_result_rate_{platform}` | > 20% (24h) → habilitar Bright Data |
 | `prewarm_coverage_rate` | < 60% dos endereços-alvo → alerta crítico |
 | `prewarm_last_run_status` | `failed` → alerta crítico |
+| `prewarm_pro_max_inclusion_count` | gauge — endereços únicos vindos de salvos Pro Max por run |
+| `pro_max_refresh_run_duration_seconds` | > 30 min → investigar |
+| `pro_max_refresh_success_rate` | < 80% em 2 runs consecutivas → investigar |
+| `pro_max_refresh_skipped_quota` | gauge — itens ignorados por franquia |
+| `pix_payment_created_count` | cobranças Pix criadas |
+| `pix_payment_paid_count` | pagamentos Pix confirmados |
+| `pix_payment_expired_count` | Pix expirados sem confirmação |
+| `pix_payment_conversion_rate` | taxa de conversão Pix |
+| `pix_activation_lag_seconds` | tempo entre pagamento Pix e ativação de plano; > 60s → alerta |
+| `pix_pending_overdue_count` | Pix pendentes vencidos — alerta se crescente |
+| `plan_activation_count{plan}` | ativações por plano |
+| `plan_renewal_count{plan}` | renovações manuais por plano |
+| `plan_expiration_count{plan}` | ciclos expirados por plano |
 | `mapbox_poi_request_error_rate` | > 10% (24h) → investigar limites/token/categorias |
 | `job_queue_depth_{queue}` | > 50 → investigar |
 | `db_connection_pool_waiters` | > 5 → escalar pool |
@@ -1978,7 +2917,12 @@ Campos obrigatórios: `request_id · journey_id · job_id · user_id|session_id 
 - Custo externo estimado por jornada (`external_usage_ledger`).
 - Quantidade média de imóveis por zona.
 - Taxa de duplicidade de imóveis.
-- Taxa de conversão FREE → PRO.
+- Taxa de conversão Free → Básico → Pro → Pro Max (funil de planos).
+- MRR (monthly recurring revenue) por plano.
+- Churn mensal por plano.
+- Distribuição de uso de cota mensal por plano (p50/p90 de % consumido).
+- Taxa de uso de rollover (% de usuários que aproveitam o rollover_balance).
+- Top-ups avulsos por plano (sinaliza se cota está mal dimensionada).
 
 ### Alertas críticos
 
@@ -1987,6 +2931,10 @@ Campos obrigatórios: `request_id · journey_id · job_id · user_id|session_id 
 3. API sem resposta por > 60s (health check).
 4. `worker-scrape-browser` sem heartbeat por > 5 min.
 5. Postgres: `connection pool waiters > 10` por > 2 min.
+6. Pro Max refresh run não iniciou em 30 min do cron 04:30, ou `pro_max_refresh_success_rate < 80%` em 2 runs consecutivas.
+7. `pix_activation_lag_seconds > 60` em qualquer confirmação Pix (pagamento confirmado mas plano não ativado).
+8. `pix_pending_overdue_count` crescente há > 24h (Pix manual sem confirmação).
+9. Webhook com `processed=false` há > 5 min em `webhook_events` (loop quebrado).
 
 ---
 
@@ -2018,12 +2966,34 @@ Workers com `StubBroker` + banco real.
 fluxo completo em staging. Roda no CI antes de qualquer deploy em produção.
 
 **E2E:** Playwright — configuração → transporte → zonas → imóveis → relatório.
+Cenários adicionais (v2.4): jornada Free→Básico via Pix, Pro Max com salvos atualizados pela run noturna, Pro Max com 35 salvos (30 ativos + 5 fora de franquia + promoção de priority).
+
+### Testes unitários de billing Pix
+
+- geração de payload Pix;
+- cálculo de expiração;
+- ativação de plano a partir de pagamento confirmado;
+- concessão de créditos via ledger;
+- consumo FIFO (cycle → rollover → legacy);
+- idempotência de confirmação;
+- enforcement de entitlements.
+
+### Testes de integração de billing Pix
+
+- `POST /billing/pix/checkout`;
+- `GET /billing/payments/{id}`;
+- confirmação manual via admin;
+- ativação de plano e concessão de créditos;
+- expiração de pagamento pendente;
+- transição de ciclo e rollover.
 
 ### Fixtures obrigatórias
 
 - GTFS feed reduzido (100 paradas, 10 linhas) para integração.
 - Polígonos de vegetação e alagamento para 3 zonas de teste.
 - 30 imóveis sintéticos nas 3 zonas.
+- 5 planos seedados (`anonymous`, `free`, `basico`, `pro`, `pro_max`) com `plan_entitlements` correspondentes.
+- 4 personas pré-criadas: anônimo (sessão), Free (350 cycle), Pro (4000 cycle, 5 salvos com `address_normalized`), Pro Max (35 salvos: 30 elegíveis + 5 fora de franquia + 1 priority).
 
 ### CI checks obrigatórios
 
@@ -2037,15 +3007,25 @@ testes integração · smoke Dataset A em staging
 | Risco | Prob. | Impacto | Mitigação |
 |---|---|---|---|
 | Playwright bloqueado pelas plataformas | Alta | Alto | `success_rate` monitorado; Bright Data como escape hatch por plataforma |
-| Valhalla OOM (isócrona carro + prewarm) | Média | Alto | Concorrência 2 na fila `zones`; scraping de prewarm restrito a endereços demandados nas últimas 24h |
+| Valhalla OOM (isócrona carro + prewarm) | Média | Alto | Concorrência 2 na fila `zones`; prewarm restrito a endereços demandados nas últimas 24h |
 | Redis pub/sub congestionado | Baixa | Médio | Canal por `job_id`; cleanup automático ao desconectar |
 | Prewarm não termina antes do pico matinal | Média | Alto | Limite de 100 endereços por run; alerta em 30 min; escalar VPS se p95 prewarm > 2h |
 | S3/R2 signed URL expirada antes do download | Baixa | Baixo | Endpoint de regeneração; retenção de 30 dias |
-| Custo Mapbox Search (geocoding + POIs) > orçamento mensal | Média | Médio | Cache efêmero; rate limit por operação; debounce; orçamento diário; reduzir categorias e raio quando necessário |
-| Stripe webhook duplicado creditando créditos duas vezes | Baixa | Médio | Idempotência por `stripe_event_id` UNIQUE em `webhook_events` |
-| Migração anônima → autenticado perdendo jornada ou créditos | Baixa | Alto | Transação atômica; saldo Redis lido antes do COMMIT; fallback: jornada anônima permanece acessível |
+| Custo Mapbox Search > orçamento mensal | Média | Médio | Cache efêmero; rate limit por operação; debounce; orçamento diário |
+| Confirmação manual de Pix atrasar ativação | Média | Médio | Alerta de pendentes e painel admin; CTA na UI |
+| Pagamento Pix confirmado duas vezes | Baixa | Alto | Idempotência por `payment_id` + `status=paid` |
+| Pagamento expirado ativar plano | Baixa | Alto | Validação transacional: `expires_at < now()` → erro |
+| Usuário pagar valor errado no Pix manual | Média | Médio | QR Code dinâmico com valor fixo; conferência manual por admin |
+| Falta de recorrência automática aumentar churn | Alta | Médio | Lembretes antes do vencimento; CTA de renovação na UI |
+| Pix manual aumentar carga de suporte | Média | Médio | Painel admin simples; status de pagamento claro na UI |
+| Migração anônima → autenticado perdendo jornada | Baixa | Alto | Transação atômica; saldo anônimo descartado por design (auditado em ledger) |
 | GTFS desatualizado gerando rotas incorretas | Média | Médio | Webhook Mobility Database dispara ingestão automática |
 | WeasyPrint consumindo > 600MB | Baixa | Médio | Concorrência 1 na fila `reports`; timeout de job em 60s |
+| Pro Max subprecificado | Média | Alto | Franquia explícita (10 zn + 30 lst, 7d cadência, eleg 30d); monitoramento de custo por refresh |
+| Scraping sobrecarregar VPS | Média | Alto | Filas com concorrência limitada; prewarm limitado |
+| Futuro Stripe exigir retrabalho | Baixa | Médio | `payments` genérico e `plan_activations` separado do provedor |
+| Salvos expirados gerarem frustração | Média | Médio | UI clara com estado de expiração e CTA de renovação |
+| Cache de entitlements stale na ativação | Baixa | Baixo | TTL 60s + invalidação por `plan_activations` |
 
 ---
 
@@ -2060,24 +3040,33 @@ Não reabrir sem análise de impacto documentada.
 | Framework frontend | **Next.js App Router** | SSR nativo, Vercel zero config, ecossistema |
 | ORM / migrations | **SQLAlchemy 2 + Alembic** | Tipagem estrita, suporte PostGIS nativo |
 | Broker de jobs | **Dramatiq** | `StubBroker` para testes; retry nativo por tipo via middleware |
-| Auth backend | **fastapi-users** | Magic link + OAuth2 + SQLAlchemy 2 sem implementação manual |
-| Email provider | **Resend** | 3k/mês gratuito, SDK Python, deliverability |
 | Isócrona / rota | **Valhalla self-hosted** | Sem ToS de armazenamento; cache por fingerprint; latência 80–200ms |
 | Transporte público | **OTP 2 + GTFS** | Sem custo por request; dados locais; sem proibição de storage |
 | Progresso real-time | **SSE (não WebSocket)** | Fluxo unidirecional; mais simples, proxy-friendly |
 | Geocoding | **Mapbox Search Box API (proxy)** | Já integrado; custo baixo com cache Redis 24h |
-| POIs | **Mapbox Search Box API — Category Search** | Já alinhado ao legado; busca sob demanda por categoria/raio com cache efêmero |
+| POIs | **Mapbox Search Box API — Category Search** | Busca sob demanda por categoria/raio com cache efêmero |
 | PDF generator | **WeasyPrint** | HTML/CSS, SVG, Python-native, sem Node no worker |
 | DI Fases 0–3 | **Composição manual no lifespan** | Baixa complexidade, sem overhead |
 | DI Fase 4+ | **dependency-injector** | Container/Provider explícito, migração incremental |
 | Scraping browser | **Playwright no Hostinger VPS** | IP brasileiro; isolado do api/worker-general |
-| Scraping HTTP | **httpx no Hostinger VPS (fila scrape_http)** | Válido para plataformas que o permitam |
 | Proxy residencial | **Bright Data somente como escape hatch** | Ativação por plataforma; nunca base da arquitetura |
-| Auth nas Fases 6–7 | **Toda sessão = FREE** | Elimina dependência circular; PRO ativado na Fase 8 |
-| Plataformas FREE | **QuintoAndar + Zap** | Restrição computacional, não de implementação |
-| Plataforma PRO extra | **VivaReal** | Terceiro scraper Playwright disponível |
-| Modelo de monetização | **Cotas de crédito avulsas (sem assinatura)** | Zero comprometimento do usuário; experiência proporcional ao saldo; Stripe Payment Intent em vez de Subscription |
-| Créditos iniciais | **30 (sessão) + 30 (cadastro)** | Proporcional: 3 análises de transporte público ou 1 análise a pé/carro com os 30 de sessão |
-| Pacote Starter | **60 créditos por R$ 9,90** | — |
-| Pacote Explorer | **150 créditos por R$ 19,90** | — |
-| Pacote Pro | **400 créditos por R$ 44,90** | — |
+| Modelo de monetização | **Freemium + planos mensais + créditos por ciclo** | Separação clara entre uso ocasional e intenso |
+| Cobrança prioritária | **Pix com QR Code / Pix Copia e Cola** | Menor complexidade para lançamento |
+| Stripe | **Backlog futuro (Fase 10)** | Automação de assinatura depois da validação comercial |
+| Ciclo do plano | **30 dias** | Simples para Pix manual e compatível com assinatura futura |
+| Créditos por jornada | **100 créditos** | Orçamento mental simples |
+| Etapas monetizáveis | **5 × 20 créditos** | Consumo uniforme independente do modal |
+| Créditos anônimos | **350** | Até 3 jornadas completas |
+| Migração anônimo → Free | **Free recebe 350; não soma saldo anônimo** | Evita arbitragem |
+| Plano Básico | **R$ 21,99 / 800 créditos** | Entrada acessível |
+| Plano Pro | **R$ 90,99 / 4000 créditos** | Usuário intenso |
+| Plano Pro Max | **R$ 121,99 / 4000 créditos + refresh** | Conveniência e atualização automática |
+| Refresh do plano Pro | **Não incluso** | Evita custo oculto |
+| Refresh do plano Pro Max | **10 zonas + 30 imóveis, 7 dias, eleg 30d** | Limite operacional explícito |
+| Modelo de pagamento | **`payments` genérico** | Suporta Pix agora e Stripe depois |
+| Ativação de plano | **`plan_activations`** | Desacopla plano ativo do provedor de pagamento |
+| Confirmação Pix inicial | **Manual/admin ou callback opcional** | Permite lançar sem gateway completo |
+| Renovação | **Manual por Pix na primeira versão** | Simples e suficiente para validação |
+| Stripe Billing | **Fase 10** | Portal, retries e recorrência depois da validação comercial |
+| Scraping arbitrário | **Nenhum plano libera scraping arbitrário** | Scraping fresco continua sendo etapa monetizável #4 |
+| Salvos pós-downgrade | **`over_limit_grace` 7d → `archived` (nunca delete)** | Recuperação total via upgrade; UI sempre mostra arquivados |
