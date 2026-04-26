@@ -333,6 +333,7 @@ export function Step4Compare() {
   const [poiBackfillError, setPoiBackfillError] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<ZoneSortKey>("travel_time");
   const poiBackfillRequestedRef = useRef<string | null>(null);
+  const zoneCardRefs = useRef<Record<string, HTMLElement | null>>({});
   const query = useQuery({
     queryKey: ["journey-zones", journeyId],
     queryFn: async () => getJourneyZonesList(journeyId as string),
@@ -439,6 +440,14 @@ export function Step4Compare() {
     [selectedZoneFingerprint, sortedZones]
   );
 
+  useEffect(() => {
+    if (!selectedZoneFingerprint) return;
+    const node = zoneCardRefs.current[selectedZoneFingerprint];
+    if (node) {
+      node.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [selectedZoneFingerprint]);
+
   function handleContinue() {
     if (!selectedZone) {
       return;
@@ -493,15 +502,19 @@ export function Step4Compare() {
           {sortedZones.map((zone) => {
             const isSelected = selectedZoneFingerprint === zone.fingerprint;
             return (
-              <ZoneCard
+              <div
                 key={zone.id}
-                zone={zone}
-                isSelected={isSelected}
-                onSelect={() => void handleSelect(zone.id, zone.fingerprint)}
-                journeyId={journeyId}
-                searchType={config.type}
-                usageType={config.propertyUsageType}
-              />
+                ref={(node) => { zoneCardRefs.current[zone.fingerprint] = node; }}
+              >
+                <ZoneCard
+                  zone={zone}
+                  isSelected={isSelected}
+                  onSelect={() => void handleSelect(zone.id, zone.fingerprint)}
+                  journeyId={journeyId}
+                  searchType={config.type}
+                  usageType={config.propertyUsageType}
+                />
+              </div>
             );
           })}
         </div>

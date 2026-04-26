@@ -183,3 +183,8 @@ class FavoriteZoneRead(BaseModel):
     usage_type: str
     saved_at: datetime
     payload: FavoriteZonePayload
+    note: str | None = None
+
+
+class FavoriteZoneNoteUpdate(BaseModel):
+    note: str | None = None

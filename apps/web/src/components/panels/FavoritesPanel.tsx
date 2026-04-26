@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueries } from "@tanstack/react-query";
-import { ArrowRight, ChevronsLeft, ChevronsRight, ExternalLink, Heart, Link2, Loader2, MapPin, Trash2 } from "lucide-react";
+import { ArrowRight, ChevronsLeft, ChevronsRight, ExternalLink, Heart, Link2, Loader2, MapPin, MessageSquare, Trash2 } from "lucide-react";
 import type { FavoriteZoneEntry } from "../../api/client";
 import { getZoneFavoriteAnalytics } from "../../api/client";
 import { getPoiCategoryMeta, POI_CATEGORY_ORDER } from "../../domain/poi";
@@ -14,70 +14,17 @@ import {
   formatFavoriteMetricValue,
   getFavoriteMetricDefinition,
 } from "../../lib/favorites";
+import {
+  buildZoneRanking,
+  buildZoneMetricWinCounts,
+  formatZoneMetricValue,
+  ZONE_METRIC_DEFINITIONS,
+} from "../../lib/zone-favorites";
 import { formatCurrencyBr, getListingDisplayPrice, resolveListingCardImageUrls, resolvePlatformUrl } from "../../lib/listingFormat";
 import { useFavoritesStore, useJourneyStore, useUIStore, useZoneFavoritesStore } from "../../state";
 
 const FAVORITES_ANALYTICS_STALE_TIME = 30 * 60_000;
 const FAVORITES_ANALYTICS_GC_TIME = 60 * 60_000;
-
-type ZoneCompareColumnKey =
-  | "travel"
-  | "avg_price"
-  | "avg_unit_price"
-  | "green_pct"
-  | "flood_pct"
-  | "homicide"
-  | "robbery"
-  | "crime"
-  | "pois";
-
-const ZONE_COMPARE_COLUMNS: Array<{ key: ZoneCompareColumnKey; label: string; format: (entry: FavoriteZoneEntry) => string }> = [
-  {
-    key: "travel",
-    label: "Tempo",
-    format: (entry) => (entry.payload.metrics.travel_time_minutes != null ? `${entry.payload.metrics.travel_time_minutes} min` : "--"),
-  },
-  {
-    key: "avg_price",
-    label: "Preço médio",
-    format: (entry) => (entry.payload.metrics.zone_average_price != null ? formatCurrencyBr(entry.payload.metrics.zone_average_price) : "--"),
-  },
-  {
-    key: "avg_unit_price",
-    label: "Preço m²",
-    format: (entry) => (entry.payload.metrics.zone_average_unit_price != null ? `${formatCurrencyBr(entry.payload.metrics.zone_average_unit_price)}/m²` : "--"),
-  },
-  {
-    key: "green_pct",
-    label: "Verde (%)",
-    format: (entry) => (entry.payload.metrics.green_percentage != null ? `${entry.payload.metrics.green_percentage.toFixed(1)}%` : "--"),
-  },
-  {
-    key: "flood_pct",
-    label: "Alagamento (%)",
-    format: (entry) => (entry.payload.metrics.flood_percentage != null ? `${entry.payload.metrics.flood_percentage.toFixed(1)}%` : "--"),
-  },
-  {
-    key: "homicide",
-    label: "Homicídios/km²",
-    format: (entry) => (entry.payload.metrics.homicide_density_per_km2 != null ? entry.payload.metrics.homicide_density_per_km2.toFixed(2) : "--"),
-  },
-  {
-    key: "robbery",
-    label: "Roubos/km²",
-    format: (entry) => (entry.payload.metrics.robbery_density_per_km2 != null ? entry.payload.metrics.robbery_density_per_km2.toFixed(2) : "--"),
-  },
-  {
-    key: "crime",
-    label: "Crimes/km²",
-    format: (entry) => (entry.payload.metrics.crime_density_per_km2 != null ? entry.payload.metrics.crime_density_per_km2.toFixed(2) : "--"),
-  },
-  {
-    key: "pois",
-    label: "POIs",
-    format: (entry) => String(entry.payload.poi_points?.length ?? 0),
-  },
-];
 
 function MetricChip({ label, value }: { label: string; value: string }) {
   return (
@@ -100,10 +47,14 @@ export function FavoritesPanel() {
   const setActiveScope = useFavoritesStore((state) => state.setActiveScope);
   const removeFavorite = useFavoritesStore((state) => state.removeFavorite);
   const toggleMetric = useFavoritesStore((state) => state.toggleMetric);
+  const updateListingNote = useFavoritesStore((state) => state.updateListingNote);
   const zoneFavorites = useZoneFavoritesStore((state) => state.zoneFavorites);
   const removeZoneFavorite = useZoneFavoritesStore((state) => state.removeZoneFavorite);
   const selectedZoneKey = useZoneFavoritesStore((state) => state.selectedZoneKey);
   const setSelectedZoneKey = useZoneFavoritesStore((state) => state.setSelectedZoneKey);
+  const selectedZoneMetricIds = useZoneFavoritesStore((state) => state.selectedZoneMetricIds);
+  const toggleZoneMetric = useZoneFavoritesStore((state) => state.toggleZoneMetric);
+  const updateZoneNote = useZoneFavoritesStore((state) => state.updateZoneNote);
   const selectedSavedListingKey = useFavoritesStore((state) => state.selectedSavedListingKey);
   const setSelectedSavedListingKey = useFavoritesStore((state) => state.setSelectedSavedListingKey);
   const setJourneyId = useJourneyStore((state) => state.setJourneyId);
@@ -119,6 +70,8 @@ export function FavoritesPanel() {
   const [manualUrl, setManualUrl] = useState("");
   const [manualSubmitting, setManualSubmitting] = useState(false);
   const [manualError, setManualError] = useState<string | null>(null);
+  const [editingNoteKey, setEditingNoteKey] = useState<string | null>(null);
+  const [noteText, setNoteText] = useState("");
 
   async function handleSubmitManualUrl(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -143,12 +96,37 @@ export function FavoritesPanel() {
   }, [selectedZoneKey]);
 
   const orderedZones = useMemo(
-    () => [...zoneFavorites].sort((left, right) => right.savedAt.localeCompare(left.savedAt)),
-    [zoneFavorites],
+    () => buildZoneRanking(zoneFavorites, selectedZoneMetricIds),
+    [zoneFavorites, selectedZoneMetricIds],
+  );
+
+  const zoneRankingWinCounts = useMemo(
+    () => buildZoneMetricWinCounts(zoneFavorites, selectedZoneMetricIds),
+    [zoneFavorites, selectedZoneMetricIds],
+  );
+
+  const zoneRankPositionByKey = useMemo(
+    () => new Map(orderedZones.map((entry, idx) => [entry.zoneKey, idx + 1])),
+    [orderedZones],
   );
 
   function handleSelectZone(zoneKey: string) {
     setSelectedZoneKey(selectedZoneKey === zoneKey ? null : zoneKey);
+  }
+
+  function startEditingNote(key: string, currentNote: string | null) {
+    setEditingNoteKey(key);
+    setNoteText(currentNote || "");
+  }
+
+  async function saveListingNote(listingKey: string) {
+    await updateListingNote(listingKey, noteText);
+    setEditingNoteKey(null);
+  }
+
+  async function saveZoneNote(zoneKey: string) {
+    await updateZoneNote(zoneKey, noteText);
+    setEditingNoteKey(null);
   }
 
   function handleContinueFromZone(entry: FavoriteZoneEntry) {
@@ -406,7 +384,7 @@ export function FavoritesPanel() {
                 </p>
               </div>
             ) : (
-              favorites.map((favorite) => {
+              ranking.map((favorite) => {
                 const adUrl = resolvePlatformUrl(favorite.listing.url, favorite.listing.platform);
                 const imageCandidates = resolveListingCardImageUrls(favorite.listing);
                 const price = getListingDisplayPrice(favorite.listing);
@@ -467,19 +445,46 @@ export function FavoritesPanel() {
                         </div>
                         <div className="mt-auto flex items-center justify-between gap-3">
                           <p className="text-[11px] text-slate-500">Salvo em {new Date(favorite.savedAt).toLocaleDateString("pt-BR")}</p>
-                          {adUrl ? (
-                            <a
-                              href={adUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              onClick={(event) => event.stopPropagation()}
-                              className="inline-flex items-center gap-1.5 rounded-xl border border-pastel-violet-200 bg-pastel-violet-50 px-3 py-2 text-xs font-semibold text-pastel-violet-700 transition hover:bg-pastel-violet-100"
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={(event) => { event.stopPropagation(); startEditingNote(favorite.listingKey, favorite.note); }}
+                              title={favorite.note ? "Editar comentário" : "Adicionar comentário"}
+                              className={`inline-flex h-8 w-8 items-center justify-center rounded-xl border transition ${favorite.note ? "border-amber-200 bg-amber-50 text-amber-600 hover:bg-amber-100" : "border-slate-200 bg-slate-50 text-slate-400 hover:border-slate-300 hover:text-slate-600"}`}
                             >
-                              Abrir anúncio
-                              <ExternalLink className="h-3.5 w-3.5" />
-                            </a>
-                          ) : null}
+                              <MessageSquare className="h-3.5 w-3.5" />
+                            </button>
+                            {adUrl ? (
+                              <a
+                                href={adUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                onClick={(event) => event.stopPropagation()}
+                                className="inline-flex items-center gap-1.5 rounded-xl border border-pastel-violet-200 bg-pastel-violet-50 px-3 py-2 text-xs font-semibold text-pastel-violet-700 transition hover:bg-pastel-violet-100"
+                              >
+                                Abrir anúncio
+                                <ExternalLink className="h-3.5 w-3.5" />
+                              </a>
+                            ) : null}
+                          </div>
                         </div>
+                        {editingNoteKey === favorite.listingKey ? (
+                          <div className="mt-2 flex flex-col gap-1.5" onClick={(event) => event.stopPropagation()}>
+                            <textarea
+                              value={noteText}
+                              onChange={(e) => setNoteText(e.target.value)}
+                              placeholder="Escreva um comentário sobre este imóvel..."
+                              rows={2}
+                              className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-800 outline-none focus:border-pastel-violet-400 focus:ring-1 focus:ring-pastel-violet-200"
+                            />
+                            <div className="flex gap-2">
+                              <button type="button" onClick={() => void saveListingNote(favorite.listingKey)} className="rounded-lg bg-pastel-violet-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-pastel-violet-600">Salvar</button>
+                              <button type="button" onClick={(event) => { event.stopPropagation(); setEditingNoteKey(null); }} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50">Cancelar</button>
+                            </div>
+                          </div>
+                        ) : favorite.note ? (
+                          <p className="mt-2 rounded-xl border border-amber-100 bg-amber-50/70 px-3 py-2 text-[11px] text-amber-800">{favorite.note}</p>
+                        ) : null}
                       </div>
                     </div>
                   </article>
@@ -681,7 +686,18 @@ export function FavoritesPanel() {
                       aria-pressed={isSelected}
                     >
                       <div className="min-w-0">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">Zona salva</p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">Zona salva</p>
+                          {(() => {
+                            const pos = zoneRankPositionByKey.get(entry.zoneKey);
+                            if (!pos || zoneFavorites.length < 2) return null;
+                            return (
+                              <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] ${pos === 1 ? "border border-emerald-200 bg-emerald-50 text-emerald-700" : "border border-slate-200 bg-slate-50 text-slate-600"}`}>
+                                {`${pos}º no ranking`}
+                              </span>
+                            );
+                          })()}
+                        </div>
                         <h3 className="mt-1 line-clamp-2 text-sm font-bold text-slate-900">
                           {entry.payload.neighborhood_name
                             ? `${entry.payload.neighborhood_name}${entry.payload.city_name ? ` · ${entry.payload.city_name}` : ""}`
@@ -751,23 +767,52 @@ export function FavoritesPanel() {
                         })}
                       </div>
                     ) : null}
-                    <div className="flex items-center justify-between gap-2 border-t border-slate-100 px-4 py-3">
-                      <button
-                        type="button"
-                        onClick={() => setExpandedZoneKey(isExpanded ? null : entry.zoneKey)}
-                        className="text-xs font-semibold text-pastel-violet-700 transition hover:text-pastel-violet-900"
-                      >
-                        {isExpanded ? `Ocultar ${filteredPois.length} POIs` : `Ver ${filteredPois.length} POIs`}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleContinueFromZone(entry)}
-                        className="inline-flex items-center gap-1.5 rounded-xl bg-pastel-violet-500 px-3 py-2 text-xs font-semibold text-white transition hover:bg-pastel-violet-600"
-                        data-testid={`saved-zone-continue-${entry.zoneKey}`}
-                      >
-                        Continuar para endereços
-                        <ArrowRight className="h-3.5 w-3.5" />
-                      </button>
+                    <div className="border-t border-slate-100 px-4 py-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => setExpandedZoneKey(isExpanded ? null : entry.zoneKey)}
+                            className="text-xs font-semibold text-pastel-violet-700 transition hover:text-pastel-violet-900"
+                          >
+                            {isExpanded ? `Ocultar ${filteredPois.length} POIs` : `Ver ${filteredPois.length} POIs`}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => startEditingNote(entry.zoneKey, entry.note ?? null)}
+                            title={entry.note ? "Editar comentário" : "Adicionar comentário"}
+                            className={`inline-flex h-7 w-7 items-center justify-center rounded-lg border transition ${entry.note ? "border-amber-200 bg-amber-50 text-amber-600 hover:bg-amber-100" : "border-slate-200 bg-slate-50 text-slate-400 hover:border-slate-300 hover:text-slate-600"}`}
+                          >
+                            <MessageSquare className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleContinueFromZone(entry)}
+                          className="inline-flex items-center gap-1.5 rounded-xl bg-pastel-violet-500 px-3 py-2 text-xs font-semibold text-white transition hover:bg-pastel-violet-600"
+                          data-testid={`saved-zone-continue-${entry.zoneKey}`}
+                        >
+                          Continuar para endereços
+                          <ArrowRight className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                      {editingNoteKey === entry.zoneKey ? (
+                        <div className="mt-2 flex flex-col gap-1.5">
+                          <textarea
+                            value={noteText}
+                            onChange={(e) => setNoteText(e.target.value)}
+                            placeholder="Escreva um comentário sobre esta zona..."
+                            rows={2}
+                            className="w-full rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-800 outline-none focus:border-pastel-violet-400 focus:ring-1 focus:ring-pastel-violet-200"
+                          />
+                          <div className="flex gap-2">
+                            <button type="button" onClick={() => void saveZoneNote(entry.zoneKey)} className="rounded-lg bg-pastel-violet-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-pastel-violet-600">Salvar</button>
+                            <button type="button" onClick={() => setEditingNoteKey(null)} className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50">Cancelar</button>
+                          </div>
+                        </div>
+                      ) : entry.note ? (
+                        <p className="mt-2 rounded-xl border border-amber-100 bg-amber-50/70 px-3 py-2 text-[11px] text-amber-800">{entry.note}</p>
+                      ) : null}
                       {isExpanded ? (
                         <ul className="mt-3 space-y-2 text-[11px] text-slate-600">
                           {filteredPois.length === 0 ? (
@@ -806,7 +851,72 @@ export function FavoritesPanel() {
           </div>
         ) : (
           <div className="panel-scroll flex-1 overflow-y-auto px-5 py-4">
-            <section className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm" data-testid="saved-zones-compare">
+            <section className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm" data-testid="zone-metric-selector">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Métricas ativas</p>
+                  <h3 className="mt-1 text-sm font-bold text-slate-800">Seleção usada no ranking e na matriz</h3>
+                </div>
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-600">
+                  {selectedZoneMetricIds.length} selecionada{selectedZoneMetricIds.length === 1 ? "" : "s"}
+                </span>
+              </div>
+              <div className="mt-4 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                {ZONE_METRIC_DEFINITIONS.map((metric) => {
+                  const isSelected = selectedZoneMetricIds.includes(metric.id);
+                  return (
+                    <button
+                      key={metric.id}
+                      type="button"
+                      aria-pressed={isSelected}
+                      onClick={() => toggleZoneMetric(metric.id)}
+                      className={`rounded-2xl border px-3 py-2 text-left text-xs transition ${isSelected ? "border-pastel-violet-300 bg-pastel-violet-50 text-pastel-violet-800 shadow-sm" : "border-slate-200 bg-slate-50/80 text-slate-600 hover:border-slate-300 hover:bg-white"}`}
+                    >
+                      <span className="block font-semibold">{metric.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
+
+            <section className="mt-4 rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm" data-testid="zone-ranking">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Ranking</p>
+                  <h3 className="mt-1 text-sm font-bold text-slate-800">Ordem pelo desempenho das métricas selecionadas</h3>
+                </div>
+              </div>
+              {orderedZones.length === 0 ? (
+                <p className="mt-3 text-xs leading-relaxed text-slate-500">Salve zonas para montar o ranking.</p>
+              ) : (
+                <div className="mt-4 space-y-2.5">
+                  {orderedZones.map((entry, index) => {
+                    const wins = zoneRankingWinCounts.get(entry.zoneKey) || 0;
+                    const zoneName = entry.payload.neighborhood_name
+                      ? `${entry.payload.neighborhood_name}${entry.payload.city_name ? ` · ${entry.payload.city_name}` : ""}`
+                      : `Zona ${entry.zoneFingerprint.slice(0, 8)}`;
+                    const isRankSelected = selectedZoneKey === entry.zoneKey;
+                    return (
+                      <div
+                        key={entry.zoneKey}
+                        onClick={() => setSelectedZoneKey(isRankSelected ? null : entry.zoneKey)}
+                        className={`grid cursor-pointer grid-cols-[auto_minmax(0,1fr)] items-center gap-3 rounded-2xl border px-3 py-3 transition-colors ${isRankSelected ? "border-pastel-violet-400 bg-pastel-violet-50 ring-1 ring-pastel-violet-200" : index === 0 ? "border-emerald-200 bg-emerald-50/70 hover:border-emerald-300" : "border-slate-200 bg-slate-50/70 hover:border-slate-300"}`}
+                      >
+                        <div className={`flex h-8 w-8 items-center justify-center rounded-xl text-xs font-extrabold ${index === 0 ? "bg-emerald-600 text-white" : "bg-slate-200 text-slate-700"}`}>#{index + 1}</div>
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-slate-900">{zoneName}</p>
+                          <p className="mt-1 truncate text-[11px] text-slate-500">
+                            {`Venceu ${wins} de ${selectedZoneMetricIds.length} ${selectedZoneMetricIds.length === 1 ? "métrica selecionada" : "métricas selecionadas"}`}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+
+            <section className="mt-4 rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm" data-testid="zone-matrix">
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Matriz</p>
@@ -826,29 +936,37 @@ export function FavoritesPanel() {
                     <thead className="bg-slate-50 text-left text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">
                       <tr>
                         <th className="sticky left-0 z-10 w-[8.4rem] min-w-[8.4rem] max-w-[8.4rem] border-b border-r border-slate-200 bg-slate-50 px-2.5 py-2">Zona</th>
-                        {ZONE_COMPARE_COLUMNS.map((column) => (
-                          <th key={column.key} className="whitespace-nowrap border-b border-slate-200 px-3 py-2">
-                            {column.label}
+                        {ZONE_METRIC_DEFINITIONS.filter((m) => selectedZoneMetricIds.includes(m.id)).map((metric) => (
+                          <th key={metric.id} className="whitespace-nowrap border-b border-slate-200 px-3 py-2">
+                            {metric.shortLabel}
                           </th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {orderedZones.map((entry, index) => (
-                        <tr key={entry.zoneKey} className={index % 2 === 0 ? "bg-white" : "bg-slate-50/60"}>
-                          <td className="sticky left-0 z-[1] w-[8.4rem] min-w-[8.4rem] max-w-[8.4rem] border-r border-slate-200 bg-inherit px-2.5 py-2.5 align-top">
-                            <p className="break-words whitespace-normal font-semibold leading-snug text-slate-900">
-                              {`Zona ${entry.zoneFingerprint.slice(0, 8)}`}
-                            </p>
-                            <p className="mt-0.5 text-[10px] text-slate-500">{`${entry.payload.poi_points?.length ?? 0} POIs`}</p>
-                          </td>
-                          {ZONE_COMPARE_COLUMNS.map((column) => (
-                            <td key={`${entry.zoneKey}:${column.key}`} className="whitespace-nowrap border-l border-slate-100 px-3 py-2.5 align-top text-slate-700">
-                              {column.format(entry)}
+                      {orderedZones.map((entry, index) => {
+                        const zoneName = entry.payload.neighborhood_name
+                          ? `${entry.payload.neighborhood_name}${entry.payload.city_name ? ` · ${entry.payload.city_name}` : ""}`
+                          : `Zona ${entry.zoneFingerprint.slice(0, 8)}`;
+                        const isRowSelected = selectedZoneKey === entry.zoneKey;
+                        return (
+                          <tr
+                            key={entry.zoneKey}
+                            onClick={() => setSelectedZoneKey(isRowSelected ? null : entry.zoneKey)}
+                            className={`cursor-pointer ${isRowSelected ? "bg-pastel-violet-50" : index % 2 === 0 ? "bg-white hover:bg-slate-50" : "bg-slate-50/60 hover:bg-slate-100"}`}
+                          >
+                            <td className="sticky left-0 z-[1] w-[8.4rem] min-w-[8.4rem] max-w-[8.4rem] border-r border-slate-200 bg-inherit px-2.5 py-2.5 align-top">
+                              <p className="break-words whitespace-normal font-semibold leading-snug text-slate-900">{zoneName}</p>
+                              <p className="mt-0.5 text-[10px] text-slate-500">{`${entry.payload.poi_points?.length ?? 0} POIs`}</p>
                             </td>
-                          ))}
-                        </tr>
-                      ))}
+                            {ZONE_METRIC_DEFINITIONS.filter((m) => selectedZoneMetricIds.includes(m.id)).map((metric) => (
+                              <td key={`${entry.zoneKey}:${metric.id}`} className="whitespace-nowrap border-l border-slate-100 px-3 py-2.5 align-top text-slate-700">
+                                {formatZoneMetricValue(entry, metric.id)}
+                              </td>
+                            ))}
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

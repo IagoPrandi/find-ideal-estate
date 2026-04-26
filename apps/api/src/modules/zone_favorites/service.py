@@ -7,6 +7,7 @@ from uuid import UUID
 from contracts import (
     FavoriteZoneCreate,
     FavoriteZoneMetricsSnapshot,
+    FavoriteZoneNoteUpdate,
     FavoriteZonePayload,
     FavoriteZoneRead,
     FavoriteZoneTransportPoint,
@@ -34,6 +35,7 @@ def _row_to_favorite(row) -> FavoriteZoneRead:
         usage_type=row["usage_type"],
         saved_at=row["saved_at"],
         payload=payload,
+        note=row["note"] if "note" in row.keys() else None,
     )
 
 
@@ -240,7 +242,7 @@ async def list_user_zone_favorites(user_id: UUID) -> list[FavoriteZoneRead]:
         result = await conn.execute(
             text(
                 """
-                SELECT zone_key, journey_id, zone_fingerprint, search_type, usage_type, saved_at, zone_payload
+                SELECT zone_key, journey_id, zone_fingerprint, search_type, usage_type, saved_at, zone_payload, note
                 FROM user_zone_favorites
                 WHERE user_id = :user_id
                 ORDER BY saved_at DESC
@@ -294,7 +296,7 @@ async def upsert_user_zone_favorite(user_id: UUID, create: FavoriteZoneCreate) -
                     zone_payload = EXCLUDED.zone_payload,
                     saved_at = now(),
                     updated_at = now()
-                RETURNING zone_key, journey_id, zone_fingerprint, search_type, usage_type, saved_at, zone_payload
+                RETURNING zone_key, journey_id, zone_fingerprint, search_type, usage_type, saved_at, zone_payload, note
                 """
             ),
             {
@@ -308,6 +310,26 @@ async def upsert_user_zone_favorite(user_id: UUID, create: FavoriteZoneCreate) -
             },
         )
         row = result.mappings().one()
+    return _row_to_favorite(row)
+
+
+async def update_user_zone_favorite_note(user_id: UUID, zone_key: str, payload: FavoriteZoneNoteUpdate) -> FavoriteZoneRead | None:
+    engine = get_engine()
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text(
+                """
+                UPDATE user_zone_favorites
+                SET note = :note, updated_at = now()
+                WHERE user_id = :user_id AND zone_key = :zone_key
+                RETURNING zone_key, journey_id, zone_fingerprint, search_type, usage_type, saved_at, zone_payload, note
+                """
+            ),
+            {"user_id": user_id, "zone_key": zone_key, "note": payload.note},
+        )
+        row = result.mappings().first()
+    if row is None:
+        return None
     return _row_to_favorite(row)
 
 

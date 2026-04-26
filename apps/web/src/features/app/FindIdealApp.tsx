@@ -844,6 +844,9 @@ export function FindIdealApp() {
   const setSelectedListingKey = useJourneyStore((state) => state.setSelectedListingKey);
   const setSelectedPoiKey = useJourneyStore((state) => state.setSelectedPoiKey);
   const setSelectedZone = useJourneyStore((state) => state.setSelectedZone);
+  const [copiedCoordsToast, setCopiedCoordsToast] = useState<string | null>(null);
+  const copiedToastTimerRef = useRef<number | undefined>(undefined);
+  const zonesDataRef = useRef<Array<{ fingerprint: string; isochrone_geom: unknown }>>([]);
   const stepRef = useRef(step);
   const sequentialLayerSettingsRef = useRef<SequentialLayerSettings>({
     layerVisibility: DEFAULT_LAYER_VISIBILITY,
@@ -1819,6 +1822,16 @@ export function FindIdealApp() {
         busPopupRef.current = null;
       });
 
+      map.on("contextmenu", (event) => {
+        const { lat, lng } = event.lngLat;
+        const coordText = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+        navigator.clipboard.writeText(coordText).catch(() => {});
+        setCopiedCoordsToast(coordText);
+        window.clearTimeout(copiedToastTimerRef.current);
+        copiedToastTimerRef.current = window.setTimeout(() => setCopiedCoordsToast(null), 2500);
+        event.preventDefault();
+      });
+
       for (const layerId of BUS_LAYER_LIST) {
         map.on("mouseenter", layerId, () => {
           map.getCanvas().style.cursor = "pointer";
@@ -2081,6 +2094,7 @@ export function FindIdealApp() {
 
       const response = await getJourneyZonesList(journeyId);
       if (!cancelled) {
+        zonesDataRef.current = response.zones.map((z) => ({ fingerprint: z.fingerprint, isochrone_geom: z.isochrone_geom }));
         const selectedZone = response.zones.find((zone) => zone.fingerprint === selectedZoneFingerprint);
         const hasLegacyPoiZones = response.zones.some((zone) => zoneNeedsPoiBackfill(zone));
         const selectedPoiPoints = ((selectedZone?.poi_points || []) as ZonePoiPointLike[]);
@@ -2149,6 +2163,26 @@ export function FindIdealApp() {
 
     map.easeTo({ center: [selectedPoint.lon, selectedPoint.lat], duration: 600, zoom: Math.max(map.getZoom(), 15) });
   }, [activePoiCategory, isMapReady, selectedPoiKey, selectedZonePoiState, step]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !isMapReady || step !== 4 || !selectedZoneFingerprint) return;
+    const zone = zonesDataRef.current.find((z) => z.fingerprint === selectedZoneFingerprint);
+    if (!zone?.isochrone_geom) return;
+    try {
+      const coords = collectGeometryCoordinates(zone.isochrone_geom as GeoJSON.Geometry);
+      if (coords.length === 0) return;
+      const bounds = coords.reduce(
+        (box, c) => box.extend(c as [number, number]),
+        new maplibregl.LngLatBounds(coords[0] as [number, number], coords[0] as [number, number]),
+      );
+      const currentZoom = map.getZoom();
+      const padding = { top: 40, bottom: 40, left: 40, right: panelRightOffsetPx() + 40 };
+      map.fitBounds(bounds, { padding, duration: 700, maxZoom: currentZoom });
+    } catch {
+      /* noop */
+    }
+  }, [isMapReady, selectedZoneFingerprint, step]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -2412,6 +2446,15 @@ export function FindIdealApp() {
   return (
     <main className={`find-ideal-app relative h-screen w-full overflow-hidden ${isFavoritesPanelOpen ? "find-ideal-app--favorites-open" : ""}`}>
       <div ref={mapContainerRef} className="h-full w-full" aria-label="Mapa principal" />
+      {copiedCoordsToast ? (
+        <div
+          className="pointer-events-none absolute bottom-24 left-1/2 z-50 -translate-x-1/2 rounded-2xl border border-slate-200 bg-white/95 px-4 py-2.5 shadow-lg backdrop-blur-sm"
+          aria-live="polite"
+        >
+          <p className="text-[11px] font-semibold text-slate-700">Coordenadas copiadas</p>
+          <p className="mt-0.5 font-mono text-[11px] text-slate-500">{copiedCoordsToast}</p>
+        </div>
+      ) : null}
       <AuthAccessCard />
       <FavoritesPanel />
       <div className="map-side-controls pointer-events-none absolute bottom-14 right-4 z-40 flex flex-col items-end gap-2">

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from api.routes.auth import get_optional_auth_context
-from contracts import FavoriteListingCreate, FavoriteListingRead, ManualFavoriteCreate
+from contracts import FavoriteListingCreate, FavoriteListingRead, FavoriteNoteUpdate, ManualFavoriteCreate
 from fastapi import APIRouter, Depends, HTTPException, status
 from modules.auth.service import get_accessible_journey
 from modules.favorites.manual import upsert_manual_listing_favorite
-from modules.favorites.service import delete_user_favorite, list_user_favorites, upsert_user_favorite
+from modules.favorites.service import delete_user_favorite, list_user_favorites, update_user_favorite_note, upsert_user_favorite
 
 router = APIRouter(prefix="/favorites", tags=["favorites"])
 
@@ -51,6 +51,19 @@ async def save_manual_favorite_endpoint(
         return await upsert_manual_listing_favorite(user.id, payload)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.patch("/{listing_key}/note", response_model=FavoriteListingRead)
+async def update_favorite_note_endpoint(
+    listing_key: str,
+    payload: FavoriteNoteUpdate,
+    auth_context=Depends(get_optional_auth_context),
+) -> FavoriteListingRead:
+    user = _require_authenticated_user(auth_context)
+    result = await update_user_favorite_note(user.id, listing_key, payload)
+    if result is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Favorito não encontrado.")
+    return result
 
 
 @router.delete("/{listing_key}")

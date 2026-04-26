@@ -21,6 +21,7 @@ from .journeys import JourneyCreate, JourneyRead, JourneyReferencePoint, Journey
 from .listings import (
     FavoriteListingCreate,
     FavoriteListingRead,
+    FavoriteNoteUpdate,
     ListingAdRead,
     ListingCardRead,
     ListingPlatformVariantRead,
@@ -36,6 +37,7 @@ from .transport import TransportPointRead
 from .zones import (
     FavoriteZoneCreate,
     FavoriteZoneMetricsSnapshot,
+    FavoriteZoneNoteUpdate,
     FavoriteZonePayload,
     FavoriteZoneRead,
     FavoriteZoneTransportPoint,
@@ -61,7 +63,9 @@ __all__ = [
     "AuthUserRead",
     "FavoriteListingCreate",
     "FavoriteListingRead",
+    "FavoriteNoteUpdate",
     "FavoriteZoneCreate",
+    "FavoriteZoneNoteUpdate",
     "FavoriteZoneMetricsSnapshot",
     "FavoriteZonePayload",
     "FavoriteZoneRead",

@@ -1,10 +1,39 @@
 import { create } from "zustand";
 import type { AuthStatusRead, FavoriteZoneEntry } from "../api/client";
+import { ALL_ZONE_METRIC_IDS, DEFAULT_ZONE_METRIC_IDS, type ZoneMetricId, isZoneMetricId } from "../lib/zone-favorites";
 
 export type ZoneFavoritesPanelTab = "saved" | "compare";
 
+const ZONE_FAVORITES_PREFS_KEY = "find-ideal-estate:zone-favorite-preferences:v1";
+
+function normalizeZoneMetricIds(ids: string[] | undefined): ZoneMetricId[] {
+  const normalized = (ids || []).filter(isZoneMetricId);
+  return normalized.length > 0 ? normalized : DEFAULT_ZONE_METRIC_IDS;
+}
+
+function loadZonePrefs(): { selectedZoneMetricIds: ZoneMetricId[] } {
+  if (typeof window === "undefined") return { selectedZoneMetricIds: DEFAULT_ZONE_METRIC_IDS };
+  try {
+    const raw = window.localStorage.getItem(ZONE_FAVORITES_PREFS_KEY);
+    if (!raw) return { selectedZoneMetricIds: DEFAULT_ZONE_METRIC_IDS };
+    const parsed = JSON.parse(raw) as { selectedZoneMetricIds?: string[] };
+    return { selectedZoneMetricIds: normalizeZoneMetricIds(parsed.selectedZoneMetricIds) };
+  } catch {
+    return { selectedZoneMetricIds: DEFAULT_ZONE_METRIC_IDS };
+  }
+}
+
+function persistZonePrefs(state: { selectedZoneMetricIds: ZoneMetricId[] }) {
+  if (typeof window === "undefined") return;
+  window.localStorage.setItem(
+    ZONE_FAVORITES_PREFS_KEY,
+    JSON.stringify({ selectedZoneMetricIds: state.selectedZoneMetricIds.filter((id) => ALL_ZONE_METRIC_IDS.includes(id)) }),
+  );
+}
+
 type ZoneFavoritesState = {
   zoneFavorites: FavoriteZoneEntry[];
+  selectedZoneMetricIds: ZoneMetricId[];
   isPanelOpen: boolean;
   activeTab: ZoneFavoritesPanelTab;
   selectedZoneKey: string | null;
@@ -26,12 +55,16 @@ type ZoneFavoritesState = {
     searchType: string;
     usageType: string;
   }) => Promise<boolean>;
+  toggleZoneMetric: (metricId: ZoneMetricId) => void;
+  updateZoneNote: (zoneKey: string, note: string) => Promise<boolean>;
   setPanelOpen: (value: boolean) => void;
   togglePanel: () => void;
   setActiveTab: (value: ZoneFavoritesPanelTab) => void;
   setSelectedZoneKey: (value: string | null) => void;
   resetZoneFavoritesState: () => void;
 };
+
+const initialZonePrefs = loadZonePrefs();
 
 let latestZoneSyncRequestId = 0;
 
@@ -59,8 +92,14 @@ async function deleteAccountZoneFavoriteApi(zoneKey: string) {
   await client.deleteAccountZoneFavorite(zoneKey);
 }
 
+async function updateZoneNoteApi(zoneKey: string, note: string) {
+  const client = await import("../api/client");
+  return client.updateZoneFavoriteNote(zoneKey, note);
+}
+
 export const useZoneFavoritesStore = create<ZoneFavoritesState>((set, get) => ({
   zoneFavorites: [],
+  selectedZoneMetricIds: initialZonePrefs.selectedZoneMetricIds,
   isPanelOpen: false,
   activeTab: "saved",
   selectedZoneKey: null,
@@ -155,6 +194,31 @@ export const useZoneFavoritesStore = create<ZoneFavoritesState>((set, get) => ({
     }
     return await get().addZoneFavorite(payload);
   },
+  toggleZoneMetric: (metricId) => {
+    set((state) => {
+      const hasMetric = state.selectedZoneMetricIds.includes(metricId);
+      const next = hasMetric
+        ? state.selectedZoneMetricIds.filter((id) => id !== metricId)
+        : [...state.selectedZoneMetricIds, metricId];
+      if (next.length === 0) return state;
+      persistZonePrefs({ selectedZoneMetricIds: next });
+      return { selectedZoneMetricIds: next };
+    });
+  },
+  updateZoneNote: async (zoneKey, note) => {
+    if (!get().isAuthenticated) return false;
+    try {
+      const updated = await updateZoneNoteApi(zoneKey, note);
+      set((state) => ({
+        zoneFavorites: state.zoneFavorites.map((entry) =>
+          entry.zoneKey === zoneKey ? { ...entry, note: updated.note } : entry,
+        ),
+      }));
+      return true;
+    } catch {
+      return false;
+    }
+  },
   setPanelOpen: (value) => set({ isPanelOpen: value }),
   togglePanel: () => set((state) => ({ isPanelOpen: !state.isPanelOpen })),
   setActiveTab: (value) => set({ activeTab: value }),
@@ -162,6 +226,7 @@ export const useZoneFavoritesStore = create<ZoneFavoritesState>((set, get) => ({
   resetZoneFavoritesState: () => {
     set({
       zoneFavorites: [],
+      selectedZoneMetricIds: DEFAULT_ZONE_METRIC_IDS,
       isPanelOpen: false,
       activeTab: "saved",
       selectedZoneKey: null,

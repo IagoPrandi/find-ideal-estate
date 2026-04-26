@@ -45,6 +45,7 @@ describe("FavoritesPanel", () => {
           searchType: "rent",
           usageType: "all",
           savedAt: "2026-03-27T10:00:00Z",
+          note: null,
           listing: {
             property_id: "cheap",
             platform: "quintoandar",
@@ -70,6 +71,7 @@ describe("FavoritesPanel", () => {
           searchType: "rent",
           usageType: "all",
           savedAt: "2026-03-27T11:00:00Z",
+          note: null,
           listing: {
             property_id: "green",
             platform: "vivareal",

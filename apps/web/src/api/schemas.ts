@@ -198,6 +198,7 @@ export const FavoriteListingBackendSchema = z.object({
   usage_type: z.string(),
   saved_at: z.string(),
   listing: ListingCardReadBackendSchema,
+  note: z.string().nullable().optional(),
 });
 
 export const FavoriteZoneBackendSchema = z.object({
@@ -208,6 +209,7 @@ export const FavoriteZoneBackendSchema = z.object({
   usage_type: z.string(),
   saved_at: z.string(),
   payload: z.any(),
+  note: z.string().nullable().optional(),
 });
 
 export const ListingsScrapePlatformDiagnosticsSchema = z.object({

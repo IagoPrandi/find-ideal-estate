@@ -80,6 +80,7 @@ export type FavoriteListingEntry = {
   usageType: string;
   savedAt: string;
   listing: ListingCardRead;
+  note: string | null;
 };
 
 function mapFavoriteListingEntry(entry: z.output<typeof FavoriteListingBackendSchema>): FavoriteListingEntry {
@@ -91,6 +92,7 @@ function mapFavoriteListingEntry(entry: z.output<typeof FavoriteListingBackendSc
     usageType: entry.usage_type,
     savedAt: entry.saved_at,
     listing: ListingCardReadBackendSchema.parse(entry.listing),
+    note: entry.note ?? null,
   };
 }
 
@@ -419,6 +421,7 @@ export type FavoriteZoneEntry = {
   usageType: string;
   savedAt: string;
   payload: FavoriteZonePayload;
+  note: string | null;
 };
 
 function mapFavoriteZoneEntry(entry: z.output<typeof FavoriteZoneBackendSchema>): FavoriteZoneEntry {
@@ -469,6 +472,7 @@ function mapFavoriteZoneEntry(entry: z.output<typeof FavoriteZoneBackendSchema>)
       metrics: (raw.metrics as FavoriteZoneMetricsSnapshot) || {},
       listings: Array.isArray(raw.listings) ? (raw.listings as unknown[]) : [],
     },
+    note: entry.note ?? null,
   };
 }
 
@@ -499,6 +503,22 @@ export async function deleteAccountZoneFavorite(zoneKey: string): Promise<void> 
   await requestJson(`/zone-favorites/${encodeURIComponent(zoneKey)}`, z.object({ message: z.string() }), {
     method: "DELETE",
   });
+}
+
+export async function updateZoneFavoriteNote(zoneKey: string, note: string): Promise<FavoriteZoneEntry> {
+  const response = await requestJson(`/zone-favorites/${encodeURIComponent(zoneKey)}/note`, FavoriteZoneBackendSchema, {
+    method: "PATCH",
+    body: { note: note || null },
+  });
+  return mapFavoriteZoneEntry(response);
+}
+
+export async function updateListingFavoriteNote(listingKey: string, note: string): Promise<FavoriteListingEntry> {
+  const response = await requestJson(`/favorites/${encodeURIComponent(listingKey)}/note`, FavoriteListingBackendSchema, {
+    method: "PATCH",
+    body: { note: note || null },
+  });
+  return mapFavoriteListingEntry(response);
 }
 
 export type SearchAddressSuggestion = z.output<typeof SearchAddressSuggestionBackendSchema>;

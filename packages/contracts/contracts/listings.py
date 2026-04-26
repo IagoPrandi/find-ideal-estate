@@ -144,6 +144,11 @@ class FavoriteListingRead(BaseModel):
     usage_type: str
     saved_at: datetime
     listing: ListingCardRead
+    note: str | None = None
+
+
+class FavoriteNoteUpdate(BaseModel):
+    note: str | None = None
 
 
 class SearchAddressSuggestion(BaseModel):

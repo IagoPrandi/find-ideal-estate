@@ -42,6 +42,7 @@ type FavoritesState = {
     zoneFingerprint?: string | null;
   }) => Promise<{ ok: boolean; error?: string }>;
   removeFavorite: (listingKey: string) => Promise<boolean>;
+  updateListingNote: (listingKey: string, note: string) => Promise<boolean>;
   toggleFavorite: (payload: {
     listing: ListingCardRead;
     journeyId: string;
@@ -298,6 +299,19 @@ export const useFavoritesStore = create<FavoritesState>((set, get) => ({
       await deleteAccountFavoriteApi(listingKey);
       set((state) => ({
         favorites: state.favorites.filter((favorite) => favorite.listingKey !== listingKey),
+      }));
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  updateListingNote: async (listingKey, note) => {
+    if (!get().isAuthenticated) return false;
+    try {
+      const { updateListingFavoriteNote } = await import("../api/client");
+      const updated = await updateListingFavoriteNote(listingKey, note);
+      set((state) => ({
+        favorites: state.favorites.map((fav) => fav.listingKey === listingKey ? { ...fav, note: updated.note } : fav),
       }));
       return true;
     } catch {

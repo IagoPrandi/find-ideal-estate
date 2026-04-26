@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from uuid import UUID
 
-from contracts import FavoriteListingCreate, FavoriteListingRead, ListingCardRead
+from contracts import FavoriteListingCreate, FavoriteListingRead, FavoriteNoteUpdate, ListingCardRead
 from core.db import get_engine
 from sqlalchemy import text
 
@@ -27,6 +27,7 @@ def _row_to_favorite(row) -> FavoriteListingRead:
         usage_type=row["usage_type"],
         saved_at=row["saved_at"],
         listing=ListingCardRead.model_validate(row["listing_payload"]),
+        note=row["note"] if "note" in row.keys() else None,
     )
 
 
@@ -36,7 +37,7 @@ async def list_user_favorites(user_id: UUID) -> list[FavoriteListingRead]:
         result = await conn.execute(
             text(
                 """
-                SELECT listing_key, journey_id, zone_fingerprint, search_type, usage_type, saved_at, listing_payload
+                SELECT listing_key, journey_id, zone_fingerprint, search_type, usage_type, saved_at, listing_payload, note
                 FROM user_listing_favorites
                 WHERE user_id = :user_id
                 ORDER BY saved_at DESC
@@ -84,7 +85,7 @@ async def upsert_user_favorite(user_id: UUID, payload: FavoriteListingCreate) ->
                     listing_payload = EXCLUDED.listing_payload,
                     saved_at = now(),
                     updated_at = now()
-                RETURNING listing_key, journey_id, zone_fingerprint, search_type, usage_type, saved_at, listing_payload
+                RETURNING listing_key, journey_id, zone_fingerprint, search_type, usage_type, saved_at, listing_payload, note
                 """
             ),
             {
@@ -98,6 +99,26 @@ async def upsert_user_favorite(user_id: UUID, payload: FavoriteListingCreate) ->
             },
         )
         row = result.mappings().one()
+    return _row_to_favorite(row)
+
+
+async def update_user_favorite_note(user_id: UUID, listing_key: str, payload: FavoriteNoteUpdate) -> FavoriteListingRead | None:
+    engine = get_engine()
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text(
+                """
+                UPDATE user_listing_favorites
+                SET note = :note, updated_at = now()
+                WHERE user_id = :user_id AND listing_key = :listing_key
+                RETURNING listing_key, journey_id, zone_fingerprint, search_type, usage_type, saved_at, listing_payload, note
+                """
+            ),
+            {"user_id": user_id, "listing_key": listing_key, "note": payload.note},
+        )
+        row = result.mappings().first()
+    if row is None:
+        return None
     return _row_to_favorite(row)
 
 
