@@ -903,6 +903,12 @@ export function FindIdealApp() {
   }, [step]);
 
   useEffect(() => {
+    if (step >= 6) {
+      setLayerVisibility((current) => current.listings ? current : { ...current, listings: true });
+    }
+  }, [step]);
+
+  useEffect(() => {
     sequentialLayerSettingsRef.current = {
       layerVisibility,
       greenEnabled: config.enrichments.green,
