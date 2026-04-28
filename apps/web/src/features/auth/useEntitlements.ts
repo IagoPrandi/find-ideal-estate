@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { AccountPlanRead, getAccountPlan } from "../../api/client";
 import { useAuth } from "./AuthContext";
 
@@ -38,41 +38,7 @@ const ANONYMOUS_DEFAULTS: EntitlementState = {
   max_transport_radius_m_cap: null,
 };
 
-export function useEntitlements(): EntitlementState {
-  const { authStatus } = useAuth();
-  const [accountPlan, setAccountPlan] = useState<AccountPlanRead | null>(null);
-  const [hasFetched, setHasFetched] = useState(false);
-
-  useEffect(() => {
-    if (!authStatus.is_authenticated) {
-      setAccountPlan(null);
-      setHasFetched(false);
-      return;
-    }
-    setHasFetched(false);
-    getAccountPlan()
-      .then((plan) => {
-        setAccountPlan(plan);
-        setHasFetched(true);
-      })
-      .catch(() => {
-        setAccountPlan(null);
-        setHasFetched(true);
-      });
-  }, [authStatus.is_authenticated]);
-
-  if (!authStatus.is_authenticated) {
-    return ANONYMOUS_DEFAULTS;
-  }
-
-  if (!hasFetched) {
-    return { ...ANONYMOUS_DEFAULTS, isLoading: true };
-  }
-
-  if (!accountPlan) {
-    return ANONYMOUS_DEFAULTS;
-  }
-
+function planToEntitlements(accountPlan: AccountPlanRead): EntitlementState {
   return {
     isLoading: false,
     can_customize_radius: accountPlan.entitlements.can_customize_radius,
@@ -90,4 +56,29 @@ export function useEntitlements(): EntitlementState {
     max_zone_radius_m_cap: accountPlan.entitlements.max_zone_radius_m_cap ?? null,
     max_transport_radius_m_cap: accountPlan.entitlements.max_transport_radius_m_cap ?? null,
   };
+}
+
+export function useEntitlements(): EntitlementState {
+  const { authStatus } = useAuth();
+
+  const { data: accountPlan, isLoading } = useQuery({
+    queryKey: ["account", "plan"],
+    queryFn: getAccountPlan,
+    enabled: authStatus.is_authenticated,
+    retry: false,
+  });
+
+  if (!authStatus.is_authenticated) {
+    return ANONYMOUS_DEFAULTS;
+  }
+
+  if (isLoading) {
+    return { ...ANONYMOUS_DEFAULTS, isLoading: true };
+  }
+
+  if (!accountPlan) {
+    return ANONYMOUS_DEFAULTS;
+  }
+
+  return planToEntitlements(accountPlan);
 }

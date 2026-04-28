@@ -42,7 +42,8 @@ export function PlanosPage({ onClose }: { onClose: () => void }) {
       if (activating) return;
       setActivating(plan.slug);
       try {
-        await activateProprietarioPlan(plan.slug);
+        const activatedPlan = await activateProprietarioPlan(plan.slug);
+        queryClient.setQueryData(["account", "plan"], activatedPlan);
         queryClient.invalidateQueries({ queryKey: ["account", "plan"] });
         queryClient.invalidateQueries({ queryKey: ["account", "credits"] });
       } finally {
