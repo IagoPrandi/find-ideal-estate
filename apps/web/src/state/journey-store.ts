@@ -117,9 +117,9 @@ const defaultConfig: JourneyConfig = {
   propertyUsageType: "residential",
   modal: "transit",
   publicTransportMode: "bus",
-  time: 30,
-  zoneRadiusMeters: 400,
-  transportSearchRadiusMeters: 400,
+  time: 15,
+  zoneRadiusMeters: 100,
+  transportSearchRadiusMeters: 200,
   greenVegetationLevel: "medium",
   enrichments: {
     safety: false,

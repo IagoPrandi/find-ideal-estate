@@ -26,6 +26,7 @@ from modules.journeys.service import (
     get_journey,
     update_journey,
 )
+from modules.plans.service import resolve_entitlements
 from modules.public_safety import classify_public_safety_group
 from modules.dashboard.analytics import fetch_zone_dashboard_analytics, fetch_zone_favorite_analytics
 from modules.public_safety import public_safety_group_case_sql
@@ -39,6 +40,59 @@ from modules.zones.vegetation import (
 from sqlalchemy import text
 
 router = APIRouter(prefix="/journeys", tags=["journeys"])
+
+# Default parameter values used when the plan has locked customization.
+_DEFAULT_ZONE_RADIUS_M = 400
+_DEFAULT_TRANSPORT_RADIUS_M = 400
+_DEFAULT_MAX_TRAVEL_MINUTES = 30
+
+
+async def _enforce_snapshot_customization(snapshot: dict[str, Any], auth_context) -> None:
+    """Silently overrides locked/capped parameters — UI already blocks invalid values."""
+    if auth_context.user is None:
+        _clamp_locked_value(snapshot, "zone_radius_meters", _DEFAULT_ZONE_RADIUS_M)
+        _clamp_locked_value(snapshot, "transport_search_radius_meters", _DEFAULT_TRANSPORT_RADIUS_M)
+        _clamp_locked_value(snapshot, "max_travel_minutes", _DEFAULT_MAX_TRAVEL_MINUTES)
+        return
+
+    resolved = await resolve_entitlements(auth_context.user.id)
+    ent = resolved.entitlements
+
+    if not ent.can_customize_radius:
+        _clamp_locked_value(snapshot, "zone_radius_meters", _DEFAULT_ZONE_RADIUS_M)
+    elif ent.max_zone_radius_m_cap is not None:
+        _clamp_cap_value(snapshot, "zone_radius_meters", ent.max_zone_radius_m_cap)
+
+    if not ent.can_customize_distance:
+        _clamp_locked_value(snapshot, "transport_search_radius_meters", _DEFAULT_TRANSPORT_RADIUS_M)
+
+    if not ent.can_customize_max_time:
+        _clamp_locked_value(snapshot, "max_travel_minutes", _DEFAULT_MAX_TRAVEL_MINUTES)
+    else:
+        mode = snapshot.get("transport_mode", "transit")
+        cap = (
+            ent.max_walk_minutes_cap if mode == "walk"
+            else ent.max_car_minutes_cap if mode == "car"
+            else ent.max_transit_minutes_cap
+        )
+        if cap is not None:
+            _clamp_cap_value(snapshot, "max_travel_minutes", cap)
+
+
+def _clamp_locked_value(snapshot: dict[str, Any], field: str, default: int | float) -> None:
+    if snapshot.get(field) is not None:
+        snapshot[field] = default
+
+
+def _clamp_cap_value(snapshot: dict[str, Any], field: str, cap: int | float) -> None:
+    val = snapshot.get(field)
+    if val is not None and val > cap:
+        snapshot[field] = cap
+
+
+
+async def _enforce_zone_selection_policy(journey_id: UUID, zone_id: UUID, auth_context) -> None:
+    return
 
 
 async def _get_accessible_journey_or_404(journey_id: UUID, auth_context) -> JourneyRead:
@@ -478,6 +532,8 @@ async def create_journey_endpoint(
     response: Response,
     auth_context=Depends(get_optional_auth_context),
 ) -> JourneyRead:
+    if payload.input_snapshot:
+        await _enforce_snapshot_customization(payload.input_snapshot, auth_context)
     session_id = auth_context.anonymous_session_id or generate_anonymous_session_id()
     if auth_context.user is not None:
         journey = await create_journey(payload, user_id=auth_context.user.id)
@@ -505,6 +561,10 @@ async def update_journey_endpoint(
     auth_context=Depends(get_optional_auth_context),
 ) -> JourneyRead:
     await _get_accessible_journey_or_404(journey_id, auth_context)
+    if payload.input_snapshot:
+        await _enforce_snapshot_customization(payload.input_snapshot, auth_context)
+    if payload.selected_zone_id is not None:
+        await _enforce_zone_selection_policy(journey_id, payload.selected_zone_id, auth_context)
     journey = await update_journey(journey_id, payload)
     if journey is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Journey not found")

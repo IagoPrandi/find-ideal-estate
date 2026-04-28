@@ -31,20 +31,34 @@ def _row_to_favorite(row) -> FavoriteListingRead:
     )
 
 
-async def list_user_favorites(user_id: UUID) -> list[FavoriteListingRead]:
+async def list_user_favorites(user_id: UUID, *, retention_days: int | None = None) -> list[FavoriteListingRead]:
     engine = get_engine()
     async with engine.connect() as conn:
-        result = await conn.execute(
-            text(
-                """
-                SELECT listing_key, journey_id, zone_fingerprint, search_type, usage_type, saved_at, listing_payload, note
-                FROM user_listing_favorites
-                WHERE user_id = :user_id
-                ORDER BY saved_at DESC
-                """
-            ),
-            {"user_id": user_id},
-        )
+        if retention_days is not None:
+            result = await conn.execute(
+                text(
+                    """
+                    SELECT listing_key, journey_id, zone_fingerprint, search_type, usage_type, saved_at, listing_payload, note
+                    FROM user_listing_favorites
+                    WHERE user_id = :user_id
+                      AND saved_at > now() - (:retention_days * INTERVAL '1 day')
+                    ORDER BY saved_at DESC
+                    """
+                ),
+                {"user_id": user_id, "retention_days": retention_days},
+            )
+        else:
+            result = await conn.execute(
+                text(
+                    """
+                    SELECT listing_key, journey_id, zone_fingerprint, search_type, usage_type, saved_at, listing_payload, note
+                    FROM user_listing_favorites
+                    WHERE user_id = :user_id
+                    ORDER BY saved_at DESC
+                    """
+                ),
+                {"user_id": user_id},
+            )
         rows = result.mappings().all()
     return [_row_to_favorite(row) for row in rows]
 

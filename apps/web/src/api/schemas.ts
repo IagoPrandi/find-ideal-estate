@@ -827,6 +827,11 @@ export const PlanEntitlementsReadSchema = z.object({
   rollover_percent: z.number(),
   rollover_cycles: z.number(),
   cycle_length_days: z.number(),
+  max_transit_minutes_cap: z.number().nullable().optional(),
+  max_walk_minutes_cap: z.number().nullable().optional(),
+  max_car_minutes_cap: z.number().nullable().optional(),
+  max_zone_radius_m_cap: z.number().nullable().optional(),
+  max_transport_radius_m_cap: z.number().nullable().optional(),
 });
 
 export const AccountPlanReadSchema = z.object({

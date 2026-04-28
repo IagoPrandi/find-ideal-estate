@@ -7,7 +7,7 @@
 
 > **Mudanças v2.3 (2026-04-26):** monetização migrada de "créditos avulsos" para **freemium + assinatura mensal por plano** (Anônimo, Free, Básico, Pro, Pro Max). Custo padronizado em 5 etapas monetizáveis × 20 créditos = 100 créditos por jornada completa. Stripe Billing (Subscriptions) substitui Payment Intent. Plano Pro inclui endereços de imóveis salvos na fila do prewarm noturno (mesmo run da atualização da base). Plano Pro Max ganha fila dedicada de refresh com cadência e franquia próprias. Adicionadas tabelas `plans`, `plan_entitlements`, `subscriptions`, `subscription_events`, `pro_max_refresh_targets`. Fase 8 reescopada e Fase 9 (Pro Max) adicionada ao roadmap.
 
-> **Mudanças v2.4 (2026-04-26):** mantém o modelo de monetização por **freemium + planos mensais + créditos por ciclo + entitlements**, mas altera a prioridade de implementação de cobrança. A ativação inicial dos planos pagos passa a ser feita por **Pix com QR Code / Pix Copia e Cola**. **Stripe não foi removido**: Stripe Billing permanece no roadmap como evolução futura para automação de assinatura, portal do cliente, retries, proration e cobrança recorrente. A Fase 8 foi reescopada para **Auth + planos + ativação por Pix**. Fase 10 adicionada para **Stripe Billing e automação de recorrência**. Tabelas `subscriptions` e `subscription_events` substituídas por `plan_activations`. Adicionadas `payments` e `pix_payment_data`. Preço do Pro Max corrigido para R$ 121,99.
+> **Mudanças v2.4 (2026-04-26):** mantém o modelo de monetização por **freemium + planos mensais + créditos por ciclo + entitlements**, mas altera a prioridade de implementação de cobrança. A ativação inicial dos planos pagos passa a ser feita por **Pix com QR Code / Pix Copia e Cola**. **Stripe não foi removido**: Stripe Billing permanece no roadmap como evolução futura para automação de assinatura, portal do cliente, retries, proration e cobrança recorrente. A Fase 8 foi reescopada para **Auth + planos + ativação por Pix**. Fase 10 adicionada para **Stripe Billing e automação de recorrência**. Tabelas `subscriptions` e `subscription_events` substituídas por `plan_activations`. Adicionadas `payments` e `pix_payment_data`. Preço do Pro Max corrigido para R$ 312,99.
 
 ---
 
@@ -836,11 +836,11 @@ plans (
 
 | slug | name | price_brl | monthly_credits | is_paid |
 |---|---|---:|---:|---|
-| anonymous | Anônimo | NULL | 350 | false |
+| anonymous | Anônimo | NULL | 300 | false |
 | free | Free cadastrado | 0 | 350 | false |
 | basico | Básico | 21.99 | 800 | true |
 | pro | Pro | 90.99 | 4000 | true |
-| pro_max | Pro Max | 321.99 | 20000 | true |
+| pro_max | Pro Max | 312.99 | 20000 | true |
 
 ### `plan_entitlements`
 
@@ -857,7 +857,6 @@ plan_entitlements (
   can_customize_distance          BOOLEAN NOT NULL DEFAULT false,
 
   max_active_metrics              INT,
-  transport_line_policy           TEXT NOT NULL, -- locked_default | top_2_lines | unlocked
   zone_selection_policy           TEXT NOT NULL, -- restricted | any
 
   auto_refresh_policy             TEXT NOT NULL, -- none | managed_queue
@@ -880,7 +879,7 @@ plan_entitlements (
 | Free | 5 | 2 | 7 dias | travada | default | 2 linhas | none |
 | Básico | 20 | 4 | 30 dias | liberada com limite | 4 | qualquer zona | none |
 | Pro | 100 | 20 | 30 dias | liberada | ilimitadas | qualquer zona | none |
-| Pro Max | 100 | 20 | 30 dias | liberada | ilimitadas | qualquer zona | managed_queue |
+| Pro Max | 100 | 20 | 30 dias | liberada | ilimitadas | qualquer zona | none |
 
 ### `plan_activations` (v2.4 — substitui `subscriptions`)
 
@@ -1272,7 +1271,6 @@ class ResolvedEntitlements:
     can_customize_max_time: bool
     can_customize_distance: bool
     max_active_metrics: int | None
-    transport_line_policy: str          # 'locked_default' | 'top_2_lines' | 'unlocked'
     zone_selection_policy: str          # 'restricted' | 'any'
     auto_refresh_policy: str            # 'none' | 'nightly_inclusion' | 'managed_queue'
     pro_max_refresh_max_zones: int | None
@@ -1745,7 +1743,6 @@ subtarefas concluídas, botão cancelar.
 **Painel:** lista por `travel_time_minutes` asc (empates por `walk_distance_meters` asc),
 badges incrementais, filtros, detalhes da zona selecionada, grupos de POIs, CTA "buscar imóveis".
 
-**Restrição Free cadastrado:** quando `transport_line_policy = 'top_2_lines'`, a UI exibe somente as zonas geradas a partir das 2 linhas selecionadas pelo algoritmo de priorização (linha com maior densidade + linha com segunda menor densidade). Banner persistente: "Veja todas as zonas com o plano Básico (R$ 21,99/mês)."
 
 **Mapa:** rótulos numéricos nos polígonos, ponto de transporte persistente,
 rotas visíveis, POIs sob demanda.
@@ -1980,7 +1977,7 @@ async def entitlements_middleware(request, call_next):
 | Análise de transporte e zonas | 4 | Não (créditos de sessão) | anônimo |
 | Cache de imóveis | 6 | Não (créditos de sessão) | anônimo |
 | Badge de frescor | 6 | Não | anônimo |
-| Scraping fresco | 6 | Não (mesma lógica de etapa monetizável) | anônimo |
+| Scraping fresco sob demanda | 6 | Não | nenhum plano |
 | Download do relatório PDF | 7 | Sim (CTA de cadastro) | free |
 | Histórico de análises | 7 | Sim | free |
 | Salvar imóvel/zona | 6 | Sim | free (5/2) |
@@ -1988,7 +1985,7 @@ async def entitlements_middleware(request, call_next):
 | Selecionar qualquer zona | 4 | Sim | basico |
 | > 4 métricas simultâneas | 4 | Sim | pro |
 | Inclusão noturna no prewarm | 7 | Sim | pro |
-| Refresh automático semanal de salvos | 9 | Sim | pro_max |
+| Refresh automático semanal de salvos | 9 | Não | nenhum plano |
 | Assinatura recorrente / billing | 8 | Sim | qualquer pago |
 
 **Fases 6–7 sem auth completa:** créditos de sessão trackeados por Redis `credit:session:{session_id}` com TTL 7 dias. A assinatura real é criada na Fase 8.
@@ -2020,28 +2017,28 @@ Stripe permanece no roadmap, mas não bloqueia o lançamento da monetização.
 | Geração de zona | 20 |
 | Enriquecimento de zona | 20 |
 | Acesso a imóveis em cache | 20 |
-| Scraping fresco sob demanda | 20 |
+| Scraping fresco sob demanda | indisponível |
 | Relatório/export analítico | 20 |
 
 Total:
 
 ```text
-1 jornada completa = 100 créditos
+1 jornada completa sem scraping sob demanda = 80 créditos
 ```
 
 ### Planos
 
 | Plano | Preço | Créditos | Imóveis salvos | Zonas salvas | Retenção | Parametrização | Métricas | Atualização |
 |---|---:|---:|---:|---:|---:|---|---|---|
-| Anônimo | — | 350 sessão | 0 | 0 | 7 dias sessão | travada | default | não |
+| Anônimo | — | 300 sessão | 0 | 0 | 7 dias sessão | travada | default | não |
 | Free | R$ 0 | 350 | 5 | 2 | 7 dias | travada | default | não |
 | Básico | R$ 21,99 | 800 | 20 | 4 | 30 dias | limitada | 4 | não |
 | Pro | R$ 90,99 | 4000 | 100 | 20 | 30 dias | liberada | sem limite | não |
-| Pro Max | R$ 121,99 | 20000 | 100 | 20 | 30 dias | liberada | sem limite | sim, controlada |
+| Pro Max | R$ 312,99 | 20000 | 100 | 20 | 30 dias | liberada | sem limite | não |
 
 ### Plano Anônimo
 
-- 350 créditos de sessão;
+- 300 créditos de sessão;
 - até 3 jornadas completas;
 - parâmetros travados;
 - sem favoritos persistentes;
@@ -2055,8 +2052,7 @@ Total:
 - 2 zonas salvas;
 - retenção de 7 dias;
 - acesso à comparação por 7 dias;
-- parâmetros travados;
-- zonas limitadas a 2 linhas de transporte público escolhidas automaticamente.
+- parâmetros travados.
 
 ### Plano Básico
 
@@ -2082,13 +2078,10 @@ Total:
 
 ### Plano Pro Max
 
-- R$ 321,99/mês;
+- R$ 312,99/mês;
+- 20000 créditos;
 - herda Pro;
-- refresh automático controlado:
-  - até 10 zonas ativas;
-  - até 30 imóveis ativos;
-  - cadência de 7 dias;
-  - elegibilidade por visualização nos últimos 30 dias ou prioridade manual.
+- sem atualização automática.
 
 ### Política de créditos
 
@@ -2455,7 +2448,7 @@ após 3ª: `zones.badges.finalized` emitido exatamente uma vez. ✅
 #### M5.4 — Stale-while-revalidate e hit parcial ✅
 - [x] Hit total: cache `complete` + dentro do TTL → retorna imediatamente
 - [x] Hit parcial: cache por interseção de polígonos (`ST_Within`) com outra zona de geometria similar
-- [x] Miss total: enfileira job de scraping
+- [x] Miss total: registra demanda e retorna fila para prewarm; não enfileira scraping sob demanda
 - [x] `PreliminaryResultThresholds` aplicados antes de sinalizar `listings.preliminary.ready`
 
 **Verificação:** buscar imóveis em zona A → criar zona B que cobre 70% de A → resultado parcial de A serve para B.
@@ -2470,7 +2463,7 @@ após 3ª: `zones.badges.finalized` emitido exatamente uma vez. ✅
 **Verificação:** inserir mesmo imóvel via 2 plataformas → `SELECT count(*) FROM properties WHERE fingerprint = :fp` = 1. ✅ (2026-03-22: `property_count=1`, `listing_ads_count=2`, `current_best_price=2800.00`, `second_best_price=3100.00`)
 
 #### M5.6 — `listing_search_requests` ✅
-- [x] Registrar somente buscas confirmadas pelo clique em "Buscar imóveis" na Etapa 5, inclusive cache hit, cache miss e scraping fresh
+- [x] Registrar somente buscas confirmadas pelo clique em "Buscar imóveis" na Etapa 5, inclusive cache hit e cache miss
 - [x] Persistir `zone_fingerprint`, `search_location_normalized`, `search_type`, `usage_type`, `platforms_hash` e `requested_at`
 - [x] Busca de usuário FREE sem cache também entra na fila lógica de demanda para o prewarm seguinte
 - [x] Query base da Fase 7: agregação das buscas das últimas 24h por endereço/search location
@@ -3054,19 +3047,19 @@ Não reabrir sem análise de impacto documentada.
 | Cobrança prioritária | **Pix com QR Code / Pix Copia e Cola** | Menor complexidade para lançamento |
 | Stripe | **Backlog futuro (Fase 10)** | Automação de assinatura depois da validação comercial |
 | Ciclo do plano | **30 dias** | Simples para Pix manual e compatível com assinatura futura |
-| Créditos por jornada | **100 créditos** | Orçamento mental simples |
-| Etapas monetizáveis | **5 × 20 créditos** | Consumo uniforme independente do modal |
-| Créditos anônimos | **350** | Até 3 jornadas completas |
+| Créditos por jornada | **80 créditos** | Jornada sem scraping sob demanda |
+| Etapas monetizáveis | **4 × 20 créditos** | Scraping sob demanda indisponível em todos os planos |
+| Créditos anônimos | **300** | Menor liberdade que o Free |
 | Migração anônimo → Free | **Free recebe 350; não soma saldo anônimo** | Evita arbitragem |
 | Plano Básico | **R$ 21,99 / 800 créditos** | Entrada acessível |
 | Plano Pro | **R$ 90,99 / 4000 créditos** | Usuário intenso |
-| Plano Pro Max | **R$ 121,99 / 4000 créditos + refresh** | Conveniência e atualização automática |
+| Plano Pro Max | **R$ 312,99 / 20000 créditos** | Franquia superior ao Pro; sem scraping sob demanda |
 | Refresh do plano Pro | **Não incluso** | Evita custo oculto |
-| Refresh do plano Pro Max | **10 zonas + 30 imóveis, 7 dias, eleg 30d** | Limite operacional explícito |
+| Refresh do plano Pro Max | **Não incluso** | Nenhum plano libera scraping/refresh sob demanda |
 | Modelo de pagamento | **`payments` genérico** | Suporta Pix agora e Stripe depois |
 | Ativação de plano | **`plan_activations`** | Desacopla plano ativo do provedor de pagamento |
 | Confirmação Pix inicial | **Manual/admin ou callback opcional** | Permite lançar sem gateway completo |
 | Renovação | **Manual por Pix na primeira versão** | Simples e suficiente para validação |
 | Stripe Billing | **Fase 10** | Portal, retries e recorrência depois da validação comercial |
-| Scraping arbitrário | **Nenhum plano libera scraping arbitrário** | Scraping fresco continua sendo etapa monetizável #4 |
+| Scraping arbitrário | **Nenhum plano libera scraping sob demanda** | Buscas sem cache registram demanda para prewarm controlado |
 | Salvos pós-downgrade | **`over_limit_grace` 7d → `archived` (nunca delete)** | Recuperação total via upgrade; UI sempre mostra arquivados |

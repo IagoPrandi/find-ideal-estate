@@ -5,11 +5,11 @@ import { useAuth } from "../auth/AuthContext";
 import { PixModal } from "./PixModal";
 
 const PLAN_FEATURES: Record<string, string[]> = {
-  anonymous: ["350 créditos de sessão", "Sem favoritos", "Parâmetros travados"],
+  anonymous: ["300 créditos de sessão", "Sem favoritos", "Parâmetros travados"],
   free: ["350 créditos/mês", "5 imóveis salvos", "2 zonas salvas", "Retenção 7 dias"],
   basico: ["800 créditos/mês", "20 imóveis salvos", "4 zonas salvas", "Retenção 30 dias", "Parametrização limitada", "4 métricas"],
   pro: ["4.000 créditos/mês", "100 imóveis salvos", "20 zonas salvas", "Retenção 30 dias", "Parametrização completa", "Métricas ilimitadas"],
-  pro_max: ["20.000 créditos/mês", "100 imóveis salvos", "20 zonas salvas", "Retenção 30 dias", "Refresh automático semanal", "Prioridade configurável"],
+  pro_max: ["20.000 créditos/mês", "100 imóveis salvos", "20 zonas salvas", "Retenção 30 dias", "Parametrização completa", "Métricas ilimitadas"],
 };
 
 export function PlanosPage({ onClose }: { onClose: () => void }) {

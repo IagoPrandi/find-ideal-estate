@@ -18,9 +18,10 @@ import {
   SlidersHorizontal,
   Building2,
 } from "lucide-react";
-import { apiActionHint, getJob, getZoneDashboardAnalytics, getZoneFavoriteAnalytics, getZoneListings, searchZoneListings, type ListingPlatformVariantRead } from "../../api/client";
+import { apiActionHint, getJob, getZoneDashboardAnalytics, getZoneFavoriteAnalytics, getZoneListings, type ListingPlatformVariantRead } from "../../api/client";
 import { ListingsScrapeDiagnosticsSchema, type ListingsScrapeDiagnostics, type ListingsScrapePlatformDiagnostics } from "../../api/schemas";
 import { useAuth } from "../../features/auth/AuthContext";
+import { useEntitlements } from "../../features/auth/useEntitlements";
 import { buildZoneFavoriteAnalyticsQueryKey } from "../../lib/favorites";
 import { applyListingsPanelFilters, formatCurrencyBr, getListingDisplayPrice, getListingSelectionKey, resolveListingCardImageUrls, resolvePlatformUrl } from "../../lib/listingFormat";
 import { useFavoritesStore, useJourneyStore, useUIStore, type ListingsPanelFilters } from "../../state";
@@ -199,13 +200,13 @@ export function Step6Analysis() {
   const toggleFavorite = useFavoritesStore((state) => state.toggleFavorite);
   const favoriteListings = useFavoritesStore((state) => state.favorites);
   const isFavoritesHydrating = useFavoritesStore((state) => state.isHydrating);
+  const { max_listing_favorites, planName } = useEntitlements();
   const listingCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const listingsPanelScrollRef = useRef<HTMLDivElement | null>(null);
   const lastScrolledListingKeyRef = useRef<string | null>(null);
   const lastProgressRunKeyRef = useRef<string | null>(null);
   const autoCollapsedProgressRunKeyRef = useRef<string | null>(null);
   const lastListingsAvailabilityRef = useRef<{ runKey: string; freshnessStatus: string | null } | null>(null);
-  const scrapeTriggeredRunKeyRef = useRef<string | null>(null);
   const [isProgressCollapsed, setIsProgressCollapsed] = useState(false);
   const [isFiltersCollapsed, setIsFiltersCollapsed] = useState(false);
   const [isPreparingDashboard, setIsPreparingDashboard] = useState(false);
@@ -505,44 +506,6 @@ export function Step6Analysis() {
   useEffect(() => {
     setFailedListingImageKeys({});
   }, [journeyId, zoneFingerprint]);
-
-  // Trigger scraping only after the first cache batch has loaded in the frontend.
-  // Step5 records demand with start_scraping=false; this effect fires the real
-  // scrape POST once the GET response confirms there's no usable cache.
-  useEffect(() => {
-    if (!journeyId || !zoneFingerprint || !selectedAddress) return;
-    if (listingsQuery.isLoading || listingsQuery.isError) return;
-    if (listingsQuery.data?.freshness_status !== "no_cache") return;
-    if (effectiveListingsJobId) return;
-
-    const runKey = `${journeyId}:${zoneFingerprint}:${selectedAddress.normalized}`;
-    if (scrapeTriggeredRunKeyRef.current === runKey) return;
-    scrapeTriggeredRunKeyRef.current = runKey;
-
-    void searchZoneListings(journeyId, zoneFingerprint, {
-      search_location_normalized: selectedAddress.normalized,
-      search_location_label: selectedAddress.label,
-      search_location_type: selectedAddress.locationType,
-      search_type: config.type,
-      usage_type: config.propertyUsageType,
-      start_scraping: true,
-    }).then((result) => {
-      setJobIds({ listingsJobId: result.job_id || null });
-    }).catch(() => {
-      scrapeTriggeredRunKeyRef.current = null;
-    });
-  }, [
-    journeyId,
-    zoneFingerprint,
-    selectedAddress,
-    listingsQuery.isLoading,
-    listingsQuery.isError,
-    listingsQuery.data?.freshness_status,
-    effectiveListingsJobId,
-    config.type,
-    config.propertyUsageType,
-    setJobIds,
-  ]);
 
   useEffect(() => {
     if (!journeyId || !zoneFingerprint) {
@@ -959,10 +922,13 @@ export function Step6Analysis() {
               const hasAvailabilityPopover = Boolean(listing.duplication_badge && platformVariants.length > 1);
               const isSelected = listingKey !== "" && listingKey === selectedListingKey;
               const isSavedFavorite = listingKey ? favoriteListingKeySet.has(listingKey) : false;
+              const isAtListingLimit = !isSavedFavorite && max_listing_favorites != null && favoriteListings.length >= max_listing_favorites;
               const favoriteButtonLabel = isAuthLoading
                 ? "Verificando sua conta"
                 : !authStatus.is_authenticated
                 ? "Entre para salvar na sua conta"
+                : isAtListingLimit
+                ? `Limite de imóveis salvos atingido no plano ${planName}`
                 : isSavedFavorite
                   ? "Remover da lista de interesse"
                   : "Adicionar a lista de interesse";
@@ -1198,7 +1164,7 @@ export function Step6Analysis() {
                           aria-label={favoriteButtonLabel}
                           aria-pressed={isSavedFavorite}
                           title={favoriteButtonLabel}
-                          disabled={!listingKey || !journeyId || !zoneFingerprint || isFavoritesHydrating || isAuthLoading}
+                          disabled={!listingKey || !journeyId || !zoneFingerprint || isFavoritesHydrating || isAuthLoading || isAtListingLimit}
                           onClick={async (event) => {
                             event.stopPropagation();
                             if (!listingKey || !journeyId || !zoneFingerprint || isFavoritesHydrating || isAuthLoading) {

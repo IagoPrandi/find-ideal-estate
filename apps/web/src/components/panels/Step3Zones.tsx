@@ -1,6 +1,7 @@
-import { LoaderCircle, MapIcon } from "lucide-react";
+import { LoaderCircle, Lock, MapIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { apiActionHint, createZoneEnrichmentJob, createZoneGenerationJob, getJob, updateJourney } from "../../api/client";
+import { useEntitlements } from "../../features/auth/useEntitlements";
 import { useJourneyStore, useUIStore } from "../../state";
 
 type StageMode = "idle" | "generation" | "enrichment" | "finalizing";
@@ -231,7 +232,7 @@ export function Step3Zones() {
       setStageMode("idle");
       setProgress(0);
       setJobIds({ zoneGenerationJobId: null, zoneEnrichmentJobId: null });
-      setError(caughtError instanceof Error ? caughtError.message : apiActionHint(caughtError));
+      setError(apiActionHint(caughtError));
     }
   }
 
@@ -247,6 +248,7 @@ export function Step3Zones() {
     void runGenerationPipeline();
   }, [isDirectIsochroneMode, journeyId, stageMode]);
 
+  const { can_customize_max_time, can_customize_radius, max_transit_minutes_cap, max_zone_radius_m_cap } = useEntitlements();
   const isBusy = stageMode !== "idle";
   const stageLabel = stageMode === "generation" ? (isDirectIsochroneMode ? "Gerando área acessível" : "Gerando zonas") : stageMode === "enrichment" ? "Enriquecendo camadas" : "Finalizando";
 
@@ -316,36 +318,62 @@ export function Step3Zones() {
                 <div className="grid gap-5 md:grid-cols-2">
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
-                      <label className="text-sm font-medium text-slate-700">Tempo máximo de viagem</label>
+                      <div className="flex items-center gap-1.5">
+                        <label className="text-sm font-medium text-slate-700">Tempo máximo de viagem</label>
+                        {!can_customize_max_time && (
+                          <span title="Disponível a partir do plano Básico" className="inline-flex cursor-help items-center text-slate-400">
+                            <Lock className="h-3.5 w-3.5" />
+                          </span>
+                        )}
+                      </div>
                       <span className="text-sm font-bold text-pastel-violet-600">{config.time} min</span>
                     </div>
                     <input
                       type="range"
                       min="10"
-                      max="90"
+                      max={max_transit_minutes_cap ?? 90}
                       step="5"
                       value={config.time}
-                      onChange={(event) => setConfig({ time: Number(event.target.value) })}
-                      className="w-full accent-pastel-violet-500"
+                      disabled={!can_customize_max_time}
+                      onChange={can_customize_max_time ? (event) => setConfig({ time: Math.min(Number(event.target.value), max_transit_minutes_cap ?? 90) }) : undefined}
+                      className={`w-full accent-pastel-violet-500 ${!can_customize_max_time ? "cursor-not-allowed opacity-50" : ""}`}
                     />
-                    <p className="text-xs text-slate-400">Limita o alcance temporal usado para montar as zonas candidatas.</p>
+                    {!can_customize_max_time
+                      ? <p className="text-xs text-slate-400">Disponível a partir do plano Básico.</p>
+                      : max_transit_minutes_cap !== null
+                        ? <p className="text-xs text-slate-400">Máximo de {max_transit_minutes_cap} min no seu plano.</p>
+                        : <p className="text-xs text-slate-400">Limita o alcance temporal usado para montar as zonas candidatas.</p>
+                    }
                   </div>
 
                   <div className="space-y-3">
                     <div className="flex items-center justify-between">
-                      <label className="text-sm font-medium text-slate-700">Raio das zonas</label>
+                      <div className="flex items-center gap-1.5">
+                        <label className="text-sm font-medium text-slate-700">Raio das zonas</label>
+                        {!can_customize_radius && (
+                          <span title="Disponível a partir do plano Básico" className="inline-flex cursor-help items-center text-slate-400">
+                            <Lock className="h-3.5 w-3.5" />
+                          </span>
+                        )}
+                      </div>
                       <span className="text-sm font-bold text-pastel-violet-600">{config.zoneRadiusMeters} m</span>
                     </div>
                     <input
                       type="range"
-                      min="400"
-                      max="2500"
+                      min={max_zone_radius_m_cap !== null ? Math.min(300, max_zone_radius_m_cap) : 400}
+                      max={max_zone_radius_m_cap ?? 2500}
                       step="100"
                       value={config.zoneRadiusMeters}
-                      onChange={(event) => setConfig({ zoneRadiusMeters: Number(event.target.value) })}
-                      className="w-full accent-pastel-violet-500"
+                      disabled={!can_customize_radius}
+                      onChange={can_customize_radius ? (event) => setConfig({ zoneRadiusMeters: Math.min(Number(event.target.value), max_zone_radius_m_cap ?? 2500) }) : undefined}
+                      className={`w-full accent-pastel-violet-500 ${!can_customize_radius ? "cursor-not-allowed opacity-50" : ""}`}
                     />
-                    <p className="text-xs text-slate-400">Define o raio-base usado para consolidar a zona ao redor do ponto de transporte selecionado.</p>
+                    {!can_customize_radius
+                      ? <p className="text-xs text-slate-400">Disponível a partir do plano Básico.</p>
+                      : max_zone_radius_m_cap !== null
+                        ? <p className="text-xs text-slate-400">Máximo de {max_zone_radius_m_cap} m no seu plano.</p>
+                        : <p className="text-xs text-slate-400">Define o raio-base usado para consolidar a zona ao redor do ponto de transporte selecionado.</p>
+                    }
                   </div>
                 </div>
               )}

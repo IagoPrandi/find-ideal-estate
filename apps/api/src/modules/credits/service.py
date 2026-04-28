@@ -9,14 +9,13 @@ from core.redis import get_redis
 from sqlalchemy import text
 
 ANONYMOUS_CREDIT_KEY = "credit:session:{session_id}"
-ANONYMOUS_CREDIT_DEFAULT = 350
+ANONYMOUS_CREDIT_DEFAULT = 300
 ANONYMOUS_CREDIT_TTL = 7 * 24 * 3600  # 7 days in seconds
 
 STEP_COSTS: dict[str, int] = {
     "zone_generation": 20,
     "zone_enrichment": 20,
     "listings_cache": 20,
-    "listings_scrape": 20,
     "report": 20,
 }
 

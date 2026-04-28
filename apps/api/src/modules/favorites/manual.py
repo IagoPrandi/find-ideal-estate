@@ -6,9 +6,10 @@ from typing import Any
 from urllib.parse import urlparse
 from uuid import UUID
 
-from contracts import FavoriteListingCreate, FavoriteListingRead, ListingCardRead, ManualFavoriteCreate
+from contracts import FavoriteListingCreate, FavoriteListingRead, ListingCardRead, ManualFavoriteCreate, ResolvedEntitlements
 from core.db import get_engine
-from modules.favorites.service import upsert_user_favorite
+from modules.favorites.service import build_listing_key, upsert_user_favorite
+from modules.plans.service import assert_can_save_listing_with_plan
 from sqlalchemy import text
 
 _PLATFORM_HOST_MAP = (
@@ -222,6 +223,8 @@ def _json_string(value: str) -> str:
 async def upsert_manual_listing_favorite(
     user_id: UUID,
     payload: ManualFavoriteCreate,
+    *,
+    resolved: ResolvedEntitlements | None = None,
 ) -> FavoriteListingRead:
     url = (payload.url or "").strip()
     if not url:
@@ -250,6 +253,10 @@ async def upsert_manual_listing_favorite(
         search_type=payload.search_type,
         usage_type=payload.usage_type,
     )
+
+    if resolved is not None:
+        listing_key = build_listing_key(listing_card)
+        await assert_can_save_listing_with_plan(user_id, resolved, listing_key=listing_key)
 
     journey_id = payload.journey_id
     zone_fingerprint = payload.zone_fingerprint or ""

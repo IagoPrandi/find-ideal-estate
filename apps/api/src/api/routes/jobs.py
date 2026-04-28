@@ -3,14 +3,17 @@ from __future__ import annotations
 from uuid import UUID
 
 from api.routes.auth import get_optional_auth_context
-from contracts import JobCancelAccepted, JobCreate, JobRead
+from contracts import JobCancelAccepted, JobCreate, JobRead, JobType
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
 from modules.auth.service import get_accessible_journey
+from modules.credits.service import InsufficientCreditsError, check_and_consume, consume_anonymous_credits
 from modules.jobs.events import job_events_stream
 from modules.jobs.service import create_job, get_job, request_job_cancellation
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
+
+_CREDIT_JOB_TYPES = {JobType.ZONE_GENERATION, JobType.ZONE_ENRICHMENT}
 
 
 @router.post("", response_model=JobRead, status_code=status.HTTP_201_CREATED)
@@ -18,6 +21,24 @@ async def create_job_endpoint(payload: JobCreate, response: Response, auth_conte
     journey = await get_accessible_journey(payload.journey_id, auth_context)
     if journey is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Journey not found")
+    if payload.job_type == JobType.LISTINGS_SCRAPE:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Nenhum plano libera scraping sob demanda.",
+        )
+    if payload.job_type in _CREDIT_JOB_TYPES:
+        try:
+            if auth_context.user is None:
+                session_id = auth_context.anonymous_session_id or ""
+                await consume_anonymous_credits(session_id, 20)
+            else:
+                bypass = auth_context.user.role == "proprietario"
+                await check_and_consume(auth_context.user.id, payload.job_type.value, bypass=bypass)
+        except InsufficientCreditsError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                detail=f"Créditos insuficientes para executar esta etapa (necessário={exc.required}, saldo={exc.balance}).",
+            ) from exc
     result = await create_job(payload)
     if not result.created:
         response.status_code = status.HTTP_200_OK

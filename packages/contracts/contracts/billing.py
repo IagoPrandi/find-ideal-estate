@@ -35,6 +35,11 @@ class PlanEntitlementsRead(BaseModel):
     rollover_percent: int
     rollover_cycles: int
     cycle_length_days: int
+    max_transit_minutes_cap: int | None = None
+    max_walk_minutes_cap: int | None = None
+    max_car_minutes_cap: int | None = None
+    max_zone_radius_m_cap: int | None = None
+    max_transport_radius_m_cap: int | None = None
 
 
 class ResolvedEntitlements(BaseModel):

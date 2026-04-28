@@ -1,7 +1,7 @@
 """Listings API routes.
 
 POST /journeys/{journey_id}/listings/search
-    Step 5: confirm address search, record demand, return cache or enqueue scraping.
+    Step 5: confirm address search, record demand, return cache or queue for prewarm.
 
 GET  /journeys/{journey_id}/listings/address-suggest
     Step 5: autocomplete filtered to zone polygon.
@@ -49,9 +49,9 @@ _DEFERRED_ADDRESS_NOTICE_REASON = "address_search_registered"
 
 
 def _is_scrape_authorized(auth_context: object) -> bool:
-    # Scraping liberado para todos os usuários autenticados ou anônimos.
+    # Nenhum plano libera scraping sob demanda.
     _ = auth_context
-    return True
+    return False
 
 
 def _build_deferred_address_response() -> ListingsRequestResult:
@@ -262,13 +262,11 @@ async def listings_search(
         result_source = "cache_miss"
 
     active_job_id: UUID | None = None
-    scrape_authorized = True
     if result_source == "cache_miss":
         active_job_id = await _find_active_listings_job_id(
             journey_id,
             search_location_normalized=normalized_search_location,
         )
-        scrape_authorized = active_job_id is not None or _is_scrape_authorized(auth_context)
 
     # Always record demand (including misses -- drives prewarm)
     await record_search_request(
@@ -296,8 +294,7 @@ async def listings_search(
             )
 
         if not body.start_scraping:
-            # Demand recorded; caller will trigger scraping separately (after first
-            # cache batch loads in the frontend).
+            # Demand recorded; no plan can trigger an immediate scrape.
             return ListingsRequestResult(
                 source="none",
                 job_id=None,
@@ -306,34 +303,7 @@ async def listings_search(
                 total_count=0,
             )
 
-        if not scrape_authorized:
-            return _build_deferred_address_response()
-
-        # Ensure cache row exists (for lock coordination) and enqueue scrape job
-        await create_cache_record(
-            normalized_search_location,
-            zone_fingerprint=body.zone_fingerprint,
-            config_hash=config_hash,
-        )
-
-        job_id = await _enqueue_listings_scrape_job(
-            journey_id=journey_id,
-            zone_fingerprint=body.zone_fingerprint,
-            search_location_normalized=normalized_search_location,
-            search_address=body.search_location_label,
-            search_type=body.search_type,
-            usage_type=body.usage_type,
-            platforms=platforms,
-            force_refresh=False,
-        )
-
-        return ListingsRequestResult(
-            source="none",
-            job_id=job_id,
-            freshness_status="no_cache",
-            listings=[],
-            total_count=0,
-        )
+        return _build_deferred_address_response()
 
     # Cache hit or partial hit -- return listings
     display_platforms = _cache_display_platforms(cache, platforms)
@@ -398,30 +368,12 @@ async def get_listings_scrape_plan(
 ) -> ListingsScrapePlanResponse:
     if await get_accessible_journey(journey_id, auth_context) is None:
         raise HTTPException(status_code=404, detail="Journey not found")
-    try:
-        registry = get_platform_registry()
-    except PlatformRegistryError as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-    raw_platforms = platforms or registry.default_free_platforms()
-    try:
-        canonical_platforms = registry.resolve_names(raw_platforms)
-    except PlatformRegistryError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    platform_plan = [
-        ListingsScrapePlanPlatform(
-            platform=platform,
-            max_pages=int(registry.scraper_config_for(platform).get("max_pages", 1) or 1),
-        )
-        for platform in canonical_platforms
-    ]
-
+    _ = platforms
     return ListingsScrapePlanResponse(
         search_type=search_type,
         usage_type=usage_type,
-        total_pages=sum(item.max_pages for item in platform_plan),
-        platforms=platform_plan,
+        total_pages=0,
+        platforms=[],
     )
 
 

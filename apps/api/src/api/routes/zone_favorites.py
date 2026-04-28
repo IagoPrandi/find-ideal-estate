@@ -4,7 +4,9 @@ from api.routes.auth import get_optional_auth_context
 from contracts import FavoriteZoneCreate, FavoriteZoneNoteUpdate, FavoriteZoneRead
 from fastapi import APIRouter, Depends, HTTPException, status
 from modules.auth.service import get_accessible_journey
+from modules.plans.service import assert_can_save_zone_with_plan, resolve_entitlements
 from modules.zone_favorites.service import (
+    build_zone_key,
     delete_user_zone_favorite,
     list_user_zone_favorites,
     update_user_zone_favorite_note,
@@ -28,7 +30,9 @@ async def list_zone_favorites_endpoint(
     auth_context=Depends(get_optional_auth_context),
 ) -> list[FavoriteZoneRead]:
     user = _require_authenticated_user(auth_context)
-    return await list_user_zone_favorites(user.id)
+    resolved = await resolve_entitlements(user.id)
+    retention_days = resolved.entitlements.retention_days
+    return await list_user_zone_favorites(user.id, retention_days=retention_days)
 
 
 @router.post("", response_model=FavoriteZoneRead)
@@ -40,6 +44,9 @@ async def save_zone_favorite_endpoint(
     journey = await get_accessible_journey(payload.journey_id, auth_context)
     if journey is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Journey not found")
+    resolved = await resolve_entitlements(user.id)
+    zone_key = build_zone_key(payload.journey_id, payload.zone_fingerprint)
+    await assert_can_save_zone_with_plan(user.id, resolved, zone_key=zone_key)
     return await upsert_user_zone_favorite(user.id, payload)
 
 

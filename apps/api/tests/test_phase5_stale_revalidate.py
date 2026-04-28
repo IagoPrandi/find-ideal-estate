@@ -220,8 +220,8 @@ def test_listings_search_without_address_cache_queues_new_scrape(monkeypatch) ->
     assert body["freshness_status"] == "queued_for_next_prewarm"
     assert len(fetch_calls) == 0
     assert calls["record"] == 1
-    assert calls["create_cache"] == 1
-    assert calls["enqueue"] == 1
+    assert calls["create_cache"] == 0
+    assert calls["enqueue"] == 0
 
 
 def test_listings_search_old_cache_hit_remains_valid_without_revalidation(monkeypatch) -> None:
@@ -607,9 +607,7 @@ def test_get_zone_listings_can_scope_to_selected_address(monkeypatch) -> None:
     assert fetch_calls[0]["address_scope"] == "selected_address"
 
 
-def test_listings_search_cache_miss_returns_job_id(monkeypatch) -> None:
-    created_job_id = uuid4()
-
+def test_listings_search_cache_miss_returns_deferred_without_scraping(monkeypatch) -> None:
     class _Registry:
         def default_free_platforms(self):
             return ["quintoandar", "vivareal", "zapimoveis"]
@@ -630,10 +628,10 @@ def test_listings_search_cache_miss_returns_job_id(monkeypatch) -> None:
         return None
 
     async def _fake_create_cache_record(_normalized, **_kwargs):
-        return None
+        raise AssertionError("create_cache_record should not run when scraping is disabled")
 
     async def _fake_enqueue(**_kwargs):
-        return created_job_id
+        raise AssertionError("_enqueue_listings_scrape_job should not run when scraping is disabled")
 
     async def _fake_find_active_job(*_args, **_kwargs):
         return None
@@ -664,7 +662,7 @@ def test_listings_search_cache_miss_returns_job_id(monkeypatch) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["source"] == "none"
-    assert body["job_id"] == str(created_job_id)
+    assert body["job_id"] is None
     assert body["freshness_status"] == "queued_for_next_prewarm"
 
 
@@ -728,6 +726,7 @@ def test_listings_search_cache_miss_registers_deferred_address_for_non_authorize
         "listings": [],
         "total_count": 0,
         "cache_age_hours": None,
+        "has_more": False,
     }
     assert calls["record"] == 1
 
@@ -967,5 +966,5 @@ def test_listings_search_normalizes_address_before_active_job_lookup(monkeypatch
     assert response.status_code == 200
     body = response.json()
     assert body["source"] == "none"
-    assert body["freshness_status"] == "queued_for_next_prewarm"
+    assert body["freshness_status"] == "no_cache"
     assert calls["record"] == 1

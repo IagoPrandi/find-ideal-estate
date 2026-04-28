@@ -8,6 +8,7 @@ from uuid import UUID
 from contracts import AccountPlanRead, PlanEntitlementsRead, PlanRead, ResolvedEntitlements
 from core.db import get_engine
 from core.redis import get_redis
+from modules.plans.exceptions import EntitlementExceeded, ViewWindowExpired
 from sqlalchemy import text
 
 _ENTITLEMENTS_CACHE_TTL = 60
@@ -16,6 +17,16 @@ _FREE_PLAN_SLUG = "free"
 _ANONYMOUS_PLAN_SLUG = "anonymous"
 _PROPRIETARIO_ROLE = "proprietario"
 _PROPRIETARIO_PLAN_ID = UUID("00000000-0000-0000-0000-000000000099")
+
+_PLAN_CAPS: dict[str, dict] = {
+    "basico": {
+        "max_transit_minutes_cap": 20,
+        "max_walk_minutes_cap": 15,
+        "max_car_minutes_cap": 10,
+        "max_zone_radius_m_cap": 300,
+        "max_transport_radius_m_cap": None,
+    },
+}
 
 
 def _proprietario_resolved_entitlements() -> ResolvedEntitlements:
@@ -38,14 +49,19 @@ def _proprietario_resolved_entitlements() -> ResolvedEntitlements:
         max_active_metrics=None,
         transport_line_policy="unlocked",
         zone_selection_policy="any",
-        auto_refresh_policy="managed_queue",
+        auto_refresh_policy="none",
         pro_max_refresh_max_zones=None,
         pro_max_refresh_max_listings=None,
-        pro_max_refresh_cadence_days=1,
-        pro_max_refresh_eligibility_days=365,
+        pro_max_refresh_cadence_days=None,
+        pro_max_refresh_eligibility_days=None,
         rollover_percent=100,
         rollover_cycles=12,
         cycle_length_days=30,
+        max_transit_minutes_cap=None,
+        max_walk_minutes_cap=None,
+        max_car_minutes_cap=None,
+        max_zone_radius_m_cap=None,
+        max_transport_radius_m_cap=None,
     )
     return ResolvedEntitlements(plan=plan, entitlements=entitlements)
 
@@ -78,6 +94,7 @@ def _row_to_plan(row) -> PlanRead:
 
 
 def _row_to_entitlements(row) -> PlanEntitlementsRead:
+    caps = _PLAN_CAPS.get(row["slug"], {})
     return PlanEntitlementsRead(
         max_listing_favorites=row["max_listing_favorites"],
         max_zone_favorites=row["max_zone_favorites"],
@@ -96,6 +113,11 @@ def _row_to_entitlements(row) -> PlanEntitlementsRead:
         rollover_percent=row["rollover_percent"],
         rollover_cycles=row["rollover_cycles"],
         cycle_length_days=row["cycle_length_days"],
+        max_transit_minutes_cap=caps.get("max_transit_minutes_cap"),
+        max_walk_minutes_cap=caps.get("max_walk_minutes_cap"),
+        max_car_minutes_cap=caps.get("max_car_minutes_cap"),
+        max_zone_radius_m_cap=caps.get("max_zone_radius_m_cap"),
+        max_transport_radius_m_cap=caps.get("max_transport_radius_m_cap"),
     )
 
 
@@ -247,6 +269,119 @@ async def activate_plan_direct(user_id: UUID, plan_slug: str) -> None:
         )
 
     await invalidate_entitlements_cache(user_id)
+
+
+async def count_listing_favorites(user_id: UUID) -> int:
+    engine = get_engine()
+    async with engine.connect() as conn:
+        result = await conn.execute(
+            text("SELECT COUNT(*) FROM user_listing_favorites WHERE user_id = :user_id"),
+            {"user_id": user_id},
+        )
+        return int(result.scalar() or 0)
+
+
+async def count_zone_favorites(user_id: UUID) -> int:
+    engine = get_engine()
+    async with engine.connect() as conn:
+        result = await conn.execute(
+            text("SELECT COUNT(*) FROM user_zone_favorites WHERE user_id = :user_id"),
+            {"user_id": user_id},
+        )
+        return int(result.scalar() or 0)
+
+
+async def listing_favorite_exists(user_id: UUID, listing_key: str) -> bool:
+    engine = get_engine()
+    async with engine.connect() as conn:
+        result = await conn.execute(
+            text("SELECT 1 FROM user_listing_favorites WHERE user_id = :user_id AND listing_key = :listing_key LIMIT 1"),
+            {"user_id": user_id, "listing_key": listing_key},
+        )
+        return result.first() is not None
+
+
+async def zone_favorite_exists(user_id: UUID, zone_key: str) -> bool:
+    engine = get_engine()
+    async with engine.connect() as conn:
+        result = await conn.execute(
+            text("SELECT 1 FROM user_zone_favorites WHERE user_id = :user_id AND zone_key = :zone_key LIMIT 1"),
+            {"user_id": user_id, "zone_key": zone_key},
+        )
+        return result.first() is not None
+
+
+async def assert_can_save_listing(user_id: UUID, entitlements: PlanEntitlementsRead) -> None:
+    limit = entitlements.max_listing_favorites
+    if limit is None:
+        return
+    current = await count_listing_favorites(user_id)
+    if current >= limit:
+        raise EntitlementExceeded(
+            kind="max_listing_favorites",
+            plan=entitlements.transport_line_policy,
+            current=current,
+            limit=limit,
+        )
+
+
+async def assert_can_save_listing_with_plan(
+    user_id: UUID,
+    resolved: ResolvedEntitlements,
+    *,
+    listing_key: str | None = None,
+) -> None:
+    limit = resolved.entitlements.max_listing_favorites
+    if limit is None:
+        return
+    if listing_key is not None and await listing_favorite_exists(user_id, listing_key):
+        return  # upsert de item já salvo — não consome cota
+    current = await count_listing_favorites(user_id)
+    if current >= limit:
+        raise EntitlementExceeded(
+            kind="max_listing_favorites",
+            plan=resolved.plan.slug,
+            current=current,
+            limit=limit,
+        )
+
+
+async def assert_can_save_zone_with_plan(
+    user_id: UUID,
+    resolved: ResolvedEntitlements,
+    *,
+    zone_key: str | None = None,
+) -> None:
+    limit = resolved.entitlements.max_zone_favorites
+    if limit is None:
+        return
+    if zone_key is not None and await zone_favorite_exists(user_id, zone_key):
+        return  # upsert de zona já salva — não consome cota
+    current = await count_zone_favorites(user_id)
+    if current >= limit:
+        raise EntitlementExceeded(
+            kind="max_zone_favorites",
+            plan=resolved.plan.slug,
+            current=current,
+            limit=limit,
+        )
+
+
+def assert_can_customize(field: str, resolved: ResolvedEntitlements) -> None:
+    flag_map = {
+        "radius": resolved.entitlements.can_customize_radius,
+        "max_time": resolved.entitlements.can_customize_max_time,
+        "distance": resolved.entitlements.can_customize_distance,
+    }
+    if field not in flag_map:
+        return
+    if not flag_map[field]:
+        raise EntitlementExceeded(kind=f"customize_{field}", plan=resolved.plan.slug)
+
+
+def assert_view_window_valid(view_state: str, plan_slug: str) -> None:
+    if view_state == "expired_for_view":
+        raise ViewWindowExpired(plan=plan_slug)
 
 
 async def get_active_plan_activation(user_id: UUID) -> AccountPlanRead | None:

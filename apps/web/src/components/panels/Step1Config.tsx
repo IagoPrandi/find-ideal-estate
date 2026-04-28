@@ -1,8 +1,9 @@
-import { MapPin, Route, ShieldAlert, Trees, Droplets, Search, ArrowRight, Bus, Train, Blend, CarFront } from "lucide-react";
+import { MapPin, Route, ShieldAlert, Trees, Droplets, Search, ArrowRight, Bus, Train, Blend, CarFront, Lock } from "lucide-react";
 import { useState } from "react";
 import { apiActionHint, createJourney } from "../../api/client";
 import { GREEN_VEGETATION_LABELS, GREEN_VEGETATION_LEVELS, useJourneyStore } from "../../state";
 import { useUIStore } from "../../state";
+import { useEntitlements } from "../../features/auth/useEntitlements";
 
 const PUBLIC_TRANSPORT_OPTIONS = [
   {
@@ -35,6 +36,7 @@ export function Step1Config() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isGreenPopoverOpen, setIsGreenPopoverOpen] = useState(false);
+  const { can_customize_distance, can_customize_max_time, max_walk_minutes_cap, max_car_minutes_cap } = useEntitlements();
   const greenEnabled = config.enrichments.green;
   const isWalkingMode = config.modal === "walk";
   const isDrivingMode = config.modal === "car";
@@ -278,24 +280,53 @@ export function Step1Config() {
         {isDirectIsochroneMode ? (
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <label htmlFor="direct-travel-time-minutes" className="text-sm font-medium text-slate-700">{isWalkingMode ? "Tempo de caminhada" : "Tempo de carro"}</label>
+              <div className="flex items-center gap-1.5">
+                <label htmlFor="direct-travel-time-minutes" className="text-sm font-medium text-slate-700">{isWalkingMode ? "Tempo de caminhada" : "Tempo de carro"}</label>
+                {!can_customize_max_time && (
+                  <span title="Disponível a partir do plano Básico" className="inline-flex cursor-help items-center text-slate-400">
+                    <Lock className="h-3.5 w-3.5" />
+                  </span>
+                )}
+              </div>
               <span className="text-sm font-bold text-pastel-violet-600">{config.time} min</span>
             </div>
-            <input
-              id="direct-travel-time-minutes"
-              type="range"
-              min="5"
-              max="60"
-              step="5"
-              value={config.time}
-              onChange={(event) => setConfig({ time: Number(event.target.value) })}
-              className="w-full accent-pastel-violet-500"
-            />
+            {(() => {
+              const cap = isWalkingMode ? max_walk_minutes_cap : max_car_minutes_cap;
+              const maxVal = cap ?? 60;
+              return (
+                <>
+                  <input
+                    id="direct-travel-time-minutes"
+                    type="range"
+                    min="5"
+                    max={maxVal}
+                    step="5"
+                    value={config.time}
+                    disabled={!can_customize_max_time}
+                    onChange={can_customize_max_time ? (event) => setConfig({ time: Math.min(Number(event.target.value), maxVal) }) : undefined}
+                    className={`w-full accent-pastel-violet-500 ${!can_customize_max_time ? "cursor-not-allowed opacity-50" : ""}`}
+                  />
+                  {!can_customize_max_time
+                    ? <p className="text-xs text-slate-400">Disponível a partir do plano Básico.</p>
+                    : cap !== null
+                      ? <p className="text-xs text-slate-400">Máximo de {cap} min no seu plano.</p>
+                      : null
+                  }
+                </>
+              );
+            })()}
           </div>
         ) : (
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <label htmlFor="transport-search-radius" className="text-sm font-medium text-slate-700">Raio de busca do transporte</label>
+              <div className="flex items-center gap-1.5">
+                <label htmlFor="transport-search-radius" className="text-sm font-medium text-slate-700">Raio de busca do transporte</label>
+                {!can_customize_distance && (
+                  <span title="Disponível a partir do plano Básico" className="inline-flex cursor-help items-center text-slate-400">
+                    <Lock className="h-3.5 w-3.5" />
+                  </span>
+                )}
+              </div>
               <span className="text-sm font-bold text-pastel-violet-600">{config.transportSearchRadiusMeters} m</span>
             </div>
             <input
@@ -305,9 +336,13 @@ export function Step1Config() {
               max="2500"
               step="100"
               value={config.transportSearchRadiusMeters}
-              onChange={(event) => setConfig({ transportSearchRadiusMeters: Number(event.target.value) })}
-              className="w-full accent-pastel-violet-500"
+              disabled={!can_customize_distance}
+              onChange={can_customize_distance ? (event) => setConfig({ transportSearchRadiusMeters: Number(event.target.value) }) : undefined}
+              className={`w-full accent-pastel-violet-500 ${!can_customize_distance ? "cursor-not-allowed opacity-50" : ""}`}
             />
+            {!can_customize_distance && (
+              <p className="text-xs text-slate-400">Disponível a partir do plano Básico.</p>
+            )}
           </div>
         )}
 

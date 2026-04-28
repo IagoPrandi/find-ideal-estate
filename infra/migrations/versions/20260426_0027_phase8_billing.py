@@ -189,11 +189,11 @@ def upgrade() -> None:
     op.execute("""
         INSERT INTO plans (slug, name, price_brl, monthly_credits, is_paid, display_order)
         VALUES
-            ('anonymous', 'Anônimo',        NULL,    350, false, 0),
+            ('anonymous', 'Anônimo',        NULL,    300, false, 0),
             ('free',      'Free',           0.00,    350, false, 1),
             ('basico',    'Básico',        21.99,    800, true,  2),
             ('pro',       'Pro',           90.99,   4000, true,  3),
-            ('pro_max',   'Pro Max',      321.99,  20000, true,  4)
+            ('pro_max',   'Pro Max',      312.99,  20000, true,  4)
         ON CONFLICT (slug) DO NOTHING
     """)
 
@@ -222,11 +222,11 @@ def upgrade() -> None:
             e.rollover_percent, e.rollover_cycles, e.cycle_length_days
         FROM plans p
         JOIN (VALUES
-            ('anonymous', 0,   0,  7, false, false, false, NULL, 'locked_default', 'restricted', 'none', NULL, NULL, NULL, NULL, 0,  0, 30),
-            ('free',      5,   2,  7, false, false, false, NULL, 'top_2_lines',    'restricted', 'none', NULL, NULL, NULL, NULL, 0,  0, 30),
+            ('anonymous', 0,   0,  7, false, false, false, 4,    'locked_default', 'restricted', 'none', NULL, NULL, NULL, NULL, 0,  0, 30),
+            ('free',      5,   2,  7, false, false, false, 4,    'top_2_lines',    'restricted', 'none', NULL, NULL, NULL, NULL, 0,  0, 30),
             ('basico',    20,  4, 30, true,  true,  true,  4,    'unlocked',       'any',        'none', NULL, NULL, NULL, NULL, 25, 1, 30),
             ('pro',       100, 20,30, true,  true,  true,  NULL, 'unlocked',       'any',        'none', NULL, NULL, NULL, NULL, 25, 1, 30),
-            ('pro_max',   100, 20,30, true,  true,  true,  NULL, 'unlocked',       'any',        'managed_queue', 10, 30, 7, 30, 25, 1, 30)
+            ('pro_max',   100, 20,30, true,  true,  true,  NULL, 'unlocked',       'any',        'none', NULL, NULL, NULL, NULL, 25, 1, 30)
         ) AS e(
             slug,
             max_listing_favorites, max_zone_favorites, retention_days,

@@ -83,6 +83,21 @@ export class ApiError extends Error {
   }
 }
 
+export class EntitlementError extends ApiError {
+  kind: string;
+  plan: string;
+  current: number | null;
+  limit: number | null;
+
+  constructor(detail: { kind: string; plan: string; current?: number; limit?: number }) {
+    super(`Limite do plano atingido.`, 403, false);
+    this.kind = detail.kind;
+    this.plan = detail.plan;
+    this.current = detail.current ?? null;
+    this.limit = detail.limit ?? null;
+  }
+}
+
 export type AuthStatusRead = z.output<typeof AuthStatusReadSchema>;
 export type FavoriteListingEntry = {
   listingKey: string;
@@ -161,6 +176,20 @@ async function requestJson<T>(path: string, schema: ZodSchema<T>, options: Reque
   }
 
   if (!response.ok) {
+    if (typeof data === "object" && data !== null) {
+      const detail = (data as Record<string, unknown>).detail;
+      if (typeof detail === "object" && detail !== null) {
+        const d = detail as Record<string, unknown>;
+        if (d.code === "entitlement_exceeded" && typeof d.kind === "string" && typeof d.plan === "string") {
+          throw new EntitlementError({
+            kind: d.kind,
+            plan: d.plan,
+            current: typeof d.current === "number" ? d.current : undefined,
+            limit: typeof d.limit === "number" ? d.limit : undefined,
+          });
+        }
+      }
+    }
     const detail =
       typeof data === "object" && data !== null && "detail" in data && typeof (data as { detail?: unknown }).detail === "string"
         ? ((data as { detail: string }).detail)
@@ -177,7 +206,21 @@ async function requestJson<T>(path: string, schema: ZodSchema<T>, options: Reque
   return parsed.data;
 }
 
+const _ENTITLEMENT_KIND_LABELS: Record<string, string> = {
+  max_listing_favorites: "imóveis salvos",
+  max_zone_favorites: "zonas salvas",
+  customize_radius: "raio da zona",
+  customize_max_time: "tempo máximo de viagem",
+  customize_distance: "raio de busca de transporte",
+  zone_selection_policy: "seleção de zona",
+};
+
 export function apiActionHint(error: unknown): string {
+  if (error instanceof EntitlementError) {
+    const label = _ENTITLEMENT_KIND_LABELS[error.kind] ?? error.kind;
+    const limitInfo = error.limit !== null ? ` (limite: ${error.limit})` : "";
+    return `Limite de ${label} atingido no seu plano atual${limitInfo}. Acesse Planos para fazer upgrade.`;
+  }
   if (error instanceof ApiError) {
     if (error.recoverable) {
       return `${error.message} Tente novamente em alguns segundos.`;
