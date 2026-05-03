@@ -899,11 +899,13 @@ def test_get_zone_listings_no_cache_still_returns_zone_inventory(monkeypatch) ->
     assert response.status_code == 200
     body = response.json()
     assert body["source"] == "none"
-    assert body["freshness_status"] == "no_cache"
+    assert body["freshness_status"] == "queued_for_next_prewarm"
     assert body["total_count"] == 1
     assert body["listings"][0]["address_normalized"] == "Rua Guaipa, 100"
     assert fetch_calls[0]["observed_since"] is None
     assert fetch_calls[0]["search_location_normalized"] == _payload()["search_location_normalized"]
+    assert fetch_calls[0]["limit"] == 101
+    assert body["has_more"] is False
 
 
 def test_listings_search_normalizes_address_before_active_job_lookup(monkeypatch) -> None:

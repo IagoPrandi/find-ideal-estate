@@ -3,13 +3,14 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Step6Analysis } from "./Step6Analysis";
 import { useFavoritesStore, useJourneyStore, useUIStore } from "../../state";
-import { deleteAccountFavorite, getJob, getZoneDashboardAnalytics, getZoneFavoriteAnalytics, getZoneListings, saveAccountFavorite } from "../../api/client";
+import { deleteAccountFavorite, getAccountPlan, getJob, getZoneDashboardAnalytics, getZoneFavoriteAnalytics, getZoneListings, saveAccountFavorite } from "../../api/client";
 
 const useAuthMock = vi.fn();
 
 vi.mock("../../api/client", () => ({
   apiActionHint: (error: unknown) => (error instanceof Error ? error.message : "erro"),
   deleteAccountFavorite: vi.fn(),
+  getAccountPlan: vi.fn(),
   getJob: vi.fn(),
   getZoneDashboardAnalytics: vi.fn(),
   getZoneFavoriteAnalytics: vi.fn(),
@@ -80,6 +81,42 @@ describe("Step6Analysis", () => {
       selectedZoneFingerprint: "zone-fp-1",
       listingsJobId: "listings-job-1"
     }));
+    vi.mocked(getAccountPlan).mockResolvedValue({
+      plan: {
+        id: "plan-free",
+        slug: "free",
+        name: "Free",
+        price_brl: 0,
+        monthly_credits: 350,
+        is_paid: false,
+        display_order: 1,
+      },
+      status: "active",
+      started_at: "2026-03-27T10:00:00Z",
+      ends_at: "2026-04-26T10:00:00Z",
+      entitlements: {
+        plan_id: "plan-free",
+        plan_slug: "free",
+        max_listing_favorites: 3,
+        max_zone_favorites: 1,
+        retention_days: 30,
+        can_customize_radius: true,
+        can_customize_max_time: true,
+        can_customize_distance: true,
+        max_active_metrics: 3,
+        transport_line_policy: "standard",
+        zone_selection_policy: "standard",
+        auto_refresh_policy: "none",
+        rollover_percent: 0,
+        rollover_cycles: 0,
+        cycle_length_days: 30,
+        max_transit_minutes_cap: 120,
+        max_walk_minutes_cap: 60,
+        max_car_minutes_cap: 120,
+        max_zone_radius_m_cap: 5000,
+        max_transport_radius_m_cap: 5000,
+      },
+    } as never);
 
     vi.mocked(getZoneListings).mockResolvedValue({
       source: "none",
@@ -89,6 +126,16 @@ describe("Step6Analysis", () => {
       total_count: 0,
       cache_age_hours: null
     } as never);
+    vi.mocked(saveAccountFavorite).mockImplementation(async (payload) => ({
+      listingKey: `property:${payload.listing.property_id}`,
+      journeyId: payload.journeyId,
+      zoneFingerprint: payload.zoneFingerprint,
+      searchType: payload.searchType,
+      usageType: payload.usageType,
+      savedAt: "2026-03-27T10:00:00Z",
+      listing: payload.listing,
+    }) as never);
+    vi.mocked(deleteAccountFavorite).mockResolvedValue(undefined as never);
     vi.mocked(getZoneDashboardAnalytics).mockImplementation(async (_journeyId, _zoneFingerprint, _searchType, options) => {
       const selectedPriceCity = typeof options === "object" && options?.cityName
         ? options.cityName
@@ -342,7 +389,7 @@ describe("Step6Analysis", () => {
     const progressGrid = within(progressPanel).getByTestId("listings-platform-progress-grid");
 
     await waitFor(() => {
-      expect(getZoneListings).toHaveBeenCalledWith("journey-1", "zone-fp-1", "rent", "all", "all", "all_addresses");
+      expect(getZoneListings).toHaveBeenCalledWith("journey-1", "zone-fp-1", "rent", "all", "all", "all_addresses", 100, 0);
     });
 
     expect(progressPanel).toBeInTheDocument();
@@ -387,7 +434,7 @@ describe("Step6Analysis", () => {
     vi.mocked(getZoneListings).mockResolvedValue({
       source: "none",
       job_id: null,
-      freshness_status: "no_cache",
+      freshness_status: "queued_for_next_prewarm",
       listings: [
         {
           property_id: "prop-1",
@@ -411,14 +458,43 @@ describe("Step6Analysis", () => {
     await renderWithQueryClient();
 
     expect(await screen.findByText(/serão adicionados em até 24 horas/i)).toBeInTheDocument();
+    expect(screen.getByText(/^Busca iniciada$/i)).toBeInTheDocument();
+    expect(screen.queryByText(/^Scraping em andamento$/i)).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText("Origem da coleta dos imóveis"), {
       target: { value: "selected_address" },
     });
 
     await waitFor(() => {
-      expect(getZoneListings).toHaveBeenLastCalledWith("journey-1", "zone-fp-1", "rent", "all", "all", "selected_address");
+      expect(getZoneListings).toHaveBeenLastCalledWith("journey-1", "zone-fp-1", "rent", "all", "all", "selected_address", 100, 0);
     });
+  });
+
+  it("states when deferred prewarm has no persisted inventory yet", async () => {
+    useJourneyStore.setState((state) => ({
+      ...state,
+      listingsJobId: null,
+      selectedAddress: {
+        label: "Rua Manuel da Nóbrega, Moema, São Paulo, SP",
+        normalized: "rua manuel da nobrega, moema, sao paulo, sp",
+        locationType: "street",
+        lat: -23.594,
+        lon: -46.666,
+      },
+    }));
+    vi.mocked(getZoneListings).mockResolvedValue({
+      source: "none",
+      job_id: null,
+      freshness_status: "queued_for_next_prewarm",
+      listings: [],
+      total_count: 0,
+      cache_age_hours: null,
+    } as never);
+
+    await renderWithQueryClient();
+
+    expect(await screen.findAllByText(/Ainda não há imóveis persistidos no banco/i)).toHaveLength(2);
+    expect(screen.getByText(/^Busca iniciada$/i)).toBeInTheDocument();
   });
 
   it("recalculates dashboard analytics after listings scraping finishes", async () => {

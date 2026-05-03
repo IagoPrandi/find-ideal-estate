@@ -5932,6 +5932,55 @@
 - Progress Tracker:
   - Nenhuma milestone foi marcada como concluída; política de confirmação explícita preservada.
 
+## 2026-05-03 - Fase 6 listings: diagnóstico do caso Moema sem inventário persistido
+
+- Required docs opened:
+  - `AGENTS.md`
+  - `PRD.md`
+  - `SKILLS_README.md`
+- Skill used:
+  - `skills/best-practices/SKILL.md`
+
+- Scope executed (delta):
+  - `apps/api/src/modules/listings/dedup.py` corrigido para que `address_scope='all_addresses'` consiga devolver o conjunto ampliado de imóveis persistidos esperado pela Step 6 quando houver inventário fora da zona mas ainda pertencente ao lote observado.
+  - `apps/web/src/components/panels/Step6Analysis.tsx` ajustado para não afirmar que está exibindo imóveis persistidos quando o conjunto persistido está vazio.
+  - `apps/web/src/components/panels/Step6Analysis.test.tsx` ganhou cobertura para o estado de prewarm sem inventário persistido.
+  - Diagnóstico local confirmado no banco:
+    - há `listing_search_requests` para `Rua Manuel da Nóbrega, Moema, São Paulo, SP` com `result_source=cache_miss`;
+    - não há `zone_listing_caches` nem `listing_snapshots` associados a esse endereço;
+    - a zona `020480d5b0eb666762dcb247b37cad9611c8e05bc90695ad7d2ec9797259c6ec` está `complete`, mas hoje possui `0` imóveis ativos dentro do bbox e `0` dentro do polígono.
+
+- Verification executed:
+  - `.\.venv\Scripts\python -m pytest apps/api/tests/test_phase5_dedup.py -q -k selected_address_scope_filters_to_step5_address --color=no` -> `1 passed`.
+  - `.\.venv\Scripts\python -m pytest apps/api/tests/test_phase5_stale_revalidate.py -q --color=no` -> `14 passed`.
+  - `npm run test:run -- src/components/panels/Step6Analysis.test.tsx` -> `17 passed`.
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluída; política de confirmação explícita preservada.
+
+## 2026-05-03 - Fase 6 listings: status de prewarm consistente e carregamento inicial mais leve
+
+- Required docs opened:
+  - `AGENTS.md`
+  - `PRD.md`
+  - `SKILLS_README.md`
+- Skill used:
+  - `skills/develop-frontend/SKILL.md`
+
+- Scope executed (delta):
+  - `apps/api/src/api/routes/listings.py` ajustado para diferenciar `queued_for_next_prewarm` de `no_cache` na leitura do painel, evitando tratar endereço apenas enfileirado como scraping ativo.
+  - O mesmo endpoint passou a paginar também o inventário sem cache consolidado usando `limit + 1`, reduzindo o payload inicial e melhorando o tempo até os primeiros imóveis aparecerem no painel.
+  - `apps/web/src/components/panels/Step6Analysis.tsx` atualizado para refletir o novo estado de prewarm no cabeçalho, manter o aviso de inventário persistido coerente e refazer a query quando o endereço selecionado muda.
+  - O botão de favorito no passo 6 deixou de ser bloqueado por limite de plano para visitante anônimo antes de abrir o fluxo de login.
+  - Cobertura atualizada em `apps/api/tests/test_phase5_stale_revalidate.py` e `apps/web/src/components/panels/Step6Analysis.test.tsx`.
+
+- Verification executed:
+  - `.\.venv\Scripts\python -m pytest apps/api/tests/test_phase5_stale_revalidate.py -q --color=no` -> `14 passed`.
+  - `npm run test:run -- src/components/panels/Step6Analysis.test.tsx` -> `16 passed`.
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluída; política de confirmação explícita preservada.
+
 ## 2026-05-03 - Configuração Mercado Pago: validação de segredos e MCP
 
 - Required docs opened:

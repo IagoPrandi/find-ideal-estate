@@ -515,10 +515,11 @@ async def get_zone_listings(
 
     display_platforms = _cache_display_platforms(usable_cache, canonical_platforms)
 
-    # Paginação só se aplica ao inventário de cache consolidado.
-    # Durante scraping (sem cache usável), retornamos tudo que já foi raspado.
-    effective_limit = limit if usable_cache else 9999
-    effective_offset = offset if usable_cache else 0
+    # Sempre trazemos só a primeira página + 1 registro para detectar `has_more`.
+    # Sem cache consolidado, isso reduz o payload inicial e deixa o painel responsivo
+    # enquanto seguimos reaproveitando o inventário já persistido.
+    effective_limit = limit + 1
+    effective_offset = offset
 
     listing_cards_raw = await fetch_listing_cards_for_zone(
         journey_id=journey_id,
@@ -533,6 +534,8 @@ async def get_zone_listings(
         limit=effective_limit,
         offset=effective_offset,
     )
+    has_more = len(listing_cards_raw) > limit
+    listing_cards_page = listing_cards_raw[:limit]
 
     if usable_cache is None:
         active_job_id = await _find_active_listings_job_id(
@@ -540,23 +543,28 @@ async def get_zone_listings(
             zone_fingerprint=zone_fingerprint,
             search_location_normalized=latest_search_location,
         )
+        freshness_status = (
+            "no_cache"
+            if active_job_id is not None or latest_search is None
+            else "queued_for_next_prewarm"
+        )
         return ListingsRequestResult(
             source="none",
             job_id=active_job_id,
-            freshness_status="no_cache",
-            listings=listing_cards_raw,  # type: ignore[arg-type]
-            total_count=len(listing_cards_raw),
+            freshness_status=freshness_status,
+            listings=listing_cards_page,  # type: ignore[arg-type]
+            total_count=effective_offset + len(listing_cards_page),
+            has_more=has_more,
         )
 
     age_hours = cache_age_hours(cache)
     freshness = "fresh"
-    has_more = len(listing_cards_raw) == limit
 
     return ListingsRequestResult(
         source="cache",
         freshness_status=freshness,
-        listings=listing_cards_raw,  # type: ignore[arg-type]
-        total_count=effective_offset + len(listing_cards_raw),
+        listings=listing_cards_page,  # type: ignore[arg-type]
+        total_count=effective_offset + len(listing_cards_page),
         cache_age_hours=age_hours,
         has_more=has_more,
     )

@@ -34,6 +34,7 @@ const FAVORITES_ANALYTICS_GC_TIME = 60 * 60_000;
 const PRICE_DASHBOARD_FILTER_DEBOUNCE_MS = 350;
 const ACTIVE_LISTINGS_JOB_STATES = new Set(["pending", "running", "retrying"]);
 const TERMINAL_LISTINGS_JOB_STATES = new Set(["completed", "failed", "cancelled", "cancelled_partial"]);
+const DEFERRED_LISTINGS_FRESHNESS_STATUSES = new Set(["queued_for_next_prewarm", "no_cache"]);
 
 function platformLabel(value: string | null | undefined) {
   if (!value) {
@@ -230,7 +231,7 @@ export function Step6Analysis() {
   }, [listingsFilters]);
 
   const listingsQuery = useQuery({
-    queryKey: ["zone-listings", journeyId, zoneFingerprint, config.type, "all", listingsAddressScope],
+    queryKey: ["zone-listings", journeyId, zoneFingerprint, config.type, "all", listingsAddressScope, selectedAddress?.normalized || "no-address"],
     queryFn: async () => getZoneListings(journeyId as string, zoneFingerprint as string, config.type, "all", "all", listingsAddressScope, 100, 0),
     enabled: Boolean(journeyId && zoneFingerprint),
     placeholderData: keepPreviousData,
@@ -274,7 +275,7 @@ export function Step6Analysis() {
     || (listingsQuery.data?.freshness_status === "no_cache" && !hasInterruptedListingsJob && !listingsJobState);
 
   const bgListingsQuery = useQuery({
-    queryKey: ["zone-listings-bg", journeyId, zoneFingerprint, config.type, listingsAddressScope],
+    queryKey: ["zone-listings-bg", journeyId, zoneFingerprint, config.type, listingsAddressScope, selectedAddress?.normalized || "no-address"],
     queryFn: async () => getZoneListings(journeyId as string, zoneFingerprint as string, config.type, "all", "all", listingsAddressScope, 9999, 100),
     enabled: Boolean(journeyId && zoneFingerprint && listingsQuery.data?.has_more && !isScraping),
     staleTime: 5 * 60_000,
@@ -343,10 +344,12 @@ export function Step6Analysis() {
   const showDeferredAddressInventoryNotice = Boolean(
     selectedAddress
     && !effectiveListingsJobId
-    && listingsQuery.data?.freshness_status === "no_cache"
+    && DEFERRED_LISTINGS_FRESHNESS_STATUSES.has(listingsQuery.data?.freshness_status || "")
   );
   const deferredAddressInventoryNotice = selectedAddress
-    ? `Os imóveis ligados a "${selectedAddress.label}" serão adicionados em até 24 horas. Enquanto isso, exibimos os imóveis já persistidos no banco para ${listingsAddressScope === "selected_address" ? "esse endereço pesquisado" : "todos os endereços pesquisados nesta jornada"}.`
+    ? rawListings.length > 0
+      ? `Os imóveis ligados a "${selectedAddress.label}" serão adicionados em até 24 horas. Enquanto isso, exibimos os imóveis já persistidos no banco para ${listingsAddressScope === "selected_address" ? "esse endereço pesquisado" : "todos os endereços pesquisados nesta jornada"}.`
+      : `Os imóveis ligados a "${selectedAddress.label}" serão adicionados em até 24 horas. Ainda não há imóveis persistidos no banco para ${listingsAddressScope === "selected_address" ? "esse endereço pesquisado" : "os endereços pesquisados nesta jornada"}.`
     : null;
 
   const displayedListings = applyListingsPanelFilters(rawListings, listingsFilters);
@@ -882,6 +885,8 @@ export function Step6Analysis() {
                   ? deferredAddressInventoryNotice
                   : listingsQuery.data?.freshness_status === "no_cache"
                     ? "A busca foi iniciada. Esta tela é atualizada automaticamente assim que os primeiros imóveis estiverem prontos."
+                  : listingsQuery.data?.freshness_status === "queued_for_next_prewarm"
+                    ? "A busca foi registrada para o próximo prewarm. Enquanto isso, esta tela mostra o inventário persistido já disponível para a jornada."
                   : scrapedButNoCards
                     ? `A busca terminou e encontrou ${diagnosticsSummary?.total_scraped || 0} anúncios, mas nenhum permaneceu elegível após os filtros da busca. Tente outra rua ou outra zona.`
                     : "Nenhum imóvel disponível ainda para esta busca."}
@@ -922,7 +927,10 @@ export function Step6Analysis() {
               const hasAvailabilityPopover = Boolean(listing.duplication_badge && platformVariants.length > 1);
               const isSelected = listingKey !== "" && listingKey === selectedListingKey;
               const isSavedFavorite = listingKey ? favoriteListingKeySet.has(listingKey) : false;
-              const isAtListingLimit = !isSavedFavorite && max_listing_favorites != null && favoriteListings.length >= max_listing_favorites;
+              const isAtListingLimit = authStatus.is_authenticated
+                && !isSavedFavorite
+                && max_listing_favorites != null
+                && favoriteListings.length >= max_listing_favorites;
               const favoriteButtonLabel = isAuthLoading
                 ? "Verificando sua conta"
                 : !authStatus.is_authenticated

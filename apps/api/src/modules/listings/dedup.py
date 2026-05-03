@@ -246,25 +246,40 @@ async def fetch_listing_cards_for_zone(
                     WHERE fingerprint = :zone_fp
                     LIMIT 1
                 ),
-                selected_address_props AS (
-                    -- Only populated for selected_address mode; empty otherwise.
-                    -- Finds properties that were scraped for this specific search address.
+                search_scope_props AS (
+                    -- Address-linked properties that should remain visible even when
+                    -- they fall outside the selected zone geometry.
+                    --
+                    -- selected_address:
+                    --   keeps only the Step 5 address currently chosen by the user
+                    --   (plus legacy unlabeled rows observed since the same cache cohort).
+                    --
+                    -- all_addresses:
+                    --   keeps the expanded recently-observed address inventory so the
+                    --   Step 6 panel can start with "inside zone" and still let the user
+                    --   broaden to the complete persisted set.
                     SELECT DISTINCT la.property_id
                     FROM listing_ads la
                     JOIN listing_snapshots ls ON ls.listing_ad_id = la.id
-                    WHERE :address_scope = 'selected_address'
-                      AND la.is_active = true
+                    WHERE la.is_active = true
                       AND la.platform = ANY(:platforms)
                       AND (la.advertised_usage_type = :search_type OR la.advertised_usage_type IS NULL)
                       AND (:usage_type = 'all' OR la.usage_type IS NULL OR la.usage_type = :usage_type)
                       AND (ls.availability_state = 'active' OR ls.availability_state IS NULL)
                       AND (
                           (
-                              :has_search_location = TRUE
+                              :address_scope = 'selected_address'
+                              AND :has_search_location = TRUE
                               AND ls.raw_payload->>'search_location_normalized' = :search_location_normalized
                           )
                           OR (
-                              CAST(:observed_since AS TIMESTAMPTZ) IS NOT NULL
+                              :address_scope = 'all_addresses'
+                              AND CAST(:observed_since AS TIMESTAMPTZ) IS NOT NULL
+                              AND ls.observed_at >= CAST(:observed_since AS TIMESTAMPTZ)
+                          )
+                          OR (
+                              :address_scope = 'selected_address'
+                              AND CAST(:observed_since AS TIMESTAMPTZ) IS NOT NULL
                               AND COALESCE(ls.raw_payload->>'search_location_normalized', '') = ''
                               AND ls.observed_at >= CAST(:observed_since AS TIMESTAMPTZ)
                           )
@@ -279,8 +294,7 @@ async def fetch_listing_cards_for_zone(
                     CROSS JOIN zone_geom z
                     WHERE (p.location IS NOT NULL AND p.location && z.isochrone_geom)
                        OR (
-                           :address_scope = 'selected_address'
-                           AND p.id IN (SELECT property_id FROM selected_address_props)
+                           p.id IN (SELECT property_id FROM search_scope_props)
                        )
                 ),
                 ranked_prices AS (
@@ -494,7 +508,7 @@ async def fetch_listing_cards_for_zone(
                           AND bp2.platform_rank = 1
                     )                  AS platform_variants
                 FROM zone_props zp
-                LEFT JOIN selected_address_props sap ON sap.property_id = zp.property_id
+                LEFT JOIN search_scope_props sap ON sap.property_id = zp.property_id
                 JOIN ranked_prices bp ON bp.property_id = zp.property_id AND bp.price_rank = 1
                 LEFT JOIN property_price_context ppc ON ppc.property_id = zp.property_id
                 LEFT JOIN neighborhood_medians nm
@@ -507,7 +521,7 @@ async def fetch_listing_cards_for_zone(
                     )
                     OR (
                         :address_scope = 'all_addresses'
-                        AND (zp.inside_zone = true OR sap.property_id IS NOT NULL)
+                        AND true
                     )
                 )
                 AND (:spatial_scope = 'all' OR zp.inside_zone = true)
