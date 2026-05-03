@@ -22,7 +22,7 @@ type EntitlementState = {
 
 const ANONYMOUS_DEFAULTS: EntitlementState = {
   isLoading: false,
-  can_customize_radius: false,
+  can_customize_radius: true,
   can_customize_max_time: false,
   can_customize_distance: false,
   max_active_metrics: null,
@@ -34,7 +34,7 @@ const ANONYMOUS_DEFAULTS: EntitlementState = {
   max_transit_minutes_cap: null,
   max_walk_minutes_cap: null,
   max_car_minutes_cap: null,
-  max_zone_radius_m_cap: null,
+  max_zone_radius_m_cap: 500,
   max_transport_radius_m_cap: null,
 };
 

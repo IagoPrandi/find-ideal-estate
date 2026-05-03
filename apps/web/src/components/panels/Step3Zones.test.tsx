@@ -1,8 +1,9 @@
-import { render, waitFor } from "@testing-library/react";
+import { fireEvent, render, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Step3Zones } from "./Step3Zones";
 import { createZoneEnrichmentJob, createZoneGenerationJob, getJob, updateJourney } from "../../api/client";
 import { useJourneyStore, useUIStore } from "../../state";
+import { useEntitlements } from "../../features/auth/useEntitlements";
 
 vi.mock("../../api/client", () => ({
   apiActionHint: (error: unknown) => (error instanceof Error ? error.message : "erro"),
@@ -12,10 +13,47 @@ vi.mock("../../api/client", () => ({
   updateJourney: vi.fn(async () => ({ id: "journey-1" })),
 }));
 
+vi.mock("../../features/auth/useEntitlements", () => ({
+  useEntitlements: vi.fn(() => ({
+    isLoading: false,
+    can_customize_radius: true,
+    can_customize_max_time: true,
+    can_customize_distance: true,
+    max_active_metrics: null,
+    max_listing_favorites: null,
+    max_zone_favorites: null,
+    zone_selection_policy: "any",
+    planSlug: "pro",
+    planName: "Pro",
+    max_transit_minutes_cap: null,
+    max_walk_minutes_cap: null,
+    max_car_minutes_cap: null,
+    max_zone_radius_m_cap: 500,
+    max_transport_radius_m_cap: null,
+  })),
+}));
+
 describe("Step3Zones", () => {
   beforeEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
+    vi.mocked(useEntitlements).mockReturnValue({
+      isLoading: false,
+      can_customize_radius: true,
+      can_customize_max_time: true,
+      can_customize_distance: true,
+      max_active_metrics: null,
+      max_listing_favorites: null,
+      max_zone_favorites: null,
+      zone_selection_policy: "any",
+      planSlug: "pro",
+      planName: "Pro",
+      max_transit_minutes_cap: null,
+      max_walk_minutes_cap: null,
+      max_car_minutes_cap: null,
+      max_zone_radius_m_cap: 500,
+      max_transport_radius_m_cap: null,
+    });
     useJourneyStore.getState().resetJourney();
     useUIStore.getState().resetUI();
     useJourneyStore.setState((state) => ({
@@ -96,4 +134,27 @@ describe("Step3Zones", () => {
       expect(useUIStore.getState().maxStep).toBe(4);
     }, { timeout: 2000 });
   }, 10000);
+
+  it("aplica faixa de 50 m a 500 m com passos de 25 m no raio das zonas para planos elegiveis", () => {
+    useJourneyStore.setState((state) => ({
+      ...state,
+      config: {
+        ...state.config,
+        modal: "transit",
+        zoneRadiusMeters: 100,
+      },
+      selectedTransportId: "transport-1",
+    }));
+
+    const { getAllByRole } = render(<Step3Zones />);
+    const sliders = getAllByRole("slider");
+    const radiusSlider = sliders[1] as HTMLInputElement;
+
+    expect(radiusSlider.min).toBe("50");
+    expect(radiusSlider.max).toBe("500");
+    expect(radiusSlider.step).toBe("25");
+
+    fireEvent.change(radiusSlider, { target: { value: "75" } });
+    expect(useJourneyStore.getState().config.zoneRadiusMeters).toBe(75);
+  });
 });

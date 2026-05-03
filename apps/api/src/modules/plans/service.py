@@ -19,11 +19,39 @@ _PROPRIETARIO_ROLE = "proprietario"
 _PROPRIETARIO_PLAN_ID = UUID("00000000-0000-0000-0000-000000000099")
 
 _PLAN_CAPS: dict[str, dict] = {
+    "anonymous": {
+        "max_transit_minutes_cap": None,
+        "max_walk_minutes_cap": None,
+        "max_car_minutes_cap": None,
+        "max_zone_radius_m_cap": 500,
+        "max_transport_radius_m_cap": None,
+    },
+    "free": {
+        "max_transit_minutes_cap": None,
+        "max_walk_minutes_cap": None,
+        "max_car_minutes_cap": None,
+        "max_zone_radius_m_cap": 500,
+        "max_transport_radius_m_cap": None,
+    },
     "basico": {
         "max_transit_minutes_cap": 20,
         "max_walk_minutes_cap": 15,
         "max_car_minutes_cap": 10,
-        "max_zone_radius_m_cap": 300,
+        "max_zone_radius_m_cap": 500,
+        "max_transport_radius_m_cap": None,
+    },
+    "pro": {
+        "max_transit_minutes_cap": None,
+        "max_walk_minutes_cap": None,
+        "max_car_minutes_cap": None,
+        "max_zone_radius_m_cap": 500,
+        "max_transport_radius_m_cap": None,
+    },
+    "pro_max": {
+        "max_transit_minutes_cap": None,
+        "max_walk_minutes_cap": None,
+        "max_car_minutes_cap": None,
+        "max_zone_radius_m_cap": 500,
         "max_transport_radius_m_cap": None,
     },
 }

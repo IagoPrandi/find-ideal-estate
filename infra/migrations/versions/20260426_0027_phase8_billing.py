@@ -222,8 +222,8 @@ def upgrade() -> None:
             e.rollover_percent, e.rollover_cycles, e.cycle_length_days
         FROM plans p
         JOIN (VALUES
-            ('anonymous', 0,   0,  7, false, false, false, 4,    'locked_default', 'restricted', 'none', NULL, NULL, NULL, NULL, 0,  0, 30),
-            ('free',      5,   2,  7, false, false, false, 4,    'top_2_lines',    'restricted', 'none', NULL, NULL, NULL, NULL, 0,  0, 30),
+            ('anonymous', 0,   0,  7, true,  false, false, 4,    'locked_default', 'restricted', 'none', NULL, NULL, NULL, NULL, 0,  0, 30),
+            ('free',      5,   2,  7, true,  false, false, 4,    'top_2_lines',    'restricted', 'none', NULL, NULL, NULL, NULL, 0,  0, 30),
             ('basico',    20,  4, 30, true,  true,  true,  4,    'unlocked',       'any',        'none', NULL, NULL, NULL, NULL, 25, 1, 30),
             ('pro',       100, 20,30, true,  true,  true,  NULL, 'unlocked',       'any',        'none', NULL, NULL, NULL, NULL, 25, 1, 30),
             ('pro_max',   100, 20,30, true,  true,  true,  NULL, 'unlocked',       'any',        'none', NULL, NULL, NULL, NULL, 25, 1, 30)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from contracts import AccountCreditsRead
@@ -32,6 +32,127 @@ def _utc_now() -> datetime:
     return datetime.now(tz=timezone.utc)
 
 
+async def _resolve_effective_credit_plan(conn, *, user_id: UUID) -> dict | None:
+    active_plan_result = await conn.execute(
+        text("""
+            SELECT p.id, p.monthly_credits, pe.cycle_length_days
+            FROM plan_activations pa
+            JOIN plans p ON p.id = pa.plan_id
+            JOIN plan_entitlements pe ON pe.plan_id = p.id
+            WHERE pa.user_id = :user_id
+              AND pa.status = 'active'
+              AND pa.ends_at > now()
+            ORDER BY p.display_order DESC
+            LIMIT 1
+        """),
+        {"user_id": user_id},
+    )
+    active_plan = active_plan_result.mappings().first()
+    if active_plan is not None:
+        return active_plan
+
+    fallback_plan_result = await conn.execute(
+        text("""
+            SELECT p.id, p.monthly_credits, pe.cycle_length_days
+            FROM plans p
+            JOIN plan_entitlements pe ON pe.plan_id = p.id
+            WHERE p.slug = 'free'
+            LIMIT 1
+        """)
+    )
+    return fallback_plan_result.mappings().first()
+
+
+async def _refresh_credit_cycle_if_needed(conn, *, user_id: UUID, lock_row: bool) -> dict | None:
+    lock_sql = "FOR UPDATE" if lock_row else ""
+    result = await conn.execute(
+        text(f"""
+            SELECT plan_id, cycle_credits, rollover_balance, legacy_balance,
+                   cycle_started_at, cycle_ends_at, monthly_quota
+            FROM user_credits
+            WHERE user_id = :user_id
+            {lock_sql}
+        """),
+        {"user_id": user_id},
+    )
+    row = result.mappings().first()
+    if row is None:
+        return None
+
+    now = _utc_now()
+    cycle_ends_at = row["cycle_ends_at"]
+    if cycle_ends_at is None or cycle_ends_at > now:
+        return dict(row)
+
+    effective_plan = await _resolve_effective_credit_plan(conn, user_id=user_id)
+    monthly_quota = (
+        int(effective_plan["monthly_credits"])
+        if effective_plan is not None and effective_plan["monthly_credits"] is not None
+        else int(row["monthly_quota"] or 0)
+    )
+    cycle_length_days = (
+        int(effective_plan["cycle_length_days"])
+        if effective_plan is not None and effective_plan["cycle_length_days"] is not None
+        else 30
+    )
+    new_plan_id = effective_plan["id"] if effective_plan is not None else row["plan_id"]
+    new_cycle_ends_at = now + timedelta(days=cycle_length_days)
+    legacy_balance = int(row["legacy_balance"] or 0)
+    final_balance = monthly_quota + legacy_balance
+    cycle_delta = monthly_quota - int(row["cycle_credits"] or 0)
+    rollover_balance = int(row["rollover_balance"] or 0)
+
+    await conn.execute(
+        text("""
+            UPDATE user_credits
+            SET plan_id = :plan_id,
+                cycle_credits = :cycle_credits,
+                rollover_balance = 0,
+                monthly_quota = :monthly_quota,
+                cycle_started_at = :cycle_started_at,
+                cycle_ends_at = :cycle_ends_at,
+                updated_at = now()
+            WHERE user_id = :user_id
+        """),
+        {
+            "user_id": user_id,
+            "plan_id": new_plan_id,
+            "cycle_credits": monthly_quota,
+            "monthly_quota": monthly_quota,
+            "cycle_started_at": now,
+            "cycle_ends_at": new_cycle_ends_at,
+        },
+    )
+
+    if cycle_delta != 0:
+        await conn.execute(
+            text("""
+                INSERT INTO credit_ledger (user_id, bucket, delta, reason, reference_id, balance_after)
+                VALUES (:user_id, 'cycle', :delta, 'monthly_cycle_reset', NULL, :balance_after)
+            """),
+            {"user_id": user_id, "delta": cycle_delta, "balance_after": final_balance},
+        )
+
+    if rollover_balance != 0:
+        await conn.execute(
+            text("""
+                INSERT INTO credit_ledger (user_id, bucket, delta, reason, reference_id, balance_after)
+                VALUES (:user_id, 'rollover', :delta, 'monthly_cycle_reset', NULL, :balance_after)
+            """),
+            {"user_id": user_id, "delta": -rollover_balance, "balance_after": final_balance},
+        )
+
+    return {
+        "plan_id": new_plan_id,
+        "cycle_credits": monthly_quota,
+        "rollover_balance": 0,
+        "legacy_balance": legacy_balance,
+        "cycle_started_at": now,
+        "cycle_ends_at": new_cycle_ends_at,
+        "monthly_quota": monthly_quota,
+    }
+
+
 async def get_or_init_anonymous_credits(session_id: str) -> int:
     redis = get_redis()
     key = ANONYMOUS_CREDIT_KEY.format(session_id=session_id)
@@ -60,21 +181,13 @@ async def delete_anonymous_credits(session_id: str) -> None:
 
 async def get_user_credits(user_id: UUID) -> AccountCreditsRead:
     engine = get_engine()
-    async with engine.connect() as conn:
-        result = await conn.execute(
-            text("""
-                SELECT cycle_credits, rollover_balance, legacy_balance, cycle_ends_at, monthly_quota
-                FROM user_credits
-                WHERE user_id = :user_id
-            """),
-            {"user_id": user_id},
-        )
-        row = result.mappings().first()
+    async with engine.begin() as conn:
+        row = await _refresh_credit_cycle_if_needed(conn, user_id=user_id, lock_row=True)
     if row is None:
         return AccountCreditsRead(cycle=0, rollover=0, legacy=0, total=0, cycle_ends_at=None, monthly_quota=None)
-    cycle = row["cycle_credits"]
-    rollover = row["rollover_balance"]
-    legacy = row["legacy_balance"]
+    cycle = int(row["cycle_credits"] or 0)
+    rollover = int(row["rollover_balance"] or 0)
+    legacy = int(row["legacy_balance"] or 0)
     return AccountCreditsRead(
         cycle=cycle,
         rollover=rollover,
@@ -98,23 +211,13 @@ async def check_and_consume(user_id: UUID, step: str, *, reference_id: UUID | No
     cost = STEP_COSTS.get(step, 20)
     engine = get_engine()
     async with engine.begin() as conn:
-        result = await conn.execute(
-            text("""
-                SELECT cycle_credits, rollover_balance, legacy_balance,
-                       cycle_ends_at, monthly_quota
-                FROM user_credits
-                WHERE user_id = :user_id
-                FOR UPDATE
-            """),
-            {"user_id": user_id},
-        )
-        row = result.mappings().first()
+        row = await _refresh_credit_cycle_if_needed(conn, user_id=user_id, lock_row=True)
         if row is None:
             raise InsufficientCreditsError(required=cost, balance=0)
 
-        cycle = row["cycle_credits"]
-        rollover = row["rollover_balance"]
-        legacy = row["legacy_balance"]
+        cycle = int(row["cycle_credits"] or 0)
+        rollover = int(row["rollover_balance"] or 0)
+        legacy = int(row["legacy_balance"] or 0)
         total = cycle + rollover + legacy
 
         if total < cost:

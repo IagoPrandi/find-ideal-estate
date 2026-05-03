@@ -45,29 +45,54 @@ router = APIRouter(prefix="/journeys", tags=["journeys"])
 _DEFAULT_ZONE_RADIUS_M = 400
 _DEFAULT_TRANSPORT_RADIUS_M = 400
 _DEFAULT_MAX_TRAVEL_MINUTES = 30
+_MIN_CUSTOMIZABLE_ZONE_RADIUS_M = 50
+_ZONE_RADIUS_FIELD_ALIASES = (
+    "zone_radius_meters",
+    "zone_radius_m",
+    "radius_meters",
+    "radius",
+)
+_TRANSPORT_RADIUS_FIELD_ALIASES = (
+    "transport_search_radius_meters",
+    "transport_search_radius_m",
+)
+_TRAVEL_TIME_FIELD_ALIASES = (
+    "max_travel_minutes",
+    "max_travel_time_minutes",
+    "max_travel_time_min",
+    "max_time_minutes",
+    "time_max_minutes",
+)
 
 
 async def _enforce_snapshot_customization(snapshot: dict[str, Any], auth_context) -> None:
     """Silently overrides locked/capped parameters — UI already blocks invalid values."""
     if auth_context.user is None:
-        _clamp_locked_value(snapshot, "zone_radius_meters", _DEFAULT_ZONE_RADIUS_M)
-        _clamp_locked_value(snapshot, "transport_search_radius_meters", _DEFAULT_TRANSPORT_RADIUS_M)
-        _clamp_locked_value(snapshot, "max_travel_minutes", _DEFAULT_MAX_TRAVEL_MINUTES)
+        _clamp_range_value(
+            snapshot,
+            _ZONE_RADIUS_FIELD_ALIASES,
+            minimum=_MIN_CUSTOMIZABLE_ZONE_RADIUS_M,
+            maximum=500,
+        )
+        _clamp_locked_value(snapshot, _TRANSPORT_RADIUS_FIELD_ALIASES, _DEFAULT_TRANSPORT_RADIUS_M)
+        _clamp_locked_value(snapshot, _TRAVEL_TIME_FIELD_ALIASES, _DEFAULT_MAX_TRAVEL_MINUTES)
         return
 
     resolved = await resolve_entitlements(auth_context.user.id)
     ent = resolved.entitlements
 
-    if not ent.can_customize_radius:
-        _clamp_locked_value(snapshot, "zone_radius_meters", _DEFAULT_ZONE_RADIUS_M)
-    elif ent.max_zone_radius_m_cap is not None:
-        _clamp_cap_value(snapshot, "zone_radius_meters", ent.max_zone_radius_m_cap)
+    _clamp_range_value(
+        snapshot,
+        _ZONE_RADIUS_FIELD_ALIASES,
+        minimum=_MIN_CUSTOMIZABLE_ZONE_RADIUS_M,
+        maximum=ent.max_zone_radius_m_cap,
+    )
 
     if not ent.can_customize_distance:
-        _clamp_locked_value(snapshot, "transport_search_radius_meters", _DEFAULT_TRANSPORT_RADIUS_M)
+        _clamp_locked_value(snapshot, _TRANSPORT_RADIUS_FIELD_ALIASES, _DEFAULT_TRANSPORT_RADIUS_M)
 
     if not ent.can_customize_max_time:
-        _clamp_locked_value(snapshot, "max_travel_minutes", _DEFAULT_MAX_TRAVEL_MINUTES)
+        _clamp_locked_value(snapshot, _TRAVEL_TIME_FIELD_ALIASES, _DEFAULT_MAX_TRAVEL_MINUTES)
     else:
         mode = snapshot.get("transport_mode", "transit")
         cap = (
@@ -76,18 +101,56 @@ async def _enforce_snapshot_customization(snapshot: dict[str, Any], auth_context
             else ent.max_transit_minutes_cap
         )
         if cap is not None:
-            _clamp_cap_value(snapshot, "max_travel_minutes", cap)
+            _clamp_cap_value(snapshot, _TRAVEL_TIME_FIELD_ALIASES, cap)
 
 
-def _clamp_locked_value(snapshot: dict[str, Any], field: str, default: int | float) -> None:
-    if snapshot.get(field) is not None:
-        snapshot[field] = default
+def _get_present_numeric_value(snapshot: dict[str, Any], fields: str | tuple[str, ...]) -> int | float | None:
+    field_names = (fields,) if isinstance(fields, str) else fields
+    for field in field_names:
+        value = snapshot.get(field)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, (int, float)):
+            return value
+    return None
 
 
-def _clamp_cap_value(snapshot: dict[str, Any], field: str, cap: int | float) -> None:
-    val = snapshot.get(field)
-    if val is not None and val > cap:
-        snapshot[field] = cap
+def _set_present_alias_values(snapshot: dict[str, Any], fields: str | tuple[str, ...], value: int | float) -> None:
+    field_names = (fields,) if isinstance(fields, str) else fields
+    for field in field_names:
+        if snapshot.get(field) is not None:
+            snapshot[field] = value
+
+
+def _clamp_locked_value(snapshot: dict[str, Any], fields: str | tuple[str, ...], default: int | float) -> None:
+    if _get_present_numeric_value(snapshot, fields) is None:
+        return
+    _set_present_alias_values(snapshot, fields, default)
+
+
+def _clamp_cap_value(snapshot: dict[str, Any], fields: str | tuple[str, ...], cap: int | float) -> None:
+    _clamp_range_value(snapshot, fields, maximum=cap)
+
+
+def _clamp_range_value(
+    snapshot: dict[str, Any],
+    fields: str | tuple[str, ...],
+    *,
+    minimum: int | float | None = None,
+    maximum: int | float | None = None,
+) -> None:
+    value = _get_present_numeric_value(snapshot, fields)
+    if value is None:
+        return
+
+    normalized = value
+    if minimum is not None and normalized < minimum:
+        normalized = minimum
+    if maximum is not None and normalized > maximum:
+        normalized = maximum
+
+    if normalized != value:
+        _set_present_alias_values(snapshot, fields, normalized)
 
 
 

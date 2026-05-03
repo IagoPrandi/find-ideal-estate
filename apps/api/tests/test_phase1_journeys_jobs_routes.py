@@ -376,6 +376,55 @@ def test_get_journey_zones_returns_list_response(monkeypatch):
     assert body["zones"][0]["price_summary"] == {"p50_price": 4200.0, "active_listing_count": 12}
 
 
+@pytest.mark.anyio
+async def test_enforce_snapshot_customization_clamps_zone_radius_aliases(monkeypatch):
+    async def _resolve_entitlements(_user_id):
+        return SimpleNamespace(
+            entitlements=SimpleNamespace(
+                can_customize_radius=True,
+                can_customize_distance=True,
+                can_customize_max_time=True,
+                max_zone_radius_m_cap=500,
+                max_walk_minutes_cap=None,
+                max_car_minutes_cap=None,
+                max_transit_minutes_cap=None,
+            )
+        )
+
+    snapshot = {
+        "transport_mode": "transit",
+        "zone_radius_meters": 10,
+        "zone_radius_m": 750,
+    }
+    auth_context = SimpleNamespace(user=SimpleNamespace(id=uuid4()))
+
+    monkeypatch.setattr("api.routes.journeys.resolve_entitlements", _resolve_entitlements)
+
+    from api.routes.journeys import _enforce_snapshot_customization
+
+    await _enforce_snapshot_customization(snapshot, auth_context)
+
+    assert snapshot["zone_radius_meters"] == 50
+    assert snapshot["zone_radius_m"] == 50
+
+
+@pytest.mark.anyio
+async def test_enforce_snapshot_customization_allows_anonymous_zone_radius_range():
+    from api.routes.journeys import _enforce_snapshot_customization
+
+    snapshot = {
+        "transport_mode": "transit",
+        "zone_radius_meters": 725,
+        "zone_radius_m": 725,
+    }
+    auth_context = SimpleNamespace(user=None)
+
+    await _enforce_snapshot_customization(snapshot, auth_context)
+
+    assert snapshot["zone_radius_meters"] == 500
+    assert snapshot["zone_radius_m"] == 500
+
+
 def test_classify_public_safety_group_maps_canonical_groups():
     assert classify_public_safety_group("Furto") == ("theft", "Furto")
     assert classify_public_safety_group("Roubo") == ("robbery", "Roubo")

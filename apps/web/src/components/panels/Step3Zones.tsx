@@ -8,6 +8,8 @@ type StageMode = "idle" | "generation" | "enrichment" | "finalizing";
 
 const JOB_POLL_INTERVAL_MS = 1000;
 const FINALIZING_TRANSITION_DELAY_MS = 150;
+const ZONE_RADIUS_MIN_M = 50;
+const ZONE_RADIUS_STEP_M = 25;
 
 export function Step3Zones() {
   const journeyId = useJourneyStore((state) => state.journeyId);
@@ -248,9 +250,10 @@ export function Step3Zones() {
     void runGenerationPipeline();
   }, [isDirectIsochroneMode, journeyId, stageMode]);
 
-  const { can_customize_max_time, can_customize_radius, max_transit_minutes_cap, max_zone_radius_m_cap } = useEntitlements();
+  const { can_customize_max_time, max_transit_minutes_cap, max_zone_radius_m_cap } = useEntitlements();
   const isBusy = stageMode !== "idle";
   const stageLabel = stageMode === "generation" ? (isDirectIsochroneMode ? "Gerando área acessível" : "Gerando zonas") : stageMode === "enrichment" ? "Enriquecendo camadas" : "Finalizando";
+  const zoneRadiusMax = max_zone_radius_m_cap ?? 2500;
 
   return (
     <div className="flex h-full flex-col animate-[fadeInRight_0.3s_ease-out]">
@@ -350,29 +353,21 @@ export function Step3Zones() {
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5">
                         <label className="text-sm font-medium text-slate-700">Raio das zonas</label>
-                        {!can_customize_radius && (
-                          <span title="Disponível a partir do plano Básico" className="inline-flex cursor-help items-center text-slate-400">
-                            <Lock className="h-3.5 w-3.5" />
-                          </span>
-                        )}
                       </div>
                       <span className="text-sm font-bold text-pastel-violet-600">{config.zoneRadiusMeters} m</span>
                     </div>
                     <input
                       type="range"
-                      min={max_zone_radius_m_cap !== null ? Math.min(300, max_zone_radius_m_cap) : 400}
-                      max={max_zone_radius_m_cap ?? 2500}
-                      step="100"
+                      min={ZONE_RADIUS_MIN_M}
+                      max={zoneRadiusMax}
+                      step={ZONE_RADIUS_STEP_M}
                       value={config.zoneRadiusMeters}
-                      disabled={!can_customize_radius}
-                      onChange={can_customize_radius ? (event) => setConfig({ zoneRadiusMeters: Math.min(Number(event.target.value), max_zone_radius_m_cap ?? 2500) }) : undefined}
-                      className={`w-full accent-pastel-violet-500 ${!can_customize_radius ? "cursor-not-allowed opacity-50" : ""}`}
+                      onChange={(event) => setConfig({ zoneRadiusMeters: Math.min(Math.max(Number(event.target.value), ZONE_RADIUS_MIN_M), zoneRadiusMax) })}
+                      className="w-full accent-pastel-violet-500"
                     />
-                    {!can_customize_radius
-                      ? <p className="text-xs text-slate-400">Disponível a partir do plano Básico.</p>
-                      : max_zone_radius_m_cap !== null
-                        ? <p className="text-xs text-slate-400">Máximo de {max_zone_radius_m_cap} m no seu plano.</p>
-                        : <p className="text-xs text-slate-400">Define o raio-base usado para consolidar a zona ao redor do ponto de transporte selecionado.</p>
+                    {max_zone_radius_m_cap !== null
+                      ? <p className="text-xs text-slate-400">Ajuste de {ZONE_RADIUS_MIN_M} m a {max_zone_radius_m_cap} m, em passos de {ZONE_RADIUS_STEP_M} m.</p>
+                      : <p className="text-xs text-slate-400">Define o raio-base usado para consolidar a zona ao redor do ponto de transporte selecionado.</p>
                     }
                   </div>
                 </div>
