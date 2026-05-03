@@ -1,15 +1,17 @@
 import { useState } from "react";
+
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { activateProprietarioPlan, getPlans, getAccountPlan, PlanRead } from "../../api/client";
+
+import { activateProprietarioPlan, getAccountPlan, getPlans, PlanRead } from "../../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { PixModal } from "./PixModal";
 
 const PLAN_FEATURES: Record<string, string[]> = {
   anonymous: ["300 créditos de sessão", "Sem favoritos", "Parâmetros travados"],
-  free: ["350 créditos/mês", "5 imóveis salvos", "2 zonas salvas", "Retenção 7 dias"],
-  basico: ["800 créditos/mês", "20 imóveis salvos", "4 zonas salvas", "Retenção 30 dias", "Parametrização limitada", "4 métricas"],
-  pro: ["4.000 créditos/mês", "100 imóveis salvos", "20 zonas salvas", "Retenção 30 dias", "Parametrização completa", "Métricas ilimitadas"],
-  pro_max: ["20.000 créditos/mês", "100 imóveis salvos", "20 zonas salvas", "Retenção 30 dias", "Parametrização completa", "Métricas ilimitadas"],
+  free: ["350 créditos/mês", "5 imóveis salvos", "2 zonas salvas", "Retenção de 7 dias"],
+  basico: ["800 créditos/mês", "20 imóveis salvos", "4 zonas salvas", "Retenção de 30 dias", "Parametrização limitada", "4 métricas"],
+  pro: ["4.000 créditos/mês", "100 imóveis salvos", "20 zonas salvas", "Retenção de 30 dias", "Parametrização completa", "Métricas ilimitadas"],
+  pro_max: ["20.000 créditos/mês", "100 imóveis salvos", "20 zonas salvas", "Retenção de 30 dias", "Parametrização completa", "Métricas ilimitadas"],
 };
 
 export function PlanosPage({ onClose }: { onClose: () => void }) {
@@ -38,6 +40,7 @@ export function PlanosPage({ onClose }: { onClose: () => void }) {
       openAuthModal("register");
       return;
     }
+
     if (isProprietario) {
       if (activating) return;
       setActivating(plan.slug);
@@ -51,6 +54,7 @@ export function PlanosPage({ onClose }: { onClose: () => void }) {
       }
       return;
     }
+
     if (!plan.is_paid) return;
     setSelectedPlan(plan);
   };
@@ -69,8 +73,7 @@ export function PlanosPage({ onClose }: { onClose: () => void }) {
   };
 
   const isCurrentPlan = (plan: PlanRead) => activePlan?.plan.slug === plan.slug;
-
-  const visiblePlans = plans.filter((p) => p.slug !== "anonymous");
+  const visiblePlans = plans.filter((plan) => plan.slug !== "anonymous");
 
   return (
     <div className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-black/50 p-4 pt-16">
@@ -78,15 +81,18 @@ export function PlanosPage({ onClose }: { onClose: () => void }) {
         <div className="flex items-center justify-between border-b border-slate-100 px-8 py-5">
           <div>
             <h1 className="text-2xl font-bold text-slate-800">Planos</h1>
-            <p className="text-sm text-slate-500 mt-0.5">Escolha o plano ideal para sua busca imobiliária</p>
+            <p className="mt-0.5 text-sm text-slate-500">Escolha o plano ideal para sua busca imobiliária</p>
           </div>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-2xl leading-none">×</button>
+          <button onClick={onClose} className="text-2xl leading-none text-slate-400 hover:text-slate-600">
+            ×
+          </button>
         </div>
 
         <div className="grid grid-cols-1 gap-6 p-8 sm:grid-cols-2 lg:grid-cols-4">
           {visiblePlans.map((plan) => {
             const isCurrent = isCurrentPlan(plan);
             const isHighlighted = plan.slug === "pro";
+
             return (
               <div
                 key={plan.id}
@@ -94,8 +100,8 @@ export function PlanosPage({ onClose }: { onClose: () => void }) {
                   isHighlighted
                     ? "border-violet-500 shadow-lg shadow-violet-100"
                     : isCurrent
-                    ? "border-green-400"
-                    : "border-slate-200 hover:border-violet-300"
+                      ? "border-green-400"
+                      : "border-slate-200 hover:border-violet-300"
                 }`}
               >
                 {isHighlighted && (
@@ -116,10 +122,10 @@ export function PlanosPage({ onClose }: { onClose: () => void }) {
                 </p>
 
                 <ul className="mt-4 flex-1 space-y-2">
-                  {(PLAN_FEATURES[plan.slug] ?? []).map((f) => (
-                    <li key={f} className="flex items-start gap-2 text-sm text-slate-600">
+                  {(PLAN_FEATURES[plan.slug] ?? []).map((feature) => (
+                    <li key={feature} className="flex items-start gap-2 text-sm text-slate-600">
                       <span className="mt-0.5 text-violet-500">✓</span>
-                      {f}
+                      {feature}
                     </li>
                   ))}
                 </ul>
@@ -129,25 +135,25 @@ export function PlanosPage({ onClose }: { onClose: () => void }) {
                   disabled={isCurrent || (!isProprietario && !plan.is_paid) || activating === plan.slug}
                   className={`mt-6 w-full rounded-xl py-2.5 text-sm font-semibold transition-colors ${
                     isCurrent
-                      ? "bg-green-100 text-green-700 cursor-default"
+                      ? "cursor-default bg-green-100 text-green-700"
                       : isProprietario
-                      ? "bg-amber-500 text-white hover:bg-amber-600"
-                      : !plan.is_paid
-                      ? "bg-slate-100 text-slate-400 cursor-default"
-                      : isHighlighted
-                      ? "bg-violet-600 text-white hover:bg-violet-700"
-                      : "bg-slate-800 text-white hover:bg-slate-900"
+                        ? "bg-amber-500 text-white hover:bg-amber-600"
+                        : !plan.is_paid
+                          ? "cursor-default bg-slate-100 text-slate-400"
+                          : isHighlighted
+                            ? "bg-violet-600 text-white hover:bg-violet-700"
+                            : "bg-slate-800 text-white hover:bg-slate-900"
                   }`}
                 >
                   {isCurrent
                     ? "Plano ativo"
                     : activating === plan.slug
-                    ? "Ativando..."
-                    : isProprietario
-                    ? "Ativar grátis"
-                    : !plan.is_paid
-                    ? "Incluído"
-                    : "Assinar via Pix"}
+                      ? "Ativando..."
+                      : isProprietario
+                        ? "Ativar grátis"
+                        : !plan.is_paid
+                          ? "Incluído"
+                          : "Assinar via Pix"}
                 </button>
               </div>
             );
@@ -156,12 +162,12 @@ export function PlanosPage({ onClose }: { onClose: () => void }) {
 
         <div className="border-t border-slate-100 px-8 py-4">
           {isProprietario ? (
-            <p className="text-xs text-amber-600 text-center font-medium">
-              Acesso proprietário ativo — troca de plano sem pagamento.
+            <p className="text-center text-xs font-medium text-amber-600">
+              Acesso proprietário ativo - troca de plano sem pagamento.
             </p>
           ) : (
-            <p className="text-xs text-slate-400 text-center">
-              Pagamento via Pix com QR Code ou Pix Copia e Cola. Ativação em até 1 hora após confirmação.
+            <p className="text-center text-xs text-slate-400">
+              Pagamento via Pix com QR Code ou Pix Copia e Cola. Ativação automática após confirmação.
             </p>
           )}
         </div>

@@ -65,3 +65,5 @@ cods_ok/.profiles/
 
 data_cache/dados_criminais_*.xlsx
 data_cache/~$dados_criminais_*.xlsx
+
+WORK_LOG.md

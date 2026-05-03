@@ -51,6 +51,7 @@ describe("favorites-store", () => {
         display_name: "Ana",
         is_active: true,
         created_at: "2026-04-12T10:00:00Z",
+        role: "user",
       },
       session_expires_at: "2026-05-12T10:00:00Z",
     });

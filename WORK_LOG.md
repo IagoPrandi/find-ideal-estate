@@ -1,5 +1,7 @@
 # Work Log
 
+- 2026-05-03 (integração Mercado Pago para Pix): PRD.md e SKILLS_README.md foram reabertos antes da implementação, conforme AGENTS.md. Skill primária usada: `best-practices`, com apoio de `security-threat-checklist`, porque o escopo altera billing, webhook, secrets, integração externa e UX de pagamento. O workspace não expunha um MCP utilizável do Mercado Pago nem `.mcp.json` local para ativação do servidor MCP; por isso a integração foi feita diretamente contra a API oficial do Mercado Pago, preservando os endpoints internos já existentes do produto. Backend: `apps/api/src/modules/billing/mercado_pago.py` adicionado com criação/consulta/cancelamento de pagamento Pix via `/v1/payments`, seleção de credenciais `test/live`, idempotência e validação oficial de webhook `x-signature`; `apps/api/src/modules/billing/pix.py` reescrito para orquestrar `payments`, `pix_payment_data`, reconciliação por polling em `GET /billing/payments/{id}`, ativação transacional de `plan_activations` e processamento idempotente de `webhook_events`; `apps/api/src/api/routes/billing.py` passou a enviar `payer_email`/`display_name` do usuário autenticado ao checkout e a receber callback compatível com Mercado Pago (`data.id`, `x-request-id`, `x-signature`). Configuração: `apps/api/src/core/config.py` ganhou `MERCADO_PAGO_ENVIRONMENT`, `MERCADO_PAGO_*_TEST/LIVE`, `MERCADO_PAGO_WEBHOOK_SECRET`, `MERCADO_PAGO_WEBHOOK_URL` e `PIX_PROVIDER` defaultando para `mercado_pago`; `.env.example` atualizado com as novas variáveis. Contratos/UI: `packages/contracts/contracts/billing.py` e `apps/web/src/api/schemas.ts` ganharam `ticket_url` no checkout Pix; `apps/web/src/features/billing/PixModal.tsx` agora renderiza QR base64/data URL retornado pelo provedor, mantém o polling existente e oferece link opcional "Abrir cobrança no Mercado Pago"; `PlanosPage.tsx` e `ContaPage.tsx` foram regravados em UTF-8 com cópias em português correto e CTA de ativação automática após confirmação. Validação: `C:/Users/iagoo/PESSOAL/projetos/onde_morar/principal/.venv/Scripts/python.exe -m pytest apps/api/tests/test_phase8_mercado_pago.py -q` passou (`3 passed`), cobrindo assinatura do webhook, callback HTTP e repasse do usuário autenticado para o checkout; `npm.cmd --prefix apps/web run typecheck` continua falhando por erros TypeScript preexistentes fora do escopo de billing (`client.ts` em favoritos tipados, `FavoritesPanel.tsx`, `Step2Transport.tsx`, `Step6Analysis.test.tsx`, `FindIdealApp.test.tsx`, `src/lib/api/index.ts`, `journey-store.test.ts`). Nenhum milestone foi marcado, pois ainda não houve confirmação explícita do responsável.
+
 - 2026-04-27 (verificação de limites de favoritos e visualização): PRD.md, SKILLS_README.md e `skills/security-threat-checklist/SKILL.md` reabertos antes da análise. Skill primária usada: `security-threat-checklist`, porque o escopo envolve endpoints autenticados, autorização por plano e restrições de acesso a dados salvos. Resultado: limite de imóveis salvos e limite de zonas salvas estão implementados no backend via entitlements e bloqueio no POST; restrição de visualização está implementada apenas parcialmente por filtro de retenção nas listas, sem `view_window_ends_at`, `view_state`, endpoint de detalhe com 410, estados `expired_for_view`/`over_limit_grace`/`archived` ou fluxo pós-downgrade completo conforme PRD. Nenhum milestone foi marcado, pois não houve confirmação explícita do responsável.
 
 - 2026-04-27 (correção Pro Max): PRD.md, SKILLS_README.md e `skills/security-threat-checklist/SKILL.md` reabertos antes da implementação. Skill primária usada: `security-threat-checklist`, porque o escopo altera planos, créditos, cobrança e acesso privilegiado. Corrigido o plano Pro Max para R$ 312,99/mês e 20.000 créditos: seed `20260426_0027`, migration corretiva `20260427_0030`, nova migration `20260427_0031_pro_max_price_credits.py`, UI de planos e PRD atualizados. A migration 0031 também corrige `user_credits` de usuários Pro Max ativos para 20.000 créditos, zerando rollover/legacy para manter o reset administrativo anterior. `.venv` não conseguiu iniciar o Python do WindowsApps nesta sessão; por isso a SQL equivalente da 0031 foi aplicada no Postgres local via `psql` com `ON_ERROR_STOP` e `alembic_version` atualizado para `20260427_0031`. Verificação no banco confirmou `pro_max,312.99,20000,20260427_0031` e 0 usuários Pro Max ativos. Validação: `py_compile` das migrations 0030/0031 passou com o Python empacotado; `npm.cmd --prefix apps/web run test:run -- src/components/panels/Step5Address.test.tsx` passou (3), mantendo warnings preexistentes de `act(...)`. Nenhum milestone foi marcado, pois não houve confirmação explícita do responsável.
@@ -5922,6 +5924,49 @@
 - Verification executed:
   - `vitest run --config vitest.config.ts src/components/panels/Step6Analysis.test.tsx --reporter=dot --no-color` -> `6 passed`.
   - Warnings antigos de `act(...)` e `ResponsiveContainer` no ambiente de teste permaneceram sem regressão funcional.
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluída; política de confirmação explícita preservada.
+
+## 2026-05-03 - Configuração Mercado Pago: validação de segredos e MCP
+
+- Required docs opened:
+  - `AGENTS.md`
+  - `PRD.md`
+  - `SKILLS_README.md`
+- Skill used:
+  - `skills/release-config-management/SKILL.md`
+
+- Scope executed (delta):
+  - Validada a configuração do MCP do Mercado Pago em `.mcp.json`, mantendo o endpoint oficial `https://mcp.mercadopago.com/mcp`.
+  - Validado que as variáveis do Mercado Pago em `.env.example` permanecem sem valores, preservando a política de não versionar segredos.
+  - Validado que as variáveis do Mercado Pago em `.env` estão preenchidas localmente para ambiente de teste.
+  - Confirmado que esta configuração local de segredos atende ao padrão esperado do projeto para runtime secrets.
+
+- Verification executed:
+  - Conferência manual de `.mcp.json`.
+  - Conferência de presença/ausência de valores em `.env.example` e `.env` sem expor conteúdo sensível.
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluída; política de confirmação explícita preservada.
+
+## 2026-05-03 - Configuração MCP: validação do Mercado Pago
+
+- Required docs opened:
+  - `AGENTS.md`
+  - `PRD.md`
+  - `SKILLS_README.md`
+- Skill used:
+  - `skills/release-config-management/SKILL.md`
+
+- Scope executed (delta):
+  - Validada a documentação oficial do MCP Server do Mercado Pago para Cursor.
+  - Confirmado que a configuração existente em `.mcp.json` já corresponde ao endpoint oficial: `https://mcp.mercadopago.com/mcp`.
+  - Confirmado que, para Cursor, a autenticação não deve ser commitada no repositório: a conexão é concluída no IDE em `Settings > Tools & MCPs > Connect`.
+
+- Verification executed:
+  - Conferência manual da configuração local em `.mcp.json`.
+  - Conferência da documentação oficial do Mercado Pago MCP Server (seção de conexão para Cursor).
 
 - Progress Tracker:
   - Nenhuma milestone foi marcada como concluída; política de confirmação explícita preservada.

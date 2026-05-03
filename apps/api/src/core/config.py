@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     stripe_secret_key: str | None = None
     stripe_webhook_secret: str | None = None
 
-    pix_provider: str = "manual"
+    pix_provider: str = "mercado_pago"
     pix_key: str | None = None
     pix_merchant_name: str | None = None
     pix_merchant_city: str | None = None
@@ -44,6 +44,14 @@ class Settings(BaseSettings):
     pix_static_qr_code_url: str | None = None
     pix_copy_paste_payload: str | None = None
     pix_callback_secret: str | None = None
+    mercado_pago_environment: str = "test"
+    mercado_pago_public_key_test: str | None = None
+    mercado_pago_public_key_live: str | None = None
+    mercado_pago_access_token_test: str | None = None
+    mercado_pago_access_token_live: str | None = None
+    mercado_pago_webhook_secret: str | None = None
+    mercado_pago_webhook_url: str | None = None
+    mercado_pago_timeout_seconds: float = 20.0
 
 
 @lru_cache(maxsize=1)

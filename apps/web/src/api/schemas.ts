@@ -6,7 +6,7 @@ export const AuthUserReadSchema = z.object({
   display_name: z.string().nullable().optional(),
   is_active: z.boolean(),
   created_at: z.string(),
-  role: z.string().optional().default("user"),
+  role: z.string(),
 });
 
 export const AuthStatusReadSchema = z.object({
@@ -856,6 +856,7 @@ export const PixCheckoutResponseSchema = z.object({
   pix_copy_paste: z.string(),
   qr_code_payload: z.string(),
   qr_code_image_url: z.string().nullable().optional(),
+  ticket_url: z.string().nullable().optional(),
   amount_brl: z.union([z.string(), z.number()]),
   expires_at: z.string(),
   status: z.string(),

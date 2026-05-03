@@ -74,6 +74,7 @@ class PixCheckoutResponse(BaseModel):
     pix_copy_paste: str
     qr_code_payload: str
     qr_code_image_url: str | None
+    ticket_url: str | None = None
     amount_brl: Decimal
     expires_at: datetime
     status: str
