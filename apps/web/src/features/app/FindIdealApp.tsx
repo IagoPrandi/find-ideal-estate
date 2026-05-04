@@ -2102,6 +2102,9 @@ export function FindIdealApp() {
       if (!cancelled) {
         zonesDataRef.current = response.zones.map((z) => ({ fingerprint: z.fingerprint, isochrone_geom: z.isochrone_geom }));
         const selectedZone = response.zones.find((zone) => zone.fingerprint === selectedZoneFingerprint);
+        const hasIncompleteZones = response.zones.some(
+          (zone) => typeof zone.state === "string" && zone.state !== "complete" && zone.state !== "failed"
+        );
         const hasLegacyPoiZones = response.zones.some((zone) => zoneNeedsPoiBackfill(zone));
         const selectedPoiPoints = ((selectedZone?.poi_points || []) as ZonePoiPointLike[]);
         setGeoJsonSourceData(
@@ -2111,7 +2114,7 @@ export function FindIdealApp() {
         );
         setSelectedZonePoiState({ zoneFingerprint: selectedZoneFingerprint || null, poiPoints: selectedPoiPoints });
 
-        if (hasLegacyPoiZones) {
+        if (hasIncompleteZones || hasLegacyPoiZones) {
           pollTimeout = window.setTimeout(() => {
             void syncZones().catch(() => {
               if (!cancelled) {

@@ -1,7 +1,14 @@
-import { fireEvent, render, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Step3Zones } from "./Step3Zones";
-import { createZoneEnrichmentJob, createZoneGenerationJob, getJob, updateJourney } from "../../api/client";
+import {
+  createZoneEnrichmentJob,
+  createZoneGenerationJob,
+  getJob,
+  getJourneyZonesList,
+  updateJourney
+} from "../../api/client";
 import { useJourneyStore, useUIStore } from "../../state";
 import { useEntitlements } from "../../features/auth/useEntitlements";
 
@@ -10,6 +17,7 @@ vi.mock("../../api/client", () => ({
   createZoneEnrichmentJob: vi.fn(async () => ({ id: "job-enrich-1" })),
   createZoneGenerationJob: vi.fn(async () => ({ id: "job-zone-1" })),
   getJob: vi.fn(async (jobId: string) => ({ id: jobId, state: "completed", progress_percent: 100 })),
+  getJourneyZonesList: vi.fn(async () => ({ zones: [], total_count: 0, completed_count: 0 })),
   updateJourney: vi.fn(async () => ({ id: "journey-1" })),
 }));
 
@@ -32,6 +40,23 @@ vi.mock("../../features/auth/useEntitlements", () => ({
     max_transport_radius_m_cap: null,
   })),
 }));
+
+function renderWithQueryClient() {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+        gcTime: 0
+      }
+    }
+  });
+
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <Step3Zones />
+    </QueryClientProvider>
+  );
+}
 
 describe("Step3Zones", () => {
   beforeEach(() => {
@@ -68,10 +93,11 @@ describe("Step3Zones", () => {
       },
     }));
     useUIStore.setState((state) => ({ ...state, step: 3, maxStep: 3 }));
+    vi.mocked(getJourneyZonesList).mockResolvedValue({ zones: [], total_count: 0, completed_count: 0 } as never);
   });
 
   it("auto-starts the single walk isochrone pipeline without a transport seed", async () => {
-    render(<Step3Zones />);
+    renderWithQueryClient();
 
     await waitFor(() => {
       expect(updateJourney).toHaveBeenCalledWith(
@@ -90,12 +116,12 @@ describe("Step3Zones", () => {
       expect(createZoneGenerationJob).toHaveBeenCalledWith("journey-1");
       expect(createZoneEnrichmentJob).toHaveBeenCalledWith("journey-1");
       expect(getJob).toHaveBeenCalledWith("job-zone-1");
-      expect(getJob).toHaveBeenCalledWith("job-enrich-1");
     });
 
     await waitFor(() => {
       expect(useUIStore.getState().step).toBe(4);
       expect(useUIStore.getState().maxStep).toBe(4);
+      expect(useJourneyStore.getState().zoneEnrichmentJobId).toBe("job-enrich-1");
     }, { timeout: 2000 });
   }, 10000);
 
@@ -109,7 +135,7 @@ describe("Step3Zones", () => {
       },
     }));
 
-    render(<Step3Zones />);
+    renderWithQueryClient();
 
     await waitFor(() => {
       expect(updateJourney).toHaveBeenCalledWith(
@@ -132,10 +158,11 @@ describe("Step3Zones", () => {
     await waitFor(() => {
       expect(useUIStore.getState().step).toBe(4);
       expect(useUIStore.getState().maxStep).toBe(4);
+      expect(useJourneyStore.getState().zoneEnrichmentJobId).toBe("job-enrich-1");
     }, { timeout: 2000 });
   }, 10000);
 
-  it("aplica faixa de 50 m a 500 m com passos de 25 m no raio das zonas para planos elegiveis", () => {
+  it("aplica faixa de 50 m a 500 m com passos de 25 m no raio das zonas para planos elegíveis", () => {
     useJourneyStore.setState((state) => ({
       ...state,
       config: {
@@ -146,7 +173,7 @@ describe("Step3Zones", () => {
       selectedTransportId: "transport-1",
     }));
 
-    const { getAllByRole } = render(<Step3Zones />);
+    const { getAllByRole } = renderWithQueryClient();
     const sliders = getAllByRole("slider");
     const radiusSlider = sliders[1] as HTMLInputElement;
 
@@ -156,5 +183,48 @@ describe("Step3Zones", () => {
 
     fireEvent.change(radiusSlider, { target: { value: "75" } });
     expect(useJourneyStore.getState().config.zoneRadiusMeters).toBe(75);
+  });
+
+  it("mostra no painel as zonas que já apareceram no mapa durante o processamento", async () => {
+    useJourneyStore.setState((state) => ({
+      ...state,
+      config: {
+        ...state.config,
+        modal: "transit",
+        time: 40,
+      },
+      selectedTransportId: "transport-1",
+    }));
+
+    vi.mocked(getJob).mockResolvedValue({
+      id: "job-zone-1",
+      state: "running",
+      progress_percent: 48,
+    } as never);
+    vi.mocked(getJourneyZonesList).mockResolvedValue({
+      zones: [
+        {
+          id: "zone-1",
+          fingerprint: "abcdef1234567890",
+          state: "processing",
+          travel_time_minutes: 22,
+          walk_distance_meters: 180,
+        },
+      ],
+      total_count: 1,
+      completed_count: 0,
+    } as never);
+
+    renderWithQueryClient();
+    fireEvent.click(screen.getByRole("button", { name: "Gerar zonas" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("step3-zones-preview-panel")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("Zonas já disponíveis")).toBeInTheDocument();
+    expect(screen.getByText("Zona abcdef12")).toBeInTheDocument();
+    expect(screen.getByText("Até 22 min")).toBeInTheDocument();
+    expect(screen.getByText("Gerada, carregando dados")).toBeInTheDocument();
   });
 });

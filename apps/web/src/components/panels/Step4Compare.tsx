@@ -7,6 +7,9 @@ import { formatCurrencyBr } from "../../lib/listingFormat";
 import { useJourneyStore, useUIStore, useZoneFavoritesStore } from "../../state";
 import { useEntitlements } from "../../features/auth/useEntitlements";
 
+type JourneyZonesResponse = Awaited<ReturnType<typeof getJourneyZonesList>>;
+type ZoneItem = JourneyZonesResponse["zones"][number];
+
 type JourneyRank = {
   position?: number | null;
   total?: number;
@@ -38,7 +41,7 @@ function getRankValue(rank: JourneyRank | null | undefined) {
 }
 
 function getZoneSortValue(
-  zone: Awaited<ReturnType<typeof getJourneyZonesList>>["zones"][number],
+  zone: ZoneItem,
   sortKey: ZoneSortKey
 ) {
   if (sortKey === "travel_time") {
@@ -235,23 +238,28 @@ function ZonePoiList({
 function ZoneCard({
   zone,
   isSelected,
+  isPrioritized,
   onSelect,
   journeyId,
   searchType,
   usageType,
 }: {
-  zone: Awaited<ReturnType<typeof getJourneyZonesList>>["zones"][number];
+  zone: ZoneItem;
   isSelected: boolean;
+  isPrioritized: boolean;
   onSelect: () => void;
   journeyId: string | null;
   searchType: string;
   usageType: string;
 }) {
+  const isComplete = isZoneComplete(zone);
+  const isProcessing = isZoneProcessing(zone);
+  const statusLabel = getZoneStatusLabel(zone, isPrioritized);
   const showGreen = zone.green_vegetation_label !== null && zone.green_vegetation_label !== undefined;
   const poiPoints = zone.poi_points || [];
   const priceP50 = zone.price_summary?.p50_price ?? null;
-  const priceChipValue = priceP50 != null ? formatCurrencyBr(priceP50) : "Sem base";
-  const priceTooltip = priceP50 != null
+  const priceChipValue = !isComplete ? "Carregando" : priceP50 != null ? formatCurrencyBr(priceP50) : "Sem base";
+  const priceTooltip = isComplete && priceP50 != null
     ? "Metade dos imóveis está abaixo desse valor e metade está acima, considerando o recorte padrão de imóveis para venda dentro da zona."
     : undefined;
 
@@ -283,11 +291,30 @@ function ZoneCard({
       onClick={onSelect}
     >
       <div className="mb-3 flex items-start justify-between gap-3">
-        <h3 className="text-sm font-semibold text-slate-800">{`Zona ${zone.fingerprint.slice(0, 8)}`}</h3>
+        <div className="space-y-1">
+          <h3 className="text-sm font-semibold text-slate-800">{`Zona ${zone.fingerprint.slice(0, 8)}`}</h3>
+          <div className="flex flex-wrap gap-2">
+            <span
+              className={`rounded px-2 py-0.5 text-[11px] font-semibold ${
+                zone.state === "complete"
+                  ? "bg-emerald-100 text-emerald-700"
+                  : zone.state === "failed"
+                    ? "bg-rose-100 text-rose-700"
+                    : isPrioritized
+                      ? "bg-pastel-violet-100 text-pastel-violet-700"
+                      : "bg-sky-100 text-sky-700"
+              }`}
+            >
+              {statusLabel}
+            </span>
+            {zone.is_circle_fallback ? (
+              <span className="rounded bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700" title="Zona circular aproximada porque o serviço de rotas está indisponível.">
+                Círculo aproximado
+              </span>
+            ) : null}
+          </div>
+        </div>
         <div className="flex items-center gap-1.5">
-          {zone.is_circle_fallback ? (
-            <span className="rounded bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700" title="Zona circular aproximada porque o serviço de rotas está indisponível.">Círculo aproximado</span>
-          ) : null}
           <span className="rounded bg-slate-100 px-2 py-1 text-xs font-bold text-slate-600">Até {zone.travel_time_minutes ?? "--"} min</span>
           <button
             type="button"
@@ -304,17 +331,31 @@ function ZoneCard({
       </div>
 
       <div className="mb-3 flex flex-wrap gap-2">
-        <ZoneMetricChip label="Segurança" value={formatRank(zone.journey_rankings?.safety)} tone="emerald" />
-        {showGreen ? <ZoneMetricChip label="Verde" value={formatRank(zone.journey_rankings?.green)} tone="violet" /> : null}
-        <ZoneMetricChip label="Alagamento" value={formatRank(zone.journey_rankings?.flood)} tone="amber" />
+        <ZoneMetricChip label="Segurança" value={isComplete ? formatRank(zone.journey_rankings?.safety) : "Carregando"} tone="emerald" />
+        {showGreen || isProcessing ? <ZoneMetricChip label="Verde" value={isComplete ? formatRank(zone.journey_rankings?.green) : "Carregando"} tone="violet" /> : null}
+        <ZoneMetricChip label="Alagamento" value={isComplete ? formatRank(zone.journey_rankings?.flood) : "Carregando"} tone="amber" />
         <ZoneMetricChip label="Valor mediano" value={priceChipValue} tone="rose" title={priceTooltip} />
-        <ZoneMetricChip label="POIs" value={String(poiPoints.length)} tone="slate" />
+        <ZoneMetricChip label="POIs" value={isComplete ? String(poiPoints.length) : "Carregando"} tone="slate" />
       </div>
 
       <div className="mb-4 flex flex-wrap gap-3 text-xs text-slate-500">
         <span>{zone.walk_distance_meters ? `${Math.round(zone.walk_distance_meters)} m até o ponto de transporte` : "Sem distância consolidada"}</span>
-        <span>{poiPoints.length > 0 ? `${poiPoints.length} POIs mapeados` : zone.poi_counts ? `${Object.keys(zone.poi_counts).length} grupos de POIs` : "POIs pendentes"}</span>
-        <span>{zone.price_summary?.active_listing_count ? `${zone.price_summary.active_listing_count} anúncios ativos no recorte padrão` : "Sem base de valor consolidada"}</span>
+        <span>
+          {poiPoints.length > 0
+            ? `${poiPoints.length} POIs mapeados`
+            : isProcessing
+              ? "POIs detalhados em carregamento"
+              : zone.poi_counts
+                ? `${Object.keys(zone.poi_counts).length} grupos de POIs`
+                : "POIs pendentes"}
+        </span>
+        <span>
+          {zone.price_summary?.active_listing_count
+            ? `${zone.price_summary.active_listing_count} anúncios ativos no recorte padrão`
+            : isProcessing
+              ? "Base de valor em processamento"
+              : "Sem base de valor consolidada"}
+        </span>
         {showGreen ? <span>{zone.green_vegetation_label}</span> : null}
       </div>
 
@@ -329,21 +370,31 @@ function ZoneCard({
 export function Step4Compare() {
   const journeyId = useJourneyStore((state) => state.journeyId);
   const selectedZoneFingerprint = useJourneyStore((state) => state.selectedZoneFingerprint);
+  const zoneEnrichmentJobId = useJourneyStore((state) => state.zoneEnrichmentJobId);
   const setSelectedZone = useJourneyStore((state) => state.setSelectedZone);
+  const setJobIds = useJourneyStore((state) => state.setJobIds);
   const config = useJourneyStore((state) => state.config);
   const goToStep = useUIStore((state) => state.goToStep);
   const setMaxStep = useUIStore((state) => state.setMaxStep);
-  const [poiBackfillJobId, setPoiBackfillJobId] = useState<string | null>(null);
-  const [poiBackfillError, setPoiBackfillError] = useState<string | null>(null);
+  const [zoneEnrichmentError, setZoneEnrichmentError] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<ZoneSortKey>("travel_time");
-  const poiBackfillRequestedRef = useRef<string | null>(null);
+  const legacyBackfillRequestedRef = useRef<string | null>(null);
   const zoneCardRefs = useRef<Record<string, HTMLElement | null>>({});
   const query = useQuery({
     queryKey: ["journey-zones", journeyId],
     queryFn: async () => getJourneyZonesList(journeyId as string),
     enabled: Boolean(journeyId),
-    refetchInterval: poiBackfillJobId ? 3000 : false
+    refetchInterval: (currentQuery) => {
+      const zones = (currentQuery.state.data as JourneyZonesResponse | undefined)?.zones || [];
+      const hasIncompleteZones = zones.some((zone) => isZoneProcessing(zone));
+      return hasIncompleteZones || Boolean(zoneEnrichmentJobId) ? 3000 : false;
+    }
   });
+
+  const hasIncompleteZones = useMemo(
+    () => Boolean(query.data?.zones.some((zone) => isZoneProcessing(zone))),
+    [query.data?.zones]
+  );
 
   const hasLegacyPoiZones = useMemo(
     () =>
@@ -351,10 +402,10 @@ export function Step4Compare() {
     [query.data?.zones]
   );
 
-  const poiBackfillJobQuery = useQuery({
-    queryKey: ["journey-zones-poi-backfill-job", poiBackfillJobId],
-    queryFn: async () => getJob(poiBackfillJobId as string),
-    enabled: Boolean(poiBackfillJobId),
+  const zoneEnrichmentJobQuery = useQuery({
+    queryKey: ["journey-zones-enrichment-job", zoneEnrichmentJobId],
+    queryFn: async () => getJob(zoneEnrichmentJobId as string),
+    enabled: Boolean(zoneEnrichmentJobId),
     refetchInterval: (jobQuery) => {
       const state = jobQuery.state.data?.state;
       return state === "completed" || state === "failed" || state === "cancelled" ? false : 3000;
@@ -362,49 +413,48 @@ export function Step4Compare() {
   });
 
   useEffect(() => {
-    poiBackfillRequestedRef.current = null;
-    setPoiBackfillJobId(null);
-    setPoiBackfillError(null);
+    legacyBackfillRequestedRef.current = null;
+    setZoneEnrichmentError(null);
   }, [journeyId]);
 
   useEffect(() => {
-    if (!journeyId || !query.data || !hasLegacyPoiZones || poiBackfillJobId) {
+    if (!journeyId || !query.data || !hasLegacyPoiZones || hasIncompleteZones || zoneEnrichmentJobId) {
       return;
     }
-    if (poiBackfillRequestedRef.current === journeyId) {
+    if (legacyBackfillRequestedRef.current === journeyId) {
       return;
     }
 
-    poiBackfillRequestedRef.current = journeyId;
-    setPoiBackfillError(null);
+    legacyBackfillRequestedRef.current = journeyId;
+    setZoneEnrichmentError(null);
 
     void createZoneEnrichmentJob(journeyId)
       .then((job) => {
-        setPoiBackfillJobId(job.id);
+        setJobIds({ zoneEnrichmentJobId: job.id });
       })
       .catch((caughtError) => {
-        setPoiBackfillError(apiActionHint(caughtError));
+        setZoneEnrichmentError(apiActionHint(caughtError));
       });
-  }, [hasLegacyPoiZones, journeyId, poiBackfillJobId, query.data]);
+  }, [hasIncompleteZones, hasLegacyPoiZones, journeyId, query.data, setJobIds, zoneEnrichmentJobId]);
 
   useEffect(() => {
-    if (!poiBackfillJobId) {
+    if (!zoneEnrichmentJobId) {
       return;
     }
 
-    const state = poiBackfillJobQuery.data?.state;
+    const state = zoneEnrichmentJobQuery.data?.state;
     if (state === "completed") {
-      setPoiBackfillJobId(null);
-      setPoiBackfillError(null);
+      setJobIds({ zoneEnrichmentJobId: null });
+      setZoneEnrichmentError(null);
       void query.refetch();
       return;
     }
 
     if (state === "failed" || state === "cancelled") {
-      setPoiBackfillJobId(null);
-      setPoiBackfillError(poiBackfillJobQuery.data?.error_message || "A atualização automática dos POIs falhou.");
+      setJobIds({ zoneEnrichmentJobId: null });
+      setZoneEnrichmentError(zoneEnrichmentJobQuery.data?.error_message || "O enriquecimento das zonas falhou.");
     }
-  }, [poiBackfillJobId, poiBackfillJobQuery.data?.error_message, poiBackfillJobQuery.data?.state, query]);
+  }, [query, setJobIds, zoneEnrichmentJobId, zoneEnrichmentJobQuery.data?.error_message, zoneEnrichmentJobQuery.data?.state]);
 
   async function handleSelect(zoneId: string, fingerprint: string) {
     setSelectedZone(zoneId, fingerprint);
@@ -444,6 +494,26 @@ export function Step4Compare() {
     [selectedZoneFingerprint, sortedZones]
   );
 
+  const zoneProgress = useMemo(() => {
+    const zones = query.data?.zones || [];
+    const completed = zones.filter((zone) => isZoneComplete(zone)).length;
+    const failed = zones.filter((zone) => zone.state === "failed").length;
+    const processing = zones.filter((zone) => isZoneProcessing(zone)).length;
+    return {
+      total: zones.length,
+      completed,
+      failed,
+      processing,
+    };
+  }, [query.data?.zones]);
+
+  const zoneProgressPercent = useMemo(() => {
+    if (zoneProgress.total <= 0) {
+      return 0;
+    }
+    return Math.round((zoneProgress.completed / zoneProgress.total) * 100);
+  }, [zoneProgress.completed, zoneProgress.total]);
+
   useEffect(() => {
     if (!selectedZoneFingerprint) return;
     const node = zoneCardRefs.current[selectedZoneFingerprint];
@@ -465,20 +535,51 @@ export function Step4Compare() {
       <div className="border-b border-slate-100 p-5">
         <div className="mb-1 flex items-center justify-between">
           <h2 className="text-xl font-semibold tracking-tight text-slate-800">Zonas encontradas</h2>
-          <span className="rounded-md bg-emerald-100 px-2 py-1 text-xs font-bold text-emerald-700">Concluído</span>
+          <span className={`rounded-md px-2 py-1 text-xs font-bold ${hasIncompleteZones ? "bg-sky-100 text-sky-700" : "bg-emerald-100 text-emerald-700"}`}>
+            {hasIncompleteZones ? "Enriquecendo" : "Pronto"}
+          </span>
         </div>
-        <p className="text-sm text-slate-500">Compare as zonas pelo tempo de viagem e pelos indicadores enriquecidos.</p>
+        <p className="text-sm text-slate-500">
+          {hasIncompleteZones
+            ? "As zonas já estão disponíveis. Os indicadores urbanos continuam sendo carregados em segundo plano."
+            : "Compare as zonas pelo tempo de viagem e pelos indicadores enriquecidos."}
+        </p>
+        {hasIncompleteZones ? (
+          <div className="mt-4 space-y-1.5" data-testid="zone-enrichment-progress-header">
+            <div className="flex items-center justify-between text-[11px] font-semibold uppercase tracking-[0.14em] text-sky-700">
+              <span>Progresso do enriquecimento</span>
+              <span>{zoneProgressPercent}%</span>
+            </div>
+            <div
+              className="h-2 overflow-hidden rounded-full bg-sky-100"
+              role="progressbar"
+              aria-label="Progresso do enriquecimento das zonas"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={zoneProgressPercent}
+            >
+              <div
+                className="h-full rounded-full bg-sky-500 transition-[width] duration-500 ease-out"
+                style={{ width: `${zoneProgressPercent}%` }}
+              />
+            </div>
+          </div>
+        ) : null}
       </div>
 
       <div className="panel-scroll flex-1 overflow-y-auto bg-slate-50/50 p-4">
         {query.isLoading ? <p className="rounded-xl bg-white p-4 text-sm text-slate-500 shadow-sm">Carregando zonas...</p> : null}
         {query.error ? <p className="mb-3 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{apiActionHint(query.error)}</p> : null}
-        {poiBackfillJobId ? (
-          <p className="mb-3 rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-800">
-            Atualizando os POIs detalhados desta jornada para preencher o mapa e os cards.
-          </p>
+        {hasIncompleteZones ? (
+          <div className="mb-3 rounded-xl border border-sky-200 bg-sky-50 p-4 text-sm text-sky-800">
+            <p className="font-semibold">Mostrando as zonas agora. O enriquecimento continua em segundo plano.</p>
+            <p className="mt-1">
+              {zoneProgress.completed} de {zoneProgress.total} zonas já foram enriquecidas.
+              {selectedZone && !isZoneComplete(selectedZone) ? " A zona selecionada foi marcada como prioridade para receber os dados primeiro." : ""}
+            </p>
+          </div>
         ) : null}
-        {poiBackfillError ? <p className="mb-3 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{poiBackfillError}</p> : null}
+        {zoneEnrichmentError ? <p className="mb-3 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{zoneEnrichmentError}</p> : null}
         {query.data?.zones.some((z) => z.is_circle_fallback) ? (
           <div className="mb-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 animate-[fadeIn_0.3s_ease-out]">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
@@ -513,6 +614,7 @@ export function Step4Compare() {
                 <ZoneCard
                   zone={zone}
                   isSelected={isSelected}
+                  isPrioritized={isSelected && !isZoneComplete(zone)}
                   onSelect={() => void handleSelect(zone.id, zone.fingerprint)}
                   journeyId={journeyId}
                   searchType={config.type}
@@ -526,7 +628,11 @@ export function Step4Compare() {
 
       <div className="border-t border-slate-100 bg-white p-4">
         <div className="mb-3 min-h-5 text-xs font-medium text-slate-500">
-          {selectedZone ? `Zona ${selectedZone.fingerprint.slice(0, 8)} selecionada para a busca de imóveis.` : "Selecione uma zona para habilitar a busca de imóveis."}
+          {selectedZone
+            ? !isZoneComplete(selectedZone)
+              ? `Zona ${selectedZone.fingerprint.slice(0, 8)} selecionada. O enriquecimento desta zona foi priorizado e os dados continuam chegando no painel.`
+              : `Zona ${selectedZone.fingerprint.slice(0, 8)} selecionada para a busca de imóveis.`
+            : "Selecione uma zona para habilitar a busca de imóveis."}
         </div>
         <button
           type="button"
@@ -541,4 +647,25 @@ export function Step4Compare() {
       </div>
     </div>
   );
+}
+
+function isZoneComplete(zone: Pick<ZoneItem, "state">) {
+  return zone.state === "complete";
+}
+
+function isZoneProcessing(zone: Pick<ZoneItem, "state">) {
+  return zone.state !== "complete" && zone.state !== "failed";
+}
+
+function getZoneStatusLabel(zone: Pick<ZoneItem, "state">, isPrioritized: boolean) {
+  if (zone.state === "complete") {
+    return "Enriquecida";
+  }
+  if (zone.state === "failed") {
+    return "Falhou";
+  }
+  if (isPrioritized) {
+    return "Prioridade atual";
+  }
+  return "Carregando dados";
 }

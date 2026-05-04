@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { Step4Compare } from "./Step4Compare";
 import { useJourneyStore, useUIStore } from "../../state";
 import { createZoneEnrichmentJob, getJob, getJourneyZonesList, updateJourney } from "../../api/client";
+import { useEntitlements } from "../../features/auth/useEntitlements";
 
 vi.mock("../../api/client", () => ({
   apiActionHint: (error: unknown) => (error instanceof Error ? error.message : "erro"),
@@ -11,6 +12,26 @@ vi.mock("../../api/client", () => ({
   getJob: vi.fn(),
   getJourneyZonesList: vi.fn(),
   updateJourney: vi.fn()
+}));
+
+vi.mock("../../features/auth/useEntitlements", () => ({
+  useEntitlements: vi.fn(() => ({
+    isLoading: false,
+    can_customize_radius: true,
+    can_customize_max_time: true,
+    can_customize_distance: true,
+    max_active_metrics: null,
+    max_listing_favorites: null,
+    max_zone_favorites: null,
+    zone_selection_policy: "any",
+    planSlug: "pro",
+    planName: "Pro",
+    max_transit_minutes_cap: null,
+    max_walk_minutes_cap: null,
+    max_car_minutes_cap: null,
+    max_zone_radius_m_cap: 500,
+    max_transport_radius_m_cap: null,
+  })),
 }));
 
 const scrollIntoViewMock = vi.fn();
@@ -49,6 +70,23 @@ describe("Step4Compare", () => {
       selectedZoneId: "zone-1",
       selectedZoneFingerprint: "zone-fp-1"
     }));
+    vi.mocked(useEntitlements).mockReturnValue({
+      isLoading: false,
+      can_customize_radius: true,
+      can_customize_max_time: true,
+      can_customize_distance: true,
+      max_active_metrics: null,
+      max_listing_favorites: null,
+      max_zone_favorites: null,
+      zone_selection_policy: "any",
+      planSlug: "pro",
+      planName: "Pro",
+      max_transit_minutes_cap: null,
+      max_walk_minutes_cap: null,
+      max_car_minutes_cap: null,
+      max_zone_radius_m_cap: 500,
+      max_transport_radius_m_cap: null,
+    });
 
     vi.mocked(updateJourney).mockResolvedValue({} as never);
     vi.mocked(createZoneEnrichmentJob).mockResolvedValue({ id: "job-poi-backfill" } as never);
@@ -309,5 +347,72 @@ describe("Step4Compare", () => {
       expect(screen.getByText("Colegio Centro")).toBeInTheDocument();
       expect(screen.getByText("Restaurante Central")).toBeInTheDocument();
     });
+  });
+
+  it("shows partial zones immediately while enrichment keeps running in the background", async () => {
+    useJourneyStore.setState((state) => ({
+      ...state,
+      zoneEnrichmentJobId: "job-enrich-live"
+    }));
+
+    vi.mocked(getJourneyZonesList).mockResolvedValue({
+      zones: [
+        {
+          id: "zone-1",
+          journey_id: "journey-1",
+          transport_point_id: "tp-1",
+          fingerprint: "zone-fp-1",
+          state: "enriching",
+          is_circle_fallback: false,
+          travel_time_minutes: 8,
+          walk_distance_meters: 320,
+          isochrone_geom: null,
+          green_area_m2: null,
+          green_vegetation_label: null,
+          flood_area_m2: null,
+          safety_incidents_count: null,
+          poi_counts: null,
+          poi_points: [],
+          badges: {},
+          badges_provisional: true,
+          created_at: "2026-03-29T10:00:00Z",
+          updated_at: "2026-03-29T10:00:00Z"
+        },
+        {
+          id: "zone-2",
+          journey_id: "journey-1",
+          transport_point_id: "tp-2",
+          fingerprint: "zone-fp-2",
+          state: "complete",
+          is_circle_fallback: false,
+          travel_time_minutes: 12,
+          walk_distance_meters: 500,
+          isochrone_geom: null,
+          green_area_m2: 1800,
+          green_vegetation_label: "Media vegetacao",
+          flood_area_m2: 0,
+          safety_incidents_count: 2,
+          poi_counts: { school: 1, supermarket: 1, pharmacy: 1, restaurant: 1, gym: 0, park: 0 },
+          poi_points: [],
+          badges: {},
+          badges_provisional: false,
+          created_at: "2026-03-29T10:00:00Z",
+          updated_at: "2026-03-29T10:00:00Z"
+        }
+      ],
+      total_count: 2,
+      completed_count: 1
+    } as never);
+    vi.mocked(getJob).mockResolvedValue({ id: "job-enrich-live", state: "running", error_message: null } as never);
+
+    renderWithQueryClient();
+
+    expect(await screen.findByText(/Mostrando as zonas agora/i)).toBeInTheDocument();
+    expect(screen.getByText(/1 de 2 zonas já foram enriquecidas/i)).toBeInTheDocument();
+    expect(screen.getByText(/O enriquecimento desta zona foi priorizado/i)).toBeInTheDocument();
+    expect(screen.getByText("Prioridade atual")).toBeInTheDocument();
+    expect(screen.getAllByText("Carregando").length).toBeGreaterThan(0);
+    expect(screen.getByTestId("zone-enrichment-progress-header")).toBeInTheDocument();
+    expect(screen.getByRole("progressbar", { name: /Progresso do enriquecimento das zonas/i })).toHaveAttribute("aria-valuenow", "50");
   });
 });

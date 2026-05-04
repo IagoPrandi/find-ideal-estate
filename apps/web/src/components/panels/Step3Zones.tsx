@@ -1,12 +1,23 @@
+import { useQuery } from "@tanstack/react-query";
 import { LoaderCircle, Lock, MapIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { apiActionHint, createZoneEnrichmentJob, createZoneGenerationJob, getJob, updateJourney } from "../../api/client";
+import {
+  apiActionHint,
+  createZoneEnrichmentJob,
+  createZoneGenerationJob,
+  getJob,
+  getJourneyZonesList,
+  updateJourney
+} from "../../api/client";
 import { useEntitlements } from "../../features/auth/useEntitlements";
 import { useJourneyStore, useUIStore } from "../../state";
 
 type StageMode = "idle" | "generation" | "enrichment" | "finalizing";
+type JourneyZonesResponse = Awaited<ReturnType<typeof getJourneyZonesList>>;
+type ZonePreviewItem = JourneyZonesResponse["zones"][number];
 
 const JOB_POLL_INTERVAL_MS = 1000;
+const ZONE_PREVIEW_POLL_INTERVAL_MS = 2000;
 const FINALIZING_TRANSITION_DELAY_MS = 150;
 const ZONE_RADIUS_MIN_M = 50;
 const ZONE_RADIUS_STEP_M = 25;
@@ -194,26 +205,13 @@ export function Step3Zones() {
       }
 
       setStageMode("enrichment");
-      setProgress(52);
+      setProgress(60);
 
       let enrichmentJobId = zoneEnrichmentJobId;
       if (!enrichmentJobId) {
         const job = await createZoneEnrichmentJob(journeyId);
         enrichmentJobId = job.id;
-        if (!cancelledRef.current) {
-          setJobIds({ zoneEnrichmentJobId: job.id });
-        }
       }
-
-      await pollJobUntilTerminal(
-        enrichmentJobId,
-        enrichmentIntervalRef,
-        (progressValue) => {
-          setStageMode("enrichment");
-          setProgress(Math.max(52, 50 + Math.round(progressValue / 2)));
-        },
-        "O enriquecimento das zonas falhou."
-      );
 
       if (cancelledRef.current) {
         return;
@@ -223,7 +221,10 @@ export function Step3Zones() {
       setProgress(100);
       await updateJourney(journeyId, { last_completed_step: 3 });
       setMaxStep(4);
-      setJobIds({ zoneGenerationJobId: null, zoneEnrichmentJobId: null });
+      setJobIds({
+        zoneGenerationJobId: null,
+        zoneEnrichmentJobId: enrichmentJobId ?? null,
+      });
       window.setTimeout(() => {
         if (!cancelledRef.current) {
           goToStep(4);
@@ -252,45 +253,123 @@ export function Step3Zones() {
 
   const { can_customize_max_time, max_transit_minutes_cap, max_zone_radius_m_cap } = useEntitlements();
   const isBusy = stageMode !== "idle";
-  const stageLabel = stageMode === "generation" ? (isDirectIsochroneMode ? "Gerando área acessível" : "Gerando zonas") : stageMode === "enrichment" ? "Enriquecendo camadas" : "Finalizando";
+  const stageLabel = stageMode === "generation"
+    ? (isDirectIsochroneMode ? "Gerando área acessível" : "Gerando zonas")
+    : stageMode === "enrichment"
+      ? "Enriquecendo camadas"
+      : "Finalizando";
   const zoneRadiusMax = max_zone_radius_m_cap ?? 2500;
+  const zonePreviewQuery = useQuery({
+    queryKey: ["step3-zones-preview", journeyId],
+    queryFn: async () => getJourneyZonesList(journeyId as string),
+    enabled: Boolean(journeyId) && isBusy,
+    refetchInterval: isBusy ? ZONE_PREVIEW_POLL_INTERVAL_MS : false,
+  });
+  const previewZones = [...(zonePreviewQuery.data?.zones || [])].sort(compareZonePreview);
+  const previewReadyCount = previewZones.filter((zone) => zone.state === "complete").length;
 
   return (
     <div className="flex h-full flex-col animate-[fadeInRight_0.3s_ease-out]">
       <div className="border-b border-slate-100 p-5">
-        <h2 className="text-xl font-semibold tracking-tight text-slate-800">{isDirectIsochroneMode ? "Gerar área acessível" : "Gerar zonas"}</h2>
-        <p className="text-sm text-slate-500">{isWalkingMode ? "No modo a pé, a zona é uma única área acessível gerada a partir do ponto principal selecionado." : isDrivingMode ? "No modo carro, a zona é uma única área acessível gerada a partir do ponto principal selecionado." : "Ajuste os parâmetros da busca e gere as zonas a partir do ponto de transporte escolhido."}</p>
+        <h2 className="text-xl font-semibold tracking-tight text-slate-800">
+          {isDirectIsochroneMode ? "Gerar área acessível" : "Gerar zonas"}
+        </h2>
+        <p className="text-sm text-slate-500">
+          {isWalkingMode
+            ? "No modo a pé, a zona é uma única área acessível gerada a partir do ponto principal selecionado."
+            : isDrivingMode
+              ? "No modo carro, a zona é uma única área acessível gerada a partir do ponto principal selecionado."
+              : "Ajuste os parâmetros da busca e gere as zonas a partir do ponto de transporte escolhido."}
+        </p>
       </div>
 
       <div className="panel-scroll flex-1 overflow-y-auto bg-slate-50/50 p-4">
         {isBusy ? (
-          <div className="flex h-full flex-col items-center justify-center rounded-3xl border border-slate-200 bg-white px-6 py-10 text-center shadow-sm">
-            <div className="relative mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-pastel-violet-50 text-pastel-violet-500">
-              <MapIcon className="h-8 w-8" />
-              <div className="absolute inset-0 rounded-2xl border-4 border-pastel-violet-200 opacity-20 animate-ping" />
-            </div>
-            <h3 className="mb-2 text-xl font-semibold text-slate-800">{stageMode === "finalizing" ? "Concluindo preparação" : "Processando zonas"}</h3>
-            <p className="mb-8 max-w-xs text-sm text-slate-500">{stageMode === "generation" ? (isWalkingMode ? "Gerando a área acessível a pé a partir do ponto principal selecionado." : isDrivingMode ? "Gerando a área acessível de carro a partir do ponto principal selecionado." : "Executando a geração das zonas candidatas a partir do ponto de transporte selecionado.") : stageMode === "enrichment" ? "Calculando camadas urbanas e consolidando a comparação da etapa seguinte." : "Salvando o estado final da jornada para abrir a comparação."}</p>
-
-            <div className="w-full max-w-xs space-y-2">
-              <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
-                <div className="h-full bg-pastel-violet-500 transition-all duration-300 ease-out" style={{ width: `${progress}%` }} />
+          <div className="space-y-4">
+            <div className="flex min-h-[320px] flex-col items-center justify-center rounded-3xl border border-slate-200 bg-white px-6 py-10 text-center shadow-sm">
+              <div className="relative mb-6 flex h-16 w-16 items-center justify-center rounded-2xl bg-pastel-violet-50 text-pastel-violet-500">
+                <MapIcon className="h-8 w-8" />
+                <div className="absolute inset-0 rounded-2xl border-4 border-pastel-violet-200 opacity-20 animate-ping" />
               </div>
-              <div className="flex justify-between text-xs font-medium text-slate-400">
-                <span>{stageLabel}</span>
-                <span>{Math.round(progress)}%</span>
+              <h3 className="mb-2 text-xl font-semibold text-slate-800">
+                {stageMode === "finalizing" ? "Concluindo preparação" : "Processando zonas"}
+              </h3>
+              <p className="mb-8 max-w-xs text-sm text-slate-500">
+                {stageMode === "generation"
+                  ? isWalkingMode
+                    ? "Gerando a área acessível a pé a partir do ponto principal selecionado."
+                    : isDrivingMode
+                      ? "Gerando a área acessível de carro a partir do ponto principal selecionado."
+                      : "Executando a geração das zonas candidatas a partir do ponto de transporte selecionado."
+                  : stageMode === "enrichment"
+                    ? "Calculando camadas urbanas e consolidando a comparação da etapa seguinte."
+                    : "Salvando o estado final da jornada para abrir a comparação."}
+              </p>
+
+              <div className="w-full max-w-xs space-y-2">
+                <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                  <div className="h-full bg-pastel-violet-500 transition-all duration-300 ease-out" style={{ width: `${progress}%` }} />
+                </div>
+                <div className="flex justify-between text-xs font-medium text-slate-400">
+                  <span>{stageLabel}</span>
+                  <span>{Math.round(progress)}%</span>
+                </div>
               </div>
+
+              <button
+                type="button"
+                onClick={() => goToStep(isDirectIsochroneMode ? 1 : 2)}
+                className="mt-8 text-sm font-medium text-slate-400 transition-colors hover:text-rose-600"
+              >
+                {isDirectIsochroneMode ? "Voltar para a configuração" : "Voltar para o ponto de transporte"}
+              </button>
             </div>
 
-            <button type="button" onClick={() => goToStep(isDirectIsochroneMode ? 1 : 2)} className="mt-8 text-sm font-medium text-slate-400 transition-colors hover:text-rose-600">
-              {isDirectIsochroneMode ? "Voltar para a configuração" : "Voltar para o ponto de transporte"}
-            </button>
+            {previewZones.length > 0 ? (
+              <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm" data-testid="step3-zones-preview-panel">
+                <div className="mb-4 flex items-start justify-between gap-3">
+                  <div>
+                    <h3 className="text-sm font-semibold text-slate-800">Zonas já disponíveis</h3>
+                    <p className="text-sm text-slate-500">
+                      As zonas já estão aparecendo no mapa e também ficam visíveis aqui no painel enquanto o restante do processamento continua.
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-sky-100 px-3 py-1 text-xs font-semibold text-sky-700">
+                    {previewReadyCount} de {previewZones.length} enriquecidas
+                  </span>
+                </div>
+
+                <div className="space-y-3">
+                  {previewZones.map((zone) => (
+                    <ZonePreviewCard key={zone.id} zone={zone} />
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            {zonePreviewQuery.error ? (
+              <p className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                As zonas continuam sendo processadas, mas o painel ainda não conseguiu atualizar a prévia. {apiActionHint(zonePreviewQuery.error)}
+              </p>
+            ) : null}
           </div>
         ) : (
           <div className="space-y-4">
-            {!isDirectIsochroneMode && !selectedTransportId ? <p className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Escolha um ponto de transporte na etapa anterior antes de gerar as zonas.</p> : null}
-            {isWalkingMode ? <p className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">A busca a pé não depende de um ponto de transporte. O sistema vai gerar uma única área acessível usando o tempo de caminhada definido na configuração.</p> : null}
-            {isDrivingMode ? <p className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">A busca de carro não depende de um ponto de transporte. O sistema vai gerar uma única área acessível usando o tempo de carro definido na configuração.</p> : null}
+            {!isDirectIsochroneMode && !selectedTransportId ? (
+              <p className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                Escolha um ponto de transporte na etapa anterior antes de gerar as zonas.
+              </p>
+            ) : null}
+            {isWalkingMode ? (
+              <p className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
+                A busca a pé não depende de um ponto de transporte. O sistema vai gerar uma única área acessível usando o tempo de caminhada definido na configuração.
+              </p>
+            ) : null}
+            {isDrivingMode ? (
+              <p className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
+                A busca de carro não depende de um ponto de transporte. O sistema vai gerar uma única área acessível usando o tempo de carro definido na configuração.
+              </p>
+            ) : null}
             {error ? <p className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p> : null}
 
             <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -300,21 +379,29 @@ export function Step3Zones() {
                 </div>
                 <div>
                   <h3 className="text-sm font-semibold text-slate-800">Parâmetros da geração</h3>
-                  <p className="text-sm text-slate-500">Esses valores alimentam a geração de zonas e o processamento comparativo da próxima etapa.</p>
+                  <p className="text-sm text-slate-500">
+                    Esses valores alimentam a geração de zonas e o processamento comparativo da próxima etapa.
+                  </p>
                 </div>
               </div>
 
               {isDirectIsochroneMode ? (
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
-                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">{isWalkingMode ? "Tempo de caminhada" : "Tempo de carro"}</p>
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      {isWalkingMode ? "Tempo de caminhada" : "Tempo de carro"}
+                    </p>
                     <p className="mt-2 text-2xl font-semibold text-slate-800">{config.time} min</p>
                     <p className="mt-1 text-xs text-slate-500">Usado para gerar a mancha única da área acessível.</p>
                   </div>
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
                     <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Ponto de partida</p>
-                    <p className="mt-2 text-sm font-semibold text-slate-800">{primaryReferenceLabel || pickedCoord?.label || "Ponto selecionado no mapa"}</p>
-                    <p className="mt-1 text-xs text-slate-500">A área acessível sai diretamente da referência principal, sem etapa de transporte.</p>
+                    <p className="mt-2 text-sm font-semibold text-slate-800">
+                      {primaryReferenceLabel || pickedCoord?.label || "Ponto selecionado no mapa"}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      A área acessível sai diretamente da referência principal, sem etapa de transporte.
+                    </p>
                   </div>
                 </div>
               ) : (
@@ -323,11 +410,11 @@ export function Step3Zones() {
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5">
                         <label className="text-sm font-medium text-slate-700">Tempo máximo de viagem</label>
-                        {!can_customize_max_time && (
+                        {!can_customize_max_time ? (
                           <span title="Disponível a partir do plano Básico" className="inline-flex cursor-help items-center text-slate-400">
                             <Lock className="h-3.5 w-3.5" />
                           </span>
-                        )}
+                        ) : null}
                       </div>
                       <span className="text-sm font-bold text-pastel-violet-600">{config.time} min</span>
                     </div>
@@ -345,8 +432,7 @@ export function Step3Zones() {
                       ? <p className="text-xs text-slate-400">Disponível a partir do plano Básico.</p>
                       : max_transit_minutes_cap !== null
                         ? <p className="text-xs text-slate-400">Máximo de {max_transit_minutes_cap} min no seu plano.</p>
-                        : <p className="text-xs text-slate-400">Limita o alcance temporal usado para montar as zonas candidatas.</p>
-                    }
+                        : <p className="text-xs text-slate-400">Limita o alcance temporal usado para montar as zonas candidatas.</p>}
                   </div>
 
                   <div className="space-y-3">
@@ -367,8 +453,7 @@ export function Step3Zones() {
                     />
                     {max_zone_radius_m_cap !== null
                       ? <p className="text-xs text-slate-400">Ajuste de {ZONE_RADIUS_MIN_M} m a {max_zone_radius_m_cap} m, em passos de {ZONE_RADIUS_STEP_M} m.</p>
-                      : <p className="text-xs text-slate-400">Define o raio-base usado para consolidar a zona ao redor do ponto de transporte selecionado.</p>
-                    }
+                      : <p className="text-xs text-slate-400">Define o raio-base usado para consolidar a zona ao redor do ponto de transporte selecionado.</p>}
                   </div>
                 </div>
               )}
@@ -392,4 +477,58 @@ export function Step3Zones() {
       </div>
     </div>
   );
+}
+
+function ZonePreviewCard({ zone }: { zone: ZonePreviewItem }) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-slate-800">{`Zona ${zone.fingerprint.slice(0, 8)}`}</p>
+          <p className="text-xs text-slate-500">
+            {zone.walk_distance_meters
+              ? `${Math.round(zone.walk_distance_meters)} m até o ponto de transporte`
+              : "Distância de acesso em consolidação"}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-700">
+            {zone.travel_time_minutes != null ? `Até ${zone.travel_time_minutes} min` : "Tempo em consolidação"}
+          </span>
+          <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${getZonePreviewStatusClassName(zone.state)}`}>
+            {getZonePreviewStatusLabel(zone.state)}
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function compareZonePreview(left: ZonePreviewItem, right: ZonePreviewItem) {
+  const leftTime = left.travel_time_minutes ?? Number.POSITIVE_INFINITY;
+  const rightTime = right.travel_time_minutes ?? Number.POSITIVE_INFINITY;
+  if (leftTime !== rightTime) {
+    return leftTime - rightTime;
+  }
+  return left.fingerprint.localeCompare(right.fingerprint, "pt-BR");
+}
+
+function getZonePreviewStatusLabel(state: ZonePreviewItem["state"]) {
+  if (state === "complete") {
+    return "Enriquecida";
+  }
+  if (state === "failed") {
+    return "Falhou";
+  }
+  return "Gerada, carregando dados";
+}
+
+function getZonePreviewStatusClassName(state: ZonePreviewItem["state"]) {
+  if (state === "complete") {
+    return "bg-emerald-100 text-emerald-700";
+  }
+  if (state === "failed") {
+    return "bg-rose-100 text-rose-700";
+  }
+  return "bg-sky-100 text-sky-700";
 }

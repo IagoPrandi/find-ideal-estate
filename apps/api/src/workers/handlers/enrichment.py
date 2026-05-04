@@ -143,6 +143,44 @@ async def dispatch_enrichment_subjobs(
     }
 
 
+async def _load_remaining_zones(job_id: UUID) -> list[tuple[UUID, UUID | None, UUID | None]]:
+    engine = get_engine()
+    async with engine.begin() as conn:
+        zones_result = await conn.execute(
+            text(
+                """
+                SELECT z.id, jz.journey_id, j.selected_zone_id
+                FROM journey_zones jz
+                JOIN jobs jb ON jb.journey_id = jz.journey_id
+                JOIN journeys j ON j.id = jz.journey_id
+                JOIN zones z ON z.id = jz.zone_id
+                WHERE jb.id = :job_id
+                  AND z.state <> 'complete'
+                ORDER BY jz.created_at ASC, z.created_at ASC
+                """
+            ),
+            {"job_id": job_id},
+        )
+        zone_rows = zones_result.fetchall()
+
+    return [(row[0], row[1], row[2]) for row in zone_rows]
+
+
+def _pick_next_zone_row(
+    zone_rows: list[tuple[UUID, UUID | None, UUID | None]],
+) -> tuple[UUID, UUID | None, UUID | None] | None:
+    if not zone_rows:
+        return None
+
+    selected_zone_id = zone_rows[0][2]
+    if selected_zone_id is not None:
+        for row in zone_rows:
+            if row[0] == selected_zone_id:
+                return row
+
+    return zone_rows[0]
+
+
 async def _zone_enrichment_step(job_id: UUID) -> None:
     stage = "zone_enrichment"
     await check_cancellation(job_id)
@@ -156,25 +194,19 @@ async def _zone_enrichment_step(job_id: UUID) -> None:
 
     engine = get_engine()
     async with engine.begin() as conn:
-        zones_result = await conn.execute(
+        count_result = await conn.execute(
             text(
                 """
-                SELECT z.id, jz.journey_id
+                SELECT COUNT(*)
                 FROM journey_zones jz
                 JOIN jobs jb ON jb.journey_id = jz.journey_id
-                JOIN zones z ON z.id = jz.zone_id
                 WHERE jb.id = :job_id
-                ORDER BY jz.created_at ASC, z.created_at ASC
                 """
             ),
             {"job_id": job_id},
         )
-        zone_rows = zones_result.fetchall()
+        total = int(count_result.scalar_one() or 0)
 
-    zones = [row[0] for row in zone_rows]
-    journey_id = zone_rows[0][1] if zone_rows else None
-
-    total = len(zones)
     if total == 0:
         await emit_stage_progress(
             job_id,
@@ -184,8 +216,18 @@ async def _zone_enrichment_step(job_id: UUID) -> None:
         )
         return
 
-    for idx, zone_id in enumerate(zones, 1):
+    processed_count = 0
+    journey_id: UUID | None = None
+
+    while processed_count < total:
         await check_cancellation(job_id)
+        remaining_rows = await _load_remaining_zones(job_id)
+        next_zone_row = _pick_next_zone_row(remaining_rows)
+        if next_zone_row is None:
+            break
+
+        zone_id, journey_id, _selected_zone_id = next_zone_row
+        processed_count += 1
         results = await dispatch_enrichment_subjobs(
             zone_id,
             enrichment_flags,
@@ -194,7 +236,7 @@ async def _zone_enrichment_step(job_id: UUID) -> None:
 
         # Compute provisional badges after enrichment (based on zones completed so far)
         provisional_badges = await compute_zone_badges(
-            zone_id, provisional=True, based_on_count=idx
+            zone_id, provisional=True, based_on_count=processed_count
         )
         await update_zone_badges(zone_id, provisional_badges, provisional=True)
 
@@ -202,10 +244,10 @@ async def _zone_enrichment_step(job_id: UUID) -> None:
             job_id,
             "zone.enriched",
             stage=stage,
-            message=f"Zone {idx}/{total} enriched",
+            message=f"Zone {processed_count}/{total} enriched",
             payload_json={
                 "zone_id": str(zone_id),
-                "sequence": idx,
+                "sequence": processed_count,
                 "total": total,
                 "results": results,
             },
@@ -216,21 +258,21 @@ async def _zone_enrichment_step(job_id: UUID) -> None:
             job_id,
             "zone.badges.updated",
             stage=stage,
-            message=f"Badges computed (provisional, {idx}/{total} zones)",
+            message=f"Badges computed (provisional, {processed_count}/{total} zones)",
             payload_json={
                 "zone_id": str(zone_id),
-                "sequence": idx,
+                "sequence": processed_count,
                 "total": total,
                 "badges": provisional_badges,
             },
         )
 
-        progress = 10 + int((idx / total) * 90)
+        progress = 10 + int((processed_count / total) * 90)
         await emit_stage_progress(
             job_id,
             stage=stage,
             progress_percent=progress,
-            message=f"Enriched {idx}/{total} zones",
+            message=f"Enriched {processed_count}/{total} zones",
         )
 
     # After all zones complete, compute and emit final badges
