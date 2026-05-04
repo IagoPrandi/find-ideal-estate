@@ -28,6 +28,10 @@ export function PixModal({ plan, onClose, onSuccess }: PixModalProps) {
         setCheckout(data);
         setState("pending");
 
+        if (data.checkout_url) {
+          window.open(data.checkout_url, "_blank", "noopener,noreferrer");
+        }
+
         const expires = new Date(data.expires_at).getTime();
         timerRef.current = setInterval(() => {
           const left = Math.max(0, Math.floor((expires - Date.now()) / 1000));
@@ -65,7 +69,7 @@ export function PixModal({ plan, onClose, onSuccess }: PixModalProps) {
       })
       .catch((err) => {
         if (cancelled) return;
-        setErrorMsg(err instanceof ApiError ? err.message : "Erro ao gerar cobrança Pix.");
+        setErrorMsg(err instanceof ApiError ? err.message : "Erro ao preparar o pagamento.");
         setState("error");
       });
 
@@ -77,7 +81,7 @@ export function PixModal({ plan, onClose, onSuccess }: PixModalProps) {
   }, [onClose, onSuccess, plan.slug]);
 
   const handleCopy = () => {
-    if (!checkout) return;
+    if (!checkout?.pix_copy_paste) return;
     navigator.clipboard.writeText(checkout.pix_copy_paste).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2500);
@@ -90,22 +94,31 @@ export function PixModal({ plan, onClose, onSuccess }: PixModalProps) {
       return;
     }
 
-    try {
-      await cancelPayment(checkout.payment_id);
-    } catch {
-      // Mantém o fechamento do modal mesmo se o cancelamento remoto falhar.
+    if (!checkout.checkout_url) {
+      try {
+        await cancelPayment(checkout.payment_id);
+      } catch {
+        // Mantém o fechamento do modal mesmo se o cancelamento remoto falhar.
+      }
     }
+
     onClose();
+  };
+
+  const handleOpenPanel = () => {
+    if (!checkout?.checkout_url) return;
+    window.open(checkout.checkout_url, "_blank", "noopener,noreferrer");
   };
 
   const formatTime = (seconds: number) => `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
   const priceLabel = plan.price_brl ? `R$ ${Number(plan.price_brl).toFixed(2).replace(".", ",")}` : "Grátis";
+  const isHostedCheckout = Boolean(checkout?.checkout_url);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl">
         <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
-          <h2 className="text-lg font-semibold text-slate-800">Pagar via Pix - {plan.name}</h2>
+          <h2 className="text-lg font-semibold text-slate-800">Assinar - {plan.name}</h2>
           <button onClick={handleCancel} className="text-xl leading-none text-slate-400 hover:text-slate-600">
             ×
           </button>
@@ -115,7 +128,7 @@ export function PixModal({ plan, onClose, onSuccess }: PixModalProps) {
           {state === "loading" && (
             <div className="flex flex-col items-center gap-4 py-8">
               <div className="h-10 w-10 animate-spin rounded-full border-4 border-violet-200 border-t-violet-600" />
-              <p className="text-sm text-slate-500">Gerando cobrança Pix...</p>
+              <p className="text-sm text-slate-500">Preparando pagamento...</p>
             </div>
           )}
 
@@ -128,38 +141,46 @@ export function PixModal({ plan, onClose, onSuccess }: PixModalProps) {
                 </p>
               </div>
 
-              {checkout.qr_code_image_url && (
-                <div className="flex justify-center">
-                  <img src={checkout.qr_code_image_url} alt="QR Code Pix" className="h-48 w-48 rounded-lg border border-slate-200" />
-                </div>
-              )}
+              {isHostedCheckout ? (
+                <>
+                  <div className="rounded-xl border border-violet-200 bg-violet-50/60 p-4 text-sm text-slate-700">
+                    Escolha Pix ou cartão no painel do Mercado Pago para concluir a assinatura.
+                  </div>
 
-              <div>
-                <p className="mb-1 text-xs font-medium text-slate-500">Pix Copia e Cola</p>
-                <div className="flex gap-2">
-                  <input
-                    readOnly
-                    value={checkout.pix_copy_paste}
-                    className="flex-1 truncate rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-mono text-slate-700"
-                  />
                   <button
-                    onClick={handleCopy}
-                    className="shrink-0 rounded-lg bg-violet-600 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-violet-700"
+                    onClick={handleOpenPanel}
+                    className="rounded-lg bg-violet-600 px-4 py-3 text-center text-sm font-semibold text-white transition-colors hover:bg-violet-700"
                   >
-                    {copied ? "Copiado!" : "Copiar"}
+                    Abrir painel de pagamento
                   </button>
-                </div>
-              </div>
+                </>
+              ) : (
+                <>
+                  {checkout.qr_code_image_url && (
+                    <div className="flex justify-center">
+                      <img src={checkout.qr_code_image_url} alt="QR Code Pix" className="h-48 w-48 rounded-lg border border-slate-200" />
+                    </div>
+                  )}
 
-              {checkout.ticket_url && (
-                <a
-                  href={checkout.ticket_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="rounded-lg border border-violet-200 bg-violet-50 px-4 py-3 text-center text-sm font-medium text-violet-700 transition-colors hover:bg-violet-100"
-                >
-                  Abrir cobrança no Mercado Pago
-                </a>
+                  {checkout.pix_copy_paste && (
+                    <div>
+                      <p className="mb-1 text-xs font-medium text-slate-500">Pix Copia e Cola</p>
+                      <div className="flex gap-2">
+                        <input
+                          readOnly
+                          value={checkout.pix_copy_paste}
+                          className="flex-1 truncate rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-mono text-slate-700"
+                        />
+                        <button
+                          onClick={handleCopy}
+                          className="shrink-0 rounded-lg bg-violet-600 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-violet-700"
+                        >
+                          {copied ? "Copiado!" : "Copiar"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
 
               <div className="flex items-center gap-2 rounded-lg bg-amber-50 px-4 py-3 text-xs text-amber-700">
@@ -207,7 +228,7 @@ export function PixModal({ plan, onClose, onSuccess }: PixModalProps) {
           {state === "error" && (
             <div className="flex flex-col items-center gap-4 py-8 text-center">
               <div className="text-5xl">⚠️</div>
-              <p className="text-lg font-semibold text-red-700">Erro ao gerar cobrança</p>
+              <p className="text-lg font-semibold text-red-700">Erro ao preparar pagamento</p>
               <p className="text-sm text-slate-500">{errorMsg}</p>
               <button
                 onClick={onClose}

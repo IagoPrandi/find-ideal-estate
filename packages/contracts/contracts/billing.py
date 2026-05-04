@@ -71,9 +71,11 @@ class PixCheckoutRequest(BaseModel):
 
 class PixCheckoutResponse(BaseModel):
     payment_id: UUID
-    pix_copy_paste: str
-    qr_code_payload: str
-    qr_code_image_url: str | None
+    checkout_flow: str
+    checkout_url: str | None = None
+    pix_copy_paste: str | None = None
+    qr_code_payload: str | None = None
+    qr_code_image_url: str | None = None
     ticket_url: str | None = None
     amount_brl: Decimal
     expires_at: datetime

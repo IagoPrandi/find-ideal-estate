@@ -68,6 +68,8 @@ async def get_payment(
         return await get_payment_status(payment_id, user_id=ctx.user.id)
     except PaymentNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except PixError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.post("/payments/{payment_id}/cancel", response_model=PaymentStatusRead)

@@ -853,8 +853,10 @@ export const AccountCreditsReadSchema = z.object({
 
 export const PixCheckoutResponseSchema = z.object({
   payment_id: z.string(),
-  pix_copy_paste: z.string(),
-  qr_code_payload: z.string(),
+  checkout_flow: z.string(),
+  checkout_url: z.string().nullable().optional(),
+  pix_copy_paste: z.string().nullable().optional(),
+  qr_code_payload: z.string().nullable().optional(),
   qr_code_image_url: z.string().nullable().optional(),
   ticket_url: z.string().nullable().optional(),
   amount_brl: z.union([z.string(), z.number()]),

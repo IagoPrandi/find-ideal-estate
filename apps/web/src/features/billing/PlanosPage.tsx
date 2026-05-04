@@ -153,7 +153,7 @@ export function PlanosPage({ onClose }: { onClose: () => void }) {
                         ? "Ativar grátis"
                         : !plan.is_paid
                           ? "Incluído"
-                          : "Assinar via Pix"}
+                          : "Assinar"}
                 </button>
               </div>
             );
@@ -167,7 +167,7 @@ export function PlanosPage({ onClose }: { onClose: () => void }) {
             </p>
           ) : (
             <p className="text-center text-xs text-slate-400">
-              Pagamento via Pix com QR Code ou Pix Copia e Cola. Ativação automática após confirmação.
+              O pagamento é aberto no painel do Mercado Pago, com opção de Pix ou cartão.
             </p>
           )}
         </div>

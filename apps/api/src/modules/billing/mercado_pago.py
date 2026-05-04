@@ -67,6 +67,19 @@ def get_mercado_pago_credentials() -> MercadoPagoCredentials:
     )
 
 
+def _should_prefill_checkout_payer(*, environment: str, payer_email: str | None) -> bool:
+    normalized_email = (payer_email or "").strip().lower()
+    if not normalized_email:
+        return False
+
+    # No sandbox, evitar conflito entre o e-mail real do app e a conta buyer
+    # autenticada no Checkout Pro durante os testes.
+    if environment == "test" and not normalized_email.endswith("@testuser.com"):
+        return False
+
+    return True
+
+
 async def create_pix_payment(
     *,
     amount: Decimal,
@@ -107,8 +120,90 @@ async def create_pix_payment(
     )
 
 
+async def create_checkout_preference(
+    *,
+    amount: Decimal,
+    title: str,
+    description: str,
+    payer_email: str,
+    external_reference: str,
+    expires_at: datetime,
+    payer_first_name: str | None = None,
+    payer_last_name: str | None = None,
+    back_url: str | None = None,
+) -> dict:
+    credentials = get_mercado_pago_credentials()
+    payload: dict[str, object] = {
+        "items": [
+            {
+                "id": external_reference,
+                "title": title,
+                "description": description,
+                "quantity": 1,
+                "currency_id": "BRL",
+                "unit_price": float(amount),
+            }
+        ],
+        "external_reference": external_reference,
+        "payment_methods": {
+            # Remove apenas os meios offline clássicos, preservando cartão e Pix.
+            "excluded_payment_types": [{"id": "ticket"}],
+        },
+        "expires": True,
+        "expiration_date_to": expires_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z"),
+    }
+
+    payer = None
+    if _should_prefill_checkout_payer(environment=credentials.environment, payer_email=payer_email):
+        payload["payer"] = {"email": payer_email}
+        payer = payload["payer"]
+
+    if isinstance(payer, dict):
+        if payer_first_name:
+            payer["name"] = payer_first_name
+        if payer_last_name:
+            payer["surname"] = payer_last_name
+
+    if credentials.webhook_url:
+        payload["notification_url"] = credentials.webhook_url
+
+    if back_url:
+        payload["back_urls"] = {
+            "success": back_url,
+            "pending": back_url,
+            "failure": back_url,
+        }
+        payload["auto_return"] = "approved"
+
+    return await _request(
+        "POST",
+        "/checkout/preferences",
+        json_body=payload,
+        idempotency_key=external_reference,
+    )
+
+
 async def get_payment(payment_id: str) -> dict:
     return await _request("GET", f"/v1/payments/{payment_id}")
+
+
+async def search_payments_by_external_reference(external_reference: str) -> list[dict]:
+    payload = await _request(
+        "GET",
+        "/v1/payments/search",
+        query_params={
+            "sort": "date_created",
+            "criteria": "desc",
+            "range": "date_created",
+            "begin_date": "NOW-30DAYS",
+            "end_date": "NOW",
+            "external_reference": external_reference,
+        },
+    )
+    results = payload.get("results")
+    if not isinstance(results, list):
+        return []
+    return [item for item in results if isinstance(item, dict)]
 
 
 async def cancel_payment(payment_id: str, *, idempotency_key: str) -> dict:
@@ -174,6 +269,7 @@ async def _request(
     path: str,
     *,
     json_body: dict | None = None,
+    query_params: dict[str, str] | None = None,
     idempotency_key: str | None = None,
 ) -> dict:
     credentials = get_mercado_pago_credentials()
@@ -190,7 +286,7 @@ async def _request(
         base_url=MERCADO_PAGO_API_BASE_URL,
         timeout=httpx.Timeout(credentials.timeout_seconds),
     ) as client:
-        response = await client.request(method, path, headers=headers, json=json_body)
+        response = await client.request(method, path, headers=headers, json=json_body, params=query_params)
 
     try:
         payload = response.json()

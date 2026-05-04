@@ -122,7 +122,7 @@ export function ContaPage({ onClose }: { onClose: () => void }) {
                     onClick={handleRenew}
                     className="mt-2 self-start rounded-lg bg-amber-500 px-4 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-amber-600"
                   >
-                    Renovar via Pix
+                    Renovar assinatura
                   </button>
                 )}
               </div>

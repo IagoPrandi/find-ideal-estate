@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     mercado_pago_access_token_live: str | None = None
     mercado_pago_webhook_secret: str | None = None
     mercado_pago_webhook_url: str | None = None
+    mercado_pago_checkout_back_url: str | None = None
     mercado_pago_timeout_seconds: float = 20.0
 
 

@@ -13,8 +13,9 @@ from modules.billing.mercado_pago import (
     MercadoPagoError,
     MercadoPagoRequestError,
     cancel_payment as cancel_mercado_pago_payment,
-    create_pix_payment,
+    create_checkout_preference,
     get_payment as get_mercado_pago_payment,
+    search_payments_by_external_reference,
     verify_webhook_signature as verify_mercado_pago_webhook_signature,
 )
 from modules.credits.service import grant_credits
@@ -87,7 +88,7 @@ def _crc16(data: str) -> str:
                 crc = (crc << 1) ^ 0x1021
             else:
                 crc <<= 1
-        crc &= 0xFFFF
+            crc &= 0xFFFF
     return format(crc, "04X")
 
 
@@ -134,7 +135,7 @@ async def create_pix_checkout(
     settings = get_settings()
     plan = await get_plan_by_slug(plan_slug)
     if plan is None or not plan.is_paid:
-        raise PixError("Plano invÃ¡lido ou nÃ£o requer pagamento.")
+        raise PixError("Plano inválido ou não requer pagamento.")
 
     amount = plan.price_brl
     if amount is None or amount <= 0:
@@ -144,7 +145,7 @@ async def create_pix_checkout(
     expires_at = _utc_now() + timedelta(minutes=expiration_minutes)
     payment_provider = (settings.pix_provider or "mercado_pago").strip().lower()
     if payment_provider not in {"manual", "mercado_pago"}:
-        raise PixError("PIX_PROVIDER invÃ¡lido. Use 'manual' ou 'mercado_pago'.")
+        raise PixError("PIX_PROVIDER inválido. Use 'manual' ou 'mercado_pago'.")
 
     engine = get_engine()
     async with engine.begin() as conn:
@@ -166,7 +167,7 @@ async def create_pix_checkout(
                     :user_id,
                     :plan_id,
                     :payment_provider,
-                    'pix_qr_code',
+                    :payment_method,
                     :payment_type,
                     :amount,
                     'pending',
@@ -180,6 +181,7 @@ async def create_pix_checkout(
                 "user_id": user_id,
                 "plan_id": plan.id,
                 "payment_provider": payment_provider,
+                "payment_method": "pix_qr_code" if payment_provider == "manual" else "mercado_pago_checkout",
                 "payment_type": payment_type,
                 "amount": float(amount),
                 "external_reference": None,
@@ -191,8 +193,6 @@ async def create_pix_checkout(
     if payment_provider == "manual":
         return await _create_manual_pix_checkout(
             payment_id=payment_id,
-            user_id=user_id,
-            plan_id=plan.id,
             amount=amount,
             expires_at=expires_at,
         )
@@ -201,29 +201,31 @@ async def create_pix_checkout(
     external_reference = str(payment_id)
 
     try:
-        provider_payment = await create_pix_payment(
+        provider_preference = await create_checkout_preference(
             amount=amount,
+            title=f"Assinatura {plan.name}",
             description=f"Assinatura {plan.name} - Find Ideal Estate",
             payer_email=payer_email,
             external_reference=external_reference,
             expires_at=expires_at,
             payer_first_name=payer_first_name,
             payer_last_name=payer_last_name,
+            back_url=settings.mercado_pago_checkout_back_url,
         )
     except (MercadoPagoConfigurationError, MercadoPagoRequestError) as exc:
         await _cleanup_failed_payment(payment_id)
         raise PixError(str(exc)) from exc
     except MercadoPagoError as exc:
         await _cleanup_failed_payment(payment_id)
-        raise PixError("Falha ao criar pagamento no Mercado Pago.") from exc
+        raise PixError("Falha ao criar checkout no Mercado Pago.") from exc
 
-    qr_data = ((provider_payment.get("point_of_interaction") or {}).get("transaction_data") or {})
-    qr_code = qr_data.get("qr_code") or ""
-    qr_code_base64 = qr_data.get("qr_code_base64")
-    qr_code_image_url = _build_qr_code_data_url(qr_code_base64)
-    ticket_url = qr_data.get("ticket_url")
-    external_payment_id = str(provider_payment.get("id") or "")
-    provider_expires_at = _parse_provider_expiration(provider_payment.get("date_of_expiration")) or expires_at
+    checkout_url_raw = provider_preference.get("init_point") or provider_preference.get("sandbox_init_point")
+    checkout_url = checkout_url_raw.strip() if isinstance(checkout_url_raw, str) else ""
+    if not checkout_url:
+        await _cleanup_failed_payment(payment_id)
+        raise PixError("Mercado Pago não retornou a URL do painel de pagamento.")
+
+    provider_expires_at = _parse_provider_expiration(provider_preference.get("expiration_date_to")) or expires_at
 
     try:
         async with engine.begin() as conn:
@@ -232,7 +234,6 @@ async def create_pix_checkout(
                     """
                     UPDATE payments
                     SET external_reference = :external_reference,
-                        external_payment_id = :external_payment_id,
                         expires_at = :expires_at
                     WHERE id = :payment_id
                     """
@@ -240,7 +241,6 @@ async def create_pix_checkout(
                 {
                     "payment_id": payment_id,
                     "external_reference": external_reference,
-                    "external_payment_id": external_payment_id,
                     "expires_at": provider_expires_at,
                 },
             )
@@ -250,25 +250,23 @@ async def create_pix_checkout(
                 pix_key=None,
                 merchant_name="Mercado Pago",
                 merchant_city=None,
-                qr_code_payload=qr_code,
-                pix_copy_paste=qr_code,
-                qr_code_image_url=qr_code_image_url,
-                provider_payload=provider_payment,
+                qr_code_payload=None,
+                pix_copy_paste=None,
+                qr_code_image_url=None,
+                provider_payload=provider_preference,
             )
     except Exception:
-        if external_payment_id:
-            try:
-                await cancel_mercado_pago_payment(external_payment_id, idempotency_key=f"{payment_id}-cleanup")
-            except MercadoPagoError:
-                pass
+        await _cleanup_failed_payment(payment_id)
         raise
 
     return PixCheckoutResponse(
         payment_id=payment_id,
-        pix_copy_paste=qr_code,
-        qr_code_payload=qr_code,
-        qr_code_image_url=qr_code_image_url,
-        ticket_url=ticket_url if isinstance(ticket_url, str) else None,
+        checkout_flow="hosted_checkout",
+        checkout_url=checkout_url,
+        pix_copy_paste=None,
+        qr_code_payload=None,
+        qr_code_image_url=None,
+        ticket_url=checkout_url,
         amount_brl=amount,
         expires_at=provider_expires_at,
         status="pending",
@@ -278,8 +276,6 @@ async def create_pix_checkout(
 async def _create_manual_pix_checkout(
     *,
     payment_id: UUID,
-    user_id: UUID,
-    plan_id: UUID,
     amount: Decimal,
     expires_at: datetime,
 ) -> PixCheckoutResponse:
@@ -323,6 +319,8 @@ async def _create_manual_pix_checkout(
 
     return PixCheckoutResponse(
         payment_id=payment_id,
+        checkout_flow="pix_qr",
+        checkout_url=None,
         pix_copy_paste=copy_paste,
         qr_code_payload=copy_paste,
         qr_code_image_url=qr_code_image_url,
@@ -336,9 +334,9 @@ async def _create_manual_pix_checkout(
 async def get_payment_status(payment_id: UUID, *, user_id: UUID | None = None) -> PaymentStatusRead:
     row = await _fetch_payment_row(payment_id)
     if row is None:
-        raise PaymentNotFoundError("Pagamento nÃ£o encontrado.")
+        raise PaymentNotFoundError("Pagamento não encontrado.")
     if user_id is not None and row["user_id"] != user_id:
-        raise PaymentNotFoundError("Pagamento nÃ£o encontrado.")
+        raise PaymentNotFoundError("Pagamento não encontrado.")
 
     if row["status"] == "pending":
         payment_provider = (row["payment_provider"] or "").strip().lower()
@@ -346,12 +344,17 @@ async def get_payment_status(payment_id: UUID, *, user_id: UUID | None = None) -
             await synchronize_mercado_pago_payment(payment_id)
             row = await _fetch_payment_row(payment_id)
             if row is None:
-                raise PaymentNotFoundError("Pagamento nÃ£o encontrado.")
+                raise PaymentNotFoundError("Pagamento não encontrado.")
+        elif payment_provider == "mercado_pago" and row["external_reference"]:
+            await reconcile_mercado_pago_payment_by_reference(payment_id)
+            row = await _fetch_payment_row(payment_id)
+            if row is None:
+                raise PaymentNotFoundError("Pagamento não encontrado.")
         elif row["expires_at"] and row["expires_at"] < _utc_now():
             await _set_payment_status(payment_id, "expired")
             row = await _fetch_payment_row(payment_id)
             if row is None:
-                raise PaymentNotFoundError("Pagamento nÃ£o encontrado.")
+                raise PaymentNotFoundError("Pagamento não encontrado.")
 
     return _map_payment_status(row)
 
@@ -359,7 +362,7 @@ async def get_payment_status(payment_id: UUID, *, user_id: UUID | None = None) -
 async def cancel_payment(payment_id: UUID, *, user_id: UUID) -> PaymentStatusRead:
     row = await _fetch_payment_row(payment_id)
     if row is None or row["user_id"] != user_id or row["status"] != "pending":
-        raise PaymentNotFoundError("Pagamento nÃ£o encontrado ou nÃ£o pode ser cancelado.")
+        raise PaymentNotFoundError("Pagamento não encontrado ou não pode ser cancelado.")
 
     payment_provider = (row["payment_provider"] or "").strip().lower()
     if payment_provider == "mercado_pago" and row["external_payment_id"]:
@@ -369,7 +372,7 @@ async def cancel_payment(payment_id: UUID, *, user_id: UUID) -> PaymentStatusRea
                 idempotency_key=f"{payment_id}-cancel",
             )
         except MercadoPagoRequestError as exc:
-            raise PixError(f"NÃ£o foi possÃ­vel cancelar no Mercado Pago: {exc}") from exc
+            raise PixError(f"Não foi possível cancelar no Mercado Pago: {exc}") from exc
         except MercadoPagoError as exc:
             raise PixError("Falha ao cancelar pagamento no Mercado Pago.") from exc
 
@@ -383,7 +386,7 @@ async def cancel_payment(payment_id: UUID, *, user_id: UUID) -> PaymentStatusRea
 
     updated_row = await _fetch_payment_row(payment_id)
     if updated_row is None:
-        raise PaymentNotFoundError("Pagamento nÃ£o encontrado.")
+        raise PaymentNotFoundError("Pagamento não encontrado.")
     return _map_payment_status(updated_row)
 
 
@@ -408,13 +411,13 @@ async def activate_plan_from_pix(
         )
         row = result.mappings().first()
         if row is None:
-            raise PaymentNotFoundError("Pagamento nÃ£o encontrado.")
+            raise PaymentNotFoundError("Pagamento não encontrado.")
         if row["status"] == "paid":
-            raise PaymentAlreadyProcessedError("Pagamento jÃ¡ processado.")
+            raise PaymentAlreadyProcessedError("Pagamento já processado.")
         if row["payment_provider"] == "mercado_pago" and not verified_externally:
-            raise PixError("Pagamento do Mercado Pago precisa ser conciliado antes da ativaÃ§Ã£o.")
+            raise PixError("Pagamento do Mercado Pago precisa ser conciliado antes da ativação.")
         if row["status"] != "pending":
-            raise PixError(f"Pagamento em estado invÃ¡lido: {row['status']}")
+            raise PixError(f"Pagamento em estado inválido: {row['status']}")
         if row["expires_at"] and row["expires_at"] < _utc_now():
             raise PaymentExpiredError("Pagamento expirado.")
 
@@ -488,14 +491,14 @@ async def activate_plan_from_pix(
 async def synchronize_mercado_pago_payment(payment_id: UUID) -> None:
     row = await _fetch_payment_row(payment_id)
     if row is None:
-        raise PaymentNotFoundError("Pagamento nÃ£o encontrado.")
+        raise PaymentNotFoundError("Pagamento não encontrado.")
     if row["payment_provider"] != "mercado_pago" or not row["external_payment_id"] or row["status"] == "paid":
         return
 
     try:
         provider_payment = await get_mercado_pago_payment(str(row["external_payment_id"]))
     except MercadoPagoRequestError as exc:
-        raise PixError(f"NÃ£o foi possÃ­vel consultar pagamento no Mercado Pago: {exc}") from exc
+        raise PixError(f"Não foi possível consultar pagamento no Mercado Pago: {exc}") from exc
     except MercadoPagoError as exc:
         raise PixError("Falha ao consultar pagamento no Mercado Pago.") from exc
 
@@ -516,6 +519,39 @@ async def synchronize_mercado_pago_payment(payment_id: UUID) -> None:
         return
 
     await _upsert_provider_payload_for_payment(payment_id, provider_payload=provider_payment)
+
+
+async def reconcile_mercado_pago_payment_by_reference(payment_id: UUID) -> None:
+    row = await _fetch_payment_row(payment_id)
+    if row is None:
+        raise PaymentNotFoundError("Pagamento não encontrado.")
+    if row["payment_provider"] != "mercado_pago" or row["status"] == "paid":
+        return
+
+    external_reference = str(row["external_reference"] or "").strip()
+    if not external_reference:
+        return
+
+    try:
+        payments = await search_payments_by_external_reference(external_reference)
+    except MercadoPagoRequestError as exc:
+        raise PixError(f"Não foi possível consultar pagamentos no Mercado Pago: {exc}") from exc
+    except MercadoPagoError as exc:
+        raise PixError("Falha ao consultar pagamentos no Mercado Pago.") from exc
+
+    for provider_payment in payments:
+        provider_reference = str(provider_payment.get("external_reference") or "").strip()
+        provider_payment_id = provider_payment.get("id")
+        if provider_reference != external_reference or provider_payment_id is None:
+            continue
+
+        await _link_external_payment_to_internal_payment(
+            payment_id=payment_id,
+            external_payment_id=str(provider_payment_id),
+            provider_payload=provider_payment,
+        )
+        await synchronize_mercado_pago_payment(payment_id)
+        return
 
 
 async def process_mercado_pago_webhook_notification(
@@ -548,6 +584,17 @@ async def process_mercado_pago_webhook_notification(
 
         payment_row = await _fetch_payment_row_by_external_id(external_payment_id)
         if payment_row is None:
+            provider_payment = await get_mercado_pago_payment(external_payment_id)
+            external_reference = str(provider_payment.get("external_reference") or "")
+            payment_row = await _fetch_payment_row_by_reference(external_reference)
+            if payment_row is not None:
+                await _link_external_payment_to_internal_payment(
+                    payment_id=payment_row["id"],
+                    external_payment_id=external_payment_id,
+                    provider_payload=provider_payment,
+                )
+
+        if payment_row is None:
             await _complete_webhook_event(webhook_event_id)
             return
 
@@ -571,6 +618,7 @@ def verify_pix_callback_signature(body: bytes, signature: str, *, data_id: str |
     secret = settings.pix_callback_secret
     if not secret:
         return False
+
     import hashlib
     import hmac
 
@@ -639,6 +687,28 @@ async def _fetch_payment_row_by_external_id(external_payment_id: str):
                 """
             ),
             {"external_payment_id": external_payment_id},
+        )
+        return result.mappings().first()
+
+
+async def _fetch_payment_row_by_reference(external_reference: str):
+    if not external_reference:
+        return None
+    engine = get_engine()
+    async with engine.connect() as conn:
+        result = await conn.execute(
+            text(
+                """
+                SELECT id, user_id, plan_id, payment_provider, payment_method, payment_type,
+                       amount_brl, status, external_reference, external_payment_id,
+                       created_at, expires_at, paid_at, cancelled_at
+                FROM payments
+                WHERE external_reference = :external_reference
+                ORDER BY created_at DESC
+                LIMIT 1
+                """
+            ),
+            {"external_reference": external_reference},
         )
         return result.mappings().first()
 
@@ -763,6 +833,30 @@ async def _upsert_provider_payload(conn, *, payment_id: UUID, provider_payload: 
 async def _upsert_provider_payload_for_payment(payment_id: UUID, *, provider_payload: dict) -> None:
     engine = get_engine()
     async with engine.begin() as conn:
+        await _upsert_provider_payload(conn, payment_id=payment_id, provider_payload=provider_payload)
+
+
+async def _link_external_payment_to_internal_payment(
+    *,
+    payment_id: UUID,
+    external_payment_id: str,
+    provider_payload: dict,
+) -> None:
+    engine = get_engine()
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                """
+                UPDATE payments
+                SET external_payment_id = :external_payment_id
+                WHERE id = :payment_id
+                """
+            ),
+            {
+                "payment_id": payment_id,
+                "external_payment_id": external_payment_id,
+            },
+        )
         await _upsert_provider_payload(conn, payment_id=payment_id, provider_payload=provider_payload)
 
 
