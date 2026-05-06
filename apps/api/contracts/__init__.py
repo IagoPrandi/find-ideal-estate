@@ -16,7 +16,7 @@ _SHARED_CONTRACTS_DIR = Path(__file__).resolve().parents[3] / "packages" / "cont
 if str(_SHARED_CONTRACTS_DIR) not in __path__:
     __path__.append(str(_SHARED_CONTRACTS_DIR))
 
-from .auth import AuthLoginRequest, AuthRegisterRequest, AuthStatusRead, AuthUserRead
+from .auth import AuthGoogleLoginRequest, AuthLoginRequest, AuthRegisterRequest, AuthStatusRead, AuthUserRead
 from .billing import (
     AccountCreditsRead,
     AccountPlanRead,
@@ -87,6 +87,7 @@ __all__ = [
     "AccountCreditsRead",
     "AccountPlanRead",
     "AuthLoginRequest",
+    "AuthGoogleLoginRequest",
     "AuthRegisterRequest",
     "AuthStatusRead",
     "AuthUserRead",

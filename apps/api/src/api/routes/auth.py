@@ -3,12 +3,13 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Annotated
 
-from contracts import AuthLoginRequest, AuthRegisterRequest, AuthStatusRead
+from contracts import AuthGoogleLoginRequest, AuthLoginRequest, AuthRegisterRequest, AuthStatusRead
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 from modules.auth.service import (
     AUTH_SESSION_COOKIE,
     build_auth_status,
     build_request_auth_context,
+    login_google_user,
     login_user,
     register_user,
     revoke_session_by_token,
@@ -95,6 +96,35 @@ async def login_user_endpoint(
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+
+    max_age_seconds = _session_max_age_seconds(expires_at)
+    _set_auth_cookie(response, session_token, max_age_seconds=max_age_seconds)
+    return AuthStatusRead(
+        is_authenticated=True,
+        user=user,
+        session_expires_at=expires_at,
+    )
+
+
+@router.post("/google", response_model=AuthStatusRead)
+async def login_google_user_endpoint(
+    payload: AuthGoogleLoginRequest,
+    response: Response,
+    auth_context=Depends(get_optional_auth_context),
+) -> AuthStatusRead:
+    try:
+        user, session_token, expires_at = await login_google_user(
+            payload,
+            anonymous_session_id=auth_context.anonymous_session_id,
+        )
+    except ValueError as exc:
+        detail = str(exc)
+        error_status = (
+            status.HTTP_503_SERVICE_UNAVAILABLE
+            if "não está configurado" in detail
+            else status.HTTP_401_UNAUTHORIZED
+        )
+        raise HTTPException(status_code=error_status, detail=detail) from exc
 
     max_age_seconds = _session_max_age_seconds(expires_at)
     _set_auth_cookie(response, session_token, max_age_seconds=max_age_seconds)

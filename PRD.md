@@ -336,12 +336,16 @@ users (
   display_name         TEXT,
   password_hash        TEXT,                        -- PBKDF2-HMAC-SHA256, 600 000 iter
   password_updated_at  TIMESTAMPTZ,
+  google_subject       TEXT UNIQUE,                 -- sub do ID token Google (migration 0033)
+  email_verified_at    TIMESTAMPTZ,                 -- preenchido no login Google (migration 0033)
+  role                 TEXT NOT NULL DEFAULT 'user', -- 'user' | 'proprietario' (migration 0028)
   is_active            BOOLEAN DEFAULT true,
   is_superuser         BOOLEAN DEFAULT false,
   created_at           TIMESTAMPTZ DEFAULT NOW(),
   updated_at           TIMESTAMPTZ DEFAULT NOW()
 )
 -- UNIQUE INDEX em lower(email)
+-- UNIQUE INDEX em google_subject
 ```
 
 ### `user_sessions`
@@ -1894,7 +1898,7 @@ Auth customizado em `apps/api/src/modules/auth/service.py`:
 - E-mail normalizado em lowercase; validação por regex.
 - `GET /auth/me` inspeciona sessão; `POST /auth/register`; `POST /auth/login`; `POST /auth/logout`.
 
-> **Nota de desvio do plano original:** a implementação substituiu fastapi-users + magic link por auth customizado e-mail/senha. OAuth Google e magic link continuam no backlog, mas não bloqueiam Fase 8.
+> **Nota de desvio do plano original:** a implementação substituiu fastapi-users + magic link por auth customizado e-mail/senha. OAuth Google foi implementado em 2026-05-05 via Google Identity Services (GIS) — `POST /auth/google`, validação server-side do ID token com `google-auth`, campos `google_subject`/`email_verified_at` em `users`. Magic link continua no backlog.
 
 ### Provedor de email (backlog)
 

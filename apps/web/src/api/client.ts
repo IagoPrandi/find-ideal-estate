@@ -336,7 +336,7 @@ export async function getJourneyZonesCollection(journeyId: string): Promise<Zone
 }
 
 export async function getAuthStatus(): Promise<AuthStatusRead> {
-  return await requestJson("/auth/me", AuthStatusReadSchema);
+  return (await requestJson("/auth/me", AuthStatusReadSchema)) as AuthStatusRead;
 }
 
 export async function registerAuth(payload: {
@@ -344,23 +344,30 @@ export async function registerAuth(payload: {
   password: string;
   display_name?: string;
 }): Promise<AuthStatusRead> {
-  return await requestJson("/auth/register", AuthStatusReadSchema, {
+  return (await requestJson("/auth/register", AuthStatusReadSchema, {
     method: "POST",
     body: payload
-  });
+  })) as AuthStatusRead;
 }
 
 export async function loginAuth(payload: { email: string; password: string }): Promise<AuthStatusRead> {
-  return await requestJson("/auth/login", AuthStatusReadSchema, {
+  return (await requestJson("/auth/login", AuthStatusReadSchema, {
     method: "POST",
     body: payload
-  });
+  })) as AuthStatusRead;
+}
+
+export async function loginGoogleAuth(payload: { credential: string }): Promise<AuthStatusRead> {
+  return (await requestJson("/auth/google", AuthStatusReadSchema, {
+    method: "POST",
+    body: payload
+  })) as AuthStatusRead;
 }
 
 export async function logoutAuth(): Promise<AuthStatusRead> {
-  return await requestJson("/auth/logout", AuthStatusReadSchema, {
+  return (await requestJson("/auth/logout", AuthStatusReadSchema, {
     method: "POST"
-  });
+  })) as AuthStatusRead;
 }
 
 export async function getAccountFavorites(): Promise<FavoriteListingEntry[]> {

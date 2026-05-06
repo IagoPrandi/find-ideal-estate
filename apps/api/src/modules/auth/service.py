@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import hmac
 import re
@@ -8,8 +9,17 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from contracts import AuthLoginRequest, AuthRegisterRequest, AuthStatusRead, AuthUserRead
+from contracts import (
+    AuthGoogleLoginRequest,
+    AuthLoginRequest,
+    AuthRegisterRequest,
+    AuthStatusRead,
+    AuthUserRead,
+)
+from core.config import get_settings
 from core.db import get_engine
+from google.auth.transport import requests as google_auth_requests
+from google.oauth2 import id_token as google_id_token
 from modules.journeys.service import get_journey_for_access
 from sqlalchemy import text
 
@@ -20,6 +30,7 @@ MIN_PASSWORD_LENGTH = 8
 MAX_PASSWORD_LENGTH = 128
 MAX_DISPLAY_NAME_LENGTH = 120
 _EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_GOOGLE_ISSUERS = {"accounts.google.com", "https://accounts.google.com"}
 
 
 @dataclass(frozen=True)
@@ -34,6 +45,13 @@ class RequestAuthContext:
     session_expires_at: datetime | None
     session_token: str | None
     anonymous_session_id: str | None
+
+
+@dataclass(frozen=True)
+class GoogleIdentityClaims:
+    subject: str
+    email: str
+    display_name: str | None
 
 
 def _utc_now() -> datetime:
@@ -60,6 +78,46 @@ def _normalize_display_name(display_name: str | None) -> str | None:
     if len(normalized) > MAX_DISPLAY_NAME_LENGTH:
         raise ValueError("O nome exibido é muito longo.")
     return normalized
+
+
+def _verify_google_credential_sync(credential: str, *, client_id: str) -> GoogleIdentityClaims:
+    token = credential.strip()
+    if not token:
+        raise ValueError("Token do Google não informado.")
+
+    try:
+        claims = google_id_token.verify_oauth2_token(
+            token,
+            google_auth_requests.Request(),
+            client_id,
+        )
+    except ValueError as exc:
+        raise ValueError("Login com Google inválido.") from exc
+
+    if claims.get("iss") not in _GOOGLE_ISSUERS:
+        raise ValueError("Emissor do login Google inválido.")
+    if claims.get("aud") != client_id:
+        raise ValueError("Login Google emitido para outro aplicativo.")
+    if claims.get("email_verified") is not True:
+        raise ValueError("O e-mail da conta Google precisa estar verificado.")
+
+    subject = str(claims.get("sub") or "").strip()
+    email = str(claims.get("email") or "").strip()
+    if not subject:
+        raise ValueError("Login Google sem identificador de usuário.")
+
+    return GoogleIdentityClaims(
+        subject=subject,
+        email=_normalize_email(email),
+        display_name=_normalize_display_name(str(claims.get("name") or "") or None),
+    )
+
+
+async def _verify_google_credential(credential: str) -> GoogleIdentityClaims:
+    client_id = (get_settings().google_client_id or "").strip()
+    if not client_id:
+        raise ValueError("Login com Google não está configurado neste ambiente.")
+    return await asyncio.to_thread(_verify_google_credential_sync, credential, client_id=client_id)
 
 
 def _validate_password(password: str) -> None:
@@ -149,6 +207,42 @@ async def get_user_by_email(email: str) -> tuple[AuthUserRead, str | None] | Non
     if row is None:
         return None
     return _row_to_user(row), row.get("password_hash")
+
+
+async def _get_user_row_by_email(conn, email: str):
+    return (
+        await conn.execute(
+            text(
+                """
+                SELECT
+                    id, email, display_name, is_active, created_at, role,
+                    password_hash, google_subject
+                FROM users
+                WHERE lower(email) = :email
+                LIMIT 1
+                """
+            ),
+            {"email": email},
+        )
+    ).mappings().first()
+
+
+async def _get_user_row_by_google_subject(conn, subject: str):
+    return (
+        await conn.execute(
+            text(
+                """
+                SELECT
+                    id, email, display_name, is_active, created_at, role,
+                    password_hash, google_subject
+                FROM users
+                WHERE google_subject = :google_subject
+                LIMIT 1
+                """
+            ),
+            {"google_subject": subject},
+        )
+    ).mappings().first()
 
 
 async def _migrate_anonymous_state(conn, *, user_id: UUID, anonymous_session_id: str | None) -> None:
@@ -329,6 +423,112 @@ async def login_user(
     async with engine.begin() as conn:
         await _migrate_anonymous_state(conn, user_id=user.id, anonymous_session_id=anonymous_session_id)
         session_token, expires_at = await _create_session(conn, user_id=user.id)
+
+    return user, session_token, expires_at
+
+
+async def login_google_user(
+    payload: AuthGoogleLoginRequest,
+    *,
+    anonymous_session_id: str | None,
+) -> tuple[AuthUserRead, str, datetime]:
+    claims = await _verify_google_credential(payload.credential)
+
+    engine = get_engine()
+    created_user = False
+    async with engine.begin() as conn:
+        row = await _get_user_row_by_google_subject(conn, claims.subject)
+
+        if row is None:
+            row = await _get_user_row_by_email(conn, claims.email)
+            if row is not None and row.get("google_subject") not in (None, claims.subject):
+                raise ValueError("Esta conta já está vinculada a outro login Google.")
+
+            if row is not None:
+                if not row["is_active"]:
+                    raise ValueError("Conta inativa.")
+                update_result = await conn.execute(
+                    text(
+                        """
+                        UPDATE users
+                        SET google_subject = :google_subject,
+                            email_verified_at = COALESCE(email_verified_at, now()),
+                            display_name = COALESCE(display_name, :display_name),
+                            updated_at = now()
+                        WHERE id = :user_id
+                        RETURNING
+                            id, email, display_name, is_active, created_at,
+                            role, password_hash, google_subject
+                        """
+                    ),
+                    {
+                        "google_subject": claims.subject,
+                        "display_name": claims.display_name,
+                        "user_id": row["id"],
+                    },
+                )
+                row = update_result.mappings().one()
+            else:
+                insert_result = await conn.execute(
+                    text(
+                        """
+                        INSERT INTO users (
+                            id,
+                            email,
+                            display_name,
+                            password_hash,
+                            password_updated_at,
+                            google_subject,
+                            email_verified_at,
+                            is_active,
+                            is_superuser,
+                            created_at,
+                            updated_at
+                        )
+                        VALUES (
+                            gen_random_uuid(),
+                            :email,
+                            :display_name,
+                            NULL,
+                            NULL,
+                            :google_subject,
+                            now(),
+                            true,
+                            false,
+                            now(),
+                            now()
+                        )
+                        RETURNING
+                            id, email, display_name, is_active, created_at,
+                            role, password_hash, google_subject
+                        """
+                    ),
+                    {
+                        "email": claims.email,
+                        "display_name": claims.display_name,
+                        "google_subject": claims.subject,
+                    },
+                )
+                row = insert_result.mappings().one()
+                created_user = True
+
+        if not row["is_active"]:
+            raise ValueError("Conta inativa.")
+
+        user = _row_to_user(row)
+        await _migrate_anonymous_state(
+            conn,
+            user_id=user.id,
+            anonymous_session_id=anonymous_session_id,
+        )
+        if created_user:
+            await _activate_free_plan(conn, user_id=user.id)
+        session_token, expires_at = await _create_session(conn, user_id=user.id)
+
+    if anonymous_session_id:
+        from core.redis import get_redis
+        redis = get_redis()
+        await redis.delete(f"credit:session:{anonymous_session_id}")
 
     return user, session_token, expires_at
 

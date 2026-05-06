@@ -96,6 +96,39 @@ def test_register_sets_auth_cookie(monkeypatch):
     assert "auth_session=session-token-abc" in response.headers["set-cookie"]
 
 
+def test_google_login_sets_auth_cookie(monkeypatch):
+    user_payload = _auth_user_payload()
+    expires_at = datetime(2026, 5, 1, tzinfo=timezone.utc)
+
+    async def _context(*, session_token=None, anonymous_session_id=None):
+        return type(
+            "Ctx",
+            (),
+            {
+                "user": None,
+                "session_expires_at": None,
+                "session_token": session_token,
+                "anonymous_session_id": "anon-123",
+            },
+        )()
+
+    async def _google_login(payload, *, anonymous_session_id=None):
+        assert anonymous_session_id == "anon-123"
+        assert payload.credential == "google-id-token"
+        return AuthUserRead.model_validate(user_payload), "session-token-google", expires_at
+
+    monkeypatch.setattr("api.routes.auth.build_request_auth_context", _context)
+    monkeypatch.setattr("api.routes.auth.login_google_user", _google_login)
+
+    with TestClient(app) as client:
+        response = client.post("/auth/google", json={"credential": "google-id-token"})
+
+    assert response.status_code == 200
+    assert response.json()["is_authenticated"] is True
+    assert response.json()["user"]["email"] == "ana@example.com"
+    assert "auth_session=session-token-google" in response.headers["set-cookie"]
+
+
 def test_job_route_requires_accessible_journey(monkeypatch):
     async def _context(*, session_token=None, anonymous_session_id=None):
         return type(
@@ -217,8 +250,9 @@ def test_authenticated_favorites_roundtrip(monkeypatch):
         assert payload.zone_fingerprint == "zone-fp-1"
         return favorite
 
-    async def _list(user_id):
+    async def _list(user_id, retention_days=None):
         assert user_id == user.id
+        assert retention_days == 30
         return [favorite]
 
     async def _delete(user_id, listing_key):
@@ -226,11 +260,21 @@ def test_authenticated_favorites_roundtrip(monkeypatch):
         assert listing_key == favorite.listing_key
         return True
 
+    async def _resolve_entitlements(user_id):
+        assert user_id == user.id
+        return type("Resolved", (), {"entitlements": type("Entitlements", (), {"retention_days": 30})()})()
+
+    async def _assert_can_save(user_id, resolved, *, listing_key):
+        assert user_id == user.id
+        assert listing_key == favorite.listing_key
+
     monkeypatch.setattr("api.routes.auth.build_request_auth_context", _context)
     monkeypatch.setattr("api.routes.favorites.get_accessible_journey", _accessible)
     monkeypatch.setattr("api.routes.favorites.upsert_user_favorite", _save)
     monkeypatch.setattr("api.routes.favorites.list_user_favorites", _list)
     monkeypatch.setattr("api.routes.favorites.delete_user_favorite", _delete)
+    monkeypatch.setattr("api.routes.favorites.resolve_entitlements", _resolve_entitlements)
+    monkeypatch.setattr("api.routes.favorites.assert_can_save_listing_with_plan", _assert_can_save)
 
     with TestClient(app) as client:
         save_response = client.post("/favorites", json=_favorite_payload("1"))

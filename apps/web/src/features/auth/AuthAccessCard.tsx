@@ -1,10 +1,75 @@
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, LogIn, LogOut, CreditCard, User } from "lucide-react";
 import { useAuth } from "./AuthContext";
 import { PlanosPage } from "../billing/PlanosPage";
 import { ContaPage } from "../billing/ContaPage";
 
-const GOOGLE_AUTH_URL = String(import.meta.env.VITE_GOOGLE_AUTH_URL || "").trim();
+const GOOGLE_CLIENT_ID = String(import.meta.env.VITE_GOOGLE_CLIENT_ID || "").trim();
+const GOOGLE_SCRIPT_ID = "google-identity-services";
+
+type GoogleCredentialResponse = {
+  credential?: string;
+};
+
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        id: {
+          initialize: (options: {
+            client_id: string;
+            callback: (response: GoogleCredentialResponse) => void;
+            auto_select?: boolean;
+            cancel_on_tap_outside?: boolean;
+          }) => void;
+          renderButton: (
+            parent: HTMLElement,
+            options: {
+              type?: "standard" | "icon";
+              theme?: "outline" | "filled_blue" | "filled_black";
+              size?: "large" | "medium" | "small";
+              text?: "signin_with" | "signup_with" | "continue_with" | "signin";
+              shape?: "rectangular" | "pill" | "circle" | "square";
+              width?: number;
+              locale?: string;
+            }
+          ) => void;
+        };
+      };
+    };
+  }
+}
+
+let googleScriptPromise: Promise<void> | null = null;
+
+function loadGoogleIdentityScript(): Promise<void> {
+  if (window.google?.accounts?.id) {
+    return Promise.resolve();
+  }
+  if (googleScriptPromise) {
+    return googleScriptPromise;
+  }
+
+  googleScriptPromise = new Promise((resolve, reject) => {
+    const existing = document.getElementById(GOOGLE_SCRIPT_ID) as HTMLScriptElement | null;
+    if (existing) {
+      existing.addEventListener("load", () => resolve(), { once: true });
+      existing.addEventListener("error", () => reject(new Error("google-script-error")), { once: true });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.id = GOOGLE_SCRIPT_ID;
+    script.src = "https://accounts.google.com/gsi/client";
+    script.async = true;
+    script.defer = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("google-script-error"));
+    document.head.appendChild(script);
+  });
+
+  return googleScriptPromise;
+}
 
 function formatExpiry(value: string | null | undefined) {
   if (!value) {
@@ -42,6 +107,7 @@ export function AuthAccessCard() {
     isSubmitting,
     clearError,
     login,
+    loginWithGoogle,
     logout,
     modeLabel,
     openAuthModal,
@@ -55,6 +121,7 @@ export function AuthAccessCard() {
   const [formNotice, setFormNotice] = useState<string | null>(null);
   const [showPlanos, setShowPlanos] = useState(false);
   const [showConta, setShowConta] = useState(false);
+  const googleButtonRef = useRef<HTMLDivElement | null>(null);
 
   const expiryLabel = useMemo(() => formatExpiry(authStatus.session_expires_at), [authStatus.session_expires_at]);
   const userName = authStatus.user?.display_name?.trim() || authStatus.user?.email?.split("@")[0] || "Conta";
@@ -108,14 +175,69 @@ export function AuthAccessCard() {
     }
   };
 
+  useEffect(() => {
+    if (!isAuthModalOpen || authStatus.is_authenticated || !GOOGLE_CLIENT_ID || !googleButtonRef.current) {
+      return;
+    }
+
+    let isMounted = true;
+    void loadGoogleIdentityScript()
+      .then(() => {
+        if (!isMounted || !googleButtonRef.current || !window.google?.accounts?.id) {
+          return;
+        }
+        const buttonWidth = Math.min(360, Math.max(280, googleButtonRef.current.clientWidth || 320));
+        googleButtonRef.current.replaceChildren();
+        window.google.accounts.id.initialize({
+          client_id: GOOGLE_CLIENT_ID,
+          callback: (response) => {
+            void (async () => {
+              clearError();
+              setFormNotice(null);
+              setGoogleNotice(null);
+              if (!response.credential) {
+                setGoogleNotice("O Google não retornou uma credencial válida.");
+                return;
+              }
+              const success = await loginWithGoogle({ credential: response.credential });
+              if (success) {
+                resetForm();
+                closeAuthModal();
+              }
+            })();
+          },
+          auto_select: false,
+          cancel_on_tap_outside: true,
+        });
+        window.google.accounts.id.renderButton(googleButtonRef.current, {
+          type: "standard",
+          theme: "outline",
+          size: "large",
+          text: "continue_with",
+          shape: "rectangular",
+          width: buttonWidth,
+          locale: "pt-BR",
+        });
+      })
+      .catch(() => {
+        if (isMounted) {
+          setGoogleNotice("Não foi possível carregar o login do Google agora.");
+        }
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [authStatus.is_authenticated, clearError, isAuthModalOpen, loginWithGoogle]);
+
   const handleGoogleLogin = () => {
     clearError();
     setFormNotice(null);
-    if (!GOOGLE_AUTH_URL) {
+    if (!GOOGLE_CLIENT_ID) {
       setGoogleNotice("Login com Google ainda depende da configuração OAuth deste ambiente.");
       return;
     }
-    window.location.assign(GOOGLE_AUTH_URL);
+    setGoogleNotice("Aguarde o botão do Google carregar para continuar.");
   };
 
   return (
@@ -213,14 +335,18 @@ export function AuthAccessCard() {
             </div>
 
             <form className="grid gap-4 px-6 py-5" onSubmit={(event) => void handleSubmit(event)}>
-              <button
-                type="button"
-                className="inline-flex items-center justify-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-pastel-violet-200 hover:text-slate-900"
-                onClick={handleGoogleLogin}
-              >
-                <GoogleIcon />
-                <span>Continuar com Google</span>
-              </button>
+              {GOOGLE_CLIENT_ID ? (
+                <div className="flex min-h-11 justify-center" ref={googleButtonRef} />
+              ) : (
+                <button
+                  type="button"
+                  className="inline-flex items-center justify-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-pastel-violet-200 hover:text-slate-900"
+                  onClick={handleGoogleLogin}
+                >
+                  <GoogleIcon />
+                  <span>Continuar com Google</span>
+                </button>
+              )}
 
               <div className="gem-divider" />
 

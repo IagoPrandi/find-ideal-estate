@@ -1,6 +1,6 @@
 """Shared contracts package for inter-module DTOs."""
 
-from .auth import AuthLoginRequest, AuthRegisterRequest, AuthStatusRead, AuthUserRead
+from .auth import AuthGoogleLoginRequest, AuthLoginRequest, AuthRegisterRequest, AuthStatusRead, AuthUserRead
 from .billing import (
     AccountCreditsRead,
     AccountPlanRead,
@@ -71,6 +71,7 @@ __all__ = [
     "AccountCreditsRead",
     "AccountPlanRead",
     "AuthLoginRequest",
+    "AuthGoogleLoginRequest",
     "AuthRegisterRequest",
     "AuthStatusRead",
     "AuthUserRead",

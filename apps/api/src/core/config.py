@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     resend_api_key: str | None = None
     stripe_secret_key: str | None = None
     stripe_webhook_secret: str | None = None
+    google_client_id: str | None = None
 
     pix_provider: str = "mercado_pago"
     pix_key: str | None = None

@@ -17,6 +17,10 @@ class AuthLoginRequest(BaseModel):
     password: str
 
 
+class AuthGoogleLoginRequest(BaseModel):
+    credential: str
+
+
 class AuthUserRead(BaseModel):
     id: UUID
     email: str

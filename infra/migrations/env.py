@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from logging.config import fileConfig
+from pathlib import Path
 
 from alembic import context
 from sqlalchemy import engine_from_config, pool
@@ -14,9 +15,21 @@ if config.config_file_name is not None:
 
 target_metadata = None
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_ENV_FILE = _REPO_ROOT / ".env"
+if _ENV_FILE.exists():
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(_ENV_FILE, override=False)
+    except ImportError:
+        pass
+
 
 def _database_url() -> str:
-    return os.environ["DATABASE_URL"]
+    url = os.environ["DATABASE_URL"]
+    if url.startswith("jdbc:"):
+        url = url[5:]
+    return url
 
 
 def run_migrations_offline() -> None:

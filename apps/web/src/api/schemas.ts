@@ -6,7 +6,7 @@ export const AuthUserReadSchema = z.object({
   display_name: z.string().nullable().optional(),
   is_active: z.boolean(),
   created_at: z.string(),
-  role: z.string(),
+  role: z.string().optional().default("user"),
 });
 
 export const AuthStatusReadSchema = z.object({

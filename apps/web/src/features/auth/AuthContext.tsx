@@ -1,5 +1,5 @@
-import { createContext, ReactNode, startTransition, useContext, useEffect, useMemo, useState } from "react";
-import { ApiError, AuthStatusRead, getAuthStatus, loginAuth, logoutAuth, registerAuth } from "../../api/client";
+import { createContext, ReactNode, startTransition, useCallback, useContext, useEffect, useMemo, useState } from "react";
+import { ApiError, AuthStatusRead, getAuthStatus, loginAuth, loginGoogleAuth, logoutAuth, registerAuth } from "../../api/client";
 import { useFavoritesStore, useZoneFavoritesStore } from "../../state";
 
 type AuthMode = "login" | "register";
@@ -13,6 +13,7 @@ type AuthContextValue = {
   authModalMode: AuthMode;
   refresh: () => Promise<void>;
   login: (payload: { email: string; password: string }) => Promise<boolean>;
+  loginWithGoogle: (payload: { credential: string }) => Promise<boolean>;
   register: (payload: { email: string; password: string; displayName?: string }) => Promise<boolean>;
   logout: () => Promise<void>;
   clearError: () => void;
@@ -46,7 +47,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
   const [authModalMode, setAuthModalMode] = useState<AuthMode>("login");
 
-  const refresh = async () => {
+  const clearError = useCallback(() => setErrorMessage(null), []);
+
+  const refresh = useCallback(async () => {
     setIsLoading(true);
     try {
       const next = await getAuthStatus();
@@ -61,18 +64,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     void refresh();
-  }, []);
+  }, [refresh]);
 
   useEffect(() => {
     void syncFavoritesWithAuthStatus(authStatus);
     void syncZoneFavoritesWithAuthStatus(authStatus);
   }, [authStatus, syncFavoritesWithAuthStatus, syncZoneFavoritesWithAuthStatus]);
 
-  const login = async (payload: { email: string; password: string }) => {
+  const login = useCallback(async (payload: { email: string; password: string }) => {
     setIsSubmitting(true);
     try {
       const next = await loginAuth(payload);
@@ -87,9 +90,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsSubmitting(false);
     }
-  };
+  }, []);
 
-  const register = async (payload: { email: string; password: string; displayName?: string }) => {
+  const register = useCallback(async (payload: { email: string; password: string; displayName?: string }) => {
     setIsSubmitting(true);
     try {
       const next = await registerAuth({
@@ -108,9 +111,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsSubmitting(false);
     }
-  };
+  }, []);
 
-  const logout = async () => {
+  const loginWithGoogle = useCallback(async (payload: { credential: string }) => {
+    setIsSubmitting(true);
+    try {
+      const next = await loginGoogleAuth(payload);
+      startTransition(() => {
+        setAuthStatus(next);
+        setErrorMessage(null);
+      });
+      return true;
+    } catch (error) {
+      setErrorMessage(toMessage(error));
+      return false;
+    } finally {
+      setIsSubmitting(false);
+    }
+  }, []);
+
+  const logout = useCallback(async () => {
     setIsSubmitting(true);
     try {
       const next = await logoutAuth();
@@ -123,19 +143,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       setIsSubmitting(false);
     }
-  };
+  }, []);
 
-  const clearError = () => setErrorMessage(null);
-
-  const openAuthModal = (mode: AuthMode = "login") => {
+  const openAuthModal = useCallback((mode: AuthMode = "login") => {
     clearError();
     setAuthModalMode(mode);
     setIsAuthModalOpen(true);
-  };
+  }, [clearError]);
 
-  const closeAuthModal = () => {
+  const closeAuthModal = useCallback(() => {
     setIsAuthModalOpen(false);
-  };
+  }, []);
 
   const value = useMemo<AuthContextValue>(() => ({
     authStatus,
@@ -146,13 +164,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     authModalMode,
     refresh,
     login,
+    loginWithGoogle,
     register,
     logout,
     clearError,
     openAuthModal,
     closeAuthModal,
     modeLabel: (mode) => (mode === "login" ? "Entrar" : "Criar conta")
-  }), [authModalMode, authStatus, errorMessage, isAuthModalOpen, isLoading, isSubmitting]);
+  }), [authModalMode, authStatus, clearError, closeAuthModal, errorMessage, isAuthModalOpen, isLoading, isSubmitting, login, loginWithGoogle, logout, openAuthModal, refresh, register]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
