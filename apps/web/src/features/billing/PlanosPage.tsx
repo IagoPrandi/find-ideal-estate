@@ -7,11 +7,11 @@ import { useAuth } from "../auth/AuthContext";
 import { PixModal } from "./PixModal";
 
 const PLAN_FEATURES: Record<string, string[]> = {
-  anonymous: ["300 créditos de sessão", "Sem favoritos", "Parâmetros travados"],
-  free: ["350 créditos/mês", "5 imóveis salvos", "2 zonas salvas", "Retenção de 7 dias"],
-  basico: ["800 créditos/mês", "20 imóveis salvos", "4 zonas salvas", "Retenção de 30 dias", "Parametrização limitada", "4 métricas"],
-  pro: ["4.000 créditos/mês", "100 imóveis salvos", "20 zonas salvas", "Retenção de 30 dias", "Parametrização completa", "Métricas ilimitadas"],
-  pro_max: ["20.000 créditos/mês", "100 imóveis salvos", "20 zonas salvas", "Retenção de 30 dias", "Parametrização completa", "Métricas ilimitadas"],
+  anonymous: ["~4 análises de região", "Sem favoritos", "Configurações de busca fixas"],
+  free: ["~4 análises de região/mês", "5 imóveis favoritos", "2 regiões favoritas", "Favoritos visíveis por 7 dias", "Configurações de busca fixas"],
+  basico: ["~10 análises de região/mês", "20 imóveis favoritos", "4 regiões favoritas", "Favoritos visíveis por 30 dias", "Ajuste de raio e tempo de deslocamento", "Até 4 indicadores urbanos"],
+  pro: ["~50 análises de região/mês", "100 imóveis favoritos", "20 regiões favoritas", "Favoritos visíveis por 30 dias", "Personalização completa de busca", "Todos os indicadores urbanos"],
+  pro_max: ["~250 análises de região/mês", "200 imóveis favoritos", "40 regiões favoritas", "Favoritos visíveis por 30 dias", "Personalização completa de busca", "Todos os indicadores urbanos", "Alerta de atualização nos imóveis salvos"],
 };
 
 export function PlanosPage({ onClose }: { onClose: () => void }) {
