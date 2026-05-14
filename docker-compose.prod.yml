@@ -1,0 +1,29 @@
+# Sobrescreve docker-compose.yml para produção.
+# Uso: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+services:
+  api:
+    restart: unless-stopped
+    command: ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+    volumes: []
+
+  worker:
+    profiles: []
+    restart: unless-stopped
+    volumes: []
+
+  worker-scrape-browser:
+    restart: unless-stopped
+    volumes: []
+
+  worker-prewarm:
+    restart: unless-stopped
+    volumes: []
+
+  postgres:
+    restart: unless-stopped
+    ports: []
+
+  redis:
+    restart: unless-stopped
+    ports: []
