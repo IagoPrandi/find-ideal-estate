@@ -1,6 +1,6 @@
-# Guia de Deploy — Frontend (Vercel) + Backend (AWS EC2 + RDS + ElastiCache)
+# Guia de Deploy — Frontend (Vercel) + Backend (AWS EC2 + RDS + Redis local)
 
-> Stack: Vite + React (frontend) · FastAPI + PostgreSQL/PostGIS em RDS · Redis em ElastiCache · Workers Dramatiq em EC2.
+> Stack: Vite + React (frontend) · FastAPI + PostgreSQL/PostGIS em RDS · Redis local no EC2 · Workers Dramatiq em EC2.
 
 ---
 
@@ -8,7 +8,7 @@
 
 1. [Visão geral da arquitetura](#1-visão-geral-da-arquitetura)
 2. [Rede AWS e segurança](#2-rede-aws-e-segurança)
-3. [Banco e cache gerenciados](#3-banco-e-cache-gerenciados)
+3. [Banco gerenciado e cache local](#3-banco-gerenciado-e-cache-local)
 4. [Backend na AWS — EC2 + Docker Compose](#4-backend-na-aws--ec2--docker-compose)
 5. [Nginx + SSL no EC2](#5-nginx--ssl-no-ec2)
 6. [Variáveis de ambiente](#6-variáveis-de-ambiente)
@@ -36,51 +36,144 @@ EC2 pública (Elastic IP → api.seudominio.com.br)
       ├── worker                  (filas: transport, zones, enrichment...)
       ├── worker-scrape-browser   (Playwright + Xvfb)
       ├── worker-prewarm
-      ├── Valhalla / OTP          (self-hosted, quando aplicável)
-      └── sem Postgres/Redis locais em produção
+      ├── redis                   (porta interna Docker, sem exposição pública)
+      └── Valhalla / OTP          (self-hosted, quando aplicável)
 
 Subnets privadas da mesma VPC
-├── RDS PostgreSQL 16 + PostGIS
-└── ElastiCache Redis/Valkey
+└── RDS PostgreSQL 16 + PostGIS
 ```
 
-O MVP já inicia com **PostgreSQL/PostGIS no RDS** e **Redis no ElastiCache**, ambos em subnets privadas. O EC2 continua hospedando API, workers e serviços pesados de mobilidade/scraping. Banco e cache não devem ter IP público nem portas abertas para a internet.
+O MVP fica híbrido: **PostgreSQL/PostGIS no RDS** em subnets privadas e **Redis local no EC2** via Docker, sem exposição pública da porta `6379`. O EC2 continua hospedando API, workers e serviços pesados de mobilidade/scraping.
 
-> O Postgres e o Redis definidos no `docker-compose.yml` são para desenvolvimento local. Em produção, `docker-compose.prod.yml` força `DATABASE_URL` e `REDIS_URL` vindos do `.env` e coloca os serviços locais em profile inativo.
+> Em produção, `docker-compose.prod.yml` força `DATABASE_URL` a apontar para o RDS e mantém `REDIS_URL=redis://redis:6379/0` dentro da rede Docker local da instância.
 
 ---
 
 ## 2. Rede AWS e segurança
 
-### 2.1 Topologia mínima
+### 2.1 Região, VPC e DNS
 
-- 1 VPC dedicada ao projeto.
-- 2 subnets públicas, em AZs diferentes.
-- 2 subnets privadas, em AZs diferentes, para RDS e ElastiCache.
-- EC2 inicialmente em subnet pública com Elastic IP.
-- RDS e ElastiCache em subnets privadas.
-- NAT Gateway é opcional nesta fase se apenas a EC2 pública precisa sair para internet. Se futuramente mover API/workers para subnets privadas, use NAT Gateway ou outro caminho controlado de egress.
+Crie uma VPC dedicada ao projeto na mesma região onde ficarão EC2 e RDS.
 
-### 2.2 Security Groups
+Configuração recomendada:
 
-Crie três Security Groups:
+| Campo | Valor |
+|---|---|
+| Nome | `vpc-onde-morar-prod` |
+| Região | preferencialmente `sa-east-1` se latência Brasil for prioridade; `us-east-1` se custo/serviços forem prioridade |
+| IPv4 CIDR | `10.20.0.0/23` |
+| IPv6 | desabilitado no MVP, salvo necessidade explícita |
+| DNS resolution | habilitado |
+| DNS hostnames | habilitado |
+| Tenancy | default |
+
+Use uma VPC nova para evitar conflito com redes antigas, VPNs ou ambientes de teste. Se já existir uma VPC corporativa, valide antes se o bloco `10.20.0.0/23` não conflita com outras redes privadas.
+
+### 2.2 Plano de subnets
+
+Use pelo menos 2 Availability Zones. O RDS exige DB subnet group com subnets em AZs diferentes para alta disponibilidade e manutenção segura.
+
+Plano inicial:
+
+| Nome | AZ | CIDR | Tipo | Uso |
+|---|---|---:|---|---|
+| `subnet-onde-morar-public-a` | `az-a` | `10.20.0.0/24` | pública | EC2, Nginx, Elastic IP |
+| `subnet-onde-morar-public-b` | `az-b` | `10.20.1.0/24` | pública | reserva para ALB/futuro failover |
+| `subnet-onde-morar-private-data-a` | `az-a` | `10.20.10.0/24` | privada | RDS |
+| `subnet-onde-morar-private-data-b` | `az-b` | `10.20.11.0/24` | privada | RDS |
+| `subnet-onde-morar-private-app-a` | `az-a` | `10.20.20.0/24` | privada | futura API/worker atrás de ALB |
+| `subnet-onde-morar-private-app-b` | `az-b` | `10.20.21.0/24` | privada | futura API/worker atrás de ALB |
+
+Para o MVP, a EC2 pode começar na subnet pública. As subnets privadas de app já ficam reservadas para uma evolução sem renumerar a rede.
+
+### 2.3 Internet Gateway e route tables
+
+Crie um Internet Gateway:
+
+| Recurso | Nome |
+|---|---|
+| Internet Gateway | `igw-onde-morar-prod` |
+
+Anexe o Internet Gateway à VPC.
+
+Crie as route tables:
+
+| Route table | Associar com | Rotas |
+|---|---|---|
+| `rtb-onde-morar-public` | subnets públicas | `10.20.0.0/16 -> local`; `0.0.0.0/0 -> igw-onde-morar-prod` |
+| `rtb-onde-morar-private-data` | subnets privadas de dados | `10.20.0.0/16 -> local` |
+| `rtb-onde-morar-private-app` | subnets privadas de app | `10.20.0.0/16 -> local`; opcionalmente `0.0.0.0/0 -> NAT Gateway` no futuro |
+
+Regras:
+
+- Subnets públicas devem ter rota `0.0.0.0/0` para o Internet Gateway.
+- Subnets privadas de dados não devem ter rota direta para Internet Gateway.
+- RDS fica somente nas subnets privadas de dados.
+- NAT Gateway não é necessário para o RDS. Ele só será necessário se API/workers forem movidos para subnets privadas e precisarem baixar imagens, acessar APIs externas, Mercado Pago, MapTiler, Mapbox, GitHub ou serviços similares.
+
+### 2.4 DB subnet group e isolamento do Redis
+
+Crie um DB subnet group para o RDS:
+
+| Campo | Valor |
+|---|---|
+| Nome | `dbsubnet-onde-morar-prod` |
+| VPC | `vpc-onde-morar-prod` |
+| Subnets | `subnet-onde-morar-private-data-a`, `subnet-onde-morar-private-data-b` |
+
+Para o Redis local:
+
+- não existe subnet group;
+- não abra `6379` no Security Group da EC2;
+- mantenha `ports: []` no override de produção para que o Redis exista apenas na rede Docker interna.
+
+### 2.5 Security Groups
+
+Crie Security Groups com referência entre grupos, não com IP privado fixo. Isso evita quebrar acesso se a EC2 for recriada.
 
 | Security Group | Regras de entrada |
 |---|---|
 | `sg-onde-morar-ec2` | `22/tcp` somente do seu IP; `80/tcp` e `443/tcp` de `0.0.0.0/0` |
 | `sg-onde-morar-rds` | `5432/tcp` somente de `sg-onde-morar-ec2` |
-| `sg-onde-morar-redis` | `6379/tcp` somente de `sg-onde-morar-ec2` |
 
 Regras obrigatórias:
 
 - Não liberar `5432` ou `6379` para internet.
-- Não usar `0.0.0.0/0` no RDS ou ElastiCache.
+- Não usar `0.0.0.0/0` no RDS.
 - Não colocar credenciais reais em documentação, GitHub Actions logs ou arquivos commitados.
 - Usar credenciais diferentes por ambiente: local, staging e produção.
 
+### 2.6 NACLs, endpoints e validação
+
+Mantenha Network ACLs padrão no MVP, salvo exigência explícita de compliance. Security Groups são stateful e suficientes para este desenho inicial.
+
+Opcionalmente, quando mover API/workers para subnets privadas, considere VPC endpoints para reduzir dependência de NAT:
+
+| Endpoint | Quando usar |
+|---|---|
+| S3 Gateway Endpoint | acesso a buckets S3/R2 compatível via AWS S3 |
+| CloudWatch Logs Interface Endpoint | logs sem saída pública |
+| ECR API/DKR Interface Endpoints | pull de imagens privadas sem internet |
+| Secrets Manager Interface Endpoint | leitura de segredos sem internet |
+
+Validação mínima após criar a rede:
+
+```bash
+# A partir da EC2, DNS interno do RDS deve resolver e porta deve responder.
+nc -vz meu-rds.xxxxxx.us-east-1.rds.amazonaws.com 5432
+
+# A partir da EC2, o Redis local deve responder apenas via Docker/network interna.
+docker exec -it $(docker ps -qf name=redis) redis-cli ping
+
+# RDS não deve responder a partir da sua máquina local pela internet.
+nc -vz meu-rds.xxxxxx.us-east-1.rds.amazonaws.com 5432
+```
+
+O último comando deve falhar fora da VPC. Se responder pela internet, a rede está insegura e deve ser corrigida antes do deploy.
+
 ---
 
-## 3. Banco e cache gerenciados
+## 3. Banco gerenciado e cache local
 
 ### 3.1 RDS PostgreSQL + PostGIS
 
@@ -107,27 +200,31 @@ psql "$DATABASE_URL" -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
 
 Se as migrations já criam essas extensões, os comandos acima devem continuar idempotentes.
 
-### 3.2 ElastiCache Redis/Valkey
+### 3.2 Redis local no EC2
 
 Configuração inicial recomendada:
 
 | Campo | Valor inicial |
 |---|---|
-| Engine | Redis OSS 7.x ou Valkey compatível |
-| Tipo | Node-based cache |
-| Classe | `cache.t4g.small` para produção inicial |
-| Subnet group | subnets privadas |
-| Public access | inexistente |
-| Security Group | `sg-onde-morar-redis` |
-| Backups | habilitar se o cache passar a armazenar estado não recriável |
+| Imagem | `redis:7-alpine` |
+| Execução | container Docker na mesma instância da API |
+| Exposição externa | nenhuma |
+| Porta | `6379` somente dentro da rede Docker |
+| Persistência | opcional no MVP; manter sem exposição pública |
+| Restart policy | `unless-stopped` |
 
-Se habilitar TLS/auth token, valide que a aplicação aceita `rediss://`:
+Use `REDIS_URL` interno:
 
 ```env
-REDIS_URL=rediss://:SENHA_DO_REDIS@cache.xxxxxx.use1.cache.amazonaws.com:6379/0
+REDIS_URL=redis://redis:6379/0
 ```
 
-Se usar Redis privado sem TLS no primeiro MVP, documente a decisão como temporária. A porta continua inacessível fora da VPC.
+Regras:
+
+- não mapear `6379` para o host;
+- não abrir `6379` no Security Group da EC2;
+- usar rotação de logs e monitorar memória do Redis;
+- se o Redis passar a armazenar estado não recriável, adicionar volume persistente e política de backup.
 
 ### 3.3 Teste de conectividade a partir do EC2
 
@@ -135,8 +232,8 @@ Se usar Redis privado sem TLS no primeiro MVP, documente a decisão como tempor�
 # DNS e porta do RDS
 nc -vz meu-rds.xxxxxx.us-east-1.rds.amazonaws.com 5432
 
-# DNS e porta do ElastiCache
-nc -vz meu-cache.xxxxxx.use1.cache.amazonaws.com 6379
+# Redis local dentro do Docker
+docker compose -f docker-compose.yml -f docker-compose.prod.yml exec redis redis-cli ping
 
 # Extensões do Postgres
 psql "$DATABASE_URL" -c "SELECT extname FROM pg_extension WHERE extname IN ('postgis', 'pgcrypto');"
@@ -192,7 +289,7 @@ cp .env.example .env
 nano .env
 ```
 
-Preencha `DATABASE_URL` com o endpoint do RDS e `REDIS_URL` com o endpoint do ElastiCache. Não use `postgres:5432` nem `redis:6379` em produção.
+Preencha `DATABASE_URL` com o endpoint do RDS. Em produção, o `REDIS_URL` deve ficar interno no Docker, apontando para `redis://redis:6379/0`.
 
 ### 4.5 `docker-compose.prod.yml`
 
@@ -205,8 +302,8 @@ docker compose -f docker-compose.yml -f docker-compose.prod.yml config --service
 
 Confirme no output de `config --services`:
 
-- sobem por padrão: `api`, `worker`, `worker-scrape-browser`, `worker-prewarm`;
-- não sobem por padrão: `postgres`, `redis`, `ui`.
+- sobem por padrão: `api`, `worker`, `worker-scrape-browser`, `worker-prewarm`, `redis`;
+- não sobem por padrão: `postgres`, `ui`.
 
 Evite imprimir ou salvar o output completo de `docker compose config` em CI/logs, porque ele expande valores do `.env` e pode expor segredos.
 
@@ -224,7 +321,7 @@ curl http://localhost:8000/health
 
 # Subir workers.
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d \
-  worker worker-scrape-browser worker-prewarm
+  worker worker-scrape-browser worker-prewarm redis
 
 # Verificar status.
 docker compose -f docker-compose.yml -f docker-compose.prod.yml ps
@@ -278,7 +375,7 @@ O Certbot adiciona HTTPS e redirecionamento HTTP → HTTPS. A renovação autom�
 | Variável | Observação |
 |---|---|
 | `DATABASE_URL` | `postgresql://APP_USER:SENHA@meu-rds.xxxxxx.us-east-1.rds.amazonaws.com:5432/find_ideal_estate` |
-| `REDIS_URL` | `redis://meu-cache.xxxxxx.use1.cache.amazonaws.com:6379/0` ou `rediss://:SENHA@...:6379/0` |
+| `REDIS_URL` | `redis://redis:6379/0` |
 | `DB_POOL_SIZE` | `5` como ponto inicial |
 | `DB_MAX_OVERFLOW` | `5` como ponto inicial |
 | `DB_POOL_TIMEOUT_SECONDS` | `30` |
@@ -424,21 +521,29 @@ jobs:
 
 ### AWS / Rede
 
-- [ ] VPC criada ou selecionada.
-- [ ] Subnets públicas e privadas criadas em pelo menos 2 AZs.
+- [ ] VPC `vpc-onde-morar-prod` criada com CIDR `10.20.0.0/16`.
+- [ ] DNS resolution e DNS hostnames habilitados na VPC.
+- [ ] Subnets públicas criadas: `10.20.0.0/24` e `10.20.1.0/24`.
+- [ ] Subnets privadas de dados criadas: `10.20.10.0/24` e `10.20.11.0/24`.
+- [ ] Subnets privadas de app reservadas: `10.20.20.0/24` e `10.20.21.0/24`.
+- [ ] Internet Gateway criado e anexado à VPC.
+- [ ] Route table pública criada com `0.0.0.0/0 -> Internet Gateway`.
+- [ ] Route table privada de dados sem rota para Internet Gateway.
+- [ ] DB subnet group `dbsubnet-onde-morar-prod` criado somente com subnets privadas de dados.
 - [ ] `sg-onde-morar-ec2` permite SSH somente do seu IP e HTTP/HTTPS público.
 - [ ] `sg-onde-morar-rds` permite `5432` somente de `sg-onde-morar-ec2`.
-- [ ] `sg-onde-morar-redis` permite `6379` somente de `sg-onde-morar-ec2`.
+- [ ] Porta `6379` não está aberta no Security Group da EC2.
+- [ ] RDS não responde a partir da internet pública.
 
-### RDS / ElastiCache
+### RDS / Redis
 
 - [ ] RDS PostgreSQL 16 criado sem acesso público.
 - [ ] Banco `find_ideal_estate` criado.
 - [ ] Extensões `postgis` e `pgcrypto` habilitadas.
 - [ ] Backups automáticos habilitados.
-- [ ] ElastiCache criado em subnets privadas.
 - [ ] EC2 consegue conectar no RDS (`nc -vz ... 5432`).
-- [ ] EC2 consegue conectar no ElastiCache (`nc -vz ... 6379`).
+- [ ] Redis local sobe com `docker compose ... up -d redis`.
+- [ ] `docker compose ... exec redis redis-cli ping` retorna `PONG`.
 
 ### EC2 / Backend
 
@@ -447,11 +552,12 @@ jobs:
 - [ ] `A record` de `api.seudominio.com.br` apontando para o Elastic IP.
 - [ ] Docker e Docker Compose instalados.
 - [ ] Repositório clonado em `/opt/app`.
-- [ ] `.env` preenchido com endpoints reais de RDS e ElastiCache.
-- [ ] `.env` revisado sem imprimir segredos em logs; `docker compose ... config --services` não lista `postgres`, `redis` ou `ui`.
+- [ ] `.env` preenchido com endpoint real do RDS e `REDIS_URL=redis://redis:6379/0`.
+- [ ] `.env` revisado sem imprimir segredos em logs; `docker compose ... config --services` não lista `postgres` nem `ui`.
 - [ ] `docker compose ... up -d api` executado com sucesso.
+- [ ] `docker compose ... up -d redis` executado com sucesso.
 - [ ] Logs da API mostram migrations aplicadas sem erro.
-- [ ] Workers sobem sem tentar conectar em `postgres` ou `redis` locais.
+- [ ] API e workers conseguem conectar no Redis local sem exposição da porta `6379`.
 - [ ] `curl http://localhost:8000/health` retorna `200`.
 - [ ] Nginx configurado e testado (`nginx -t`).
 - [ ] Certificado SSL emitido pelo Certbot.

@@ -104,6 +104,8 @@ async def enqueue_nightly_listings_prewarm() -> None:
             "lookback_hours": settings.listings_prewarm_lookback_hours,
             "limit": settings.listings_prewarm_limit,
             "trigger": "scheduler",
+            "max_address_duration_seconds": settings.listings_prewarm_max_address_duration_seconds,
+            "max_platform_duration_seconds": settings.listings_prewarm_max_address_duration_seconds,
         },
     )
 

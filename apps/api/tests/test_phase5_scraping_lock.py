@@ -19,14 +19,14 @@ if str(API_ROOT) not in sys.path:
 
 from core.db import close_db, get_engine, init_db  # noqa: E402
 from core.redis import close_redis, init_redis, redis_healthcheck  # noqa: E402
-from src.modules.listings.dedup import (  # noqa: E402
+from modules.listings.dedup import (  # noqa: E402
     compute_property_fingerprint,
     upsert_property_and_ad,
 )
-from src.modules.listings.models import ZoneCacheStatus  # noqa: E402
-from src.workers.handlers import listings as listings_handler  # noqa: E402
+from modules.listings.models import ZoneCacheStatus  # noqa: E402
+from workers.handlers import listings as listings_handler  # noqa: E402
 
-lock_module = importlib.import_module("src.modules.listings.scraping_lock")
+lock_module = importlib.import_module("modules.listings.scraping_lock")
 scraping_lock = lock_module.scraping_lock
 
 os.environ.setdefault("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/find_ideal_estate")
@@ -244,8 +244,13 @@ def test_listings_step_force_refresh_bypasses_usable_cache(monkeypatch) -> None:
             }
         ]
 
-    async def _fake_persist_listings(listings, platform, search_type):
-        del platform, search_type
+    async def _fake_persist_listings(
+        listings,
+        platform,
+        search_type,
+        search_location_normalized,
+    ):
+        del platform, search_type, search_location_normalized
         return len(listings)
 
     async def _fake_publish_job_event(*_args, **_kwargs):
@@ -369,8 +374,13 @@ def test_listings_step_expired_cache_remains_usable_by_default(monkeypatch) -> N
             }
         ]
 
-    async def _fake_persist_listings(listings, platform, search_type):
-        del platform, search_type
+    async def _fake_persist_listings(
+        listings,
+        platform,
+        search_type,
+        search_location_normalized,
+    ):
+        del platform, search_type, search_location_normalized
         return len(listings)
 
     async def _fake_publish_job_event(*_args, **_kwargs):
@@ -488,8 +498,13 @@ def test_listings_step_records_platform_diagnostics(monkeypatch) -> None:
             }
         ]
 
-    async def _fake_persist_listings(listings, platform, search_type):
-        del platform, search_type
+    async def _fake_persist_listings(
+        listings,
+        platform,
+        search_type,
+        search_location_normalized,
+    ):
+        del platform, search_type, search_location_normalized
         return len(listings)
 
     async def _fake_publish_job_event(_job_id, event_type, **kwargs):
@@ -625,8 +640,13 @@ def test_listings_step_recovers_stale_scraping_cache(monkeypatch) -> None:
             }
         ]
 
-    async def _fake_persist_listings(listings, platform, search_type):
-        del platform, search_type
+    async def _fake_persist_listings(
+        listings,
+        platform,
+        search_type,
+        search_location_normalized,
+    ):
+        del platform, search_type, search_location_normalized
         return len(listings)
 
     async def _fake_publish_job_event(_job_id, event_type, **kwargs):

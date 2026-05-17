@@ -247,7 +247,7 @@ def test_trigger_manual_prewarm_enqueues_job_with_valid_token(monkeypatch):
 
     async def _enqueue(addresses, **kwargs):
         assert addresses == ["Rua Botucatu, Vila Mariana, Sao Paulo, SP"]
-        assert kwargs["max_address_duration_seconds"] == 210
+        assert kwargs["max_address_duration_seconds"] == 60
         return sample.id
 
     async def _get_job(job_id):

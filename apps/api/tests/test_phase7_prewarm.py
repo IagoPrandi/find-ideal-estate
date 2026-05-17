@@ -61,6 +61,7 @@ def test_listings_prewarm_step_reuses_single_session_per_platform(monkeypatch) -
     start_calls: list[str] = []
     close_calls: list[str] = []
     scrape_calls: list[str] = []
+    persist_calls: list[tuple[str, str, str]] = []
     marked_cache_ids: list[str] = []
 
     async def _fake_get_prewarm_targets(*, lookback_hours: int, limit: int):
@@ -147,8 +148,13 @@ def test_listings_prewarm_step_reuses_single_session_per_platform(monkeypatch) -
     async def _fake_mark_cache_prewarmed(cache_id, **_kwargs):
         marked_cache_ids.append(str(cache_id))
 
-    async def _fake_persist_listings(listings, platform, search_type):
-        del platform, search_type
+    async def _fake_persist_listings(
+        listings,
+        platform,
+        search_type,
+        search_location_normalized,
+    ):
+        persist_calls.append((platform, search_type, search_location_normalized))
         return len(listings)
 
     async def _fake_publish_job_event(*_args, **_kwargs):
@@ -199,6 +205,10 @@ def test_listings_prewarm_step_reuses_single_session_per_platform(monkeypatch) -
         "Rua Guaipa, Vila Leopoldina, Sao Paulo, SP",
         "Avenida Paulista, Bela Vista, Sao Paulo, SP",
     ]
+    assert persist_calls == [
+        ("quintoandar", "rent", "rua guaipa vila leopoldina sao paulo sp"),
+        ("quintoandar", "rent", "avenida paulista bela vista sao paulo sp"),
+    ]
     assert len(marked_cache_ids) == 2
 
 
@@ -233,7 +243,16 @@ def test_enqueue_manual_listings_prewarm_deduplicates_addresses(monkeypatch) -> 
     assert len(manual_targets) == 2
 
 
-def test_listings_prewarm_step_stops_after_address_budget_timeout(monkeypatch) -> None:
+def test_platform_budget_defaults_to_sixty_seconds_and_caps_overrides(monkeypatch) -> None:
+    monkeypatch.delenv("LISTINGS_PREWARM_MAX_ADDRESS_DURATION_SECONDS", raising=False)
+
+    assert prewarm_handler._platform_budget_seconds({}) == 60.0
+    assert prewarm_handler._platform_budget_seconds({"max_address_duration_seconds": 120}) == 60.0
+    assert prewarm_handler._platform_budget_seconds({"max_address_duration_seconds": 30}) == 30.0
+    assert prewarm_handler._platform_budget_seconds({"max_platform_duration_seconds": 45}) == 45.0
+
+
+def test_listings_prewarm_step_resets_budget_for_each_platform_timeout(monkeypatch) -> None:
     job_id = uuid4()
     start_calls: list[str] = []
     close_calls: list[str] = []
@@ -302,8 +321,13 @@ def test_listings_prewarm_step_stops_after_address_budget_timeout(monkeypatch) -
     async def _fake_mark_cache_prewarmed(*_args, **_kwargs):
         return None
 
-    async def _fake_persist_listings(listings, platform, search_type):
-        del listings, platform, search_type
+    async def _fake_persist_listings(
+        listings,
+        platform,
+        search_type,
+        search_location_normalized,
+    ):
+        del listings, platform, search_type, search_location_normalized
         return 0
 
     async def _fake_publish_job_event(_job_id, event_type, **kwargs):
@@ -349,8 +373,17 @@ def test_listings_prewarm_step_stops_after_address_budget_timeout(monkeypatch) -
 
     assert start_calls == ["rent", "rent"]
     assert close_calls == ["rent", "rent"]
-    assert scrape_calls == ["Rua Botucatu, Vila Mariana, Sao Paulo, SP"]
-    assert any(event_type == "prewarm.address.timeout" for event_type, _ in published_events)
+    assert scrape_calls == [
+        "Rua Botucatu, Vila Mariana, Sao Paulo, SP",
+        "Rua Botucatu, Vila Mariana, Sao Paulo, SP",
+    ]
+    timeout_events = [
+        kwargs
+        for event_type, kwargs in published_events
+        if event_type == "prewarm.address.timeout"
+    ]
+    assert len(timeout_events) == 2
+    assert all(event["payload_json"]["budget_scope"] == "platform" for event in timeout_events)
 
 
 def test_process_target_cleans_up_scraping_status_on_unexpected_failure(monkeypatch) -> None:

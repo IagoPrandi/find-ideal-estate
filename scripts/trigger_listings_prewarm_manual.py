@@ -44,7 +44,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--search-type", default="rent", choices=["rent", "sale"])
     parser.add_argument("--usage-type", default="residential")
     parser.add_argument("--location-type", default="address")
-    parser.add_argument("--max-address-duration-seconds", type=int, default=210)
+    parser.add_argument("--max-address-duration-seconds", type=int, default=60)
     parser.add_argument("--wait", action="store_true")
     parser.add_argument("--inline", action="store_true")
     parser.add_argument("--timeout-seconds", type=int, default=1800)

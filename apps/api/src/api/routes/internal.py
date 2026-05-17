@@ -17,7 +17,7 @@ class ManualListingsPrewarmRequest(BaseModel):
     search_type: Literal["rent", "sale"] = "rent"
     usage_type: str = "residential"
     search_location_type: str = "address"
-    max_address_duration_seconds: int = Field(default=210, gt=0, le=210)
+    max_address_duration_seconds: int = Field(default=60, gt=0, le=60)
 
 
 def _extract_internal_token(

@@ -36,6 +36,9 @@ from workers.queue import QUEUE_PREWARM
 from workers.runtime import run_job_with_retry
 
 
+DEFAULT_PLATFORM_BUDGET_SECONDS = 60.0
+
+
 @dataclass(frozen=True)
 class PrewarmTarget:
     search_location_normalized: str
@@ -63,15 +66,20 @@ def _prewarm_zone_fingerprint(target: PrewarmTarget) -> str:
     return f"prewarm:{target.search_type}:{target.search_location_normalized}"[:255]
 
 
-def _address_budget_seconds(ctx: dict[str, object]) -> float:
-    raw_value = ctx.get("max_address_duration_seconds")
+def _platform_budget_seconds(ctx: dict[str, object]) -> float:
+    raw_value = ctx.get("max_platform_duration_seconds")
     if raw_value is None:
-        raw_value = os.getenv("LISTINGS_PREWARM_MAX_ADDRESS_DURATION_SECONDS", "210")
+        raw_value = ctx.get("max_address_duration_seconds")
+    if raw_value is None:
+        raw_value = os.getenv(
+            "LISTINGS_PREWARM_MAX_ADDRESS_DURATION_SECONDS",
+            str(int(DEFAULT_PLATFORM_BUDGET_SECONDS)),
+        )
     try:
         parsed = float(raw_value)
     except (TypeError, ValueError):
-        parsed = 210.0
-    return max(parsed, 0.01)
+        parsed = DEFAULT_PLATFORM_BUDGET_SECONDS
+    return min(max(parsed, 0.01), DEFAULT_PLATFORM_BUDGET_SECONDS)
 
 
 async def _load_job_context(job_id: UUID) -> dict[str, object]:
@@ -190,6 +198,7 @@ async def enqueue_manual_listings_prewarm(
             "trigger": "manual",
             "manual_targets": manual_targets,
             "max_address_duration_seconds": max_address_duration_seconds,
+            "max_platform_duration_seconds": max_address_duration_seconds,
         },
     )
     return result.job.id
@@ -238,7 +247,7 @@ async def _process_target(
         "usage_type": target.usage_type,
         "demand_count": target.demand_count,
         "cache_age_hours": target.cache_age_hours,
-        "max_duration_seconds": _address_budget_seconds(ctx),
+        "max_platform_duration_seconds": _platform_budget_seconds(ctx),
     }
     await _persist_job_context(job_id, ctx)
 
@@ -272,38 +281,23 @@ async def _process_target(
         platforms_completed: list[str] = []
         platforms_failed: list[str] = []
         total_scraped = 0
-        budget_seconds = _address_budget_seconds(ctx)
-        address_started_at = asyncio.get_running_loop().time()
+        budget_seconds = _platform_budget_seconds(ctx)
         budget_exhausted = False
         try:
             for platform in target.platforms:
                 await check_cancellation(job_id)
-                remaining_seconds = budget_seconds - (
-                    asyncio.get_running_loop().time() - address_started_at
-                )
-                if remaining_seconds <= 0:
-                    budget_exhausted = True
-                    await publish_job_event(
-                        job_id,
-                        "prewarm.address.timeout",
-                        stage=stage,
-                        message=(
-                            f"Prewarm address budget exhausted before starting {platform}"
-                        ),
-                        payload_json={
-                            "platform": platform,
-                            "search_location_normalized": search_location_normalized,
-                            "budget_seconds": budget_seconds,
-                        },
-                    )
-                    break
                 scraper = platform_sessions[(platform, target.search_type)]
                 try:
                     listings = await asyncio.wait_for(
                         scraper.scrape_in_session(target.search_location_label),
-                        timeout=max(remaining_seconds, 1.0),
+                        timeout=budget_seconds,
                     )
-                    total_scraped += await _persist_listings(listings, platform, target.search_type)
+                    total_scraped += await _persist_listings(
+                        listings,
+                        platform,
+                        target.search_type,
+                        search_location_normalized,
+                    )
                     platforms_completed.append(platform)
                 except asyncio.TimeoutError:
                     budget_exhausted = True
@@ -312,14 +306,15 @@ async def _process_target(
                         job_id,
                         "prewarm.address.timeout",
                         stage=stage,
-                        message=f"Prewarm address budget exhausted while scraping {platform}",
+                        message=f"Prewarm platform budget exhausted while scraping {platform}",
                         payload_json={
                             "platform": platform,
                             "search_location_normalized": search_location_normalized,
                             "budget_seconds": budget_seconds,
+                            "budget_scope": "platform",
                         },
                     )
-                    break
+                    continue
                 except ScraperDisallowedError as exc:
                     platforms_failed.append(platform)
                     await _record_degradation_event(platform, "degraded", "robots_disallowed", 1.0)
