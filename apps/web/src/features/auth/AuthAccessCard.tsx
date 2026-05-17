@@ -1,4 +1,4 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, LogIn, LogOut, CreditCard, User } from "lucide-react";
 import { useAuth } from "./AuthContext";
 import { PlanosPage } from "../billing/PlanosPage";
@@ -98,7 +98,6 @@ function GoogleIcon() {
 
 export function AuthAccessCard() {
   const {
-    authModalMode,
     authStatus,
     closeAuthModal,
     errorMessage,
@@ -106,19 +105,11 @@ export function AuthAccessCard() {
     isLoading,
     isSubmitting,
     clearError,
-    login,
     loginWithGoogle,
     logout,
-    modeLabel,
     openAuthModal,
-    register,
   } = useAuth();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [passwordConfirmation, setPasswordConfirmation] = useState("");
-  const [displayName, setDisplayName] = useState("");
   const [googleNotice, setGoogleNotice] = useState<string | null>(null);
-  const [formNotice, setFormNotice] = useState<string | null>(null);
   const [showPlanos, setShowPlanos] = useState(false);
   const [showConta, setShowConta] = useState(false);
   const googleButtonRef = useRef<HTMLDivElement | null>(null);
@@ -132,47 +123,7 @@ export function AuthAccessCard() {
     }
     clearError();
     setGoogleNotice(null);
-    setFormNotice(null);
     closeAuthModal();
-  };
-
-  const resetForm = () => {
-    setEmail("");
-    setPassword("");
-    setPasswordConfirmation("");
-    setDisplayName("");
-    setFormNotice(null);
-  };
-
-  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const normalizedEmail = email.trim();
-    const normalizedPassword = password.trim();
-    if (!normalizedEmail || !normalizedPassword) {
-      return;
-    }
-    setFormNotice(null);
-
-    if (authModalMode === "register") {
-      const normalizedConfirmation = passwordConfirmation.trim();
-      if (!normalizedConfirmation) {
-        setFormNotice("Repita a senha para concluir o cadastro.");
-        return;
-      }
-      if (normalizedPassword !== normalizedConfirmation) {
-        setFormNotice("As senhas informadas não coincidem.");
-        return;
-      }
-    }
-
-    const success = authModalMode === "login"
-      ? await login({ email: normalizedEmail, password: normalizedPassword })
-      : await register({ email: normalizedEmail, password: normalizedPassword, displayName });
-
-    if (success) {
-      resetForm();
-      closeAuthModal();
-    }
   };
 
   useEffect(() => {
@@ -193,7 +144,6 @@ export function AuthAccessCard() {
           callback: (response) => {
             void (async () => {
               clearError();
-              setFormNotice(null);
               setGoogleNotice(null);
               if (!response.credential) {
                 setGoogleNotice("O Google não retornou uma credencial válida.");
@@ -201,7 +151,6 @@ export function AuthAccessCard() {
               }
               const success = await loginWithGoogle({ credential: response.credential });
               if (success) {
-                resetForm();
                 closeAuthModal();
               }
             })();
@@ -228,11 +177,10 @@ export function AuthAccessCard() {
     return () => {
       isMounted = false;
     };
-  }, [authStatus.is_authenticated, clearError, isAuthModalOpen, loginWithGoogle]);
+  }, [authStatus.is_authenticated, clearError, closeAuthModal, isAuthModalOpen, loginWithGoogle]);
 
   const handleGoogleLogin = () => {
     clearError();
-    setFormNotice(null);
     if (!GOOGLE_CLIENT_ID) {
       setGoogleNotice("Login com Google ainda depende da configuração OAuth deste ambiente.");
       return;
@@ -301,8 +249,7 @@ export function AuthAccessCard() {
                 className="pointer-events-auto inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/80 bg-white/95 text-slate-600 shadow-md backdrop-blur-md transition hover:-translate-y-0.5 hover:text-pastel-violet-700 disabled:cursor-not-allowed disabled:opacity-60"
                 onClick={() => {
                   setGoogleNotice(null);
-                  setFormNotice(null);
-                  openAuthModal("login");
+                  openAuthModal();
                 }}
                 disabled={isLoading}
               >
@@ -318,15 +265,13 @@ export function AuthAccessCard() {
 
       {isAuthModalOpen ? (
         <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/35 px-4 py-8 backdrop-blur-sm">
-          <div className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+          <div className="w-full max-w-sm overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
             <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
               <div className="min-w-0">
                 <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Conta</p>
-                <h2 className="mt-2 text-lg font-semibold tracking-tight text-slate-900">{authModalMode === "login" ? "Entrar para salvar a jornada" : "Criar conta"}</h2>
+                <h2 className="mt-2 text-lg font-semibold tracking-tight text-slate-900">Entrar para salvar a jornada</h2>
                 <p className="mt-1 text-sm leading-relaxed text-slate-500">
-                  {authModalMode === "login"
-                    ? "Acesse sua conta para continuar de onde parou."
-                    : "Crie sua conta sem perder a jornada iniciada nesta sessão."}
+                  Acesse sua conta para continuar de onde parou.
                 </p>
               </div>
               <button type="button" className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-500 transition hover:border-slate-300 hover:text-slate-700" onClick={closeModal}>
@@ -334,7 +279,7 @@ export function AuthAccessCard() {
               </button>
             </div>
 
-            <form className="grid gap-4 px-6 py-5" onSubmit={(event) => void handleSubmit(event)}>
+            <div className="grid gap-4 px-6 py-6">
               {GOOGLE_CLIENT_ID ? (
                 <div className="flex min-h-11 justify-center" ref={googleButtonRef} />
               ) : (
@@ -348,69 +293,9 @@ export function AuthAccessCard() {
                 </button>
               )}
 
-              <div className="gem-divider" />
-
-              {authModalMode === "register" ? (
-                <label className="grid gap-2 text-sm font-semibold text-slate-700">
-                  Nome exibido
-                  <input
-                    className="gem-input"
-                    value={displayName}
-                    onChange={(event) => setDisplayName(event.target.value)}
-                    placeholder="Como quer aparecer"
-                  />
-                </label>
-              ) : null}
-
-              <label className="grid gap-2 text-sm font-semibold text-slate-700">
-                E-mail
-                <input
-                  className="gem-input"
-                  type="email"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  placeholder="voce@exemplo.com"
-                  required
-                />
-              </label>
-
-              <label className="grid gap-2 text-sm font-semibold text-slate-700">
-                Senha
-                <input
-                  className="gem-input"
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  placeholder="Use pelo menos 8 caracteres"
-                  minLength={8}
-                  required
-                />
-              </label>
-
-              {authModalMode === "register" ? (
-                <label className="grid gap-2 text-sm font-semibold text-slate-700">
-                  Repita a senha
-                  <input
-                    className="gem-input"
-                    type="password"
-                    value={passwordConfirmation}
-                    onChange={(event) => setPasswordConfirmation(event.target.value)}
-                    placeholder="Digite a senha novamente"
-                    minLength={8}
-                    required
-                  />
-                </label>
-              ) : null}
-
               {googleNotice ? (
                 <p className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-700" role="alert">
                   {googleNotice}
-                </p>
-              ) : null}
-
-              {formNotice ? (
-                <p className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-700" role="alert">
-                  {formNotice}
                 </p>
               ) : null}
 
@@ -419,30 +304,7 @@ export function AuthAccessCard() {
                   {errorMessage}
                 </p>
               ) : null}
-
-              <div className="grid gap-3 pt-1 sm:grid-cols-2">
-                <button
-                  type="submit"
-                  className="gem-primary-button disabled:cursor-not-allowed disabled:opacity-60"
-                  disabled={isSubmitting}
-                >
-                  {isSubmitting ? "Processando..." : modeLabel(authModalMode)}
-                </button>
-                <button
-                  type="button"
-                  className="gem-secondary-button disabled:cursor-not-allowed disabled:opacity-60"
-                  onClick={() => {
-                    clearError();
-                    setGoogleNotice(null);
-                    setFormNotice(null);
-                    openAuthModal(authModalMode === "login" ? "register" : "login");
-                  }}
-                  disabled={isSubmitting}
-                >
-                  {authModalMode === "login" ? "Quero criar conta" : "Já tenho conta"}
-                </button>
-              </div>
-            </form>
+            </div>
 
             {authStatus.is_authenticated ? (
               <div className="border-t border-slate-200 bg-slate-50 px-6 py-4 text-xs text-slate-500">

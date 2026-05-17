@@ -37,7 +37,7 @@ export function PlanosPage({ onClose }: { onClose: () => void }) {
 
   const handlePlanClick = async (plan: PlanRead) => {
     if (!authStatus.is_authenticated) {
-      openAuthModal("register");
+      openAuthModal();
       return;
     }
 

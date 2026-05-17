@@ -1179,7 +1179,7 @@ export function Step6Analysis() {
                               return;
                             }
                             if (!authStatus.is_authenticated) {
-                              openAuthModal("login");
+                              openAuthModal();
                               return;
                             }
                             const nextWillBeSaved = !isSavedFavorite;

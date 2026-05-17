@@ -5,25 +5,58 @@ services:
   api:
     restart: unless-stopped
     command: ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+    depends_on: !reset []
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Defina DATABASE_URL apontando para o RDS}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-5}
+      DB_POOL_TIMEOUT_SECONDS: ${DB_POOL_TIMEOUT_SECONDS:-30}
+      REDIS_URL: ${REDIS_URL:?Defina REDIS_URL apontando para o ElastiCache}
     volumes: []
 
   worker:
-    profiles: []
+    profiles: !reset []
     restart: unless-stopped
+    depends_on: !reset []
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Defina DATABASE_URL apontando para o RDS}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-5}
+      DB_POOL_TIMEOUT_SECONDS: ${DB_POOL_TIMEOUT_SECONDS:-30}
+      REDIS_URL: ${REDIS_URL:?Defina REDIS_URL apontando para o ElastiCache}
     volumes: []
 
   worker-scrape-browser:
     restart: unless-stopped
+    depends_on: !reset []
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Defina DATABASE_URL apontando para o RDS}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-5}
+      DB_POOL_TIMEOUT_SECONDS: ${DB_POOL_TIMEOUT_SECONDS:-30}
+      REDIS_URL: ${REDIS_URL:?Defina REDIS_URL apontando para o ElastiCache}
     volumes: []
 
   worker-prewarm:
     restart: unless-stopped
+    depends_on: !reset []
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Defina DATABASE_URL apontando para o RDS}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-5}
+      DB_POOL_TIMEOUT_SECONDS: ${DB_POOL_TIMEOUT_SECONDS:-30}
+      REDIS_URL: ${REDIS_URL:?Defina REDIS_URL apontando para o ElastiCache}
     volumes: []
 
   postgres:
+    profiles: ["local-managed-data"]
     restart: unless-stopped
     ports: []
 
   redis:
+    profiles: ["local-managed-data"]
     restart: unless-stopped
     ports: []
+
+  ui:
+    profiles: ["local-ui"]

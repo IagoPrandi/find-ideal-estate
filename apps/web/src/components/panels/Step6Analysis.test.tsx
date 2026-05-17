@@ -1808,7 +1808,7 @@ describe("Step6Analysis", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /Entre para salvar na sua conta/i }));
 
-    expect(openAuthModal).toHaveBeenCalledWith("login");
+    expect(openAuthModal).toHaveBeenCalledWith();
     expect(saveAccountFavorite).not.toHaveBeenCalled();
   });
 });

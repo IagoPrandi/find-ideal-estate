@@ -1,8 +1,6 @@
 import { createContext, ReactNode, startTransition, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { ApiError, AuthStatusRead, getAuthStatus, loginAuth, loginGoogleAuth, logoutAuth, registerAuth } from "../../api/client";
+import { ApiError, AuthStatusRead, getAuthStatus, loginGoogleAuth, logoutAuth } from "../../api/client";
 import { useFavoritesStore, useZoneFavoritesStore } from "../../state";
-
-type AuthMode = "login" | "register";
 
 type AuthContextValue = {
   authStatus: AuthStatusRead;
@@ -10,16 +8,12 @@ type AuthContextValue = {
   isSubmitting: boolean;
   errorMessage: string | null;
   isAuthModalOpen: boolean;
-  authModalMode: AuthMode;
   refresh: () => Promise<void>;
-  login: (payload: { email: string; password: string }) => Promise<boolean>;
   loginWithGoogle: (payload: { credential: string }) => Promise<boolean>;
-  register: (payload: { email: string; password: string; displayName?: string }) => Promise<boolean>;
   logout: () => Promise<void>;
   clearError: () => void;
-  openAuthModal: (mode?: AuthMode) => void;
+  openAuthModal: () => void;
   closeAuthModal: () => void;
-  modeLabel: (mode: AuthMode) => string;
 };
 
 const GUEST_STATUS: AuthStatusRead = {
@@ -45,7 +39,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
-  const [authModalMode, setAuthModalMode] = useState<AuthMode>("login");
 
   const clearError = useCallback(() => setErrorMessage(null), []);
 
@@ -74,44 +67,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void syncFavoritesWithAuthStatus(authStatus);
     void syncZoneFavoritesWithAuthStatus(authStatus);
   }, [authStatus, syncFavoritesWithAuthStatus, syncZoneFavoritesWithAuthStatus]);
-
-  const login = useCallback(async (payload: { email: string; password: string }) => {
-    setIsSubmitting(true);
-    try {
-      const next = await loginAuth(payload);
-      startTransition(() => {
-        setAuthStatus(next);
-        setErrorMessage(null);
-      });
-      return true;
-    } catch (error) {
-      setErrorMessage(toMessage(error));
-      return false;
-    } finally {
-      setIsSubmitting(false);
-    }
-  }, []);
-
-  const register = useCallback(async (payload: { email: string; password: string; displayName?: string }) => {
-    setIsSubmitting(true);
-    try {
-      const next = await registerAuth({
-        email: payload.email,
-        password: payload.password,
-        display_name: payload.displayName?.trim() || undefined
-      });
-      startTransition(() => {
-        setAuthStatus(next);
-        setErrorMessage(null);
-      });
-      return true;
-    } catch (error) {
-      setErrorMessage(toMessage(error));
-      return false;
-    } finally {
-      setIsSubmitting(false);
-    }
-  }, []);
 
   const loginWithGoogle = useCallback(async (payload: { credential: string }) => {
     setIsSubmitting(true);
@@ -145,9 +100,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const openAuthModal = useCallback((mode: AuthMode = "login") => {
+  const openAuthModal = useCallback(() => {
     clearError();
-    setAuthModalMode(mode);
     setIsAuthModalOpen(true);
   }, [clearError]);
 
@@ -161,17 +115,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isSubmitting,
     errorMessage,
     isAuthModalOpen,
-    authModalMode,
     refresh,
-    login,
     loginWithGoogle,
-    register,
     logout,
     clearError,
     openAuthModal,
     closeAuthModal,
-    modeLabel: (mode) => (mode === "login" ? "Entrar" : "Criar conta")
-  }), [authModalMode, authStatus, clearError, closeAuthModal, errorMessage, isAuthModalOpen, isLoading, isSubmitting, login, loginWithGoogle, logout, openAuthModal, refresh, register]);
+  }), [authStatus, clearError, closeAuthModal, errorMessage, isAuthModalOpen, isLoading, isSubmitting, loginWithGoogle, logout, openAuthModal, refresh]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
