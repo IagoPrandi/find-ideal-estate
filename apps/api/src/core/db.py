@@ -1,3 +1,5 @@
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
@@ -6,12 +8,20 @@ _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 
 
 def _normalize_database_url(database_url: str) -> str:
+    def _normalize_asyncpg_query(url: str) -> str:
+        parts = urlsplit(url)
+        query_items = parse_qsl(parts.query, keep_blank_values=True)
+        normalized_items: list[tuple[str, str]] = []
+        for key, value in query_items:
+            normalized_items.append(("ssl" if key == "sslmode" else key, value))
+        return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(normalized_items), parts.fragment))
+
     if database_url.startswith("postgresql+asyncpg://"):
-        return database_url
+        return _normalize_asyncpg_query(database_url)
     if database_url.startswith("postgresql://"):
-        return database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return _normalize_asyncpg_query(database_url.replace("postgresql://", "postgresql+asyncpg://", 1))
     if database_url.startswith("postgres://"):
-        return database_url.replace("postgres://", "postgresql+asyncpg://", 1)
+        return _normalize_asyncpg_query(database_url.replace("postgres://", "postgresql+asyncpg://", 1))
     return database_url
 
 

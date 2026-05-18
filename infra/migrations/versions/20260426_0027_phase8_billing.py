@@ -212,14 +212,14 @@ def upgrade() -> None:
         )
         SELECT
             p.id,
-            e.max_listing_favorites, e.max_zone_favorites, e.retention_days,
-            e.can_customize_radius, e.can_customize_max_time, e.can_customize_distance,
-            e.max_active_metrics,
+            e.max_listing_favorites::INT, e.max_zone_favorites::INT, e.retention_days::INT,
+            e.can_customize_radius::BOOLEAN, e.can_customize_max_time::BOOLEAN, e.can_customize_distance::BOOLEAN,
+            e.max_active_metrics::INT,
             e.transport_line_policy, e.zone_selection_policy,
             e.auto_refresh_policy,
-            e.pro_max_refresh_max_zones, e.pro_max_refresh_max_listings,
-            e.pro_max_refresh_cadence_days, e.pro_max_refresh_eligibility_days,
-            e.rollover_percent, e.rollover_cycles, e.cycle_length_days
+            e.pro_max_refresh_max_zones::INT, e.pro_max_refresh_max_listings::INT,
+            e.pro_max_refresh_cadence_days::INT, e.pro_max_refresh_eligibility_days::INT,
+            e.rollover_percent::INT, e.rollover_cycles::INT, e.cycle_length_days::INT
         FROM plans p
         JOIN (VALUES
             ('anonymous', 0,   0,  7, true,  false, false, 4,    'locked_default', 'restricted', 'none', NULL, NULL, NULL, NULL, 0,  0, 30),

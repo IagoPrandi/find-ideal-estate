@@ -5,6 +5,8 @@ services:
   api:
     restart: unless-stopped
     command: ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+    ports: !override
+      - "127.0.0.1:8000:8000"
     depends_on: !override
       redis:
         condition: service_healthy
@@ -59,11 +61,11 @@ services:
   postgres:
     profiles: ["local-managed-data"]
     restart: unless-stopped
-    ports: []
+    ports: !reset []
 
   redis:
     restart: unless-stopped
-    ports: []
+    ports: !reset []
 
   ui:
     profiles: ["local-ui"]
