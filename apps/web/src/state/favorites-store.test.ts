@@ -50,6 +50,7 @@ describe("favorites-store", () => {
         email: "ana@example.com",
         display_name: "Ana",
         is_active: true,
+        is_superuser: false,
         created_at: "2026-04-12T10:00:00Z",
         role: "user",
       },

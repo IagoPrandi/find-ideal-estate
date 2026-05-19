@@ -6042,6 +6042,33 @@
 - Progress Tracker:
   - Nenhuma milestone foi marcada como concluída; política de confirmação explícita preservada.
 
+## 2026-05-19 - Painel desenvolvedor de scraping
+
+- Required docs opened:
+  - `AGENTS.md`
+  - `PRD.md`
+  - `SKILLS_README.md`
+- Skill used:
+  - `skills/security-threat-checklist/SKILL.md`
+
+- Scope executed (delta):
+  - Adicionado painel SPA em `#/admin/scraping`, acessível apenas para `users.is_superuser=true`.
+  - Criados endpoints `/admin/scraping/*` para visão geral, fila, bateladas, execução imediata e cancelamento.
+  - Criados endpoints `/admin/users/*` para listar usuários e alterar `role` somente entre `user` e `proprietario`.
+  - `AuthUserRead` passou a expor `is_superuser` para habilitar o atalho administrativo no frontend.
+  - Prewarm de listings passou a registrar status por endereço em `jobs.result_ref.target_statuses`.
+
+- Verification executed:
+  - `.\\.venv\\Scripts\\python -m pytest apps/api/tests/test_admin_scraping.py apps/api/tests/test_phase7_prewarm.py -q` -> `13 passed`.
+  - `.\\.venv\\Scripts\\python -m pytest apps/api/tests -q` -> falhou durante coleta por registro duplicado de actor Dramatiq preexistente (`enrich_zones_actor`).
+  - `npm run test:run -- src/features/admin/ScrapingAdminPage.test.tsx src/features/auth/AuthAccessCard.test.tsx` -> `5 passed`.
+  - `npm run build` -> passou; Vite alertou apenas sobre tamanho de chunk e import misto estático/dinâmico já existente.
+  - `npm run typecheck` -> falhou em erros TypeScript preexistentes fora do painel novo (`FavoritesPanel`, `Step2Transport`, `FindIdealApp.test`, `journey-store.test`, re-export em `lib/api/index.ts`).
+  - `npm run test:run` -> falhou em testes preexistentes fora do painel novo (`journey-store`, `Step1Config`, `ProgressTracker`, `FindIdealApp`).
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluída; política de confirmação explícita preservada.
+
 ## 2026-04-15 - Fase 5 scraping headful: reuso do DISPLAY existente
 
 - Required docs opened:

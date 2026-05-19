@@ -1,6 +1,19 @@
 """Shared contracts package for inter-module DTOs."""
 
 from .auth import AuthGoogleLoginRequest, AuthLoginRequest, AuthRegisterRequest, AuthStatusRead, AuthUserRead
+from .admin import (
+    AdminRunNowResponse,
+    AdminScrapingBatchRead,
+    AdminScrapingBatchesRead,
+    AdminScrapingOverviewRead,
+    AdminScrapingQueueAddRequest,
+    AdminScrapingQueueItemRead,
+    AdminScrapingQueueMutationRead,
+    AdminScrapingQueueRead,
+    AdminUserRead,
+    AdminUserRoleUpdateRequest,
+    AdminUsersRead,
+)
 from .billing import (
     AccountCreditsRead,
     AccountPlanRead,
@@ -70,6 +83,17 @@ __version__ = "0.1.0"
 __all__ = [
     "AccountCreditsRead",
     "AccountPlanRead",
+    "AdminRunNowResponse",
+    "AdminScrapingBatchRead",
+    "AdminScrapingBatchesRead",
+    "AdminScrapingOverviewRead",
+    "AdminScrapingQueueAddRequest",
+    "AdminScrapingQueueItemRead",
+    "AdminScrapingQueueMutationRead",
+    "AdminScrapingQueueRead",
+    "AdminUserRead",
+    "AdminUserRoleUpdateRequest",
+    "AdminUsersRead",
     "AuthLoginRequest",
     "AuthGoogleLoginRequest",
     "AuthRegisterRequest",

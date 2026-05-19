@@ -3,6 +3,8 @@ from contextlib import asynccontextmanager
 
 from api.routes.account import router as account_router
 from api.routes.admin_billing import router as admin_billing_router
+from api.routes.admin_scraping import router as admin_scraping_router
+from api.routes.admin_users import router as admin_users_router
 from api.routes.auth import router as auth_router
 from api.routes.billing import router as billing_router
 from api.routes.favorites import router as favorites_router
@@ -93,6 +95,8 @@ app.include_router(auth_router)
 app.include_router(account_router)
 app.include_router(billing_router)
 app.include_router(admin_billing_router)
+app.include_router(admin_scraping_router)
+app.include_router(admin_users_router)
 app.include_router(favorites_router)
 app.include_router(zone_favorites_router)
 app.include_router(internal_router)
