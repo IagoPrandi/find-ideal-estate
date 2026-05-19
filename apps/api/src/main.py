@@ -75,7 +75,10 @@ _cors_origins = [
     "http://127.0.0.1:4173",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "https://betterplace.com.br",
+    "https://www.betterplace.com.br",
 ]
+
 
 app.add_middleware(
     CORSMiddleware,
