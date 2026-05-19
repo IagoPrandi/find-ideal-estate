@@ -1,4 +1,4 @@
-# Imóvel Ideal — Documentação Técnica Completa
+# betterplace — Documentação Técnica Completa
 
 **Versão do documento:** 1.1  
 **Data:** 2026-03-06  
@@ -34,7 +34,7 @@
 
 ## 1. Visão Geral
 
-**Imóvel Ideal** é um MVP local para busca de imóveis em São Paulo com enrichment geoespacial. O sistema permite que o usuário:
+**betterplace** é um MVP local para busca de imóveis em São Paulo com enrichment geoespacial. O sistema permite que o usuário:
 
 1. Marque **pontos de referência** no mapa (trabalho, faculdade, metrô etc.).
 2. Receba **zonas candidatas** de moradia alcançáveis por ônibus (GTFS) e/ou trilhos (GeoSampa), dentro de um tempo máximo de deslocamento configurável.
