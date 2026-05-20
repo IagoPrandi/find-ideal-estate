@@ -26,6 +26,7 @@ class AuthUserRead(BaseModel):
     email: str
     display_name: str | None = None
     is_active: bool
+    is_superuser: bool = False
     created_at: datetime
     role: str = "user"
 

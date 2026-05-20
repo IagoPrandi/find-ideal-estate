@@ -4,6 +4,14 @@ import {
   AccountCreditsReadSchema,
   AccountPlanRead,
   AccountPlanReadSchema,
+  AdminQueueMutationSchema,
+  AdminRunNowResponseSchema,
+  AdminScrapingBatchSchema,
+  AdminScrapingBatchesSchema,
+  AdminScrapingOverviewSchema,
+  AdminScrapingQueueSchema,
+  AdminUserSchema,
+  AdminUsersSchema,
   AuthStatusReadSchema,
   FavoriteListingBackendSchema,
   FinalListingsJson,
@@ -99,6 +107,13 @@ export class EntitlementError extends ApiError {
 }
 
 export type AuthStatusRead = z.output<typeof AuthStatusReadSchema>;
+export type AdminScrapingOverview = z.output<typeof AdminScrapingOverviewSchema>;
+export type AdminScrapingQueue = z.output<typeof AdminScrapingQueueSchema>;
+export type AdminScrapingBatch = z.output<typeof AdminScrapingBatchSchema>;
+export type AdminScrapingBatches = z.output<typeof AdminScrapingBatchesSchema>;
+export type AdminRunNowResponse = z.output<typeof AdminRunNowResponseSchema>;
+export type AdminUser = z.output<typeof AdminUserSchema>;
+export type AdminUsers = z.output<typeof AdminUsersSchema>;
 export type FavoriteListingEntry = {
   listingKey: string;
   journeyId: string;
@@ -995,5 +1010,79 @@ export async function activateProprietarioPlan(planSlug: string): Promise<Accoun
   return requestJson(`/admin/billing/plans/${encodeURIComponent(planSlug)}/activate`, AccountPlanReadSchema, {
     method: "POST",
   });
+}
+
+// Admin scraping
+export async function getAdminScrapingOverview(): Promise<AdminScrapingOverview> {
+  return (await requestJson("/admin/scraping/overview", AdminScrapingOverviewSchema)) as AdminScrapingOverview;
+}
+
+export async function getAdminScrapingQueue(): Promise<AdminScrapingQueue> {
+  return (await requestJson("/admin/scraping/queue", AdminScrapingQueueSchema)) as AdminScrapingQueue;
+}
+
+export async function addAdminScrapingQueueAddresses(payload: {
+  addresses: string[];
+  search_type?: string;
+  usage_type?: string;
+  search_location_type?: string;
+}): Promise<z.output<typeof AdminQueueMutationSchema>> {
+  return requestJson("/admin/scraping/queue", AdminQueueMutationSchema, {
+    method: "POST",
+    body: {
+      addresses: payload.addresses,
+      search_type: payload.search_type ?? "rent",
+      usage_type: payload.usage_type ?? "residential",
+      search_location_type: payload.search_location_type ?? "address",
+    },
+  });
+}
+
+export async function removeAdminScrapingQueueAddress(normalized: string): Promise<z.output<typeof AdminQueueMutationSchema>> {
+  return requestJson(`/admin/scraping/queue/${encodeURIComponent(normalized)}`, AdminQueueMutationSchema, {
+    method: "DELETE",
+  });
+}
+
+export async function getAdminScrapingBatches(): Promise<AdminScrapingBatches> {
+  return (await requestJson("/admin/scraping/batches", AdminScrapingBatchesSchema)) as AdminScrapingBatches;
+}
+
+export async function getAdminScrapingBatch(jobId: string): Promise<AdminScrapingBatch> {
+  return (await requestJson(`/admin/scraping/batches/${encodeURIComponent(jobId)}`, AdminScrapingBatchSchema)) as AdminScrapingBatch;
+}
+
+export async function runAdminScrapingNow(): Promise<AdminRunNowResponse> {
+  return (await requestJson("/admin/scraping/batches/run-now", AdminRunNowResponseSchema, {
+    method: "POST",
+  })) as AdminRunNowResponse;
+}
+
+export async function cancelAdminScrapingBatch(jobId: string): Promise<JobCancelAccepted> {
+  return requestJson(`/admin/scraping/batches/${encodeURIComponent(jobId)}/cancel`, z.object({
+    job_id: z.string(),
+    status: z.string(),
+    cancel_requested_at: z.string(),
+  }), {
+    method: "POST",
+  });
+}
+
+type JobCancelAccepted = {
+  job_id: string;
+  status: string;
+  cancel_requested_at: string;
+};
+
+export async function getAdminUsers(q = ""): Promise<AdminUsers> {
+  const params = q.trim() ? `?q=${encodeURIComponent(q.trim())}` : "";
+  return (await requestJson(`/admin/users${params}`, AdminUsersSchema)) as AdminUsers;
+}
+
+export async function updateAdminUserRole(userId: string, role: "user" | "proprietario"): Promise<AdminUser> {
+  return (await requestJson(`/admin/users/${encodeURIComponent(userId)}/role`, AdminUserSchema, {
+    method: "PATCH",
+    body: { role },
+  })) as AdminUser;
 }
 

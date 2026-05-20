@@ -5,6 +5,7 @@ export const AuthUserReadSchema = z.object({
   email: z.string().email(),
   display_name: z.string().nullable().optional(),
   is_active: z.boolean(),
+  is_superuser: z.boolean().optional().default(false),
   created_at: z.string(),
   role: z.string().optional().default("user"),
 });
@@ -582,6 +583,89 @@ export const JobReadSchema = z.object({
   error_code: z.string().nullish(),
   error_message: z.string().nullish(),
   created_at: z.string()
+});
+
+export const AdminScrapingQueueItemSchema = z.object({
+  search_location_normalized: z.string(),
+  search_location_label: z.string(),
+  search_location_type: z.string(),
+  search_type: z.string(),
+  usage_type: z.string(),
+  demand_count: z.number(),
+  last_requested_at: z.string().nullable().optional(),
+  zone_fingerprint: z.string().nullable().optional(),
+  cache_status: z.string().nullable().optional(),
+  cache_age_hours: z.number().nullable().optional(),
+  last_prewarmed_at: z.string().nullable().optional(),
+  scraped_at: z.string().nullable().optional(),
+});
+
+export const AdminScrapingQueueSchema = z.object({
+  items: z.array(AdminScrapingQueueItemSchema),
+  total_count: z.number(),
+  limit: z.number(),
+  lookback_hours: z.number(),
+});
+
+export const AdminScrapingOverviewSchema = z.object({
+  scheduler_enabled: z.boolean(),
+  cron_hour: z.number(),
+  cron_minute: z.number(),
+  timezone: z.string(),
+  next_run_at: z.string().nullable().optional(),
+  seconds_until_next_run: z.number().nullable().optional(),
+  lookback_hours: z.number(),
+  limit: z.number(),
+  active_job: JobReadSchema.nullable().optional(),
+  latest_job: JobReadSchema.nullable().optional(),
+  queue_count: z.number(),
+});
+
+export const AdminScrapingBatchSchema = z.object({
+  job: JobReadSchema,
+  trigger: z.string().nullable().optional(),
+  status: z.string().nullable().optional(),
+  target_count: z.number(),
+  processed_count: z.number(),
+  skipped_count: z.number(),
+  failed_count: z.number(),
+  duration_ms: z.number().nullable().optional(),
+  target_statuses: z.record(z.any()).default({}),
+});
+
+export const AdminScrapingBatchesSchema = z.object({
+  items: z.array(AdminScrapingBatchSchema),
+  total_count: z.number(),
+  limit: z.number(),
+  offset: z.number(),
+});
+
+export const AdminRunNowResponseSchema = z.object({
+  job: JobReadSchema,
+  target_count: z.number(),
+  status: z.string(),
+});
+
+export const AdminQueueMutationSchema = z.object({
+  status: z.string(),
+  affected_count: z.number(),
+});
+
+export const AdminUserSchema = z.object({
+  id: z.string(),
+  email: z.string(),
+  display_name: z.string().nullable().optional(),
+  is_active: z.boolean(),
+  is_superuser: z.boolean(),
+  role: z.string(),
+  created_at: z.string(),
+});
+
+export const AdminUsersSchema = z.object({
+  items: z.array(AdminUserSchema),
+  total_count: z.number(),
+  limit: z.number(),
+  offset: z.number(),
 });
 
 export type RunCreateResponse = {

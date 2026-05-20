@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Loader2, LogIn, LogOut, CreditCard, User } from "lucide-react";
+import { Loader2, LogIn, LogOut, CreditCard, User, ShieldCheck } from "lucide-react";
 import { useAuth } from "./AuthContext";
 import { PlanosPage } from "../billing/PlanosPage";
 import { ContaPage } from "../billing/ContaPage";
@@ -209,6 +209,17 @@ export function AuthAccessCard() {
               >
                 <CreditCard className="h-4 w-4" />
               </button>
+              {authStatus.user?.is_superuser ? (
+                <button
+                  type="button"
+                  aria-label="Painel admin"
+                  title="Painel admin"
+                  className="pointer-events-auto inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/80 bg-white/95 text-slate-600 shadow-md backdrop-blur-md transition hover:-translate-y-0.5 hover:text-pastel-violet-700"
+                  onClick={() => { window.location.hash = "#/admin"; }}
+                >
+                  <ShieldCheck className="h-4 w-4" />
+                </button>
+              ) : null}
               <button
                 type="button"
                 aria-label="Minha conta"

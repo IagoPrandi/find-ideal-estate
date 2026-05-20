@@ -56,6 +56,50 @@ def test_build_prewarm_targets_deduplicates_same_normalized_address(monkeypatch)
     assert targets[0].search_location_normalized == "rua guaipa vila leopoldina sao paulo sp"
 
 
+def test_set_target_status_records_duration_and_counts(monkeypatch) -> None:
+    job_id = uuid4()
+    persisted: list[dict[str, object]] = []
+
+    async def _fake_persist_job_context(_job_id, ctx):
+        assert _job_id == job_id
+        persisted.append(dict(ctx))
+
+    monkeypatch.setattr(prewarm_handler, "_persist_job_context", _fake_persist_job_context)
+
+    target = prewarm_handler.PrewarmTarget(
+        search_location_normalized="rua teste",
+        search_location_label="Rua Teste",
+        search_location_type="address",
+        search_type="rent",
+        usage_type="residential",
+        zone_fingerprint=None,
+        platforms=("quintoandar",),
+        demand_count=2,
+        cache_age_hours=10.0,
+    )
+    ctx: dict[str, object] = {}
+
+    asyncio.run(prewarm_handler._set_target_status(job_id, ctx, target, "running"))
+    asyncio.run(
+        prewarm_handler._set_target_status(
+            job_id,
+            ctx,
+            target,
+            "completed",
+            total_count=12,
+            platforms_completed=["quintoandar"],
+        )
+    )
+
+    statuses = ctx["target_statuses"]
+    assert isinstance(statuses, dict)
+    status = statuses["rent:residential:rua teste"]
+    assert status["status"] == "completed"
+    assert status["total_count"] == 12
+    assert status["duration_ms"] >= 0
+    assert len(persisted) == 2
+
+
 def test_listings_prewarm_step_reuses_single_session_per_platform(monkeypatch) -> None:
     job_id = uuid4()
     start_calls: list[str] = []

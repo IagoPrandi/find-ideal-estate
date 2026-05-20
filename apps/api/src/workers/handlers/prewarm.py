@@ -60,6 +60,63 @@ def _isoformat(value: datetime | None = None) -> str:
     return (value or _utcnow()).isoformat()
 
 
+def _target_key(target: PrewarmTarget) -> str:
+    return f"{target.search_type}:{target.usage_type}:{target.search_location_normalized}"
+
+
+def _duration_ms(started_at_iso: object, finished_at_iso: str) -> int | None:
+    if not isinstance(started_at_iso, str):
+        return None
+    try:
+        started_at = datetime.fromisoformat(started_at_iso.replace("Z", "+00:00"))
+        finished_at = datetime.fromisoformat(finished_at_iso.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return max(0, int((finished_at - started_at).total_seconds() * 1000))
+
+
+def _ensure_target_statuses(ctx: dict[str, object]) -> dict[str, Any]:
+    statuses = ctx.get("target_statuses")
+    if not isinstance(statuses, dict):
+        statuses = {}
+        ctx["target_statuses"] = statuses
+    return statuses
+
+
+async def _set_target_status(
+    job_id: UUID,
+    ctx: dict[str, object],
+    target: PrewarmTarget,
+    status: str,
+    **extra: Any,
+) -> None:
+    statuses = _ensure_target_statuses(ctx)
+    key = _target_key(target)
+    current = statuses.get(key) if isinstance(statuses.get(key), dict) else {}
+    now = _isoformat()
+    next_status = {
+        **current,
+        "status": status,
+        "search_location_normalized": target.search_location_normalized,
+        "search_location_label": target.search_location_label,
+        "search_type": target.search_type,
+        "usage_type": target.usage_type,
+        "demand_count": target.demand_count,
+        "platforms": list(target.platforms),
+        "updated_at": now,
+        **extra,
+    }
+    if status == "running" and "started_at" not in next_status:
+        next_status["started_at"] = now
+    if status in {"completed", "partial", "failed", "skipped"}:
+        next_status["finished_at"] = now
+        duration = _duration_ms(next_status.get("started_at"), now)
+        if duration is not None:
+            next_status["duration_ms"] = duration
+    statuses[key] = next_status
+    await _persist_job_context(job_id, ctx)
+
+
 def _prewarm_zone_fingerprint(target: PrewarmTarget) -> str:
     if target.zone_fingerprint:
         return target.zone_fingerprint
@@ -250,9 +307,17 @@ async def _process_target(
         "max_platform_duration_seconds": _platform_budget_seconds(ctx),
     }
     await _persist_job_context(job_id, ctx)
+    await _set_target_status(job_id, ctx, target, "running")
 
     async with scraping_lock(search_location_normalized, timeout_seconds=0) as acquired:
         if not acquired:
+            await _set_target_status(
+                job_id,
+                ctx,
+                target,
+                "skipped",
+                reason="scraping_lock_not_acquired",
+            )
             return False
 
         config_hash = compute_config_hash(
@@ -355,6 +420,16 @@ async def _process_target(
                     platforms_failed=platforms_failed,
                     preliminary_count=total_scraped,
                 )
+                await _set_target_status(
+                    job_id,
+                    ctx,
+                    target,
+                    "failed",
+                    platforms_completed=platforms_completed,
+                    platforms_failed=platforms_failed,
+                    total_count=total_scraped,
+                    budget_exhausted=budget_exhausted,
+                )
                 return False
 
             new_status = (
@@ -388,6 +463,17 @@ async def _process_target(
                     "budget_exhausted": budget_exhausted,
                 },
             )
+            await _set_target_status(
+                job_id,
+                ctx,
+                target,
+                "completed" if new_status == ZoneCacheStatus.COMPLETE else "partial",
+                platforms_completed=platforms_completed,
+                platforms_failed=platforms_failed,
+                total_count=total_scraped,
+                cache_status=new_status,
+                budget_exhausted=budget_exhausted,
+            )
             return True
         except asyncio.CancelledError:
             if entered_scraping:
@@ -400,8 +486,18 @@ async def _process_target(
                         platforms_failed=platforms_failed,
                         preliminary_count=total_scraped,
                     )
+            await _set_target_status(
+                job_id,
+                ctx,
+                target,
+                "failed",
+                platforms_completed=platforms_completed,
+                platforms_failed=platforms_failed,
+                total_count=total_scraped,
+                error_type="CancelledError",
+            )
             raise
-        except Exception:
+        except Exception as exc:
             if entered_scraping:
                 with suppress(Exception):
                     await transition_cache_status(
@@ -412,6 +508,17 @@ async def _process_target(
                         platforms_failed=platforms_failed,
                         preliminary_count=total_scraped,
                     )
+            await _set_target_status(
+                job_id,
+                ctx,
+                target,
+                "failed",
+                platforms_completed=platforms_completed,
+                platforms_failed=platforms_failed,
+                total_count=total_scraped,
+                error_type=type(exc).__name__,
+                error_message=str(exc),
+            )
             raise
 
 
@@ -436,6 +543,19 @@ async def _listings_prewarm_step(job_id: UUID) -> None:
     ctx["target_count_24h"] = len(targets)
     ctx["manual_target_count"] = len(manual_targets or [])
     ctx["status"] = "running"
+    ctx["target_statuses"] = {
+        _target_key(target): {
+            "status": "queued",
+            "search_location_normalized": target.search_location_normalized,
+            "search_location_label": target.search_location_label,
+            "search_type": target.search_type,
+            "usage_type": target.usage_type,
+            "demand_count": target.demand_count,
+            "platforms": list(target.platforms),
+            "updated_at": _isoformat(),
+        }
+        for target in targets
+    }
     await _persist_job_context(job_id, ctx)
 
     if not targets:
@@ -480,8 +600,16 @@ async def _listings_prewarm_step(job_id: UUID) -> None:
                     target=target,
                     platform_sessions=platform_sessions,
                 )
-            except Exception:
+            except Exception as exc:
                 failed_count += 1
+                await _set_target_status(
+                    job_id,
+                    ctx,
+                    target,
+                    "failed",
+                    error_type=type(exc).__name__,
+                    error_message=str(exc),
+                )
                 continue
             if processed:
                 processed_count += 1
@@ -504,7 +632,7 @@ async def _listings_prewarm_step(job_id: UUID) -> None:
     ctx["failed_count"] = failed_count
     ctx["coverage_rate"] = coverage_rate
     ctx["finished_at"] = _isoformat()
-    ctx.pop("active_target", None)
+    ctx["active_target"] = None
     await _persist_job_context(job_id, ctx)
 
     await publish_job_event(
