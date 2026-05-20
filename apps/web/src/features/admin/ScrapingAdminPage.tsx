@@ -269,8 +269,8 @@ export function ScrapingAdminPage() {
               <ArrowLeft className="h-4 w-4" />
               Voltar ao mapa
             </button>
-            <h1 className="text-2xl font-extrabold tracking-tight">Painel de scraping</h1>
-            <p className="mt-1 text-sm text-slate-500">Fila, bateladas e permissões operacionais.</p>
+            <h1 className="text-2xl font-extrabold tracking-tight">Painel admin</h1>
+            <p className="mt-1 text-sm text-slate-500">Scraping, fila, bateladas e usuários em um só lugar.</p>
           </div>
           <button
             type="button"

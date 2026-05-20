@@ -6069,6 +6069,29 @@
 - Progress Tracker:
   - Nenhuma milestone foi marcada como concluída; política de confirmação explícita preservada.
 
+## 2026-05-19 - Rota unificada do painel admin
+
+- Required docs opened:
+  - `AGENTS.md`
+  - `PRD.md`
+  - `SKILLS_README.md`
+- Skill used:
+  - `skills/security-threat-checklist/SKILL.md`
+
+- Scope executed (delta):
+  - Frontend atualizado para expor o painel administrativo principal em `#/admin`.
+  - A rota antiga `#/admin/scraping` foi mantida como alias para preservar links existentes.
+  - O atalho de superusuário passou de "Painel de scraping" para "Painel admin".
+  - O título da página agora deixa explícito que scraping, bateladas e usuários estão no mesmo painel.
+
+- Verification executed:
+  - `npm run test:run -- src/features/admin/ScrapingAdminPage.test.tsx src/features/auth/AuthAccessCard.test.tsx` -> `5 passed`.
+  - `GET http://127.0.0.1:5173/#/admin` -> `200`.
+  - Playwright headless local em `http://127.0.0.1:5173/#/admin` confirmou renderização da área admin; sem erros de console.
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluída; política de confirmação explícita preservada.
+
 ## 2026-04-15 - Fase 5 scraping headful: reuso do DISPLAY existente
 
 - Required docs opened:

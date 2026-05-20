@@ -16,12 +16,12 @@ export default function App() {
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
 
-  const isAdminScrapingRoute = hashRoute === "#/admin/scraping";
+  const isAdminRoute = hashRoute === "#/admin" || hashRoute === "#/admin/scraping";
 
   return (
     <QueryClientProvider client={client}>
       <AuthProvider>
-        {isAdminScrapingRoute ? <ScrapingAdminPage /> : <FindIdealApp />}
+        {isAdminRoute ? <ScrapingAdminPage /> : <FindIdealApp />}
       </AuthProvider>
     </QueryClientProvider>
   );

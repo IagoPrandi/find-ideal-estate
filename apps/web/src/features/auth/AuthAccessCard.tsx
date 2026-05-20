@@ -212,10 +212,10 @@ export function AuthAccessCard() {
               {authStatus.user?.is_superuser ? (
                 <button
                   type="button"
-                  aria-label="Painel de scraping"
-                  title="Painel de scraping"
+                  aria-label="Painel admin"
+                  title="Painel admin"
                   className="pointer-events-auto inline-flex h-11 w-11 items-center justify-center rounded-full border border-white/80 bg-white/95 text-slate-600 shadow-md backdrop-blur-md transition hover:-translate-y-0.5 hover:text-pastel-violet-700"
-                  onClick={() => { window.location.hash = "#/admin/scraping"; }}
+                  onClick={() => { window.location.hash = "#/admin"; }}
                 >
                   <ShieldCheck className="h-4 w-4" />
                 </button>
