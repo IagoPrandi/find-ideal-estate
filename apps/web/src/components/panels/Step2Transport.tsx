@@ -117,7 +117,7 @@ export function Step2Transport() {
           }
           setIsLoading(false);
           if (sanitizedItems.length === 0) {
-            setError("Nenhum ponto elegível retornou para a jornada atual.");
+            setError("Nenhum ponto elegível retornou para a jornada atual. Aumente o raio de busca por transporte ou altere o tipo de transporte selecionado");
           } else {
             setError(null);
           }

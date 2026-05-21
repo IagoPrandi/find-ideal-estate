@@ -1,5 +1,7 @@
 # Work Log
 
+- 2026-05-21 (deploy backend analytics de zonas favoritas): `PRD.md`, `SKILLS_README.md` e `skills/release-config-management/SKILL.md` foram abertos antes da execucao. Skill usada: `release-config-management`, pois o escopo foi rollout backend em producao. Alteracao publicada: `apps/api/src/modules/dashboard/analytics.py`, onde `fetch_zone_favorite_analytics` usa `asyncio.gather` para buscar em paralelo as paginas `preco`, `seguranca` e `ambiente`. Validacao local focada: `python -m pytest apps/api/tests/test_phase6_dashboard_analytics.py::test_fetch_zone_favorite_analytics_builds_lightweight_metrics apps/api/tests/test_phase6_dashboard_analytics.py::test_get_zone_favorite_analytics_route_returns_contract -q` passou com `2 passed`; `python -m py_compile apps/api/src/modules/dashboard/analytics.py apps/api/src/api/routes/journeys.py` passou. Limite de validacao: a suite ampla `apps/api/tests/test_phase6_dashboard_analytics.py -q` falhou em 4 testes antigos/adjacentes de `fetch_zone_dashboard_analytics`, funcao nao alterada neste rollout, por expectativas de numero de queries. Deploy: backup do arquivo anterior criado na EC2 em `/home/ubuntu/app_backups/analytics_before_20260521T220505Z.py.bak`; arquivo atualizado copiado para `/opt/app`; imagens `api`, `worker`, `worker-prewarm` e `worker-scrape-browser` reconstruidas e containers recriados. Validacao producao: containers `Up`, API `healthy`; Alembic segue em `20260521_0036 (head)`; `https://api.betterplace.com.br/health` retornou `200 {"status":"ok","db":"ok","redis":"ok"}`; introspeccao dentro do container `api` confirmou `asyncio.gather` em `fetch_zone_favorite_analytics`; logs recentes sem `error/exception/traceback/failed/fatal/no such file`. Nenhuma milestone do PRD foi marcada, pois nao houve confirmacao explicita do responsavel.
+
 - 2026-05-21 (deploy backend producao scraping imediato): `PRD.md`, `SKILLS_README.md` e `skills/release-config-management/SKILL.md` foram abertos antes da execucao. Skill usada: `release-config-management`, pois o escopo foi rollout backend em producao com migration, Docker Compose e RDS. Pre-check local: worktree limpo no commit `9a60bbff7f6058bd0765dd33a8cdcb7542d908b9` (`feat: add user permission for immediate listings scraping`) e teste focado `python -m pytest apps/api/tests/test_admin_scraping.py apps/api/tests/test_phase5_stale_revalidate.py apps/api/tests/test_phase5_scraping_lock.py apps/api/tests/test_phase7_prewarm.py -q` passou com `38 passed`. Deploy: archive Git backend (`apps/api`, `packages/contracts`, `infra`, `docker`, `alembic.ini`, `platforms.yaml`, `requirements.txt`, `docker-compose*.yml`) enviado para a EC2 `18.117.21.132` e extraido em `/opt/app`, preservando `.env`/dados locais. Backup de rollback criado em `/home/ubuntu/app_backups/app_before_backend_20260521T2140Z.tgz`. Containers `api`, `worker`, `worker-prewarm` e `worker-scrape-browser` foram reconstruidos e recriados. Durante o primeiro restart, `docker/entrypoint.sh` entrou com CRLF e causou `exec /app/docker/entrypoint.sh: no such file or directory`; corrigido na EC2 com `sed -i 's/\r$//' docker/entrypoint.sh`, seguido de novo rebuild/recreate. Validacao producao: containers finais `Up`, API `healthy`; Alembic em `20260521_0036 (head)`; `/health` publico retornou `200 {"status":"ok","db":"ok","redis":"ok"}`; RDS confirma coluna `users.can_start_immediate_scraping`; usuario `iago.oliveira2478@gmail.com` esta `is_active=true`, `is_superuser=true`, `can_start_immediate_scraping=true`, `role='proprietario'`; `/admin/users` sem sessao retorna `401`; logs recentes sem `error/exception/traceback/failed/fatal`. Nenhuma milestone do PRD foi marcada, pois nao houve confirmacao explicita do responsavel.
 
 - 2026-05-21 (correcao disparo de scraping imediato autorizado): `PRD.md`, `SKILLS_README.md` e `skills/security-threat-checklist/SKILL.md` foram abertos antes da execucao. Skill usada: `security-threat-checklist`, pois o bug envolvia permissao de usuario, endpoint autenticado e enfileiramento de scraping. Diagnostico: o backend ja validava `is_superuser`/`can_start_immediate_scraping`, mas `apps/web/src/components/panels/Step5Address.tsx` enviava `start_scraping: false` sempre ao confirmar o endereco; por isso ate usuarios liberados apenas registravam demanda para prewarm e viam a mensagem de ate 24 horas. Correcao: o frontend agora envia `start_scraping: true` na confirmacao do endereco, mantendo a autorizacao real no backend; usuarios sem permissao continuam recebendo resposta diferida, sem scraping imediato. Validacao: `npm.cmd --prefix apps/web run test:run -- src/components/panels/Step5Address.test.tsx` passou com `3 passed`; `npm.cmd --prefix apps/web run build` passou. Observacao: os testes focados ainda emitem warnings React `act(...)` preexistentes; build mantem os avisos conhecidos de chunk grande/import dinamico misto. Nenhuma milestone do PRD foi marcada, pois nao houve confirmacao explicita do responsavel.
@@ -6200,6 +6202,27 @@
 - Verification executed:
   - Leitura estatica dos stores, cliente HTTP, rotas FastAPI e servicos de favoritos.
   - Nenhum teste automatizado executado; nao houve alteracao funcional.
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
+
+## 2026-05-21 - Levantamento de erros e vulnerabilidades existentes
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+- Skill used:
+  - `skills/security-threat-checklist/SKILL.md`
+
+- Scope executed:
+  - `npm run typecheck` em `apps/web`.
+  - `python -m pytest apps/api/tests/test_phase6_dashboard_analytics.py -q --color=no`.
+  - `npm audit --omit=dev --json` e `npm audit --json` em `apps/web`.
+
+- Findings:
+  - Typecheck do frontend falha em tipos de favoritos, painel de favoritos, transporte, testes antigos e re-export duplicado.
+  - Suite de analytics do backend falha em 4 de 14 testes por fixture que espera 3 chamadas SQL, enquanto o codigo atual executa uma 4a consulta de historico.
+  - Auditoria npm de producao encontrou 1 vulnerabilidade moderada; auditoria completa encontrou 12 vulnerabilidades, sendo 5 altas, 7 moderadas e 0 criticas.
 
 - Progress Tracker:
   - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
