@@ -24,9 +24,11 @@ _GTFS_STOP_TILE_BUFFER_METERS = 250.0
 _GEOSAMPA_BUS_STOP_MATCH_METERS = 45.0
 _GEOSAMPA_BUS_TERMINAL_MATCH_METERS = 180.0
 _GREEN_TILE_MIN_ZOOM = 12
+_FLOOD_TILE_MIN_ZOOM = 14
 _SAFETY_TILE_MIN_ZOOM = 10
 _SLOW_TILE_QUERY_SECONDS = 2.0
 _VECTOR_TILE_STATEMENT_TIMEOUT_MS = 25_000
+_TRANSPORT_LINES_MIN_ZOOM = 15
 _TRANSPORT_LINES_GTFS_MIN_ZOOM = 16
 _TRANSPORT_STOPS_MIN_ZOOM = 13
 
@@ -49,11 +51,11 @@ def _green_tile_simplify_tolerance(zoom: int) -> float:
 
 def _green_tile_min_area_m2(zoom: int) -> float:
     if zoom <= 12:
-        return 50000.0
+        return 100000.0
     if zoom == 13:
-        return 10000.0
+        return 50000.0
     if zoom == 14:
-        return 2000.0
+        return 20000.0
     if zoom == 15:
         return 500.0
     if zoom == 16:
@@ -366,6 +368,8 @@ WHERE geom IS NOT NULL
 
 
 def _build_transport_lines_tile_sql(zoom: int) -> str:
+    if zoom < _TRANSPORT_LINES_MIN_ZOOM:
+        return "SELECT ''::bytea"
     if zoom >= _TRANSPORT_LINES_GTFS_MIN_ZOOM:
         return _TRANSPORT_LINES_TILE_SQL
     return _build_transport_lines_overview_tile_sql(zoom)
@@ -844,23 +848,36 @@ WITH bounds AS (
     SELECT
         ST_TileEnvelope(:z, :x, :y) AS env_3857,
         ST_Transform(ST_TileEnvelope(:z, :x, :y), 4326) AS env_4326
-), layer_rows AS (
+), candidate_rows AS (
     SELECT
         COALESCE(NULLIF(g.primaryindex, ''), 'green_area') AS id,
         COALESCE(NULLIF(g.ves_categ, ''), NULLIF(g.ves_bairro, ''), 'Área verde') AS source_name,
         {green_case_sql} AS vegetation_level,
+        {tile_geometry_sql} AS geom_4326,
+        env_3857
+    FROM geosampa_vegetacao_significativa g
+    CROSS JOIN bounds
+    WHERE g.geometry && ST_Expand(env_4326, {simplify_tolerance})
+      {area_filter_sql}
+    ORDER BY
+        CASE
+            WHEN g.ves_area ~ '^[0-9]+(\\.[0-9]+)?$' THEN g.ves_area::double precision
+            ELSE 0
+        END DESC
+    LIMIT 180
+), layer_rows AS (
+    SELECT
+        id,
+        source_name,
+        vegetation_level,
         ST_AsMVTGeom(
-            ST_Transform({tile_geometry_sql}, 3857),
+            ST_Transform(geom_4326, 3857),
             env_3857,
             4096,
             64,
             true
         ) AS geom
-    FROM geosampa_vegetacao_significativa g
-    CROSS JOIN bounds
-    WHERE g.geometry && ST_Expand(env_4326, {simplify_tolerance})
-      AND ST_Intersects(g.geometry, env_4326)
-      {area_filter_sql}
+    FROM candidate_rows
 )
 SELECT ST_AsMVT(layer_rows, 'green_areas', 4096, 'geom')
 FROM layer_rows
@@ -1229,6 +1246,9 @@ async def get_flood_areas_tile(
     x: int = Path(..., ge=0),
     y: int = Path(..., ge=0),
 ) -> Response:
+    if z < _FLOOD_TILE_MIN_ZOOM:
+        return Response(content=b"", media_type=MVT_MEDIA_TYPE)
+
     engine = get_engine()
     tile = await _query_vector_tile(engine, _FLOOD_TILE_SQL, {"z": z, "x": x, "y": y}, layer_name="flood_areas")
     return Response(content=tile, media_type=MVT_MEDIA_TYPE)
