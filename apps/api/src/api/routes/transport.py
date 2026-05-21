@@ -40,22 +40,24 @@ def _green_tile_simplify_tolerance(zoom: int) -> float:
         return 0.0015
     if zoom <= 12:
         return 0.0006
+    if zoom == 13:
+        return 0.00045
     if zoom <= 14:
-        return 0.0002
+        return 0.0003
     return 0.00005
 
 
 def _green_tile_min_area_m2(zoom: int) -> float:
     if zoom <= 12:
-        return 1000.0
+        return 50000.0
     if zoom == 13:
-        return 500.0
+        return 10000.0
     if zoom == 14:
-        return 100.0
+        return 2000.0
     if zoom == 15:
-        return 50.0
+        return 500.0
     if zoom == 16:
-        return 25.0
+        return 100.0
     return 0.0
 
 _BUS_DESCRIPTOR_SQL = (
@@ -280,7 +282,7 @@ def _transport_lines_overview_simplify_tolerance(zoom: int) -> float:
 def _build_transport_lines_overview_tile_sql(zoom: int) -> str:
     simplify_tolerance = _transport_lines_overview_simplify_tolerance(zoom)
     bus_lines_sql = ""
-    if zoom >= 13:
+    if zoom >= _TRANSPORT_LINES_GTFS_MIN_ZOOM:
         bus_lines_sql = f"""
     UNION ALL
     SELECT
@@ -374,14 +376,6 @@ WITH bounds AS (
     SELECT
         ST_TileEnvelope(:z, :x, :y) AS env_3857,
         ST_Transform(ST_TileEnvelope(:z, :x, :y), 4326) AS env_4326
-), candidate_gtfs_stops AS (
-    SELECT
-        s.stop_id::text AS stop_id,
-        COALESCE(NULLIF(s.stop_name, ''), s.stop_id::text) AS stop_name,
-        s.location AS geom_4326
-    FROM gtfs_stops s
-    CROSS JOIN bounds b
-    WHERE s.location && ST_Expand(b.env_4326, {_meters_to_degree_buffer(_GTFS_STOP_TILE_BUFFER_METERS)})
 ), geosampa_bus_stop_points AS (
     SELECT
         md5(ST_AsEWKB(g.geometry)::text) AS id,
@@ -399,16 +393,6 @@ WITH bounds AS (
     CROSS JOIN bounds b
     WHERE g.geometry && b.env_4326
 ), stop_points AS (
-    SELECT
-        cgs.stop_id AS id,
-        cgs.stop_name AS name,
-        'bus_stop'::text AS kind,
-        'gtfs_stop'::text AS source_kind,
-        0::int AS bus_count,
-        ''::text AS bus_list,
-        cgs.geom_4326
-    FROM candidate_gtfs_stops cgs
-    UNION ALL
     SELECT
         md5(ST_AsEWKB(g.geometry)::text) AS id,
         COALESCE(NULLIF(g.nm_estacao_metro_trem, ''), 'Estação de metrô') AS name,
@@ -505,6 +489,78 @@ SELECT ST_AsMVT(mvtgeom, 'transport_stops', 4096, 'geom')
 FROM mvtgeom
 WHERE geom IS NOT NULL
 """
+
+
+_TRANSPORT_STOPS_OVERVIEW_TILE_SQL = """
+WITH bounds AS (
+    SELECT
+        ST_TileEnvelope(:z, :x, :y) AS env_3857,
+        ST_Transform(ST_TileEnvelope(:z, :x, :y), 4326) AS env_4326
+), stop_points AS (
+    SELECT
+        md5(ST_AsEWKB(g.geometry)::text) AS id,
+        COALESCE(NULLIF(g.nm_estacao_metro_trem, ''), 'Estacao de metro') AS name,
+        'metro_station'::text AS kind,
+        'geosampa_metro_station'::text AS source_kind,
+        0::int AS bus_count,
+        ''::text AS bus_list,
+        ST_PointOnSurface(g.geometry) AS geom_4326
+    FROM geosampa_metro_stations g
+    CROSS JOIN bounds b
+    WHERE g.geometry && b.env_4326
+    UNION ALL
+    SELECT
+        md5(ST_AsEWKB(g.geometry)::text) AS id,
+        COALESCE(NULLIF(g.nm_estacao_metro_trem, ''), 'Estacao de trem') AS name,
+        'train_station'::text AS kind,
+        'geosampa_train_station'::text AS source_kind,
+        0::int AS bus_count,
+        ''::text AS bus_list,
+        ST_PointOnSurface(g.geometry) AS geom_4326
+    FROM geosampa_trem_stations g
+    CROSS JOIN bounds b
+    WHERE g.geometry && b.env_4326
+    UNION ALL
+    SELECT
+        md5(ST_AsEWKB(g.geometry)::text) AS id,
+        COALESCE(NULLIF(g.nm_terminal, ''), 'Terminal de onibus') AS name,
+        'bus_terminal'::text AS kind,
+        'geosampa_bus_terminal'::text AS source_kind,
+        0::int AS bus_count,
+        ''::text AS bus_list,
+        ST_PointOnSurface(g.geometry) AS geom_4326
+    FROM geosampa_bus_terminals g
+    CROSS JOIN bounds b
+    WHERE g.geometry && b.env_4326
+), mvtgeom AS (
+    SELECT
+        id,
+        name,
+        kind,
+        source_kind,
+        bus_count,
+        bus_list,
+        ST_AsMVTGeom(
+            ST_Transform(geom_4326, 3857),
+            env_3857,
+            4096,
+            64,
+            true
+        ) AS geom
+    FROM stop_points
+    CROSS JOIN bounds
+    WHERE geom_4326 IS NOT NULL AND ST_Intersects(geom_4326, env_4326)
+)
+SELECT ST_AsMVT(mvtgeom, 'transport_stops', 4096, 'geom')
+FROM mvtgeom
+WHERE geom IS NOT NULL
+"""
+
+
+def _build_transport_stops_tile_sql(zoom: int) -> str:
+    if zoom >= 16:
+        return _TRANSPORT_STOPS_TILE_SQL
+    return _TRANSPORT_STOPS_OVERVIEW_TILE_SQL
 
 
 _BUS_LINE_DETAIL_SQL = """
@@ -764,7 +820,13 @@ def _build_green_tile_sql(zoom: int) -> str:
     min_area_m2 = _green_tile_min_area_m2(zoom)
     area_filter_sql = ""
     if min_area_m2 > 0:
-        area_filter_sql = f"""
+        if zoom <= 14:
+            area_filter_sql = f"""
+      AND g.ves_area ~ '^[0-9]+(\\.[0-9]+)?$'
+      AND g.ves_area::double precision >= {min_area_m2}
+"""
+        else:
+            area_filter_sql = f"""
       AND COALESCE(
             CASE
                 WHEN g.ves_area ~ '^[0-9]+(\\.[0-9]+)?$' THEN g.ves_area::double precision
@@ -1143,7 +1205,7 @@ async def get_transport_stops_tile(
         return Response(content=b"", media_type=MVT_MEDIA_TYPE)
 
     engine = get_engine()
-    tile = await _query_vector_tile(engine, _TRANSPORT_STOPS_TILE_SQL, {"z": z, "x": x, "y": y}, layer_name="transport_stops")
+    tile = await _query_vector_tile(engine, _build_transport_stops_tile_sql(z), {"z": z, "x": x, "y": y}, layer_name="transport_stops")
     return Response(content=tile, media_type=MVT_MEDIA_TYPE)
 
 
