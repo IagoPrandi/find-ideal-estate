@@ -13,7 +13,7 @@ from modules.public_safety import (
 )
 from modules.zones.vegetation import green_vegetation_case_sql
 from sqlalchemy import text
-from sqlalchemy.exc import ProgrammingError
+from sqlalchemy.exc import DBAPIError, ProgrammingError
 
 router = APIRouter(prefix="/transport", tags=["transport"])
 logger = logging.getLogger(__name__)
@@ -26,6 +26,9 @@ _GEOSAMPA_BUS_TERMINAL_MATCH_METERS = 180.0
 _GREEN_TILE_MIN_ZOOM = 12
 _SAFETY_TILE_MIN_ZOOM = 10
 _SLOW_TILE_QUERY_SECONDS = 2.0
+_VECTOR_TILE_STATEMENT_TIMEOUT_MS = 25_000
+_TRANSPORT_LINES_GTFS_MIN_ZOOM = 16
+_TRANSPORT_STOPS_MIN_ZOOM = 13
 
 
 def _meters_to_degree_buffer(meters: float) -> float:
@@ -49,6 +52,10 @@ def _green_tile_min_area_m2(zoom: int) -> float:
         return 500.0
     if zoom == 14:
         return 100.0
+    if zoom == 15:
+        return 50.0
+    if zoom == 16:
+        return 25.0
     return 0.0
 
 _BUS_DESCRIPTOR_SQL = (
@@ -61,6 +68,7 @@ async def _query_vector_tile(engine, sql: str, params: dict, *, layer_name: str)
     try:
         async with engine.begin() as conn:
             await conn.execute(text("SET LOCAL jit = off"))
+            await conn.execute(text(f"SET LOCAL statement_timeout = {_VECTOR_TILE_STATEMENT_TIMEOUT_MS}"))
             result = await conn.execute(text(sql), params)
             tile = result.scalar()
         tile_bytes = bytes(tile or b"")
@@ -87,6 +95,17 @@ async def _query_vector_tile(engine, sql: str, params: dict, *, layer_name: str)
             elapsed_seconds * 1000,
         )
         raise HTTPException(status_code=500, detail=f"Falha ao gerar vector tile de {layer_name}.") from exc
+    except DBAPIError as exc:
+        elapsed_seconds = time.perf_counter() - started_at
+        logger.exception(
+            "vector tile query aborted for %s z=%s x=%s y=%s elapsed_ms=%.1f",
+            layer_name,
+            params.get("z"),
+            params.get("x"),
+            params.get("y"),
+            elapsed_seconds * 1000,
+        )
+        raise HTTPException(status_code=503, detail=f"Vector tile de {layer_name} excedeu o tempo limite.") from exc
 
 
 _TRANSPORT_LINES_TILE_ROWS_SQL = f"""
@@ -248,6 +267,108 @@ WHERE geom IS NOT NULL
 """
 
 
+def _transport_lines_overview_simplify_tolerance(zoom: int) -> float:
+    if zoom <= 10:
+        return 0.001
+    if zoom <= 12:
+        return 0.0005
+    if zoom <= 14:
+        return 0.0002
+    return 0.00008
+
+
+def _build_transport_lines_overview_tile_sql(zoom: int) -> str:
+    simplify_tolerance = _transport_lines_overview_simplify_tolerance(zoom)
+    bus_lines_sql = ""
+    if zoom >= 13:
+        bus_lines_sql = f"""
+    UNION ALL
+    SELECT
+        md5(ST_AsEWKB(g.geometry)::text) AS id,
+        COALESCE(NULLIF(g.ln_nome, ''), 'Linha de ônibus') AS name,
+        'bus'::text AS mode,
+        'geosampa_bus_line'::text AS source_kind,
+        0::bigint AS bus_count,
+        ''::text AS bus_list,
+        ST_Simplify(ST_LineMerge(g.geometry), {simplify_tolerance}, true) AS geom_4326
+    FROM geosampa_bus_lines g
+    CROSS JOIN bounds b
+    WHERE g.geometry && b.env_4326
+"""
+
+    return f"""
+WITH bounds AS (
+    SELECT
+        ST_TileEnvelope(:z, :x, :y) AS env_3857,
+        ST_Transform(ST_TileEnvelope(:z, :x, :y), 4326) AS env_4326
+), overview_lines AS (
+    SELECT
+        md5(ST_AsEWKB(g.geometry)::text) AS id,
+        COALESCE(NULLIF(g.nm_corredor, ''), 'Corredor de ônibus') AS name,
+        'bus'::text AS mode,
+        'geosampa_bus_corridor'::text AS source_kind,
+        0::bigint AS bus_count,
+        ''::text AS bus_list,
+        ST_Simplify(ST_LineMerge(g.geometry), {simplify_tolerance}, true) AS geom_4326
+    FROM geosampa_bus_corridors g
+    CROSS JOIN bounds b
+    WHERE g.geometry && b.env_4326
+    UNION ALL
+    SELECT
+        md5(ST_AsEWKB(g.geometry)::text) AS id,
+        COALESCE(NULLIF(g.nm_linha_metro_trem, ''), NULLIF(g.nr_nome_linha, ''), 'Linha de metrô') AS name,
+        'metro'::text AS mode,
+        'geosampa_metro_line'::text AS source_kind,
+        0::bigint AS bus_count,
+        ''::text AS bus_list,
+        ST_Simplify(ST_LineMerge(g.geometry), {simplify_tolerance}, true) AS geom_4326
+    FROM geosampa_metro_lines g
+    CROSS JOIN bounds b
+    WHERE g.geometry && b.env_4326
+    UNION ALL
+    SELECT
+        md5(ST_AsEWKB(g.geometry)::text) AS id,
+        COALESCE(NULLIF(g.nm_linha_metro_trem, ''), 'Linha de trem') AS name,
+        'train'::text AS mode,
+        'geosampa_train_line'::text AS source_kind,
+        0::bigint AS bus_count,
+        ''::text AS bus_list,
+        ST_Simplify(ST_LineMerge(g.geometry), {simplify_tolerance}, true) AS geom_4326
+    FROM geosampa_trem_lines g
+    CROSS JOIN bounds b
+    WHERE g.geometry && b.env_4326
+    {bus_lines_sql}
+), mvtgeom AS (
+    SELECT
+        id,
+        name,
+        mode,
+        source_kind,
+        COALESCE(bus_count, 0)::int AS bus_count,
+        COALESCE(bus_list, '') AS bus_list,
+        ST_AsMVTGeom(
+            ST_Transform(geom_4326, 3857),
+            env_3857,
+            4096,
+            64,
+            true
+        ) AS geom
+    FROM overview_lines
+    CROSS JOIN bounds
+    WHERE geom_4326 IS NOT NULL AND ST_Intersects(geom_4326, env_4326)
+)
+SELECT ST_AsMVT(mvtgeom, 'transport_lines', 4096, 'geom')
+FROM mvtgeom
+WHERE geom IS NOT NULL
+"""
+
+
+def _build_transport_lines_tile_sql(zoom: int) -> str:
+    if zoom >= _TRANSPORT_LINES_GTFS_MIN_ZOOM:
+        return _TRANSPORT_LINES_TILE_SQL
+    return _build_transport_lines_overview_tile_sql(zoom)
+
+
 _TRANSPORT_STOPS_TILE_ROWS_SQL = f"""
 WITH bounds AS (
     SELECT
@@ -260,8 +381,7 @@ WITH bounds AS (
         s.location AS geom_4326
     FROM gtfs_stops s
     CROSS JOIN bounds b
-        WHERE s.location && ST_Expand(b.env_4326, {_meters_to_degree_buffer(_GTFS_STOP_TILE_BUFFER_METERS)})
-            AND ST_DWithin(s.location::geography, b.env_4326::geography, {_GTFS_STOP_TILE_BUFFER_METERS})
+    WHERE s.location && ST_Expand(b.env_4326, {_meters_to_degree_buffer(_GTFS_STOP_TILE_BUFFER_METERS)})
 ), geosampa_bus_stop_points AS (
     SELECT
         md5(ST_AsEWKB(g.geometry)::text) AS id,
@@ -654,7 +774,7 @@ def _build_green_tile_sql(zoom: int) -> str:
 """
     tile_geometry_sql = (
         "g.geometry"
-        if zoom >= 15
+        if zoom >= 17
         else f"ST_Simplify(g.geometry, {simplify_tolerance}, true)"
     )
     return """
@@ -1009,7 +1129,7 @@ async def get_transport_lines_tile(
     y: int = Path(..., ge=0),
 ) -> Response:
     engine = get_engine()
-    tile = await _query_vector_tile(engine, _TRANSPORT_LINES_TILE_SQL, {"z": z, "x": x, "y": y}, layer_name="transport_lines")
+    tile = await _query_vector_tile(engine, _build_transport_lines_tile_sql(z), {"z": z, "x": x, "y": y}, layer_name="transport_lines")
     return Response(content=tile, media_type=MVT_MEDIA_TYPE)
 
 
@@ -1019,6 +1139,9 @@ async def get_transport_stops_tile(
     x: int = Path(..., ge=0),
     y: int = Path(..., ge=0),
 ) -> Response:
+    if z < _TRANSPORT_STOPS_MIN_ZOOM:
+        return Response(content=b"", media_type=MVT_MEDIA_TYPE)
+
     engine = get_engine()
     tile = await _query_vector_tile(engine, _TRANSPORT_STOPS_TILE_SQL, {"z": z, "x": x, "y": y}, layer_name="transport_stops")
     return Response(content=tile, media_type=MVT_MEDIA_TYPE)
