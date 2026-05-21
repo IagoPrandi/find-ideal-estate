@@ -356,15 +356,6 @@ describe("FindIdealApp", () => {
       expect(mapAddedLayers.find((layer) => layer.id === "journey-listings-layer")?.type).toBe("symbol");
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Camadas" }));
-
-    const panel = screen.getByText(/Camadas do mapa/i).closest("div");
-    if (!panel) {
-      throw new Error("Layers panel not rendered.");
-    }
-
-    fireEvent.click(within(panel).getByRole("checkbox", { name: "Imóveis" }));
-
     await waitFor(() => {
       expect(mapSetLayoutPropertyMock).toHaveBeenCalledWith("journey-listings-layer", "visibility", "visible");
     });
@@ -415,6 +406,7 @@ describe("FindIdealApp", () => {
   });
 
   it("loads transport points first, then lines, then green areas and finally flood areas", async () => {
+    useUIStore.setState((state) => ({ ...state, step: 1 }));
     useJourneyStore.setState((state) => ({
       ...state,
       config: {
@@ -575,6 +567,10 @@ describe("FindIdealApp", () => {
       },
     }));
 
+    loadedSourceIds.add("transport-stops-source");
+    loadedSourceIds.add("transport-lines-source");
+    loadedSourceIds.add("flood-areas-source");
+
     renderWithQueryClient();
 
     await waitFor(() => {
@@ -629,6 +625,10 @@ describe("FindIdealApp", () => {
         },
       },
     }));
+
+    loadedSourceIds.add("transport-stops-source");
+    loadedSourceIds.add("transport-lines-source");
+    loadedSourceIds.add("flood-areas-source");
 
     renderWithQueryClient();
 

@@ -94,11 +94,12 @@ type LayerLegendItem = {
   dashed?: boolean;
 };
 
-type SequentialLayerGroupKey = "transportPoints" | "transportLines" | "green" | "flood";
+type SequentialLayerGroupKey = "transportPoints" | "transportLines" | "green" | "flood" | "safety";
 
 type SequentialLayerSettings = {
   layerVisibility: Record<MapOverlayLayerKey, boolean>;
   greenEnabled: boolean;
+  safetyEnabled: boolean;
 };
 
 type TransportCandidatePoint = {
@@ -206,6 +207,7 @@ const SEQUENTIAL_LAYER_GROUPS: Array<{ key: SequentialLayerGroupKey; sourceId: s
   { key: "transportLines", sourceId: "transport-lines-source" },
   { key: "green", sourceId: "green-areas-source" },
   { key: "flood", sourceId: "flood-areas-source" },
+  { key: "safety", sourceId: SAFETY_SOURCE_ID },
 ];
 
 const getSequentialLayerGroupEnabled = (groupKey: SequentialLayerGroupKey, settings: SequentialLayerSettings) => {
@@ -218,6 +220,8 @@ const getSequentialLayerGroupEnabled = (groupKey: SequentialLayerGroupKey, setti
       return settings.layerVisibility.green && settings.greenEnabled;
     case "flood":
       return settings.layerVisibility.flood;
+    case "safety":
+      return settings.layerVisibility.safety && settings.safetyEnabled;
   }
 };
 
@@ -851,6 +855,7 @@ export function FindIdealApp() {
   const sequentialLayerSettingsRef = useRef<SequentialLayerSettings>({
     layerVisibility: DEFAULT_LAYER_VISIBILITY,
     greenEnabled: config.enrichments.green,
+    safetyEnabled: config.enrichments.safety,
   });
 
   function toggleLayerVisibility(key: MapOverlayLayerKey) {
@@ -912,6 +917,7 @@ export function FindIdealApp() {
     sequentialLayerSettingsRef.current = {
       layerVisibility,
       greenEnabled: config.enrichments.green,
+      safetyEnabled: config.enrichments.safety,
     };
 
     const map = mapRef.current;
@@ -920,7 +926,7 @@ export function FindIdealApp() {
     }
 
     setVisibleSequentialLayerGroupIndex(resolveVisibleSequentialLayerGroupIndex(map, sequentialLayerSettingsRef.current));
-  }, [config.enrichments.green, isMapReady, layerVisibility]);
+  }, [config.enrichments.green, config.enrichments.safety, isMapReady, layerVisibility]);
 
   useEffect(() => {
     if (!isLayerMenuOpen) {
@@ -1126,6 +1132,7 @@ export function FindIdealApp() {
         source: "transport-lines-source",
         "source-layer": "transport_lines",
         filter: ["==", ["get", "mode"], "bus"],
+        layout: { visibility: "none" },
         paint: {
           "line-color": "#845ef7",
           "line-width": ["interpolate", ["linear"], ["zoom"], 8, 1.2, 12, 2.2, 15, 3.5],
@@ -1141,6 +1148,7 @@ export function FindIdealApp() {
         "source-layer": "transport_lines",
         filter: ["==", ["get", "mode"], "bus"],
         layout: {
+          visibility: "none",
           "symbol-placement": "line",
           "symbol-spacing": 170,
           "text-field": "▶",
@@ -1160,6 +1168,7 @@ export function FindIdealApp() {
         source: "transport-lines-source",
         "source-layer": "transport_lines",
         filter: ["==", ["get", "mode"], "metro"],
+        layout: { visibility: "none" },
         paint: {
           "line-color": "#e11d48",
           "line-width": ["interpolate", ["linear"], ["zoom"], 8, 1.8, 12, 3.2, 15, 4.8],
@@ -1173,6 +1182,7 @@ export function FindIdealApp() {
         source: "transport-lines-source",
         "source-layer": "transport_lines",
         filter: ["==", ["get", "mode"], "train"],
+        layout: { visibility: "none" },
         paint: {
           "line-color": "#0f766e",
           "line-width": ["interpolate", ["linear"], ["zoom"], 8, 1.5, 12, 2.8, 15, 4.2],
@@ -1289,6 +1299,7 @@ export function FindIdealApp() {
         "source-layer": "transport_stops",
         filter: ["==", ["get", "kind"], "bus_stop"],
         layout: {
+          visibility: "none",
           "icon-image": "bus-stop-icon",
           "icon-size": ["interpolate", ["linear"], ["zoom"], 9, 0.28, 12, 0.36, 15, 0.46],
           "icon-allow-overlap": true,
@@ -1302,6 +1313,7 @@ export function FindIdealApp() {
         "source-layer": "transport_stops",
         filter: ["==", ["get", "kind"], "bus_terminal"],
         layout: {
+          visibility: "none",
           "icon-image": "bus-terminal-icon",
           "icon-size": ["interpolate", ["linear"], ["zoom"], 9, 0.34, 12, 0.44, 15, 0.54],
           "icon-allow-overlap": true,
@@ -1314,6 +1326,7 @@ export function FindIdealApp() {
         source: "transport-stops-source",
         "source-layer": "transport_stops",
         filter: ["==", ["get", "kind"], "metro_station"],
+        layout: { visibility: "none" },
         paint: {
           "circle-radius": 5.4,
           "circle-color": "#e11d48",
@@ -1329,6 +1342,7 @@ export function FindIdealApp() {
         source: "transport-stops-source",
         "source-layer": "transport_stops",
         filter: ["==", ["get", "kind"], "train_station"],
+        layout: { visibility: "none" },
         paint: {
           "circle-radius": 5.6,
           "circle-color": "#0f766e",
@@ -1953,7 +1967,13 @@ export function FindIdealApp() {
     let requestId = 0;
 
     const syncSafetyIncidents = async () => {
-      if (!config.enrichments.safety || !layerVisibility.safety) {
+      const safetyVisible = isSequentialLayerGroupVisible("safety", visibleSequentialLayerGroupIndex, {
+        layerVisibility,
+        greenEnabled: config.enrichments.green,
+        safetyEnabled: config.enrichments.safety,
+      });
+
+      if (!safetyVisible) {
         setGeoJsonSourceData(map, SAFETY_SOURCE_ID, EMPTY_FEATURE_COLLECTION);
         return;
       }
@@ -1998,7 +2018,15 @@ export function FindIdealApp() {
       cancelled = true;
       map.off("moveend", handleMoveEnd);
     };
-  }, [activeSafetyGroups, activeSafetyGroupsKey, config.enrichments.safety, isMapReady, layerVisibility.safety]);
+  }, [
+    activeSafetyGroups,
+    activeSafetyGroupsKey,
+    config.enrichments.green,
+    config.enrichments.safety,
+    isMapReady,
+    layerVisibility,
+    visibleSequentialLayerGroupIndex,
+  ]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -2402,11 +2430,13 @@ export function FindIdealApp() {
     const sequentialLayerSettings: SequentialLayerSettings = {
       layerVisibility,
       greenEnabled: config.enrichments.green,
+      safetyEnabled: config.enrichments.safety,
     };
     const transportPointsVisible = isSequentialLayerGroupVisible("transportPoints", visibleSequentialLayerGroupIndex, sequentialLayerSettings);
     const transportLinesVisible = isSequentialLayerGroupVisible("transportLines", visibleSequentialLayerGroupIndex, sequentialLayerSettings);
     const greenVisible = isSequentialLayerGroupVisible("green", visibleSequentialLayerGroupIndex, sequentialLayerSettings);
     const floodVisible = isSequentialLayerGroupVisible("flood", visibleSequentialLayerGroupIndex, sequentialLayerSettings);
+    const safetyVisible = isSequentialLayerGroupVisible("safety", visibleSequentialLayerGroupIndex, sequentialLayerSettings);
     const selectedTraceVisible = transportLinesVisible && Boolean(selectedTransportId);
 
     map.setLayoutProperty("bus-line-layer", "visibility", transportLinesVisible && layerVisibility.routes ? "visible" : "none");
@@ -2430,8 +2460,8 @@ export function FindIdealApp() {
     map.setLayoutProperty("zone-pois-highlight-layer", "visibility", layerVisibility.pois ? "visible" : "none");
     map.setLayoutProperty("zone-pois-layer", "visibility", layerVisibility.pois ? "visible" : "none");
     map.setLayoutProperty("journey-listings-layer", "visibility", layerVisibility.listings ? "visible" : "none");
-    map.setLayoutProperty("safety-incident-heatmap-layer", "visibility", layerVisibility.safety && config.enrichments.safety ? "visible" : "none");
-    map.setLayoutProperty("safety-incident-layer", "visibility", layerVisibility.safety && config.enrichments.safety ? "visible" : "none");
+    map.setLayoutProperty("safety-incident-heatmap-layer", "visibility", safetyVisible ? "visible" : "none");
+    map.setLayoutProperty("safety-incident-layer", "visibility", safetyVisible ? "visible" : "none");
     const savedZonesVisible = layerVisibility.savedZones ? "visible" : "none";
     map.setLayoutProperty("saved-zones-fill-layer", "visibility", savedZonesVisible);
     map.setLayoutProperty("saved-zones-outline-layer", "visibility", savedZonesVisible);

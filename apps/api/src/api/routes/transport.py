@@ -19,6 +19,8 @@ router = APIRouter(prefix="/transport", tags=["transport"])
 logger = logging.getLogger(__name__)
 
 MVT_MEDIA_TYPE = "application/vnd.mapbox-vector-tile"
+_VECTOR_TILE_CACHE_VERSION = "20260521_v1"
+_VECTOR_TILE_CACHE_CONTROL = "public, max-age=86400, stale-while-revalidate=604800"
 _METERS_PER_DEGREE = 111_320.0
 _GTFS_STOP_TILE_BUFFER_METERS = 250.0
 _GEOSAMPA_BUS_STOP_MATCH_METERS = 45.0
@@ -28,9 +30,9 @@ _FLOOD_TILE_MIN_ZOOM = 14
 _SAFETY_TILE_MIN_ZOOM = 10
 _SLOW_TILE_QUERY_SECONDS = 2.0
 _VECTOR_TILE_STATEMENT_TIMEOUT_MS = 25_000
-_TRANSPORT_LINES_MIN_ZOOM = 15
-_TRANSPORT_LINES_GTFS_MIN_ZOOM = 16
-_TRANSPORT_STOPS_MIN_ZOOM = 13
+_TRANSPORT_LINES_MIN_ZOOM = 14
+_TRANSPORT_LINES_GTFS_MIN_ZOOM = 15
+_TRANSPORT_STOPS_MIN_ZOOM = 11
 
 
 def _meters_to_degree_buffer(meters: float) -> float:
@@ -67,14 +69,20 @@ _BUS_DESCRIPTOR_SQL = (
 )
 
 
-async def _query_vector_tile(engine, sql: str, params: dict, *, layer_name: str) -> bytes:
+def _tile_response(tile: bytes, *, cache_status: str | None = None) -> Response:
+    headers = {"Cache-Control": _VECTOR_TILE_CACHE_CONTROL}
+    if cache_status:
+        headers["X-Vector-Tile-Cache"] = cache_status
+    return Response(content=tile, media_type=MVT_MEDIA_TYPE, headers=headers)
+
+
+async def _execute_vector_tile_query(conn, sql: str, params: dict, *, layer_name: str) -> bytes:
     started_at = time.perf_counter()
     try:
-        async with engine.begin() as conn:
-            await conn.execute(text("SET LOCAL jit = off"))
-            await conn.execute(text(f"SET LOCAL statement_timeout = {_VECTOR_TILE_STATEMENT_TIMEOUT_MS}"))
-            result = await conn.execute(text(sql), params)
-            tile = result.scalar()
+        await conn.execute(text("SET LOCAL jit = off"))
+        await conn.execute(text(f"SET LOCAL statement_timeout = {_VECTOR_TILE_STATEMENT_TIMEOUT_MS}"))
+        result = await conn.execute(text(sql), params)
+        tile = result.scalar()
         tile_bytes = bytes(tile or b"")
         elapsed_seconds = time.perf_counter() - started_at
         if elapsed_seconds >= _SLOW_TILE_QUERY_SECONDS:
@@ -110,6 +118,96 @@ async def _query_vector_tile(engine, sql: str, params: dict, *, layer_name: str)
             elapsed_seconds * 1000,
         )
         raise HTTPException(status_code=503, detail=f"Vector tile de {layer_name} excedeu o tempo limite.") from exc
+
+
+async def _query_vector_tile(engine, sql: str, params: dict, *, layer_name: str) -> tuple[bytes, str]:
+    async with engine.begin() as conn:
+        tile = await _execute_vector_tile_query(conn, sql, params, layer_name=layer_name)
+    return tile, "MISS"
+
+
+async def _query_cached_vector_tile(engine, sql: str, params: dict, *, layer_name: str) -> tuple[bytes, str]:
+    z = int(params["z"])
+    x = int(params["x"])
+    y = int(params["y"])
+
+    async with engine.begin() as conn:
+        cached = await conn.execute(
+            text(
+                """
+                SELECT tile
+                FROM vector_tile_cache
+                WHERE layer_name = :layer_name
+                  AND z = :z
+                  AND x = :x
+                  AND y = :y
+                  AND cache_version = :cache_version
+                  AND (expires_at IS NULL OR expires_at > now())
+                """
+            ),
+            {
+                "layer_name": layer_name,
+                "z": z,
+                "x": x,
+                "y": y,
+                "cache_version": _VECTOR_TILE_CACHE_VERSION,
+            },
+        )
+        cached_tile = cached.scalar_one_or_none()
+        if cached_tile is not None:
+            return bytes(cached_tile), "HIT"
+
+        started_at = time.perf_counter()
+        tile = await _execute_vector_tile_query(conn, sql, params, layer_name=layer_name)
+        duration_ms = int((time.perf_counter() - started_at) * 1000)
+        await conn.execute(
+            text(
+                """
+                INSERT INTO vector_tile_cache (
+                    layer_name,
+                    z,
+                    x,
+                    y,
+                    cache_version,
+                    tile,
+                    byte_size,
+                    generated_at,
+                    expires_at,
+                    duration_ms
+                )
+                VALUES (
+                    :layer_name,
+                    :z,
+                    :x,
+                    :y,
+                    :cache_version,
+                    :tile,
+                    :byte_size,
+                    now(),
+                    NULL,
+                    :duration_ms
+                )
+                ON CONFLICT (layer_name, z, x, y, cache_version)
+                DO UPDATE SET
+                    tile = EXCLUDED.tile,
+                    byte_size = EXCLUDED.byte_size,
+                    generated_at = now(),
+                    expires_at = EXCLUDED.expires_at,
+                    duration_ms = EXCLUDED.duration_ms
+                """
+            ),
+            {
+                "layer_name": layer_name,
+                "z": z,
+                "x": x,
+                "y": y,
+                "cache_version": _VECTOR_TILE_CACHE_VERSION,
+                "tile": tile,
+                "byte_size": len(tile),
+                "duration_ms": duration_ms,
+            },
+        )
+    return tile, "MISS"
 
 
 _TRANSPORT_LINES_TILE_ROWS_SQL = f"""
@@ -1208,8 +1306,13 @@ async def get_transport_lines_tile(
     y: int = Path(..., ge=0),
 ) -> Response:
     engine = get_engine()
-    tile = await _query_vector_tile(engine, _build_transport_lines_tile_sql(z), {"z": z, "x": x, "y": y}, layer_name="transport_lines")
-    return Response(content=tile, media_type=MVT_MEDIA_TYPE)
+    tile, cache_status = await _query_cached_vector_tile(
+        engine,
+        _build_transport_lines_tile_sql(z),
+        {"z": z, "x": x, "y": y},
+        layer_name="transport_lines",
+    )
+    return _tile_response(tile, cache_status=cache_status)
 
 
 @router.get("/tiles/stops/{z}/{x}/{y}.pbf")
@@ -1219,11 +1322,16 @@ async def get_transport_stops_tile(
     y: int = Path(..., ge=0),
 ) -> Response:
     if z < _TRANSPORT_STOPS_MIN_ZOOM:
-        return Response(content=b"", media_type=MVT_MEDIA_TYPE)
+        return _tile_response(b"", cache_status="BYPASS")
 
     engine = get_engine()
-    tile = await _query_vector_tile(engine, _build_transport_stops_tile_sql(z), {"z": z, "x": x, "y": y}, layer_name="transport_stops")
-    return Response(content=tile, media_type=MVT_MEDIA_TYPE)
+    tile, cache_status = await _query_cached_vector_tile(
+        engine,
+        _build_transport_stops_tile_sql(z),
+        {"z": z, "x": x, "y": y},
+        layer_name="transport_stops",
+    )
+    return _tile_response(tile, cache_status=cache_status)
 
 
 @router.get("/tiles/environment/green/{z}/{x}/{y}.pbf")
@@ -1233,11 +1341,16 @@ async def get_green_areas_tile(
     y: int = Path(..., ge=0),
 ) -> Response:
     if z < _GREEN_TILE_MIN_ZOOM:
-        return Response(content=b"", media_type=MVT_MEDIA_TYPE)
+        return _tile_response(b"", cache_status="BYPASS")
 
     engine = get_engine()
-    tile = await _query_vector_tile(engine, _build_green_tile_sql(z), {"z": z, "x": x, "y": y}, layer_name="green_areas")
-    return Response(content=tile, media_type=MVT_MEDIA_TYPE)
+    tile, cache_status = await _query_cached_vector_tile(
+        engine,
+        _build_green_tile_sql(z),
+        {"z": z, "x": x, "y": y},
+        layer_name="green_areas",
+    )
+    return _tile_response(tile, cache_status=cache_status)
 
 
 @router.get("/tiles/environment/flood/{z}/{x}/{y}.pbf")
@@ -1247,11 +1360,16 @@ async def get_flood_areas_tile(
     y: int = Path(..., ge=0),
 ) -> Response:
     if z < _FLOOD_TILE_MIN_ZOOM:
-        return Response(content=b"", media_type=MVT_MEDIA_TYPE)
+        return _tile_response(b"", cache_status="BYPASS")
 
     engine = get_engine()
-    tile = await _query_vector_tile(engine, _FLOOD_TILE_SQL, {"z": z, "x": x, "y": y}, layer_name="flood_areas")
-    return Response(content=tile, media_type=MVT_MEDIA_TYPE)
+    tile, cache_status = await _query_cached_vector_tile(
+        engine,
+        _FLOOD_TILE_SQL,
+        {"z": z, "x": x, "y": y},
+        layer_name="flood_areas",
+    )
+    return _tile_response(tile, cache_status=cache_status)
 
 
 @router.get("/tiles/environment/safety/{z}/{x}/{y}.pbf")
@@ -1261,11 +1379,16 @@ async def get_public_safety_tile(
     y: int = Path(..., ge=0),
 ) -> Response:
     if z < _SAFETY_TILE_MIN_ZOOM:
-        return Response(content=b"", media_type=MVT_MEDIA_TYPE)
+        return _tile_response(b"", cache_status="BYPASS")
 
     engine = get_engine()
-    tile = await _query_vector_tile(engine, _PUBLIC_SAFETY_TILE_SQL, {"z": z, "x": x, "y": y}, layer_name="safety_incidents")
-    return Response(content=tile, media_type=MVT_MEDIA_TYPE)
+    tile, cache_status = await _query_cached_vector_tile(
+        engine,
+        _PUBLIC_SAFETY_TILE_SQL,
+        {"z": z, "x": x, "y": y},
+        layer_name="safety_incidents",
+    )
+    return _tile_response(tile, cache_status=cache_status)
 
 
 @router.get("/safety-incidents")
