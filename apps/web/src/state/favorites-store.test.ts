@@ -51,6 +51,7 @@ describe("favorites-store", () => {
         display_name: "Ana",
         is_active: true,
         is_superuser: false,
+        can_start_immediate_scraping: false,
         created_at: "2026-04-12T10:00:00Z",
         role: "user",
       },

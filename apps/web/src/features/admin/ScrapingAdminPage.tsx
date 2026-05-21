@@ -23,6 +23,7 @@ import {
   removeAdminScrapingQueueAddress,
   runAdminScrapingNow,
   updateAdminUserRole,
+  updateAdminUserScrapingPermission,
 } from "../../api/client";
 import { useAuth } from "../auth/AuthContext";
 
@@ -214,6 +215,15 @@ export function ScrapingAdminPage() {
     mutationFn: ({ userId, role }: { userId: string; role: "user" | "proprietario" }) => updateAdminUserRole(userId, role),
     onSuccess: () => {
       setNotice("Função atualizada.");
+      refreshAdminData();
+    },
+    onError: (error) => setNotice(toMessage(error)),
+  });
+
+  const updateScrapingPermissionMutation = useMutation({
+    mutationFn: ({ userId, enabled }: { userId: string; enabled: boolean }) => updateAdminUserScrapingPermission(userId, enabled),
+    onSuccess: () => {
+      setNotice("Permissão de scraping imediato atualizada.");
       refreshAdminData();
     },
     onError: (error) => setNotice(toMessage(error)),
@@ -477,12 +487,13 @@ export function ScrapingAdminPage() {
               />
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[48rem] text-left text-sm">
+              <table className="w-full min-w-[58rem] text-left text-sm">
                 <thead className="bg-slate-50 text-[11px] uppercase tracking-[0.12em] text-slate-500">
                   <tr>
                     <th className="px-3 py-2">Usuário</th>
                     <th className="px-3 py-2">Criado em</th>
                     <th className="px-3 py-2">Função</th>
+                    <th className="px-3 py-2">Scraping imediato</th>
                     <th className="px-3 py-2">Acesso</th>
                   </tr>
                 </thead>
@@ -507,6 +518,21 @@ export function ScrapingAdminPage() {
                           <option value="user">Usuário</option>
                           <option value="proprietario">Proprietário</option>
                         </select>
+                      </td>
+                      <td className="px-3 py-2">
+                        <label className="inline-flex items-center gap-2 text-sm font-semibold text-slate-700">
+                          <input
+                            type="checkbox"
+                            checked={Boolean(user.can_start_immediate_scraping || user.is_superuser)}
+                            disabled={updateScrapingPermissionMutation.isPending || user.is_superuser}
+                            onChange={(event) => updateScrapingPermissionMutation.mutate({
+                              userId: user.id,
+                              enabled: event.target.checked,
+                            })}
+                            className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500"
+                          />
+                          {user.is_superuser ? "Sempre liberado" : "Liberado"}
+                        </label>
                       </td>
                       <td className="px-3 py-2 text-slate-700">
                         {user.is_superuser ? "Desenvolvedor" : user.is_active ? "Ativo" : "Inativo"}

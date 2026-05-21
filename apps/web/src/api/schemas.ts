@@ -6,6 +6,7 @@ export const AuthUserReadSchema = z.object({
   display_name: z.string().nullable().optional(),
   is_active: z.boolean(),
   is_superuser: z.boolean().optional().default(false),
+  can_start_immediate_scraping: z.boolean().optional().default(false),
   created_at: z.string(),
   role: z.string().optional().default("user"),
 });
@@ -657,6 +658,7 @@ export const AdminUserSchema = z.object({
   display_name: z.string().nullable().optional(),
   is_active: z.boolean(),
   is_superuser: z.boolean(),
+  can_start_immediate_scraping: z.boolean().optional().default(false),
   role: z.string(),
   created_at: z.string(),
 });

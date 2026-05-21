@@ -40,7 +40,7 @@ from modules.listings.models import (
 from modules.listings.platform_registry import get_platform_registry
 from modules.listings.price_rollups import compute_and_upsert_rollup, purge_old_rollups
 from modules.listings.scrapers import ScraperDisallowedError, ScraperError
-from modules.listings.scraping_lock import scraping_lock
+from modules.listings.scraping_lock import global_scraping_lock, scraping_lock
 from sqlalchemy import text
 from workers.cancellation import check_cancellation
 from workers.middleware import emit_stage_progress
@@ -85,6 +85,15 @@ def _scraper_platform_timeout_seconds() -> float:
     except (TypeError, ValueError):
         return 240.0
     return max(parsed, 30.0)
+
+
+def _global_scraping_lock_wait_seconds() -> float:
+    raw_value = os.getenv("LISTINGS_GLOBAL_SCRAPING_LOCK_WAIT_SECONDS", "1800")
+    try:
+        parsed = float(raw_value)
+    except (TypeError, ValueError):
+        return 1800.0
+    return max(parsed, 1.0)
 
 
 def _duration_ms(started_at: datetime | None, finished_at: datetime | None) -> int | None:
@@ -356,51 +365,99 @@ async def _listings_scrape_step(job_id: UUID) -> None:
         message="Acquiring scraping lock",
     )
 
-    async with scraping_lock(search_location_normalized) as acquired:
-        if not acquired:
-            diagnostics["status"] = "lock_contention"
-            diagnostics["lock"] = {
+    async with global_scraping_lock(timeout_seconds=_global_scraping_lock_wait_seconds()) as global_acquired:
+        if not global_acquired:
+            diagnostics["status"] = "global_lock_timeout"
+            diagnostics["global_lock"] = {
                 "acquired": False,
-                "contention": True,
+                "timeout_seconds": _global_scraping_lock_wait_seconds(),
                 "checked_at": _isoformat(),
             }
-            # Another worker is already scraping; re-open cache before exiting.
-            cache_after_wait = await get_cache_record(search_location_normalized)
-            cache_status = (
-                cache_after_wait["status"] if cache_after_wait else ZoneCacheStatus.PENDING
-            )
-            if cache_is_usable(cache_after_wait) and not force_refresh:
-                diagnostics["status"] = "cache_reopen"
-                diagnostics["cache_status"] = cache_status
-                await _persist_scrape_diagnostics(job_id, ctx)
-                await publish_job_event(
-                    job_id,
-                    "listings.preliminary.ready",
-                    stage=stage,
-                    message="Listings became available while waiting for scraping lock",
-                    payload_json={
-                        "source": "cache_reopen",
-                        "zone_fingerprint": zone_fingerprint,
-                        "status": cache_status,
-                    },
+            await _persist_scrape_diagnostics(job_id, ctx)
+            raise ScraperError("Timeout aguardando outro scraping terminar")
+
+        diagnostics["global_lock"] = {
+            "acquired": True,
+            "acquired_at": _isoformat(),
+        }
+        await _persist_scrape_diagnostics(job_id, ctx)
+
+        async with scraping_lock(search_location_normalized) as acquired:
+            if not acquired:
+                diagnostics["status"] = "lock_contention"
+                diagnostics["lock"] = {
+                    "acquired": False,
+                    "contention": True,
+                    "checked_at": _isoformat(),
+                }
+                # Another worker is already scraping this address; re-open cache before exiting.
+                cache_after_wait = await get_cache_record(search_location_normalized)
+                cache_status = (
+                    cache_after_wait["status"] if cache_after_wait else ZoneCacheStatus.PENDING
                 )
+                if cache_is_usable(cache_after_wait) and not force_refresh:
+                    diagnostics["status"] = "cache_reopen"
+                    diagnostics["cache_status"] = cache_status
+                    await _persist_scrape_diagnostics(job_id, ctx)
+                    await publish_job_event(
+                        job_id,
+                        "listings.preliminary.ready",
+                        stage=stage,
+                        message="Listings became available while waiting for scraping lock",
+                        payload_json={
+                            "source": "cache_reopen",
+                            "zone_fingerprint": zone_fingerprint,
+                            "status": cache_status,
+                        },
+                    )
+                    await emit_stage_progress(
+                        job_id,
+                        stage=stage,
+                        progress_percent=100,
+                        message="Listings available after waiting for lock",
+                    )
+                    return
+
+                await _persist_scrape_diagnostics(job_id, ctx)
                 await emit_stage_progress(
                     job_id,
                     stage=stage,
                     progress_percent=100,
-                    message="Listings available after waiting for lock",
+                    message="Scraping already in progress by another worker",
                 )
                 return
 
-            await _persist_scrape_diagnostics(job_id, ctx)
-            await emit_stage_progress(
-                job_id,
+            await _execute_locked_scrape(
+                job_id=job_id,
+                ctx=ctx,
+                diagnostics=diagnostics,
                 stage=stage,
-                progress_percent=100,
-                message="Scraping already in progress by another worker",
+                zone_fingerprint=zone_fingerprint,
+                search_address=search_address,
+                search_location_normalized=search_location_normalized,
+                search_type=search_type,
+                usage_type=usage_type,
+                platforms=platforms,
+                config_hash=config_hash,
+                force_refresh=force_refresh,
             )
-            return
 
+
+async def _execute_locked_scrape(
+    *,
+    job_id: UUID,
+    ctx: dict[str, Any],
+    diagnostics: dict[str, Any],
+    stage: str,
+    zone_fingerprint: str,
+    search_address: str,
+    search_location_normalized: str,
+    search_type: str,
+    usage_type: str,
+    platforms: list[str],
+    config_hash: str,
+    force_refresh: bool,
+) -> None:
         # Create or retrieve cache record
         cache_id = await create_cache_record(
             search_location_normalized,

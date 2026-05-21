@@ -8,6 +8,7 @@ import {
   getAdminScrapingQueue,
   getAdminUsers,
   runAdminScrapingNow,
+  updateAdminUserScrapingPermission,
 } from "../../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { ScrapingAdminPage } from "./ScrapingAdminPage";
@@ -37,6 +38,7 @@ vi.mock("../../api/client", () => {
     removeAdminScrapingQueueAddress: vi.fn(),
     runAdminScrapingNow: vi.fn(),
     updateAdminUserRole: vi.fn(),
+    updateAdminUserScrapingPermission: vi.fn(),
   };
 });
 
@@ -64,6 +66,7 @@ function developerAuthContext() {
         display_name: "Dev",
         is_active: true,
         is_superuser: true,
+        can_start_immediate_scraping: true,
         role: "user",
         created_at: "2026-05-18T12:00:00Z",
       },
@@ -125,8 +128,19 @@ describe("ScrapingAdminPage", () => {
       offset: 0,
     });
     vi.mocked(getAdminUsers).mockResolvedValue({
-      items: [],
-      total_count: 0,
+      items: [
+        {
+          id: "user-2",
+          email: "morador@example.com",
+          display_name: "Morador",
+          is_active: true,
+          is_superuser: false,
+          can_start_immediate_scraping: false,
+          role: "user",
+          created_at: "2026-05-18T12:00:00Z",
+        },
+      ],
+      total_count: 1,
       limit: 50,
       offset: 0,
     });
@@ -163,6 +177,7 @@ describe("ScrapingAdminPage", () => {
           display_name: "User",
           is_active: true,
           is_superuser: false,
+          can_start_immediate_scraping: false,
           role: "proprietario",
           created_at: "2026-05-18T12:00:00Z",
         },
@@ -187,5 +202,32 @@ describe("ScrapingAdminPage", () => {
       expect(runAdminScrapingNow).toHaveBeenCalledTimes(1);
     });
     expect(await screen.findByText("Batelada criada com 1 endereço(s).")).toBeInTheDocument();
+  });
+
+  it("permite liberar scraping imediato para um usuario", async () => {
+    vi.mocked(updateAdminUserScrapingPermission).mockResolvedValue({
+      id: "user-2",
+      email: "morador@example.com",
+      display_name: "Morador",
+      is_active: true,
+      is_superuser: false,
+      can_start_immediate_scraping: true,
+      role: "user",
+      created_at: "2026-05-18T12:00:00Z",
+    });
+
+    const user = userEvent.setup();
+    renderPage();
+
+    const usersTab = await screen.findByRole("button", { name: /Usuários/i });
+    await user.click(usersTab);
+
+    const toggle = await screen.findByRole("checkbox", { name: /Liberado/i });
+    await user.click(toggle);
+
+    await waitFor(() => {
+      expect(updateAdminUserScrapingPermission).toHaveBeenCalledWith("user-2", true);
+    });
+    expect(await screen.findByText("Permissão de scraping imediato atualizada.")).toBeInTheDocument();
   });
 });

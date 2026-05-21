@@ -1086,3 +1086,12 @@ export async function updateAdminUserRole(userId: string, role: "user" | "propri
   })) as AdminUser;
 }
 
+export async function updateAdminUserScrapingPermission(
+  userId: string,
+  canStartImmediateScraping: boolean,
+): Promise<AdminUser> {
+  return (await requestJson(`/admin/users/${encodeURIComponent(userId)}/scraping-permission`, AdminUserSchema, {
+    method: "PATCH",
+    body: { can_start_immediate_scraping: canStartImmediateScraping },
+  })) as AdminUser;
+}

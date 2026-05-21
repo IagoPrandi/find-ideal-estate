@@ -4,7 +4,12 @@ from typing import Any
 from uuid import UUID
 
 from api.routes.admin_common import require_developer
-from contracts import AdminUserRead, AdminUserRoleUpdateRequest, AdminUsersRead
+from contracts import (
+    AdminUserRead,
+    AdminUserRoleUpdateRequest,
+    AdminUserScrapingPermissionUpdateRequest,
+    AdminUsersRead,
+)
 from core.db import get_engine
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import text
@@ -22,6 +27,7 @@ def _row_to_admin_user(row: RowMapping) -> AdminUserRead:
         display_name=row["display_name"],
         is_active=row["is_active"],
         is_superuser=row["is_superuser"],
+        can_start_immediate_scraping=row["can_start_immediate_scraping"],
         role=row["role"] or "user",
         created_at=row["created_at"],
     )
@@ -53,7 +59,15 @@ async def list_admin_users(
         result = await conn.execute(
             text(
                 f"""
-                SELECT id, email, display_name, is_active, is_superuser, role, created_at
+                SELECT
+                    id,
+                    email,
+                    display_name,
+                    is_active,
+                    is_superuser,
+                    COALESCE(can_start_immediate_scraping, false) AS can_start_immediate_scraping,
+                    role,
+                    created_at
                 FROM users
                 WHERE {where_sql}
                 ORDER BY created_at DESC, email ASC
@@ -89,10 +103,55 @@ async def update_admin_user_role(
                 SET role = :role,
                     updated_at = now()
                 WHERE id = :user_id
-                RETURNING id, email, display_name, is_active, is_superuser, role, created_at
+                RETURNING
+                    id,
+                    email,
+                    display_name,
+                    is_active,
+                    is_superuser,
+                    can_start_immediate_scraping,
+                    role,
+                    created_at
                 """
             ),
             {"user_id": user_id, "role": payload.role},
+        )
+        row = result.mappings().first()
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Usuário não encontrado.")
+    return _row_to_admin_user(row)
+
+
+@router.patch("/{user_id}/scraping-permission", response_model=AdminUserRead)
+async def update_admin_user_scraping_permission(
+    user_id: UUID,
+    payload: AdminUserScrapingPermissionUpdateRequest,
+    _ctx=Depends(require_developer),
+) -> AdminUserRead:
+    engine = get_engine()
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text(
+                """
+                UPDATE users
+                SET can_start_immediate_scraping = :can_start_immediate_scraping,
+                    updated_at = now()
+                WHERE id = :user_id
+                RETURNING
+                    id,
+                    email,
+                    display_name,
+                    is_active,
+                    is_superuser,
+                    can_start_immediate_scraping,
+                    role,
+                    created_at
+                """
+            ),
+            {
+                "user_id": user_id,
+                "can_start_immediate_scraping": payload.can_start_immediate_scraping,
+            },
         )
         row = result.mappings().first()
     if row is None:

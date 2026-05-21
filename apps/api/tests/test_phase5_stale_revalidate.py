@@ -26,13 +26,20 @@ from modules.listings.cache import find_usable_cache_for_search_location  # noqa
 from src.main import app  # noqa: E402
 
 
-def _authorized_auth_context(email: str = "iago.oliveira2478@gmail.com") -> RequestAuthContext:
+def _authorized_auth_context(
+    email: str = "iago.oliveira2478@gmail.com",
+    *,
+    can_start_immediate_scraping: bool = False,
+    is_superuser: bool = False,
+) -> RequestAuthContext:
     return RequestAuthContext(
         user=AuthUserRead(
             id=uuid4(),
             email=email,
             display_name="Iago",
             is_active=True,
+            is_superuser=is_superuser,
+            can_start_immediate_scraping=can_start_immediate_scraping,
             created_at=datetime.now(tz=timezone.utc),
         ),
         session_expires_at=None,
@@ -728,6 +735,71 @@ def test_listings_search_cache_miss_registers_deferred_address_for_non_authorize
         "cache_age_hours": None,
         "has_more": False,
     }
+
+
+def test_listings_search_cache_miss_enqueues_immediate_scrape_for_authorized_user(monkeypatch) -> None:
+    class _Registry:
+        def default_free_platforms(self):
+            return ["quintoandar", "vivareal", "zapimoveis"]
+
+        def resolve_names(self, names):
+            return list(names)
+
+    calls = {"record": 0, "create_cache": 0, "enqueue": 0}
+    job_id = uuid4()
+
+    async def _fake_address_cache(_normalized, **_kwargs):
+        return None
+
+    def _fake_cache_is_usable(record):
+        return bool(record)
+
+    async def _fake_record_search_request(**_kwargs):
+        calls["record"] += 1
+
+    async def _fake_create_cache_record(_normalized, **_kwargs):
+        calls["create_cache"] += 1
+        return uuid4()
+
+    async def _fake_enqueue(**kwargs):
+        calls["enqueue"] += 1
+        assert kwargs["search_location_normalized"] == _payload()["search_location_normalized"]
+        return job_id
+
+    async def _fake_find_active_job(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr("api.routes.listings.get_platform_registry", lambda: _Registry())
+    monkeypatch.setattr("api.routes.listings.get_accessible_journey", _fake_accessible_journey)
+    monkeypatch.setattr(
+        "api.routes.listings.find_usable_cache_for_search_location", _fake_address_cache
+    )
+    monkeypatch.setattr("api.routes.listings.cache_is_usable", _fake_cache_is_usable)
+    monkeypatch.setattr("api.routes.listings.record_search_request", _fake_record_search_request)
+    monkeypatch.setattr("api.routes.listings.create_cache_record", _fake_create_cache_record)
+    monkeypatch.setattr("api.routes.listings._enqueue_listings_scrape_job", _fake_enqueue)
+    monkeypatch.setattr("api.routes.listings._find_active_listings_job_id", _fake_find_active_job)
+
+    journey_id = uuid4()
+    app.dependency_overrides[get_optional_auth_context] = lambda: _authorized_auth_context(
+        "morador@example.com",
+        can_start_immediate_scraping=True,
+    )
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                f"/journeys/{journey_id}/listings/search",
+                json=_payload(),
+            )
+    finally:
+        app.dependency_overrides.pop(get_optional_auth_context, None)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source"] == "none"
+    assert body["job_id"] == str(job_id)
+    assert body["freshness_status"] == "no_cache"
+    assert calls == {"record": 1, "create_cache": 1, "enqueue": 1}
     assert calls["record"] == 1
 
 def test_listings_search_reuses_cache_across_different_zones_and_configs(monkeypatch) -> None:

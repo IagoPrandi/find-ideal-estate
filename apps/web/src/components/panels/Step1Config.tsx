@@ -332,7 +332,7 @@ export function Step1Config() {
             <input
               id="transport-search-radius"
               type="range"
-              min="300"
+              min="200"
               max="2500"
               step="100"
               value={config.transportSearchRadiusMeters}

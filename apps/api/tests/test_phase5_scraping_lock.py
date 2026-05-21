@@ -50,6 +50,26 @@ class _FakeRedis:
         async with self._mutex:
             self._store.pop(key, None)
 
+    async def get(self, key: str) -> str | None:
+        async with self._mutex:
+            return self._store.get(key)
+
+    async def eval(self, _script: str, _num_keys: int, key: str, token: str):
+        async with self._mutex:
+            if self._store.get(key) == token:
+                self._store.pop(key, None)
+                return 1
+            return 0
+
+
+@pytest.fixture(autouse=True)
+def _stub_global_scraping_lock(monkeypatch):
+    @asynccontextmanager
+    async def _fake_global_scraping_lock(**_kwargs):
+        yield True
+
+    monkeypatch.setattr(listings_handler, "global_scraping_lock", _fake_global_scraping_lock)
+
 
 async def _run_single_writer_contention() -> int:
     writes = 0
@@ -74,6 +94,29 @@ def test_scraping_lock_allows_only_one_writer(monkeypatch) -> None:
     writes = asyncio.run(_run_single_writer_contention())
 
     assert writes == 1
+
+
+def test_global_scraping_lock_waits_and_serializes(monkeypatch) -> None:
+    fake_redis = _FakeRedis()
+    monkeypatch.setattr(lock_module, "get_redis", lambda: fake_redis)
+
+    writes: list[int] = []
+
+    async def _worker(index: int) -> None:
+        async with lock_module.global_scraping_lock(
+            timeout_seconds=0.5,
+            poll_interval_seconds=0.01,
+        ) as acquired:
+            assert acquired is True
+            writes.append(index)
+            await asyncio.sleep(0.03)
+
+    async def _run() -> None:
+        await asyncio.gather(_worker(1), _worker(2))
+
+    asyncio.run(_run())
+
+    assert sorted(writes) == [1, 2]
 
 
 def test_listings_step_reopens_cache_after_lock_contention(monkeypatch) -> None:

@@ -88,6 +88,7 @@ class AdminUserRead(BaseModel):
     display_name: str | None = None
     is_active: bool
     is_superuser: bool
+    can_start_immediate_scraping: bool = False
     role: str
     created_at: datetime
 
@@ -101,3 +102,7 @@ class AdminUsersRead(BaseModel):
 
 class AdminUserRoleUpdateRequest(BaseModel):
     role: str
+
+
+class AdminUserScrapingPermissionUpdateRequest(BaseModel):
+    can_start_immediate_scraping: bool

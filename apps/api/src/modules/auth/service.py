@@ -176,6 +176,7 @@ def _row_to_user(row) -> AuthUserRead:
         display_name=row.get("display_name"),
         is_active=row["is_active"],
         is_superuser=row.get("is_superuser", False) or False,
+        can_start_immediate_scraping=row.get("can_start_immediate_scraping", False) or False,
         created_at=row["created_at"],
         role=row.get("role", "user") or "user",
     )
@@ -196,7 +197,10 @@ async def get_user_by_email(email: str) -> tuple[AuthUserRead, str | None] | Non
         result = await conn.execute(
             text(
                 """
-                SELECT id, email, display_name, is_active, is_superuser, created_at, role, password_hash
+                SELECT
+                    id, email, display_name, is_active, is_superuser,
+                    COALESCE(can_start_immediate_scraping, false) AS can_start_immediate_scraping,
+                    created_at, role, password_hash
                 FROM users
                 WHERE lower(email) = :email
                 LIMIT 1
@@ -216,7 +220,9 @@ async def _get_user_row_by_email(conn, email: str):
             text(
                 """
                 SELECT
-                    id, email, display_name, is_active, is_superuser, created_at, role,
+                    id, email, display_name, is_active, is_superuser,
+                    COALESCE(can_start_immediate_scraping, false) AS can_start_immediate_scraping,
+                    created_at, role,
                     password_hash, google_subject
                 FROM users
                 WHERE lower(email) = :email
@@ -234,7 +240,9 @@ async def _get_user_row_by_google_subject(conn, subject: str):
             text(
                 """
                 SELECT
-                    id, email, display_name, is_active, is_superuser, created_at, role,
+                    id, email, display_name, is_active, is_superuser,
+                    COALESCE(can_start_immediate_scraping, false) AS can_start_immediate_scraping,
+                    created_at, role,
                     password_hash, google_subject
                 FROM users
                 WHERE google_subject = :google_subject
@@ -384,7 +392,9 @@ async def register_user(
                     now(),
                     now()
                 )
-                RETURNING id, email, display_name, is_active, is_superuser, created_at, role
+                RETURNING
+                    id, email, display_name, is_active, is_superuser,
+                    can_start_immediate_scraping, created_at, role
                 """
             ),
             {
@@ -458,7 +468,8 @@ async def login_google_user(
                             updated_at = now()
                         WHERE id = :user_id
                         RETURNING
-                            id, email, display_name, is_active, is_superuser, created_at,
+                            id, email, display_name, is_active, is_superuser,
+                            can_start_immediate_scraping, created_at,
                             role, password_hash, google_subject
                         """
                     ),
@@ -500,7 +511,8 @@ async def login_google_user(
                             now()
                         )
                         RETURNING
-                            id, email, display_name, is_active, is_superuser, created_at,
+                            id, email, display_name, is_active, is_superuser,
+                            can_start_immediate_scraping, created_at,
                             role, password_hash, google_subject
                         """
                     ),
@@ -548,6 +560,7 @@ async def get_authenticated_session_by_token(token: str) -> AuthenticatedSession
                     u.display_name,
                     u.is_active,
                     u.is_superuser,
+                    COALESCE(u.can_start_immediate_scraping, false) AS can_start_immediate_scraping,
                     u.created_at,
                     u.role,
                     s.expires_at

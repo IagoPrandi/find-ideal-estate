@@ -27,6 +27,7 @@ class AuthUserRead(BaseModel):
     display_name: str | None = None
     is_active: bool
     is_superuser: bool = False
+    can_start_immediate_scraping: bool = False
     created_at: datetime
     role: str = "user"
 

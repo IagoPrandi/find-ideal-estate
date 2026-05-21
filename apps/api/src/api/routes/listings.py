@@ -49,9 +49,13 @@ _DEFERRED_ADDRESS_NOTICE_REASON = "address_search_registered"
 
 
 def _is_scrape_authorized(auth_context: object) -> bool:
-    # Nenhum plano libera scraping sob demanda.
-    _ = auth_context
-    return False
+    user = getattr(auth_context, "user", None)
+    if user is None or not getattr(user, "is_active", False):
+        return False
+    return bool(
+        getattr(user, "is_superuser", False)
+        or getattr(user, "can_start_immediate_scraping", False)
+    )
 
 
 def _build_deferred_address_response() -> ListingsRequestResult:
@@ -294,10 +298,33 @@ async def listings_search(
             )
 
         if not body.start_scraping:
-            # Demand recorded; no plan can trigger an immediate scrape.
+            # Demand recorded; immediate scraping is only allowed by admin permission.
             return ListingsRequestResult(
                 source="none",
                 job_id=None,
+                freshness_status="no_cache",
+                listings=[],
+                total_count=0,
+            )
+
+        if _is_scrape_authorized(auth_context):
+            await create_cache_record(
+                normalized_search_location,
+                zone_fingerprint=body.zone_fingerprint,
+                config_hash=config_hash,
+            )
+            job_id = await _enqueue_listings_scrape_job(
+                journey_id=journey_id,
+                zone_fingerprint=body.zone_fingerprint,
+                search_location_normalized=normalized_search_location,
+                search_address=body.search_location_label,
+                search_type=body.search_type,
+                usage_type=body.usage_type,
+                platforms=platforms,
+            )
+            return ListingsRequestResult(
+                source="none",
+                job_id=job_id,
                 freshness_status="no_cache",
                 listings=[],
                 total_count=0,

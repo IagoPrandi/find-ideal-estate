@@ -23,7 +23,7 @@ from modules.listings.cache import (
 from modules.listings.models import ZoneCacheStatus
 from modules.listings.platform_registry import get_platform_registry
 from modules.listings.scrapers import ScraperDisallowedError, ScraperError
-from modules.listings.scraping_lock import scraping_lock
+from modules.listings.scraping_lock import global_scraping_lock, scraping_lock
 from modules.listings.search_requests import get_prewarm_targets
 from workers.cancellation import check_cancellation
 from .listings import (
@@ -309,17 +309,47 @@ async def _process_target(
     await _persist_job_context(job_id, ctx)
     await _set_target_status(job_id, ctx, target, "running")
 
-    async with scraping_lock(search_location_normalized, timeout_seconds=0) as acquired:
-        if not acquired:
+    async with global_scraping_lock(timeout_seconds=0) as global_acquired:
+        if not global_acquired:
             await _set_target_status(
                 job_id,
                 ctx,
                 target,
                 "skipped",
-                reason="scraping_lock_not_acquired",
+                reason="global_scraping_lock_not_acquired",
             )
             return False
 
+        async with scraping_lock(search_location_normalized, timeout_seconds=0) as acquired:
+            if not acquired:
+                await _set_target_status(
+                    job_id,
+                    ctx,
+                    target,
+                    "skipped",
+                    reason="scraping_lock_not_acquired",
+                )
+                return False
+
+            return await _process_target_with_locks(
+                job_id=job_id,
+                ctx=ctx,
+                target=target,
+                platform_sessions=platform_sessions,
+                search_location_normalized=search_location_normalized,
+                stage=stage,
+            )
+
+
+async def _process_target_with_locks(
+    *,
+    job_id: UUID,
+    ctx: dict[str, object],
+    target: PrewarmTarget,
+    platform_sessions: dict[tuple[str, str], object],
+    search_location_normalized: str,
+    stage: str,
+) -> bool:
         config_hash = compute_config_hash(
             target.search_type,
             target.usage_type,

@@ -17,6 +17,15 @@ from modules.listings.models import ZoneCacheStatus  # noqa: E402
 from workers.handlers import prewarm as prewarm_handler  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _stub_global_scraping_lock(monkeypatch):
+    @asynccontextmanager
+    async def _fake_global_scraping_lock(**_kwargs):
+        yield True
+
+    monkeypatch.setattr(prewarm_handler, "global_scraping_lock", _fake_global_scraping_lock)
+
+
 def test_build_prewarm_targets_deduplicates_same_normalized_address(monkeypatch) -> None:
     async def _fake_get_prewarm_targets(*, lookback_hours: int, limit: int):
         del lookback_hours, limit

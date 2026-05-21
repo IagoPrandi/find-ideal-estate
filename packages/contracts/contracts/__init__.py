@@ -12,6 +12,7 @@ from .admin import (
     AdminScrapingQueueRead,
     AdminUserRead,
     AdminUserRoleUpdateRequest,
+    AdminUserScrapingPermissionUpdateRequest,
     AdminUsersRead,
 )
 from .billing import (
@@ -93,6 +94,7 @@ __all__ = [
     "AdminScrapingQueueRead",
     "AdminUserRead",
     "AdminUserRoleUpdateRequest",
+    "AdminUserScrapingPermissionUpdateRequest",
     "AdminUsersRead",
     "AuthLoginRequest",
     "AuthGoogleLoginRequest",

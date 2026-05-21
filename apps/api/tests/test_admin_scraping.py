@@ -170,6 +170,60 @@ def test_admin_run_now_creates_prewarm_job(monkeypatch):
     assert body["target_count"] == 1
 
 
+def test_admin_user_scraping_permission_update(monkeypatch):
+    developer = _user(is_superuser=True)
+    target_user_id = uuid4()
+    monkeypatch.setattr("api.routes.admin_common.build_request_auth_context", _auth_context(developer))
+
+    class _Result:
+        def mappings(self):
+            return self
+
+        def first(self):
+            return {
+                "id": target_user_id,
+                "email": "morador@example.com",
+                "display_name": "Morador",
+                "is_active": True,
+                "is_superuser": False,
+                "can_start_immediate_scraping": True,
+                "role": "user",
+                "created_at": datetime.now(tz=timezone.utc),
+            }
+
+    class _Conn:
+        async def execute(self, stmt, params):
+            sql = str(stmt)
+            assert "can_start_immediate_scraping" in sql
+            assert params["user_id"] == target_user_id
+            assert params["can_start_immediate_scraping"] is True
+            return _Result()
+
+    class _Begin:
+        async def __aenter__(self):
+            return _Conn()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class _Engine:
+        def begin(self):
+            return _Begin()
+
+    monkeypatch.setattr("api.routes.admin_users.get_engine", lambda: _Engine())
+
+    with TestClient(app) as client:
+        response = client.patch(
+            f"/admin/users/{target_user_id}/scraping-permission",
+            json={"can_start_immediate_scraping": True},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["id"] == str(target_user_id)
+    assert body["can_start_immediate_scraping"] is True
+
+
 def test_admin_user_role_update_rejects_invalid_role(monkeypatch):
     monkeypatch.setattr("api.routes.admin_common.build_request_auth_context", _auth_context(_user(is_superuser=True)))
 

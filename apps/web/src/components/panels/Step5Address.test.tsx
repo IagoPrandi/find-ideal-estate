@@ -113,6 +113,7 @@ describe("Step5Address", () => {
           search_location_label: "Rua Guaipa, Vila Leopoldina, Sao Paulo-SP",
           search_location_type: "street",
           usage_type: "commercial",
+          start_scraping: true,
         })
       );
     });

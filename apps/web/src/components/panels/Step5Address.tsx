@@ -48,7 +48,7 @@ export function Step5Address() {
       search_location_type: address.locationType,
       search_type: config.type,
       usage_type: config.propertyUsageType,
-      start_scraping: false,
+      start_scraping: true,
     })
       .then((result) => {
         setJobIds({ listingsJobId: result.job_id || null });
