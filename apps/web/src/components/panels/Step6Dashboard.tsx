@@ -623,8 +623,8 @@ export function Step6Dashboard({ journeyId, zoneFingerprint, searchType, listing
               </div>
               <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">365 dias</span>
             </div>
-            <div className="h-64 w-full">
-              <ResponsiveContainer width="100%" height="100%">
+            <div className="h-64 min-h-64 min-w-0 w-full overflow-hidden">
+              <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                 <LineChart data={priceHistory}>
                   <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="#e2e8f0" />
                   <XAxis dataKey="day" tick={{ fontSize: 10 }} stroke="#94a3b8" />
@@ -645,8 +645,8 @@ export function Step6Dashboard({ journeyId, zoneFingerprint, searchType, listing
               </div>
               <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">Preço atual</span>
             </div>
-            <div className="h-60 w-full">
-              <ResponsiveContainer width="100%" height="100%">
+            <div className="h-60 min-h-60 min-w-0 w-full overflow-hidden">
+              <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                 <BarChart data={priceData?.price.price_distribution}>
                   <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="#e2e8f0" />
                   <XAxis dataKey="label" tick={{ fontSize: 10 }} stroke="#94a3b8" />
@@ -716,8 +716,8 @@ export function Step6Dashboard({ journeyId, zoneFingerprint, searchType, listing
               </div>
               <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">Por tipo</span>
             </div>
-            <div className="h-72 w-full">
-              <ResponsiveContainer width="100%" height="100%">
+            <div className="h-72 min-h-72 min-w-0 w-full overflow-hidden">
+              <ResponsiveContainer width="100%" height="100%" minWidth={1} minHeight={1}>
                 <BarChart data={peakHours}>
                   <CartesianGrid vertical={false} strokeDasharray="3 3" stroke="#e2e8f0" />
                   <XAxis dataKey="hour" tick={{ fontSize: 10 }} stroke="#94a3b8" />

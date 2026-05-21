@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 from fastapi import APIRouter, HTTPException, Path, Query, Response
 from core.db import get_engine
@@ -24,6 +25,7 @@ _GEOSAMPA_BUS_STOP_MATCH_METERS = 45.0
 _GEOSAMPA_BUS_TERMINAL_MATCH_METERS = 180.0
 _GREEN_TILE_MIN_ZOOM = 12
 _SAFETY_TILE_MIN_ZOOM = 10
+_SLOW_TILE_QUERY_SECONDS = 2.0
 
 
 def _meters_to_degree_buffer(meters: float) -> float:
@@ -39,20 +41,51 @@ def _green_tile_simplify_tolerance(zoom: int) -> float:
         return 0.0002
     return 0.00005
 
+
+def _green_tile_min_area_m2(zoom: int) -> float:
+    if zoom <= 12:
+        return 1000.0
+    if zoom == 13:
+        return 500.0
+    if zoom == 14:
+        return 100.0
+    return 0.0
+
 _BUS_DESCRIPTOR_SQL = (
     "COALESCE(NULLIF(gr.route_short_name, ''), gr.route_id)"
 )
 
 
 async def _query_vector_tile(engine, sql: str, params: dict, *, layer_name: str) -> bytes:
+    started_at = time.perf_counter()
     try:
         async with engine.begin() as conn:
             await conn.execute(text("SET LOCAL jit = off"))
             result = await conn.execute(text(sql), params)
             tile = result.scalar()
-        return bytes(tile or b"")
+        tile_bytes = bytes(tile or b"")
+        elapsed_seconds = time.perf_counter() - started_at
+        if elapsed_seconds >= _SLOW_TILE_QUERY_SECONDS:
+            logger.warning(
+                "slow vector tile query for %s z=%s x=%s y=%s elapsed_ms=%.1f bytes=%s",
+                layer_name,
+                params.get("z"),
+                params.get("x"),
+                params.get("y"),
+                elapsed_seconds * 1000,
+                len(tile_bytes),
+            )
+        return tile_bytes
     except ProgrammingError as exc:
-        logger.exception("vector tile query failed for %s", layer_name)
+        elapsed_seconds = time.perf_counter() - started_at
+        logger.exception(
+            "vector tile query failed for %s z=%s x=%s y=%s elapsed_ms=%.1f",
+            layer_name,
+            params.get("z"),
+            params.get("x"),
+            params.get("y"),
+            elapsed_seconds * 1000,
+        )
         raise HTTPException(status_code=500, detail=f"Falha ao gerar vector tile de {layer_name}.") from exc
 
 
@@ -608,6 +641,22 @@ async def _query_transport_stop_detail_rows(conn, stop_id: str, source_kind: str
 
 def _build_green_tile_sql(zoom: int) -> str:
     simplify_tolerance = _green_tile_simplify_tolerance(zoom)
+    min_area_m2 = _green_tile_min_area_m2(zoom)
+    area_filter_sql = ""
+    if min_area_m2 > 0:
+        area_filter_sql = f"""
+      AND COALESCE(
+            CASE
+                WHEN g.ves_area ~ '^[0-9]+(\\.[0-9]+)?$' THEN g.ves_area::double precision
+            END,
+            ST_Area(g.geometry::geography)
+        ) >= {min_area_m2}
+"""
+    tile_geometry_sql = (
+        "g.geometry"
+        if zoom >= 15
+        else f"ST_Simplify(g.geometry, {simplify_tolerance}, true)"
+    )
     return """
 WITH bounds AS (
     SELECT
@@ -615,20 +664,21 @@ WITH bounds AS (
         ST_Transform(ST_TileEnvelope(:z, :x, :y), 4326) AS env_4326
 ), layer_rows AS (
     SELECT
-        md5(ST_AsEWKB(g.geometry)::text) AS id,
+        COALESCE(NULLIF(g.primaryindex, ''), 'green_area') AS id,
         COALESCE(NULLIF(g.ves_categ, ''), NULLIF(g.ves_bairro, ''), 'Área verde') AS source_name,
         {green_case_sql} AS vegetation_level,
         ST_AsMVTGeom(
-            ST_Transform(ST_SimplifyPreserveTopology(g.geometry, {simplify_tolerance}), 3857),
+            ST_Transform({tile_geometry_sql}, 3857),
             env_3857,
             4096,
-            256,
+            64,
             true
         ) AS geom
     FROM geosampa_vegetacao_significativa g
     CROSS JOIN bounds
-    WHERE g.geometry && env_4326
+    WHERE g.geometry && ST_Expand(env_4326, {simplify_tolerance})
       AND ST_Intersects(g.geometry, env_4326)
+      {area_filter_sql}
 )
 SELECT ST_AsMVT(layer_rows, 'green_areas', 4096, 'geom')
 FROM layer_rows
@@ -636,6 +686,8 @@ WHERE geom IS NOT NULL
 """.format(
         green_case_sql=green_vegetation_case_sql("g.ves_categ"),
         simplify_tolerance=simplify_tolerance,
+        tile_geometry_sql=tile_geometry_sql,
+        area_filter_sql=area_filter_sql,
     )
 
 
