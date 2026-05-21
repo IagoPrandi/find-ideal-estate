@@ -40,7 +40,9 @@ type ZoneFavoritesState = {
   isAuthenticated: boolean;
   isHydrating: boolean;
   accountUserId: string | null;
+  pendingZoneKeys: string[];
   isZoneFavorite: (journeyId: string, zoneFingerprint: string) => boolean;
+  isZoneFavoritePending: (journeyId: string, zoneFingerprint: string) => boolean;
   syncWithAuthStatus: (authStatus: AuthStatusRead) => Promise<void>;
   addZoneFavorite: (payload: {
     journeyId: string;
@@ -106,9 +108,14 @@ export const useZoneFavoritesStore = create<ZoneFavoritesState>((set, get) => ({
   isAuthenticated: false,
   isHydrating: false,
   accountUserId: null,
+  pendingZoneKeys: [],
   isZoneFavorite: (journeyId, zoneFingerprint) => {
     const key = buildZoneKey(journeyId, zoneFingerprint);
     return get().zoneFavorites.some((entry) => entry.zoneKey === key);
+  },
+  isZoneFavoritePending: (journeyId, zoneFingerprint) => {
+    const key = buildZoneKey(journeyId, zoneFingerprint);
+    return get().pendingZoneKeys.includes(key);
   },
   syncWithAuthStatus: async (authStatus) => {
     const nextUserId = authStatus.is_authenticated ? authStatus.user?.id || null : null;
@@ -120,6 +127,7 @@ export const useZoneFavoritesStore = create<ZoneFavoritesState>((set, get) => ({
         isAuthenticated: false,
         isHydrating: false,
         accountUserId: null,
+        pendingZoneKeys: [],
       });
       return;
     }
@@ -146,6 +154,7 @@ export const useZoneFavoritesStore = create<ZoneFavoritesState>((set, get) => ({
         isAuthenticated: true,
         isHydrating: false,
         accountUserId: nextUserId,
+        pendingZoneKeys: [],
       });
     } catch {
       if (syncRequestId !== latestZoneSyncRequestId) {
@@ -156,6 +165,7 @@ export const useZoneFavoritesStore = create<ZoneFavoritesState>((set, get) => ({
         isAuthenticated: true,
         isHydrating: false,
         accountUserId: nextUserId,
+        pendingZoneKeys: [],
       });
     }
   },
@@ -163,13 +173,54 @@ export const useZoneFavoritesStore = create<ZoneFavoritesState>((set, get) => ({
     if (!get().isAuthenticated) {
       return false;
     }
+    const zoneKey = buildZoneKey(journeyId, zoneFingerprint);
+    if (get().pendingZoneKeys.includes(zoneKey)) {
+      return false;
+    }
+    const optimisticSavedAt = new Date().toISOString();
+    const optimisticZoneFavorite: FavoriteZoneEntry = {
+      zoneKey,
+      journeyId,
+      zoneFingerprint,
+      searchType,
+      usageType,
+      savedAt: optimisticSavedAt,
+      payload: {
+        fingerprint: zoneFingerprint,
+        journey_id: journeyId,
+        transport_point_id: null,
+        transport_point: null,
+        neighborhood_name: null,
+        city_name: null,
+        state_code: null,
+        isochrone_geom: null,
+        poi_counts: null,
+        poi_points: [],
+        metrics: {},
+        listings: [],
+      },
+      note: null,
+    };
+
+    set((state) => ({
+      pendingZoneKeys: [...state.pendingZoneKeys.filter((key) => key !== zoneKey), zoneKey],
+      zoneFavorites: [optimisticZoneFavorite, ...state.zoneFavorites.filter((entry) => entry.zoneKey !== zoneKey)],
+    }));
+
     try {
       const saved = await saveAccountZoneFavoriteApi({ journeyId, zoneFingerprint, searchType, usageType });
       set((state) => ({
+        pendingZoneKeys: state.pendingZoneKeys.filter((key) => key !== zoneKey),
         zoneFavorites: [saved, ...state.zoneFavorites.filter((entry) => entry.zoneKey !== saved.zoneKey)],
       }));
       return true;
     } catch {
+      set((state) => ({
+        pendingZoneKeys: state.pendingZoneKeys.filter((key) => key !== zoneKey),
+        zoneFavorites: state.zoneFavorites.filter(
+          (entry) => entry.zoneKey !== zoneKey || entry.savedAt !== optimisticSavedAt,
+        ),
+      }));
       return false;
     }
   },
@@ -177,18 +228,36 @@ export const useZoneFavoritesStore = create<ZoneFavoritesState>((set, get) => ({
     if (!get().isAuthenticated) {
       return false;
     }
+    if (get().pendingZoneKeys.includes(zoneKey)) {
+      return false;
+    }
+    const removedFavorite = get().zoneFavorites.find((entry) => entry.zoneKey === zoneKey) || null;
+    set((state) => ({
+      pendingZoneKeys: [...state.pendingZoneKeys.filter((key) => key !== zoneKey), zoneKey],
+      zoneFavorites: state.zoneFavorites.filter((entry) => entry.zoneKey !== zoneKey),
+    }));
+
     try {
       await deleteAccountZoneFavoriteApi(zoneKey);
       set((state) => ({
-        zoneFavorites: state.zoneFavorites.filter((entry) => entry.zoneKey !== zoneKey),
+        pendingZoneKeys: state.pendingZoneKeys.filter((key) => key !== zoneKey),
       }));
       return true;
     } catch {
+      set((state) => ({
+        pendingZoneKeys: state.pendingZoneKeys.filter((key) => key !== zoneKey),
+        zoneFavorites: removedFavorite && !state.zoneFavorites.some((entry) => entry.zoneKey === zoneKey)
+          ? [removedFavorite, ...state.zoneFavorites]
+          : state.zoneFavorites,
+      }));
       return false;
     }
   },
   toggleZoneFavorite: async (payload) => {
     const key = buildZoneKey(payload.journeyId, payload.zoneFingerprint);
+    if (get().pendingZoneKeys.includes(key)) {
+      return false;
+    }
     if (get().zoneFavorites.some((entry) => entry.zoneKey === key)) {
       return await get().removeZoneFavorite(key);
     }
@@ -233,6 +302,7 @@ export const useZoneFavoritesStore = create<ZoneFavoritesState>((set, get) => ({
       isAuthenticated: false,
       isHydrating: false,
       accountUserId: null,
+      pendingZoneKeys: [],
     });
   },
 }));

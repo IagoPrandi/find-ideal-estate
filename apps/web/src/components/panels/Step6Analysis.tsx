@@ -201,6 +201,7 @@ export function Step6Analysis() {
   const toggleFavorite = useFavoritesStore((state) => state.toggleFavorite);
   const favoriteListings = useFavoritesStore((state) => state.favorites);
   const isFavoritesHydrating = useFavoritesStore((state) => state.isHydrating);
+  const isFavoritePending = useFavoritesStore((state) => state.isFavoritePending);
   const { max_listing_favorites, planName } = useEntitlements();
   const listingCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const listingsPanelScrollRef = useRef<HTMLDivElement | null>(null);
@@ -927,6 +928,7 @@ export function Step6Analysis() {
               const hasAvailabilityPopover = Boolean(listing.duplication_badge && platformVariants.length > 1);
               const isSelected = listingKey !== "" && listingKey === selectedListingKey;
               const isSavedFavorite = listingKey ? favoriteListingKeySet.has(listingKey) : false;
+              const isPendingFavorite = listingKey ? isFavoritePending(listingKey) : false;
               const isAtListingLimit = authStatus.is_authenticated
                 && !isSavedFavorite
                 && max_listing_favorites != null
@@ -1172,10 +1174,10 @@ export function Step6Analysis() {
                           aria-label={favoriteButtonLabel}
                           aria-pressed={isSavedFavorite}
                           title={favoriteButtonLabel}
-                          disabled={!listingKey || !journeyId || !zoneFingerprint || isFavoritesHydrating || isAuthLoading || isAtListingLimit}
+                          disabled={!listingKey || !journeyId || !zoneFingerprint || isFavoritesHydrating || isAuthLoading || isAtListingLimit || isPendingFavorite}
                           onClick={async (event) => {
                             event.stopPropagation();
-                            if (!listingKey || !journeyId || !zoneFingerprint || isFavoritesHydrating || isAuthLoading) {
+                            if (!listingKey || !journeyId || !zoneFingerprint || isFavoritesHydrating || isAuthLoading || isPendingFavorite) {
                               return;
                             }
                             if (!authStatus.is_authenticated) {

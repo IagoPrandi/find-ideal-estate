@@ -265,15 +265,17 @@ function ZoneCard({
 
   const isAuthenticated = useZoneFavoritesStore((state) => state.isAuthenticated);
   const isZoneFavorite = useZoneFavoritesStore((state) => state.isZoneFavorite);
+  const isZoneFavoritePending = useZoneFavoritesStore((state) => state.isZoneFavoritePending);
   const toggleZoneFavorite = useZoneFavoritesStore((state) => state.toggleZoneFavorite);
   const zoneFavoritesCount = useZoneFavoritesStore((state) => state.zoneFavorites.length);
   const isSaved = journeyId ? isZoneFavorite(journeyId, zone.fingerprint) : false;
+  const isPending = journeyId ? isZoneFavoritePending(journeyId, zone.fingerprint) : false;
   const { max_zone_favorites, planName } = useEntitlements();
   const isAtZoneLimit = !isSaved && max_zone_favorites != null && zoneFavoritesCount >= max_zone_favorites;
 
   async function handleToggleSave(event: React.MouseEvent<HTMLButtonElement>) {
     event.stopPropagation();
-    if (!journeyId || !isAuthenticated) {
+    if (!journeyId || !isAuthenticated || isPending) {
       return;
     }
     await toggleZoneFavorite({
@@ -320,7 +322,7 @@ function ZoneCard({
             type="button"
             aria-label={isSaved ? "Remover zona da lista de interesse" : "Salvar zona na lista de interesse"}
             onClick={handleToggleSave}
-            disabled={!isAuthenticated || isAtZoneLimit}
+            disabled={!isAuthenticated || isAtZoneLimit || isPending}
             title={!isAuthenticated ? "Entre na sua conta para salvar zonas" : isAtZoneLimit ? `Limite de zonas salvas atingido no plano ${planName}` : isSaved ? "Remover zona salva" : "Salvar zona"}
             className={`inline-flex h-7 w-7 items-center justify-center rounded-lg border transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${isSaved ? "border-rose-300 bg-rose-50 text-rose-600 hover:bg-rose-100" : "border-slate-200 bg-white text-slate-500 hover:border-pastel-violet-300 hover:text-pastel-violet-700"}`}
             data-testid={`zone-save-${zone.id}`}

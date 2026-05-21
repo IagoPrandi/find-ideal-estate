@@ -25,7 +25,9 @@ type FavoritesState = {
   isAuthenticated: boolean;
   isHydrating: boolean;
   accountUserId: string | null;
+  pendingFavoriteKeys: string[];
   isFavorite: (listingKey: string) => boolean;
+  isFavoritePending: (listingKey: string) => boolean;
   syncWithAuthStatus: (authStatus: AuthStatusRead) => Promise<void>;
   addFavorite: (payload: {
     listing: ListingCardRead;
@@ -177,7 +179,9 @@ export const useFavoritesStore = create<FavoritesState>((set, get) => ({
   isAuthenticated: false,
   isHydrating: false,
   accountUserId: null,
+  pendingFavoriteKeys: [],
   isFavorite: (listingKey) => get().favorites.some((favorite) => favorite.listingKey === listingKey),
+  isFavoritePending: (listingKey) => get().pendingFavoriteKeys.includes(listingKey),
   syncWithAuthStatus: async (authStatus) => {
     const nextUserId = authStatus.is_authenticated ? authStatus.user?.id || null : null;
 
@@ -188,6 +192,7 @@ export const useFavoritesStore = create<FavoritesState>((set, get) => ({
         isAuthenticated: false,
         isHydrating: false,
         accountUserId: null,
+        pendingFavoriteKeys: [],
       });
       return;
     }
@@ -231,6 +236,7 @@ export const useFavoritesStore = create<FavoritesState>((set, get) => ({
         isAuthenticated: true,
         isHydrating: false,
         accountUserId: nextUserId,
+        pendingFavoriteKeys: [],
       });
     } catch {
       if (syncRequestId !== latestFavoritesSyncRequestId) {
@@ -242,6 +248,7 @@ export const useFavoritesStore = create<FavoritesState>((set, get) => ({
         isAuthenticated: true,
         isHydrating: false,
         accountUserId: nextUserId,
+        pendingFavoriteKeys: [],
       });
     }
   },
@@ -254,14 +261,41 @@ export const useFavoritesStore = create<FavoritesState>((set, get) => ({
     if (!listingKey) {
       return false;
     }
+    if (get().isFavoritePending(listingKey)) {
+      return false;
+    }
+
+    const optimisticSavedAt = new Date().toISOString();
+    const optimisticFavorite: FavoriteListingEntry = {
+      listingKey,
+      journeyId,
+      zoneFingerprint,
+      searchType,
+      usageType,
+      savedAt: optimisticSavedAt,
+      listing,
+      note: null,
+    };
+
+    set((state) => ({
+      pendingFavoriteKeys: [...state.pendingFavoriteKeys.filter((key) => key !== listingKey), listingKey],
+      favorites: [optimisticFavorite, ...state.favorites.filter((favorite) => favorite.listingKey !== listingKey)],
+    }));
 
     try {
       const savedFavorite = await saveAccountFavoriteApi({ listing, journeyId, zoneFingerprint, searchType, usageType });
       set((state) => ({
+        pendingFavoriteKeys: state.pendingFavoriteKeys.filter((key) => key !== listingKey),
         favorites: [savedFavorite, ...state.favorites.filter((favorite) => favorite.listingKey !== savedFavorite.listingKey)],
       }));
       return true;
     } catch {
+      set((state) => ({
+        pendingFavoriteKeys: state.pendingFavoriteKeys.filter((key) => key !== listingKey),
+        favorites: state.favorites.filter(
+          (favorite) => favorite.listingKey !== listingKey || favorite.savedAt !== optimisticSavedAt,
+        ),
+      }));
       return false;
     }
   },
@@ -294,14 +328,29 @@ export const useFavoritesStore = create<FavoritesState>((set, get) => ({
     if (!get().isAuthenticated) {
       return false;
     }
+    if (get().isFavoritePending(listingKey)) {
+      return false;
+    }
+
+    const removedFavorite = get().favorites.find((favorite) => favorite.listingKey === listingKey) || null;
+    set((state) => ({
+      pendingFavoriteKeys: [...state.pendingFavoriteKeys.filter((key) => key !== listingKey), listingKey],
+      favorites: state.favorites.filter((favorite) => favorite.listingKey !== listingKey),
+    }));
 
     try {
       await deleteAccountFavoriteApi(listingKey);
       set((state) => ({
-        favorites: state.favorites.filter((favorite) => favorite.listingKey !== listingKey),
+        pendingFavoriteKeys: state.pendingFavoriteKeys.filter((key) => key !== listingKey),
       }));
       return true;
     } catch {
+      set((state) => ({
+        pendingFavoriteKeys: state.pendingFavoriteKeys.filter((key) => key !== listingKey),
+        favorites: removedFavorite && !state.favorites.some((favorite) => favorite.listingKey === listingKey)
+          ? [removedFavorite, ...state.favorites]
+          : state.favorites,
+      }));
       return false;
     }
   },
@@ -321,6 +370,9 @@ export const useFavoritesStore = create<FavoritesState>((set, get) => ({
   toggleFavorite: async (payload) => {
     const listingKey = getListingSelectionKey(payload.listing);
     if (!listingKey) {
+      return false;
+    }
+    if (get().isFavoritePending(listingKey)) {
       return false;
     }
     if (get().isFavorite(listingKey)) {
@@ -368,6 +420,7 @@ export const useFavoritesStore = create<FavoritesState>((set, get) => ({
       isAuthenticated: false,
       isHydrating: false,
       accountUserId: null,
+      pendingFavoriteKeys: [],
     });
   },
 }));

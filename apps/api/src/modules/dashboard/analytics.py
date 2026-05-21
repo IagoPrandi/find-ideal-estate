@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import csv
 from collections import defaultdict
 from difflib import SequenceMatcher
@@ -1847,53 +1848,28 @@ async def fetch_zone_favorite_analytics(
     search_type: str,
     usage_type: str,
 ) -> dict[str, Any]:
-    price_payload = await fetch_zone_dashboard_analytics(
-        journey_id=journey_id,
-        zone_fingerprint=zone_fingerprint,
-        property_id=None,
-        neighborhood_name=None,
-        city_name=None,
-        page="preco",
-        search_type=search_type,
-        usage_type=usage_type,
-        spatial_scope="inside_zone",
-        address_scope="all_addresses",
-        min_price=None,
-        max_price=None,
-        min_size=None,
-        max_size=None,
-    )
-    safety_payload = await fetch_zone_dashboard_analytics(
-        journey_id=journey_id,
-        zone_fingerprint=zone_fingerprint,
-        property_id=None,
-        neighborhood_name=None,
-        city_name=None,
-        page="seguranca",
-        search_type=search_type,
-        usage_type=usage_type,
-        spatial_scope="inside_zone",
-        address_scope="all_addresses",
-        min_price=None,
-        max_price=None,
-        min_size=None,
-        max_size=None,
-    )
-    environment_payload = await fetch_zone_dashboard_analytics(
-        journey_id=journey_id,
-        zone_fingerprint=zone_fingerprint,
-        property_id=None,
-        neighborhood_name=None,
-        city_name=None,
-        page="ambiente",
-        search_type=search_type,
-        usage_type=usage_type,
-        spatial_scope="inside_zone",
-        address_scope="all_addresses",
-        min_price=None,
-        max_price=None,
-        min_size=None,
-        max_size=None,
+    async def _fetch_dashboard_page(page: str) -> dict[str, Any]:
+        return await fetch_zone_dashboard_analytics(
+            journey_id=journey_id,
+            zone_fingerprint=zone_fingerprint,
+            property_id=None,
+            neighborhood_name=None,
+            city_name=None,
+            page=page,
+            search_type=search_type,
+            usage_type=usage_type,
+            spatial_scope="inside_zone",
+            address_scope="all_addresses",
+            min_price=None,
+            max_price=None,
+            min_size=None,
+            max_size=None,
+        )
+
+    price_payload, safety_payload, environment_payload = await asyncio.gather(
+        _fetch_dashboard_page("preco"),
+        _fetch_dashboard_page("seguranca"),
+        _fetch_dashboard_page("ambiente"),
     )
 
     context = price_payload.get("context") or safety_payload.get("context") or environment_payload.get("context") or {}

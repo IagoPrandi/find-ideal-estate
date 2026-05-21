@@ -1,5 +1,7 @@
 # Work Log
 
+- 2026-05-21 (deploy backend producao scraping imediato): `PRD.md`, `SKILLS_README.md` e `skills/release-config-management/SKILL.md` foram abertos antes da execucao. Skill usada: `release-config-management`, pois o escopo foi rollout backend em producao com migration, Docker Compose e RDS. Pre-check local: worktree limpo no commit `9a60bbff7f6058bd0765dd33a8cdcb7542d908b9` (`feat: add user permission for immediate listings scraping`) e teste focado `python -m pytest apps/api/tests/test_admin_scraping.py apps/api/tests/test_phase5_stale_revalidate.py apps/api/tests/test_phase5_scraping_lock.py apps/api/tests/test_phase7_prewarm.py -q` passou com `38 passed`. Deploy: archive Git backend (`apps/api`, `packages/contracts`, `infra`, `docker`, `alembic.ini`, `platforms.yaml`, `requirements.txt`, `docker-compose*.yml`) enviado para a EC2 `18.117.21.132` e extraido em `/opt/app`, preservando `.env`/dados locais. Backup de rollback criado em `/home/ubuntu/app_backups/app_before_backend_20260521T2140Z.tgz`. Containers `api`, `worker`, `worker-prewarm` e `worker-scrape-browser` foram reconstruidos e recriados. Durante o primeiro restart, `docker/entrypoint.sh` entrou com CRLF e causou `exec /app/docker/entrypoint.sh: no such file or directory`; corrigido na EC2 com `sed -i 's/\r$//' docker/entrypoint.sh`, seguido de novo rebuild/recreate. Validacao producao: containers finais `Up`, API `healthy`; Alembic em `20260521_0036 (head)`; `/health` publico retornou `200 {"status":"ok","db":"ok","redis":"ok"}`; RDS confirma coluna `users.can_start_immediate_scraping`; usuario `iago.oliveira2478@gmail.com` esta `is_active=true`, `is_superuser=true`, `can_start_immediate_scraping=true`, `role='proprietario'`; `/admin/users` sem sessao retorna `401`; logs recentes sem `error/exception/traceback/failed/fatal`. Nenhuma milestone do PRD foi marcada, pois nao houve confirmacao explicita do responsavel.
+
 - 2026-05-21 (correcao disparo de scraping imediato autorizado): `PRD.md`, `SKILLS_README.md` e `skills/security-threat-checklist/SKILL.md` foram abertos antes da execucao. Skill usada: `security-threat-checklist`, pois o bug envolvia permissao de usuario, endpoint autenticado e enfileiramento de scraping. Diagnostico: o backend ja validava `is_superuser`/`can_start_immediate_scraping`, mas `apps/web/src/components/panels/Step5Address.tsx` enviava `start_scraping: false` sempre ao confirmar o endereco; por isso ate usuarios liberados apenas registravam demanda para prewarm e viam a mensagem de ate 24 horas. Correcao: o frontend agora envia `start_scraping: true` na confirmacao do endereco, mantendo a autorizacao real no backend; usuarios sem permissao continuam recebendo resposta diferida, sem scraping imediato. Validacao: `npm.cmd --prefix apps/web run test:run -- src/components/panels/Step5Address.test.tsx` passou com `3 passed`; `npm.cmd --prefix apps/web run build` passou. Observacao: os testes focados ainda emitem warnings React `act(...)` preexistentes; build mantem os avisos conhecidos de chunk grande/import dinamico misto. Nenhuma milestone do PRD foi marcada, pois nao houve confirmacao explicita do responsavel.
 
 - 2026-05-21 (correcao ambiente local Vite analytics): `PRD.md`, `SKILLS_README.md` e `skills/develop-frontend/SKILL.md` foram abertos antes da execucao. Skill usada: `develop-frontend`, pois o erro era um import quebrando o Vite local. Diagnostico: o compose monta `./apps/web:/web` e usa volume anonimo em `/web/node_modules`; por isso o `npm install` feito no host nao atualizava o `node_modules` usado pelo container `onde_morar-ui-1`. Correcao operacional: executado `npm install` dentro do container `ui` e reiniciado o servico com `docker compose restart ui`. Validacao: `npm ls @vercel/analytics --depth=0` dentro do container passou a mostrar `@vercel/analytics@2.0.1`; `GET http://localhost:5173/` retornou `200`; `GET http://localhost:5173/src/App.tsx?t=verify-analytics` retornou `200`; logs recentes do Vite mostram `new dependencies optimized: @vercel/analytics/react`, sem novo erro de import. Observacao: `npm install` reportou 12 vulnerabilidades auditaveis (7 moderadas, 5 altas), nao tratadas nesta correcao. Nenhuma milestone do PRD foi marcada, pois nao houve confirmacao explicita do responsavel.
@@ -6182,3 +6184,47 @@
 
 - Progress Tracker:
   - Nenhuma milestone foi marcada como concluída; política de confirmação explícita preservada.
+## 2026-05-21 - Investigacao de latencia ao salvar favoritos
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+- Skill used:
+  - `skills/best-practices/SKILL.md`
+
+- Scope executed (analysis only):
+  - Investigado o fluxo de salvar imoveis (`POST /favorites`) e zonas (`POST /zone-favorites`) do frontend ate a API.
+  - Identificado que o estado visual de favorito so muda apos o retorno do backend, sem atualizacao otimista.
+  - Identificado que salvar zona monta snapshot enriquecido antes do INSERT, incluindo chamadas sequenciais de analytics de preco, seguranca e ambiente.
+
+- Verification executed:
+  - Leitura estatica dos stores, cliente HTTP, rotas FastAPI e servicos de favoritos.
+  - Nenhum teste automatizado executado; nao houve alteracao funcional.
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
+
+## 2026-05-21 - Favoritos com feedback imediato
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+- Skill used:
+  - `skills/best-practices/SKILL.md`
+
+- Scope executed:
+  - `apps/web/src/state/favorites-store.ts` passou a aplicar save/remove otimista para imoveis, com `pendingFavoriteKeys` e rollback quando a API rejeita.
+  - `apps/web/src/state/zone-favorites-store.ts` passou a aplicar save/remove otimista para zonas, com `pendingZoneKeys` e rollback quando a API rejeita.
+  - `Step6Analysis` e `Step4Compare` agora desabilitam apenas o botao do favorito pendente, evitando duplo clique enquanto a fonte de verdade do servidor confirma.
+  - `fetch_zone_favorite_analytics` agora busca as paginas de preco, seguranca e ambiente em paralelo ao montar analytics de favorito de zona.
+  - `apps/web/src/state/favorites-store.test.ts` cobre hidratacao existente, save/remove otimista, confirmacao do servidor e rollback de falha para imoveis e zonas.
+
+- Verification executed:
+  - `npm run test:run -- src/components/panels/Step6Analysis.test.tsx src/components/panels/Step4Compare.test.tsx src/state/favorites-store.test.ts` -> `30 passed`.
+  - `python -m pytest apps/api/tests/test_phase6_dashboard_analytics.py::test_fetch_zone_favorite_analytics_builds_lightweight_metrics -q --color=no` -> `1 passed`.
+  - `git diff --check` -> sem erros; apenas avisos de conversao LF/CRLF.
+  - `npm run typecheck` ainda falha por erros preexistentes fora deste escopo (`src/api/client.ts`, `FavoritesPanel.tsx`, `Step2Transport.tsx`, testes antigos e re-export duplicado em `src/lib/api/index.ts`).
+  - A suite completa `python -m pytest apps/api/tests/test_phase6_dashboard_analytics.py -q --color=no` ainda falha em 4 testes preexistentes de `fetch_zone_dashboard_analytics` que esperam 3 chamadas SQL, enquanto a funcao atual executa uma 4a consulta de historico.
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
