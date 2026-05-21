@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { Analytics } from "@vercel/analytics/react";
 import { AuthProvider } from "./features/auth/AuthContext";
 import { ScrapingAdminPage } from "./features/admin/ScrapingAdminPage";
 import { FindIdealApp } from "./features/app/FindIdealApp";
@@ -22,6 +23,7 @@ export default function App() {
     <QueryClientProvider client={client}>
       <AuthProvider>
         {isAdminRoute ? <ScrapingAdminPage /> : <FindIdealApp />}
+        <Analytics />
       </AuthProvider>
     </QueryClientProvider>
   );
