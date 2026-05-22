@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useJourneyStore } from "../../state";
 import { ProgressTracker } from "./ProgressTracker";
@@ -27,8 +27,8 @@ describe("ProgressTracker", () => {
       />
     );
 
-    expect(screen.queryByRole("button", { name: /Ir para etapa Origem/i })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Ir para etapa Configuração/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Ir para etapa Transporte/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Ir para etapa Configura/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Ir para etapa Zonas/i })).toBeInTheDocument();
   });
 
@@ -51,7 +51,7 @@ describe("ProgressTracker", () => {
       />
     );
 
-    expect(screen.getByRole("button", { name: /Ir para etapa Origem/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Ir para etapa Transporte/i })).toBeInTheDocument();
   });
 
   it("hides step 2 when the journey modal is car", () => {
@@ -73,8 +73,26 @@ describe("ProgressTracker", () => {
       />
     );
 
-    expect(screen.queryByRole("button", { name: /Ir para etapa Origem/i })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Ir para etapa Configuração/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Ir para etapa Transporte/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Ir para etapa Configura/i })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /Ir para etapa Zonas/i })).toBeInTheDocument();
+  });
+
+  it("calls onStepClick for unlocked steps", () => {
+    const onStepClick = vi.fn();
+
+    render(
+      <ProgressTracker
+        currentStep={3}
+        maxStep={3}
+        isCollapsed={false}
+        onStepClick={onStepClick}
+        onToggleCollapse={vi.fn()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Ir para etapa Configura/i }));
+
+    expect(onStepClick).toHaveBeenCalledWith(1);
   });
 });
