@@ -4,6 +4,7 @@ import { ChevronDown, Eye, EyeOff, Layers } from "lucide-react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { API_BASE, getBusLineDetails, getBusStopDetails, getJourneyTransportPoints, getJourneyZonesList, getPublicSafetyIncidentsForViewport, getSelectedTransportTrace, getTransportStopDetails, getZoneListings } from "../../api/client";
+import { FeedbackFormButton } from "../../components/layout/FeedbackFormButton";
 import { FavoritesPanel, WizardPanel } from "../../components/panels";
 import { AuthAccessCard } from "../auth/AuthAccessCard";
 import { getPoiCategoryMeta, getZonePoiSelectionKey, sortPoiPoints, ZonePoiPointLike, zoneNeedsPoiBackfill } from "../../domain/poi";
@@ -2593,6 +2594,7 @@ export function FindIdealApp() {
         >
           <Layers className="h-4 w-4" />
         </button>
+        <FeedbackFormButton />
       </div>
       <WizardPanel />
     </main>

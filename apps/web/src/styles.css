@@ -27,12 +27,14 @@ html,
 body,
 #root {
   height: 100%;
+  min-height: 100dvh;
 }
 
 body {
   margin: 0;
   background: var(--color-bg);
   color: var(--color-text);
+  overflow: hidden;
 }
 
 @keyframes fadeIn {
@@ -176,6 +178,12 @@ body {
   --favorites-panel-top-offset: 4.125rem;
   --favorites-toggle-desktop-height: 3.25rem;
   --favorites-controls-gap: 0.75rem;
+  --mobile-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --mobile-edge-gap: 1rem;
+  --mobile-tracker-height: 3.75rem;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 100dvh;
 }
 
 .auth-shell__content {
@@ -273,33 +281,93 @@ body {
   right: calc(min(50vw, 54rem) + 1rem) !important;
 }
 
+.wizard-shell--collapsed .wizard-step-panel {
+  display: none;
+}
+
+.feedback-form-button {
+  pointer-events: auto;
+  display: inline-flex;
+  height: 2rem;
+  width: 2rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.5rem;
+  border: 1px solid rgb(241 245 249);
+  background: rgba(255, 255, 255, 0.96);
+  color: #d97706;
+  box-shadow: 0 10px 18px rgba(15, 23, 42, 0.14);
+  backdrop-filter: blur(12px);
+  transition: background-color 180ms ease, border-color 180ms ease, color 180ms ease, opacity 180ms ease;
+}
+
+.feedback-form-button:hover {
+  background: #fffbeb;
+  border-color: #fde68a;
+  color: #b45309;
+}
+
+.feedback-form-button--disabled {
+  color: #94a3b8;
+  cursor: not-allowed;
+  opacity: 0.78;
+}
+
+.feedback-form-button--disabled:hover {
+  color: #94a3b8;
+  background: rgba(255, 255, 255, 0.96);
+  border-color: rgb(241 245 249);
+}
+
 @media (max-width: 1024px) {
   .wizard-shell {
     left: 1rem !important;
     right: 1rem !important;
     top: auto !important;
-    bottom: 1rem !important;
+    bottom: calc(var(--mobile-edge-gap) + var(--mobile-safe-bottom)) !important;
     width: auto !important;
-    height: min(52vh, 520px) !important;
+    height: min(58dvh, 520px) !important;
+    max-height: calc(100dvh - 7rem - var(--mobile-safe-bottom));
+    gap: 0.625rem;
+  }
+
+  .wizard-shell--collapsed {
+    height: auto !important;
+    max-height: none;
+  }
+
+  .wizard-tracker {
+    order: 2;
+  }
+
+  .wizard-step-panel {
+    order: 1;
+    min-height: 0;
+    flex: 1 1 auto;
+    border-radius: 1rem 1rem 1.25rem 1.25rem;
+  }
+
+  .wizard-shell--collapsed .wizard-step-panel {
+    display: none;
   }
 
   .auth-shell {
-    right: 4.5rem;
+    right: 1rem;
   }
 
   .favorites-shell {
-    --favorites-panel-top-offset: 0rem;
-    left: 1rem;
+    --favorites-panel-top-offset: 4.125rem;
+    left: auto;
     right: 1rem;
     top: 1rem;
     bottom: auto;
-    align-items: stretch;
+    align-items: flex-end;
     flex-direction: column;
   }
 
   .favorites-toggle {
     align-self: flex-end;
-    margin-top: 0;
+    margin-top: var(--favorites-panel-top-offset);
   }
 
   .favorites-panel {
@@ -320,12 +388,22 @@ body {
     right: 1rem;
   }
 
+  .find-ideal-app .map-side-controls {
+    bottom: calc(var(--mobile-safe-bottom) + var(--mobile-tracker-height) + 1.25rem);
+    right: 1rem;
+  }
+
+  .find-ideal-app .maplibregl-ctrl-bottom-right {
+    right: 3.75rem !important;
+  }
+
   .find-ideal-app .map-layer-menu {
     max-height: min(72vh, 38rem);
+    width: min(calc(100vw - 2rem), 21rem);
   }
 
   .find-ideal-app--favorites-open .maplibregl-ctrl-bottom-right {
-    right: 0 !important;
+    right: 3.75rem !important;
   }
 }
 

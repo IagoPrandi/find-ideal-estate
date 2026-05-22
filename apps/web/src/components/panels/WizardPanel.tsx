@@ -16,16 +16,21 @@ export function WizardPanel() {
   const toggleCollapse = useUIStore((state) => state.toggleCollapse);
 
   return (
-    <>
-      <div
-        className="wizard-shell pointer-events-none absolute bottom-4 left-4 top-4 z-10 flex flex-col gap-3 transition-all duration-500 ease-[cubic-bezier(0.25,1,0.5,1)]"
-        style={{ width: `${panelWidth}px` }}
-      >
-        <div className="pointer-events-auto">
-          <ProgressTracker currentStep={step} maxStep={maxStep} isCollapsed={isCollapsed} onStepClick={goToStep} onToggleCollapse={toggleCollapse} />
-        </div>
+    <div
+      className={`wizard-shell pointer-events-none absolute bottom-4 left-4 top-4 z-10 flex flex-col gap-3 transition-all duration-500 ease-[cubic-bezier(0.25,1,0.5,1)] ${isCollapsed ? "wizard-shell--collapsed" : "wizard-shell--expanded"}`}
+      style={{ width: `${panelWidth}px` }}
+      data-testid="wizard-shell"
+    >
+      <div className="wizard-tracker pointer-events-auto">
+        <ProgressTracker currentStep={step} maxStep={maxStep} isCollapsed={isCollapsed} onStepClick={goToStep} onToggleCollapse={toggleCollapse} />
+      </div>
 
-        <div className={`pointer-events-auto overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl transition-all duration-500 ease-in-out ${isCollapsed ? "pointer-events-none flex-none scale-95 opacity-0" : "flex-1 opacity-100"}`} style={{ height: isCollapsed ? "0px" : "auto" }}>
+      <section
+        className={`wizard-step-panel pointer-events-auto overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl transition-all duration-500 ease-in-out ${isCollapsed ? "pointer-events-none flex-none scale-95 opacity-0" : "flex-1 opacity-100"}`}
+        aria-hidden={isCollapsed}
+        data-testid="wizard-step-panel"
+      >
+        {!isCollapsed ? (
           <div className="h-full w-full min-w-0">
             {step === 1 ? <Step1Config /> : null}
             {step === 2 ? <Step2Transport /> : null}
@@ -34,8 +39,8 @@ export function WizardPanel() {
             {step === 5 ? <Step5Address /> : null}
             {step === 6 ? <Step6Analysis /> : null}
           </div>
-        </div>
-      </div>
-    </>
+        ) : null}
+      </section>
+    </div>
   );
 }

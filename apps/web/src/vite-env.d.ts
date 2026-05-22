@@ -6,6 +6,8 @@ interface ImportMetaEnv {
   readonly VITE_MAPTILER_API_KEY?: string;
   /** Google Identity Services OAuth client ID (public, browser-side). */
   readonly VITE_GOOGLE_CLIENT_ID?: string;
+  /** URL pública opcional do formulário flutuante. */
+  readonly VITE_FORM_URL?: string;
 }
 
 interface ImportMeta {
