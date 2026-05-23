@@ -6206,6 +6206,30 @@
 - Progress Tracker:
   - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
 
+## 2026-05-23 - Merge origin/main em feature/mobile-version
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/best-practices/SKILL.md`
+  - `skills/best-practices/references/agent-principles.md`
+
+- Skill used:
+  - `skills/best-practices/SKILL.md`
+
+- Scope executed:
+  - Branch atual confirmada como `feature/mobile-version`.
+  - `origin/main` atualizado via `git fetch origin main`.
+  - Merge normal executado com `git merge --no-ff origin/main -m "Merge origin/main into feature/mobile-version"`, preservando historico por commit de merge.
+  - Merge concluido sem conflitos pela estrategia `ort`.
+
+- Verification executed:
+  - `git status --short --branch` -> `feature/mobile-version` ficou `ahead 2` de `origin/feature/mobile-version`.
+  - `git log --oneline --decorate --graph --max-count=10` -> commit de merge no topo da branch.
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
+
 ## 2026-05-22 - Rolagem e detalhes de bateladas no admin
 
 - Required docs opened:
