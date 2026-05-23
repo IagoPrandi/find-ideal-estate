@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FavoritesPanel } from "./FavoritesPanel";
-import { useFavoritesStore } from "../../state";
+import { useFavoritesStore, useZoneFavoritesStore } from "../../state";
 import { getZoneFavoriteAnalytics } from "../../api/client";
 
 vi.mock("../../api/client", () => ({
@@ -31,7 +31,12 @@ function renderPanel() {
 
 describe("FavoritesPanel", () => {
   beforeEach(() => {
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: vi.fn(),
+    });
     useFavoritesStore.getState().resetFavoritesState();
+    useZoneFavoritesStore.getState().resetZoneFavoritesState();
     useFavoritesStore.setState({
       isAuthenticated: true,
       isPanelOpen: true,
@@ -198,5 +203,122 @@ describe("FavoritesPanel", () => {
 
     expect(await screen.findByTestId("favorite-saved-rank-property:cheap")).toHaveTextContent("2º no ranking");
     expect(screen.getByTestId("favorite-saved-rank-property:green")).toHaveTextContent("1º no ranking");
+  });
+
+  it("shows map visibility controls on saved zone cards", () => {
+    useFavoritesStore.setState((state) => ({
+      ...state,
+      activeScope: "zones",
+      activeTab: "saved",
+    }));
+    useZoneFavoritesStore.setState({
+      isAuthenticated: true,
+      zoneFavorites: [
+        {
+          zoneKey: "zone:journey-1:zone-a",
+          journeyId: "journey-1",
+          zoneFingerprint: "zone-a",
+          searchType: "rent",
+          usageType: "all",
+          savedAt: "2026-03-27T10:00:00Z",
+          note: null,
+          payload: {
+            fingerprint: "zone-a",
+            journey_id: "journey-1",
+            transport_point: { id: "tp-a", name: "Seed A", source: "gtfs_stop", external_id: "stop-a", lat: -23.5, lon: -46.7, modal_types: ["bus"] },
+            isochrone_geom: null,
+            poi_counts: null,
+            poi_points: [],
+            metrics: {},
+            listings: [],
+          },
+        },
+        {
+          zoneKey: "zone:journey-1:zone-b",
+          journeyId: "journey-1",
+          zoneFingerprint: "zone-b",
+          searchType: "rent",
+          usageType: "all",
+          savedAt: "2026-03-27T11:00:00Z",
+          note: null,
+          payload: {
+            fingerprint: "zone-b",
+            journey_id: "journey-1",
+            transport_point: { id: "tp-b", name: "Seed B", source: "gtfs_stop", external_id: "stop-b", lat: -23.6, lon: -46.8, modal_types: ["bus"] },
+            isochrone_geom: null,
+            poi_counts: null,
+            poi_points: [],
+            metrics: {},
+            listings: [],
+          },
+        },
+      ],
+    });
+
+    renderPanel();
+
+    expect(screen.getAllByRole("button", { name: "Ocultar zona salva no mapa" })).toHaveLength(2);
+  });
+
+  it("toggles saved zone map visibility without selecting the card", async () => {
+    useFavoritesStore.setState((state) => ({
+      ...state,
+      activeScope: "zones",
+      activeTab: "saved",
+    }));
+    useZoneFavoritesStore.setState({
+      isAuthenticated: true,
+      selectedZoneKey: "zone:journey-1:zone-b",
+      zoneFavorites: [
+        {
+          zoneKey: "zone:journey-1:zone-a",
+          journeyId: "journey-1",
+          zoneFingerprint: "zone-a",
+          searchType: "rent",
+          usageType: "all",
+          savedAt: "2026-03-27T10:00:00Z",
+          note: null,
+          payload: {
+            fingerprint: "zone-a",
+            journey_id: "journey-1",
+            transport_point: { id: "tp-a", name: "Seed A", source: "gtfs_stop", external_id: "stop-a", lat: -23.5, lon: -46.7, modal_types: ["bus"] },
+            isochrone_geom: null,
+            poi_counts: null,
+            poi_points: [],
+            metrics: {},
+            listings: [],
+          },
+        },
+        {
+          zoneKey: "zone:journey-1:zone-b",
+          journeyId: "journey-1",
+          zoneFingerprint: "zone-b",
+          searchType: "rent",
+          usageType: "all",
+          savedAt: "2026-03-27T11:00:00Z",
+          note: null,
+          payload: {
+            fingerprint: "zone-b",
+            journey_id: "journey-1",
+            transport_point: { id: "tp-b", name: "Seed B", source: "gtfs_stop", external_id: "stop-b", lat: -23.6, lon: -46.8, modal_types: ["bus"] },
+            isochrone_geom: null,
+            poi_counts: null,
+            poi_points: [],
+            metrics: {},
+            listings: [],
+          },
+        },
+      ],
+    });
+
+    renderPanel();
+
+    fireEvent.click(screen.getByTestId("saved-zone-visibility-zone:journey-1:zone-a"));
+
+    await waitFor(() => {
+      expect(useZoneFavoritesStore.getState().hiddenZoneKeys).toContain("zone:journey-1:zone-a");
+    });
+    expect(useZoneFavoritesStore.getState().selectedZoneKey).toBe("zone:journey-1:zone-b");
+    expect(screen.getByRole("button", { name: "Mostrar zona salva no mapa" })).toBeInTheDocument();
   });
 });

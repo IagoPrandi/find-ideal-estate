@@ -23,7 +23,7 @@ import { ListingsScrapeDiagnosticsSchema, type ListingsScrapeDiagnostics, type L
 import { useAuth } from "../../features/auth/AuthContext";
 import { useEntitlements } from "../../features/auth/useEntitlements";
 import { buildZoneFavoriteAnalyticsQueryKey } from "../../lib/favorites";
-import { applyListingsPanelFilters, formatCurrencyBr, getListingDisplayPrice, getListingSelectionKey, resolveListingCardImageUrls, resolvePlatformUrl } from "../../lib/listingFormat";
+import { applyListingsPanelFilters, filterListingsByMapViewport, formatCurrencyBr, getListingDisplayPrice, getListingSelectionKey, resolveListingCardImageUrls, resolvePlatformUrl } from "../../lib/listingFormat";
 import { useFavoritesStore, useJourneyStore, useUIStore, type ListingsPanelFilters } from "../../state";
 import { Step6Dashboard } from "./Step6Dashboard";
 
@@ -189,6 +189,7 @@ export function Step6Analysis() {
   const listingsJobId = useJourneyStore((state) => state.listingsJobId);
   const listingsFilters = useJourneyStore((state) => state.listingsFilters);
   const listingsAddressScope = useJourneyStore((state) => state.listingsAddressScope);
+  const mapViewportBounds = useJourneyStore((state) => state.mapViewportBounds);
   const selectedListingKey = useJourneyStore((state) => state.selectedListingKey);
   const selectedAddress = useJourneyStore((state) => state.selectedAddress);
   const setListingsFilters = useJourneyStore((state) => state.setListingsFilters);
@@ -202,7 +203,12 @@ export function Step6Analysis() {
   const favoriteListings = useFavoritesStore((state) => state.favorites);
   const isFavoritesHydrating = useFavoritesStore((state) => state.isHydrating);
   const isFavoritePending = useFavoritesStore((state) => state.isFavoritePending);
-  const { max_listing_favorites, planName } = useEntitlements();
+  const {
+    max_listing_favorites,
+    planName,
+    planSlug,
+    isLoading: isEntitlementsLoading,
+  } = useEntitlements();
   const listingCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const listingsPanelScrollRef = useRef<HTMLDivElement | null>(null);
   const lastScrolledListingKeyRef = useRef<string | null>(null);
@@ -216,8 +222,16 @@ export function Step6Analysis() {
   const [openPriceDeltaTooltipKey, setOpenPriceDeltaTooltipKey] = useState<string | null>(null);
   const [debouncedPriceComparisonFilters, setDebouncedPriceComparisonFilters] = useState<ListingsPanelFilters>(listingsFilters);
   const [failedListingImageKeys, setFailedListingImageKeys] = useState<Record<string, true>>({});
+  const isAllSpatialScopeAllowed = planSlug === "pro" || planSlug === "pro_max";
+  const canSelectAllSpatialScope = !isEntitlementsLoading && isAllSpatialScopeAllowed;
 
   const persistedListingsJobId = listingsJobId;
+
+  useEffect(() => {
+    if (!isEntitlementsLoading && !isAllSpatialScopeAllowed && listingsFilters.spatialScope === "all") {
+      setListingsFilters({ spatialScope: "inside_zone" });
+    }
+  }, [isAllSpatialScopeAllowed, isEntitlementsLoading, listingsFilters.spatialScope, setListingsFilters]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -353,7 +367,14 @@ export function Step6Analysis() {
       : `Os imóveis ligados a "${selectedAddress.label}" serão adicionados em até 24 horas. Ainda não há imóveis persistidos no banco para ${listingsAddressScope === "selected_address" ? "esse endereço pesquisado" : "os endereços pesquisados nesta jornada"}.`
     : null;
 
-  const displayedListings = applyListingsPanelFilters(rawListings, listingsFilters);
+  const viewportListings = useMemo(
+    () => filterListingsByMapViewport(rawListings, mapViewportBounds),
+    [mapViewportBounds, rawListings]
+  );
+  const displayedListings = applyListingsPanelFilters(viewportListings, listingsFilters);
+  const noMatchesInMapViewport = Boolean(mapViewportBounds)
+    && rawListings.length > 0
+    && viewportListings.length === 0;
   const favoriteListingKeySet = useMemo(() => new Set(favoriteListings.map((favorite) => favorite.listingKey)), [favoriteListings]);
 
   const priceComparisonDashboardQuery = useQuery({
@@ -764,14 +785,21 @@ export function Step6Analysis() {
                       <select
                         aria-label="Escopo espacial"
                         value={listingsFilters.spatialScope}
-                        onChange={(e) => setListingsFilters({ spatialScope: e.target.value as "all" | "inside_zone" })}
+                        onChange={(e) => {
+                          const nextScope = e.target.value as "all" | "inside_zone";
+                          if (nextScope === "all" && !canSelectAllSpatialScope) {
+                            return;
+                          }
+                          setListingsFilters({ spatialScope: nextScope });
+                        }}
                         className="rounded-md border border-slate-200 px-2 py-1.5 text-sm text-slate-700 outline-none focus:border-pastel-violet-400 focus:ring-1 focus:ring-pastel-violet-200"
                       >
-                        <option value="all">Todos os imóveis</option>
+                        <option value="all" disabled={!canSelectAllSpatialScope}>Todos os imóveis</option>
                         <option value="inside_zone">Apenas dentro da zona</option>
                       </select>
                       <p className="text-xs text-slate-500">
                         {listingsInZone.length} dentro da zona · {listingsOutsideZone.length} fora da zona · {listingsWithoutCoordinates.length} sem coordenadas
+                        {!canSelectAllSpatialScope ? " Disponível a partir do plano Pro." : ""}
                       </p>
                     </div>
                     <div className="col-span-2 grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-end">
@@ -895,7 +923,9 @@ export function Step6Analysis() {
             ) : null}
             {!listingsQuery.isLoading && rawListings.length > 0 && displayedListings.length === 0 ? (
               <div className="rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-600 shadow-sm">
-                {noMatchesInZoneForScope
+                {noMatchesInMapViewport
+                  ? "Nenhum imóvel está visível na área atual do mapa. Movimente ou afaste o mapa para carregar os imóveis dessa visualização."
+                  : noMatchesInZoneForScope
                   ? `Existem ${rawListings.length} imóveis raspados para esta busca, mas nenhum com coordenadas dentro da zona selecionada. Troque o escopo para 'Todos os imóveis' para inspecionar o conjunto completo.`
                   : "Nenhum imóvel corresponde aos filtros aplicados."}
               </div>

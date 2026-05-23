@@ -31,6 +31,20 @@ type AdminTab = "overview" | "queue" | "batches" | "users";
 
 const ACTIVE_STATES = new Set(["pending", "running", "retrying"]);
 
+type BatchTargetStatus = Record<string, unknown> & {
+  platform_statuses?: Record<string, Record<string, unknown>>;
+  platforms?: unknown;
+  platforms_completed?: unknown;
+  platforms_failed?: unknown;
+};
+
+type PlatformStatusRow = {
+  platform: string;
+  status: string;
+  listingCount: number | null;
+  errorMessage: string | null;
+};
+
 function toMessage(error: unknown): string {
   if (error instanceof ApiError) return error.message;
   return "Não foi possível concluir a ação administrativa.";
@@ -68,6 +82,7 @@ function formatRemaining(seconds: number | null | undefined): string {
 
 function statusLabel(status: string | null | undefined): string {
   const labels: Record<string, string> = {
+    queued: "Na fila",
     pending: "Pendente",
     running: "Em execução",
     retrying: "Tentando novamente",
@@ -80,6 +95,46 @@ function statusLabel(status: string | null | undefined): string {
     success_empty: "Sem endereços",
   };
   return status ? labels[status] ?? status : "—";
+}
+
+function readNumber(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readStringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function platformLabel(platform: string): string {
+  const labels: Record<string, string> = {
+    quintoandar: "QuintoAndar",
+    vivareal: "Viva Real",
+    zapimoveis: "ZAP Imóveis",
+  };
+  return labels[platform] ?? platform;
+}
+
+function platformStatusRows(item: BatchTargetStatus): PlatformStatusRow[] {
+  const rawStatuses = item.platform_statuses && typeof item.platform_statuses === "object" ? item.platform_statuses : {};
+  const platforms = new Set([
+    ...readStringList(item.platforms),
+    ...readStringList(item.platforms_completed),
+    ...readStringList(item.platforms_failed),
+    ...Object.keys(rawStatuses),
+  ]);
+  const completed = new Set(readStringList(item.platforms_completed));
+  const failed = new Set(readStringList(item.platforms_failed));
+
+  return Array.from(platforms).map((platform) => {
+    const raw = rawStatuses[platform] || {};
+    const fallbackStatus = completed.has(platform) ? "completed" : failed.has(platform) ? "failed" : "queued";
+    return {
+      platform,
+      status: typeof raw.status === "string" ? raw.status : fallbackStatus,
+      listingCount: readNumber(raw.listing_count) ?? readNumber(raw.persisted_count) ?? readNumber(raw.scraped_count),
+      errorMessage: typeof raw.error_message === "string" ? raw.error_message : null,
+    };
+  });
 }
 
 function MetricCard({ label, value }: { label: string; value: string | number }) {
@@ -97,28 +152,54 @@ function BatchTargetRows({ batch }: { batch: AdminScrapingBatch }) {
     return <p className="text-sm text-slate-500">Esta batelada ainda não registrou status por endereço.</p>;
   }
   return (
-    <div className="overflow-hidden rounded-lg border border-slate-200">
-      <table className="w-full min-w-[48rem] text-left text-sm">
+    <div className="max-h-[28rem] overflow-auto rounded-lg border border-slate-200 panel-scroll">
+      <table className="w-full min-w-[64rem] text-left text-sm">
         <thead className="bg-slate-50 text-[11px] uppercase tracking-[0.12em] text-slate-500">
           <tr>
             <th className="px-3 py-2">Endereço</th>
             <th className="px-3 py-2">Status</th>
-            <th className="px-3 py-2">Imóveis</th>
+            <th className="px-3 py-2">Total</th>
+            <th className="px-3 py-2">Plataformas</th>
             <th className="px-3 py-2">Tempo</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100 bg-white">
           {targets.map(([key, raw]) => {
-            const item = raw as Record<string, unknown>;
+            const item = raw as BatchTargetStatus;
+            const platformRows = platformStatusRows(item);
             return (
-              <tr key={key}>
-                <td className="px-3 py-2">
+              <tr key={key} className="align-top">
+                <td className="px-3 py-3">
                   <p className="font-medium text-slate-800">{String(item.search_location_label || item.search_location_normalized || key)}</p>
                   <p className="text-xs text-slate-400">{String(item.search_type || "rent")} · {String(item.usage_type || "residential")}</p>
                 </td>
-                <td className="px-3 py-2 text-slate-700">{statusLabel(String(item.status || ""))}</td>
-                <td className="px-3 py-2 text-slate-700">{typeof item.total_count === "number" ? item.total_count : "—"}</td>
-                <td className="px-3 py-2 text-slate-700">{formatDurationMs(typeof item.duration_ms === "number" ? item.duration_ms : null)}</td>
+                <td className="px-3 py-3 text-slate-700">{statusLabel(String(item.status || ""))}</td>
+                <td className="px-3 py-3 text-slate-700">{typeof item.total_count === "number" ? item.total_count : "—"}</td>
+                <td className="px-3 py-3">
+                  {platformRows.length ? (
+                    <div className="grid gap-2">
+                      {platformRows.map((platform) => (
+                        <div key={platform.platform} className="flex min-w-0 flex-wrap items-center gap-2">
+                          <span className="font-semibold text-slate-800">{platformLabel(platform.platform)}</span>
+                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-semibold text-slate-600">
+                            {statusLabel(platform.status)}
+                          </span>
+                          <span className="text-xs text-slate-500">
+                            {platform.listingCount ?? "—"} imóvel(is)
+                          </span>
+                          {platform.errorMessage ? (
+                            <span className="min-w-0 truncate text-xs text-rose-600" title={platform.errorMessage}>
+                              {platform.errorMessage}
+                            </span>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-slate-400">—</span>
+                  )}
+                </td>
+                <td className="px-3 py-3 text-slate-700">{formatDurationMs(typeof item.duration_ms === "number" ? item.duration_ms : null)}</td>
               </tr>
             );
           })}
@@ -240,7 +321,7 @@ export function ScrapingAdminPage() {
 
   if (isLoading) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-100 text-slate-600">
+      <main className="flex h-screen min-h-screen items-center justify-center overflow-y-auto bg-slate-100 text-slate-600 panel-scroll">
         <Loader2 className="mr-2 h-5 w-5 animate-spin" />
         Verificando acesso
       </main>
@@ -249,7 +330,7 @@ export function ScrapingAdminPage() {
 
   if (!queriesEnabled) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-slate-100 px-4">
+      <main className="flex h-screen min-h-screen items-center justify-center overflow-y-auto bg-slate-100 px-4 panel-scroll">
         <div className="max-w-md rounded-lg border border-amber-200 bg-white p-6 text-center shadow-lg">
           <AlertTriangle className="mx-auto h-8 w-8 text-amber-500" />
           <h1 className="mt-3 text-xl font-bold text-slate-900">Acesso restrito</h1>
@@ -267,8 +348,8 @@ export function ScrapingAdminPage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-100 text-slate-900">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-6">
+    <main className="h-screen min-h-screen overflow-y-auto bg-slate-100 text-slate-900 panel-scroll">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-4 py-6 pb-10">
         <header className="flex flex-col justify-between gap-4 rounded-lg border border-slate-200 bg-white p-5 shadow-sm md:flex-row md:items-center">
           <div>
             <button

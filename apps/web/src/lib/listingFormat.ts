@@ -1,5 +1,5 @@
 import type { ListingCardRead, ListingPlatformVariantRead } from "../api/client";
-import type { ListingsPanelFilters } from "../state/journey-store";
+import type { ListingsPanelFilters, MapViewportBounds } from "../state/journey-store";
 
 const PLATFORM_BASE_URLS: Record<string, string> = {
   zapimoveis: "https://www.zapimoveis.com.br",
@@ -151,6 +151,32 @@ export function getListingSelectionKey(
     return `listing:${listing.platform_listing_id}`;
   }
   return "";
+}
+
+export function listingIsInsideMapViewport(
+  listing: Pick<ListingCardRead, "lat" | "lon">,
+  bounds: MapViewportBounds | null
+): boolean {
+  if (!bounds) {
+    return true;
+  }
+  if (typeof listing.lat !== "number" || typeof listing.lon !== "number") {
+    return false;
+  }
+  return listing.lon >= bounds.minLon
+    && listing.lon <= bounds.maxLon
+    && listing.lat >= bounds.minLat
+    && listing.lat <= bounds.maxLat;
+}
+
+export function filterListingsByMapViewport<T extends Pick<ListingCardRead, "lat" | "lon">>(
+  listings: T[],
+  bounds: MapViewportBounds | null
+): T[] {
+  if (!bounds) {
+    return listings;
+  }
+  return listings.filter((listing) => listingIsInsideMapViewport(listing, bounds));
 }
 
 export function applyListingsPanelFilters(

@@ -36,7 +36,7 @@ from workers.queue import QUEUE_PREWARM
 from workers.runtime import run_job_with_retry
 
 
-DEFAULT_PLATFORM_BUDGET_SECONDS = 60.0
+DEFAULT_PLATFORM_BUDGET_SECONDS = 100.0
 
 
 @dataclass(frozen=True)
@@ -83,6 +83,36 @@ def _ensure_target_statuses(ctx: dict[str, object]) -> dict[str, Any]:
     return statuses
 
 
+def _initial_platform_statuses(platforms: tuple[str, ...]) -> dict[str, dict[str, object]]:
+    return {
+        platform: {
+            "status": "queued",
+            "listing_count": 0,
+            "scraped_count": 0,
+            "persisted_count": 0,
+        }
+        for platform in platforms
+    }
+
+
+def _with_platform_status(
+    platform_statuses: dict[str, dict[str, object]],
+    platform: str,
+    status: str,
+    **extra: object,
+) -> dict[str, dict[str, object]]:
+    current = platform_statuses.get(platform, {})
+    return {
+        **platform_statuses,
+        platform: {
+            **current,
+            "status": status,
+            "updated_at": _isoformat(),
+            **extra,
+        },
+    }
+
+
 async def _set_target_status(
     job_id: UUID,
     ctx: dict[str, object],
@@ -103,6 +133,7 @@ async def _set_target_status(
         "usage_type": target.usage_type,
         "demand_count": target.demand_count,
         "platforms": list(target.platforms),
+        "platform_statuses": current.get("platform_statuses") or _initial_platform_statuses(target.platforms),
         "updated_at": now,
         **extra,
     }
@@ -375,6 +406,7 @@ async def _process_target_with_locks(
 
         platforms_completed: list[str] = []
         platforms_failed: list[str] = []
+        platform_statuses = _initial_platform_statuses(target.platforms)
         total_scraped = 0
         budget_seconds = _platform_budget_seconds(ctx)
         budget_exhausted = False
@@ -382,21 +414,63 @@ async def _process_target_with_locks(
             for platform in target.platforms:
                 await check_cancellation(job_id)
                 scraper = platform_sessions[(platform, target.search_type)]
+                platform_statuses = _with_platform_status(platform_statuses, platform, "running")
+                await _set_target_status(
+                    job_id,
+                    ctx,
+                    target,
+                    "running",
+                    platform_statuses=platform_statuses,
+                    active_platform=platform,
+                )
                 try:
                     listings = await asyncio.wait_for(
                         scraper.scrape_in_session(target.search_location_label),
                         timeout=budget_seconds,
                     )
-                    total_scraped += await _persist_listings(
+                    scraped_count = len(listings) if isinstance(listings, list) else 0
+                    persisted_count = await _persist_listings(
                         listings,
                         platform,
                         target.search_type,
                         search_location_normalized,
                     )
+                    total_scraped += persisted_count
+                    platform_statuses = _with_platform_status(
+                        platform_statuses,
+                        platform,
+                        "completed",
+                        scraped_count=scraped_count,
+                        persisted_count=persisted_count,
+                        listing_count=persisted_count,
+                    )
+                    await _set_target_status(
+                        job_id,
+                        ctx,
+                        target,
+                        "running",
+                        platform_statuses=platform_statuses,
+                        active_platform=None,
+                    )
                     platforms_completed.append(platform)
                 except asyncio.TimeoutError:
                     budget_exhausted = True
                     platforms_failed.append(platform)
+                    platform_statuses = _with_platform_status(
+                        platform_statuses,
+                        platform,
+                        "failed",
+                        error_type="TimeoutError",
+                        error_message="Tempo limite da plataforma esgotado.",
+                    )
+                    await _set_target_status(
+                        job_id,
+                        ctx,
+                        target,
+                        "running",
+                        platform_statuses=platform_statuses,
+                        active_platform=None,
+                    )
                     await publish_job_event(
                         job_id,
                         "prewarm.address.timeout",
@@ -412,6 +486,21 @@ async def _process_target_with_locks(
                     continue
                 except ScraperDisallowedError as exc:
                     platforms_failed.append(platform)
+                    platform_statuses = _with_platform_status(
+                        platform_statuses,
+                        platform,
+                        "failed",
+                        error_type=type(exc).__name__,
+                        error_message=str(exc),
+                    )
+                    await _set_target_status(
+                        job_id,
+                        ctx,
+                        target,
+                        "running",
+                        platform_statuses=platform_statuses,
+                        active_platform=None,
+                    )
                     await _record_degradation_event(platform, "degraded", "robots_disallowed", 1.0)
                     await publish_job_event(
                         job_id,
@@ -427,6 +516,21 @@ async def _process_target_with_locks(
                     )
                 except (ScraperError, Exception) as exc:  # noqa: BLE001
                     platforms_failed.append(platform)
+                    platform_statuses = _with_platform_status(
+                        platform_statuses,
+                        platform,
+                        "failed",
+                        error_type=type(exc).__name__,
+                        error_message=str(exc),
+                    )
+                    await _set_target_status(
+                        job_id,
+                        ctx,
+                        target,
+                        "running",
+                        platform_statuses=platform_statuses,
+                        active_platform=None,
+                    )
                     await _record_degradation_event(platform, "degraded", "scraping_error", 1.0)
                     await publish_job_event(
                         job_id,
@@ -457,6 +561,7 @@ async def _process_target_with_locks(
                     "failed",
                     platforms_completed=platforms_completed,
                     platforms_failed=platforms_failed,
+                    platform_statuses=platform_statuses,
                     total_count=total_scraped,
                     budget_exhausted=budget_exhausted,
                 )
@@ -500,6 +605,7 @@ async def _process_target_with_locks(
                 "completed" if new_status == ZoneCacheStatus.COMPLETE else "partial",
                 platforms_completed=platforms_completed,
                 platforms_failed=platforms_failed,
+                platform_statuses=platform_statuses,
                 total_count=total_scraped,
                 cache_status=new_status,
                 budget_exhausted=budget_exhausted,
@@ -523,6 +629,7 @@ async def _process_target_with_locks(
                 "failed",
                 platforms_completed=platforms_completed,
                 platforms_failed=platforms_failed,
+                platform_statuses=platform_statuses,
                 total_count=total_scraped,
                 error_type="CancelledError",
             )
@@ -545,6 +652,7 @@ async def _process_target_with_locks(
                 "failed",
                 platforms_completed=platforms_completed,
                 platforms_failed=platforms_failed,
+                platform_statuses=platform_statuses,
                 total_count=total_scraped,
                 error_type=type(exc).__name__,
                 error_message=str(exc),
@@ -582,6 +690,7 @@ async def _listings_prewarm_step(job_id: UUID) -> None:
             "usage_type": target.usage_type,
             "demand_count": target.demand_count,
             "platforms": list(target.platforms),
+            "platform_statuses": _initial_platform_statuses(target.platforms),
             "updated_at": _isoformat(),
         }
         for target in targets

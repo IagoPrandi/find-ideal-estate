@@ -51,6 +51,45 @@ async function renderWithQueryClient() {
   return view;
 }
 
+function mockProAccountPlan() {
+  vi.mocked(getAccountPlan).mockResolvedValue({
+    plan: {
+      id: "plan-pro",
+      slug: "pro",
+      name: "Pro",
+      price_brl: 90.99,
+      monthly_credits: 4000,
+      is_paid: true,
+      display_order: 3,
+    },
+    status: "active",
+    started_at: "2026-03-27T10:00:00Z",
+    ends_at: "2026-04-26T10:00:00Z",
+    entitlements: {
+      plan_id: "plan-pro",
+      plan_slug: "pro",
+      max_listing_favorites: 20,
+      max_zone_favorites: 5,
+      retention_days: 365,
+      can_customize_radius: true,
+      can_customize_max_time: true,
+      can_customize_distance: true,
+      max_active_metrics: 10,
+      transport_line_policy: "standard",
+      zone_selection_policy: "standard",
+      auto_refresh_policy: "none",
+      rollover_percent: 0,
+      rollover_cycles: 0,
+      cycle_length_days: 30,
+      max_transit_minutes_cap: 120,
+      max_walk_minutes_cap: 60,
+      max_car_minutes_cap: 120,
+      max_zone_radius_m_cap: 5000,
+      max_transport_radius_m_cap: 5000,
+    },
+  } as never);
+}
+
 describe("Step6Analysis", () => {
   beforeEach(() => {
     Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
@@ -795,6 +834,7 @@ describe("Step6Analysis", () => {
   });
 
   it("starts with inside-zone listings and lets the user expand to the full scraped set", async () => {
+    mockProAccountPlan();
     vi.mocked(getZoneListings).mockResolvedValue({
       source: "cache",
       job_id: null,
@@ -949,6 +989,156 @@ describe("Step6Analysis", () => {
     expect(screen.getByText(/Rua Dentro, 10/i)).toBeInTheDocument();
     expect(screen.queryByText(/Rua Fora, 20/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Endereço sem coordenadas/i)).not.toBeInTheDocument();
+  });
+
+  it("shows listing cards according to the current map viewport", async () => {
+    useJourneyStore.setState((state) => ({
+      ...state,
+      listingsJobId: null,
+      mapViewportBounds: {
+        minLon: -46.72,
+        minLat: -23.62,
+        maxLon: -46.58,
+        maxLat: -23.48,
+      },
+    }));
+    vi.mocked(getZoneListings).mockResolvedValue({
+      source: "cache",
+      job_id: null,
+      freshness_status: "fresh",
+      listings: [
+        {
+          property_id: "prop-visible",
+          platform: "quintoandar",
+          platform_listing_id: "qa-visible",
+          address_normalized: "Rua Visível, 10",
+          current_best_price: "3500",
+          condo_fee: "500",
+          iptu: "100",
+          area_m2: 70,
+          inside_zone: true,
+          has_coordinates: true,
+          lat: -23.5,
+          lon: -46.7,
+          platforms_available: ["quintoandar"],
+        },
+        {
+          property_id: "prop-outside-view",
+          platform: "vivareal",
+          platform_listing_id: "vr-outside-view",
+          address_normalized: "Rua Fora da tela, 20",
+          current_best_price: "4200",
+          condo_fee: "300",
+          iptu: "50",
+          area_m2: 90,
+          inside_zone: true,
+          has_coordinates: true,
+          lat: -23.5,
+          lon: -46.2,
+          platforms_available: ["vivareal"],
+        },
+      ],
+      total_count: 2,
+      cache_age_hours: 0.1,
+    } as never);
+
+    await renderWithQueryClient();
+
+    expect(await screen.findByText(/Rua Visível, 10/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Rua Fora da tela, 20/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/Imóveis \(1 de 2\)/i)).toBeInTheDocument();
+  });
+
+  it("explains when no listing is visible in the current map viewport", async () => {
+    useJourneyStore.setState((state) => ({
+      ...state,
+      listingsJobId: null,
+      mapViewportBounds: {
+        minLon: -46.72,
+        minLat: -23.62,
+        maxLon: -46.58,
+        maxLat: -23.48,
+      },
+    }));
+    vi.mocked(getZoneListings).mockResolvedValue({
+      source: "cache",
+      job_id: null,
+      freshness_status: "fresh",
+      listings: [
+        {
+          property_id: "prop-outside-view",
+          platform: "vivareal",
+          platform_listing_id: "vr-outside-view",
+          address_normalized: "Rua Fora da tela, 20",
+          current_best_price: "4200",
+          condo_fee: "300",
+          iptu: "50",
+          area_m2: 90,
+          inside_zone: true,
+          has_coordinates: true,
+          lat: -23.5,
+          lon: -46.2,
+          platforms_available: ["vivareal"],
+        },
+      ],
+      total_count: 1,
+      cache_age_hours: 0.1,
+    } as never);
+
+    await renderWithQueryClient();
+
+    expect(await screen.findByText(/Nenhum imóvel está visível na área atual do mapa/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Rua Fora da tela, 20/i)).not.toBeInTheDocument();
+  });
+
+  it("keeps full spatial scope disabled below Pro", async () => {
+    await renderWithQueryClient();
+
+    const spatialScopeSelect = await screen.findByLabelText(/Escopo espacial/i);
+    const allOption = within(spatialScopeSelect).getByRole("option", { name: "Todos os imóveis" });
+
+    expect(allOption).toBeDisabled();
+    expect(screen.getByText(/Disponível a partir do plano Pro/i)).toBeInTheDocument();
+
+    fireEvent.change(spatialScopeSelect, { target: { value: "all" } });
+
+    await waitFor(() => {
+      expect(useJourneyStore.getState().listingsFilters.spatialScope).toBe("inside_zone");
+    });
+    expect(spatialScopeSelect).toHaveValue("inside_zone");
+  });
+
+  it("allows full spatial scope on Pro", async () => {
+    mockProAccountPlan();
+
+    await renderWithQueryClient();
+
+    const spatialScopeSelect = await screen.findByLabelText(/Escopo espacial/i);
+    expect(within(spatialScopeSelect).getByRole("option", { name: "Todos os imóveis" })).not.toBeDisabled();
+
+    fireEvent.change(spatialScopeSelect, { target: { value: "all" } });
+
+    await waitFor(() => {
+      expect(useJourneyStore.getState().listingsFilters.spatialScope).toBe("all");
+    });
+    expect(spatialScopeSelect).toHaveValue("all");
+  });
+
+  it("normalizes full spatial scope to inside-zone below Pro", async () => {
+    useJourneyStore.setState((state) => ({
+      ...state,
+      listingsFilters: {
+        ...state.listingsFilters,
+        spatialScope: "all",
+      },
+    }));
+
+    await renderWithQueryClient();
+
+    await waitFor(() => {
+      expect(useJourneyStore.getState().listingsFilters.spatialScope).toBe("inside_zone");
+    });
+    expect(await screen.findByLabelText(/Escopo espacial/i)).toHaveValue("inside_zone");
   });
 
   it("recovers a card image when the Step 6 payload refreshes with a new valid URL", async () => {
