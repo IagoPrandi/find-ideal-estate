@@ -11,29 +11,40 @@ function normalizeZoneMetricIds(ids: string[] | undefined): ZoneMetricId[] {
   return normalized.length > 0 ? normalized : DEFAULT_ZONE_METRIC_IDS;
 }
 
-function loadZonePrefs(): { selectedZoneMetricIds: ZoneMetricId[] } {
-  if (typeof window === "undefined") return { selectedZoneMetricIds: DEFAULT_ZONE_METRIC_IDS };
+function normalizeZoneKeys(keys: string[] | undefined): string[] {
+  return Array.from(new Set((keys || []).filter((key) => typeof key === "string" && key.trim().length > 0)));
+}
+
+function loadZonePrefs(): { selectedZoneMetricIds: ZoneMetricId[]; hiddenZoneKeys: string[] } {
+  if (typeof window === "undefined") return { selectedZoneMetricIds: DEFAULT_ZONE_METRIC_IDS, hiddenZoneKeys: [] };
   try {
     const raw = window.localStorage.getItem(ZONE_FAVORITES_PREFS_KEY);
-    if (!raw) return { selectedZoneMetricIds: DEFAULT_ZONE_METRIC_IDS };
-    const parsed = JSON.parse(raw) as { selectedZoneMetricIds?: string[] };
-    return { selectedZoneMetricIds: normalizeZoneMetricIds(parsed.selectedZoneMetricIds) };
+    if (!raw) return { selectedZoneMetricIds: DEFAULT_ZONE_METRIC_IDS, hiddenZoneKeys: [] };
+    const parsed = JSON.parse(raw) as { selectedZoneMetricIds?: string[]; hiddenZoneKeys?: string[] };
+    return {
+      selectedZoneMetricIds: normalizeZoneMetricIds(parsed.selectedZoneMetricIds),
+      hiddenZoneKeys: normalizeZoneKeys(parsed.hiddenZoneKeys),
+    };
   } catch {
-    return { selectedZoneMetricIds: DEFAULT_ZONE_METRIC_IDS };
+    return { selectedZoneMetricIds: DEFAULT_ZONE_METRIC_IDS, hiddenZoneKeys: [] };
   }
 }
 
-function persistZonePrefs(state: { selectedZoneMetricIds: ZoneMetricId[] }) {
+function persistZonePrefs(state: { selectedZoneMetricIds: ZoneMetricId[]; hiddenZoneKeys: string[] }) {
   if (typeof window === "undefined") return;
   window.localStorage.setItem(
     ZONE_FAVORITES_PREFS_KEY,
-    JSON.stringify({ selectedZoneMetricIds: state.selectedZoneMetricIds.filter((id) => ALL_ZONE_METRIC_IDS.includes(id)) }),
+    JSON.stringify({
+      selectedZoneMetricIds: state.selectedZoneMetricIds.filter((id) => ALL_ZONE_METRIC_IDS.includes(id)),
+      hiddenZoneKeys: normalizeZoneKeys(state.hiddenZoneKeys),
+    }),
   );
 }
 
 type ZoneFavoritesState = {
   zoneFavorites: FavoriteZoneEntry[];
   selectedZoneMetricIds: ZoneMetricId[];
+  hiddenZoneKeys: string[];
   isPanelOpen: boolean;
   activeTab: ZoneFavoritesPanelTab;
   selectedZoneKey: string | null;
@@ -58,6 +69,7 @@ type ZoneFavoritesState = {
     usageType: string;
   }) => Promise<boolean>;
   toggleZoneMetric: (metricId: ZoneMetricId) => void;
+  toggleZoneMapVisibility: (zoneKey: string) => void;
   updateZoneNote: (zoneKey: string, note: string) => Promise<boolean>;
   setPanelOpen: (value: boolean) => void;
   togglePanel: () => void;
@@ -102,6 +114,7 @@ async function updateZoneNoteApi(zoneKey: string, note: string) {
 export const useZoneFavoritesStore = create<ZoneFavoritesState>((set, get) => ({
   zoneFavorites: [],
   selectedZoneMetricIds: initialZonePrefs.selectedZoneMetricIds,
+  hiddenZoneKeys: initialZonePrefs.hiddenZoneKeys,
   isPanelOpen: false,
   activeTab: "saved",
   selectedZoneKey: null,
@@ -270,8 +283,21 @@ export const useZoneFavoritesStore = create<ZoneFavoritesState>((set, get) => ({
         ? state.selectedZoneMetricIds.filter((id) => id !== metricId)
         : [...state.selectedZoneMetricIds, metricId];
       if (next.length === 0) return state;
-      persistZonePrefs({ selectedZoneMetricIds: next });
+      persistZonePrefs({ selectedZoneMetricIds: next, hiddenZoneKeys: state.hiddenZoneKeys });
       return { selectedZoneMetricIds: next };
+    });
+  },
+  toggleZoneMapVisibility: (zoneKey) => {
+    set((state) => {
+      const isHidden = state.hiddenZoneKeys.includes(zoneKey);
+      const nextHiddenZoneKeys = isHidden
+        ? state.hiddenZoneKeys.filter((key) => key !== zoneKey)
+        : [...state.hiddenZoneKeys, zoneKey];
+      persistZonePrefs({ selectedZoneMetricIds: state.selectedZoneMetricIds, hiddenZoneKeys: nextHiddenZoneKeys });
+      return {
+        hiddenZoneKeys: nextHiddenZoneKeys,
+        selectedZoneKey: !isHidden && state.selectedZoneKey === zoneKey ? null : state.selectedZoneKey,
+      };
     });
   },
   updateZoneNote: async (zoneKey, note) => {
@@ -296,6 +322,7 @@ export const useZoneFavoritesStore = create<ZoneFavoritesState>((set, get) => ({
     set({
       zoneFavorites: [],
       selectedZoneMetricIds: DEFAULT_ZONE_METRIC_IDS,
+      hiddenZoneKeys: [],
       isPanelOpen: false,
       activeTab: "saved",
       selectedZoneKey: null,

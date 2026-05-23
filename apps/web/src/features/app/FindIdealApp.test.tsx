@@ -2,13 +2,14 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FindIdealApp } from "./FindIdealApp";
-import { useFavoritesStore, useJourneyStore, useUIStore } from "../../state";
+import { useFavoritesStore, useJourneyStore, useUIStore, useZoneFavoritesStore } from "../../state";
 import { getBusLineDetails, getBusStopDetails, getJourneyTransportPoints, getJourneyZonesList, getPublicSafetyIncidentsForViewport, getSelectedTransportTrace, getTransportStopDetails, getZoneListings } from "../../api/client";
 
 const mapEaseToMock = vi.fn();
 const mapSetLayoutPropertyMock = vi.fn();
 const mapSetFilterMock = vi.fn();
-const mapQueryRenderedFeaturesMock = vi.fn(() => []);
+const mapMoveLayerMock = vi.fn();
+const mapQueryRenderedFeaturesMock = vi.fn<(point?: unknown, options?: unknown) => unknown[]>(() => []);
 let lastPopupHtml = "";
 const mapLayerClickHandlers: Record<string, (event: any) => void> = {};
 const mapEventHandlers: Record<string, Array<(event?: any) => void>> = {};
@@ -100,7 +101,7 @@ vi.mock("maplibre-gl", () => {
     ) {
       if (event === "load") {
         const callback = typeof layerOrCallback === "function" ? layerOrCallback : maybeCallback;
-        callback?.();
+        callback?.({});
       }
       if (typeof layerOrCallback === "function" && event !== "load") {
         mapEventHandlers[event] = [...(mapEventHandlers[event] || []), layerOrCallback];
@@ -163,8 +164,12 @@ vi.mock("maplibre-gl", () => {
       mapSetFilterMock(layerId, filter);
       return this;
     }
-    queryRenderedFeatures() {
-      return mapQueryRenderedFeaturesMock();
+    moveLayer(layerId: string, beforeId?: string) {
+      mapMoveLayerMock(layerId, beforeId);
+      return this;
+    }
+    queryRenderedFeatures(point?: unknown, options?: unknown) {
+      return mapQueryRenderedFeaturesMock(point, options);
     }
     getCanvas() {
       return { style: { cursor: "" } };
@@ -220,6 +225,7 @@ describe("FindIdealApp", () => {
     mapEaseToMock.mockReset();
     mapSetLayoutPropertyMock.mockReset();
     mapSetFilterMock.mockReset();
+    mapMoveLayerMock.mockReset();
     mapQueryRenderedFeaturesMock.mockReset();
     mapQueryRenderedFeaturesMock.mockReturnValue([]);
     lastPopupHtml = "";
@@ -234,6 +240,7 @@ describe("FindIdealApp", () => {
     useJourneyStore.getState().resetJourney();
     useUIStore.getState().resetUI();
     useFavoritesStore.getState().resetFavoritesState();
+    useZoneFavoritesStore.getState().resetZoneFavoritesState();
     useUIStore.setState((state) => ({ ...state, step: 6 }));
     useJourneyStore.setState((state) => ({
       ...state,
@@ -303,7 +310,7 @@ describe("FindIdealApp", () => {
     renderWithQueryClient();
 
     await waitFor(() => {
-      expect(getZoneListings).toHaveBeenCalledWith("journey-1", "zone-fp-1", "rent", "all", "all", "all_addresses");
+      expect(getZoneListings).toHaveBeenCalledWith("journey-1", "zone-fp-1", "rent", "all", "all", "all_addresses", 9999, 0);
     });
 
     await act(async () => {
@@ -344,7 +351,54 @@ describe("FindIdealApp", () => {
     renderWithQueryClient();
 
     await waitFor(() => {
-      expect(getZoneListings).toHaveBeenCalledWith("journey-1", "zone-fp-1", "rent", "all", "all", "selected_address");
+      expect(getZoneListings).toHaveBeenCalledWith("journey-1", "zone-fp-1", "rent", "all", "all", "selected_address", 9999, 0);
+    });
+  });
+
+  it("renders map listing pins only for properties inside the current map viewport", async () => {
+    vi.mocked(getZoneListings).mockResolvedValue({
+      source: "cache",
+      job_id: null,
+      freshness_status: "fresh",
+      listings: [
+        {
+          property_id: "prop-visible",
+          platform: "quintoandar",
+          platform_listing_id: "qa-visible",
+          address_normalized: "Rua Visível, 10",
+          current_best_price: "3500",
+          condo_fee: "500",
+          iptu: "100",
+          inside_zone: true,
+          has_coordinates: true,
+          lat: -23.5,
+          lon: -46.7,
+          platforms_available: ["quintoandar"],
+        },
+        {
+          property_id: "prop-outside",
+          platform: "quintoandar",
+          platform_listing_id: "qa-outside",
+          address_normalized: "Rua Fora, 10",
+          current_best_price: "3900",
+          condo_fee: "500",
+          iptu: "100",
+          inside_zone: true,
+          has_coordinates: true,
+          lat: -23.5,
+          lon: -46.2,
+          platforms_available: ["quintoandar"],
+        },
+      ],
+      total_count: 2,
+      cache_age_hours: 0.1,
+    } as never);
+
+    renderWithQueryClient();
+
+    await waitFor(() => {
+      const listings = mapSourceData["journey-listings-source-runtime"] as { features: Array<{ properties: Record<string, unknown> }> };
+      expect(listings.features.map((feature) => feature.properties.listing_key)).toEqual(["property:prop-visible"]);
     });
   });
 
@@ -354,6 +408,12 @@ describe("FindIdealApp", () => {
     await waitFor(() => {
       expect(mapAddedLayers.find((layer) => layer.id === "transport-candidate-layer")?.type).toBe("symbol");
       expect(mapAddedLayers.find((layer) => layer.id === "journey-listings-layer")?.type).toBe("symbol");
+      expect(mapAddedLayers.find((layer) => layer.id === "bus-stop-layer")?.layout?.["icon-size"]).toEqual(["interpolate", ["linear"], ["zoom"], 9, 0.32, 12, 0.41, 15, 0.53]);
+      expect(mapAddedLayers.find((layer) => layer.id === "bus-terminal-layer")?.layout?.["icon-size"]).toEqual(["interpolate", ["linear"], ["zoom"], 9, 0.39, 12, 0.51, 15, 0.62]);
+      expect(mapAddedLayers.find((layer) => layer.id === "saved-zone-transport-layer")?.type).toBe("symbol");
+      expect(mapAddedLayers.find((layer) => layer.id === "saved-zone-pois-layer")?.type).toBe("symbol");
+      expect(mapAddedLayers.find((layer) => layer.id === "saved-zone-transport-layer")?.layout?.["icon-size"]).toEqual(["interpolate", ["linear"], ["zoom"], 9, 0.36, 14, 0.6, 17, 0.84]);
+      expect(mapAddedLayers.find((layer) => layer.id === "saved-zone-pois-layer")?.layout?.["icon-size"]).toEqual(["interpolate", ["linear"], ["zoom"], 10, 0.252, 14, 0.456, 17, 0.6]);
     });
 
     await waitFor(() => {
@@ -367,6 +427,165 @@ describe("FindIdealApp", () => {
     await waitFor(() => {
       expect(mapCreatedMarkers.some((marker) => marker.options?.anchor === "bottom" && marker.options?.element?.dataset?.selectedPinKind === "listing")).toBe(true);
     });
+  });
+
+  it("keeps polygons below lines, geometric points and clickable icons", async () => {
+    renderWithQueryClient();
+
+    await waitFor(() => {
+      expect(mapMoveLayerMock).toHaveBeenCalled();
+    });
+
+    const movedLayerIds = mapMoveLayerMock.mock.calls.map(([layerId]) => layerId);
+    expect(movedLayerIds.indexOf("zones-runtime-fill-layer")).toBeLessThan(movedLayerIds.indexOf("bus-line-layer"));
+    expect(movedLayerIds.indexOf("saved-zones-fill-layer")).toBeLessThan(movedLayerIds.indexOf("saved-zones-outline-layer"));
+    expect(movedLayerIds.indexOf("bus-line-layer")).toBeLessThan(movedLayerIds.indexOf("saved-zone-pois-layer"));
+    expect(movedLayerIds.indexOf("saved-zone-transport-layer")).toBeLessThan(movedLayerIds.indexOf("bus-stop-layer"));
+    expect(movedLayerIds.indexOf("safety-incident-layer")).toBeLessThan(movedLayerIds.indexOf("zone-pois-layer"));
+    expect(movedLayerIds.indexOf("journey-listings-layer")).toBeGreaterThan(movedLayerIds.indexOf("saved-zone-transport-layer"));
+    expect(movedLayerIds.indexOf("saved-listings-layer")).toBeGreaterThan(movedLayerIds.indexOf("zones-runtime-outline-layer"));
+  });
+
+  it("keeps hidden saved zones out of saved zone, POI and seed sources", async () => {
+    useZoneFavoritesStore.setState({
+      isAuthenticated: true,
+      hiddenZoneKeys: ["zone:journey-1:hidden"],
+      zoneFavorites: [
+        {
+          zoneKey: "zone:journey-1:visible",
+          journeyId: "journey-1",
+          zoneFingerprint: "visible",
+          searchType: "rent",
+          usageType: "all",
+          savedAt: "2026-03-27T10:00:00Z",
+          note: null,
+          payload: {
+            fingerprint: "visible",
+            journey_id: "journey-1",
+            transport_point: { id: "tp-visible", name: "Seed visível", source: "gtfs_stop", external_id: "stop-visible", lat: -23.5, lon: -46.7, modal_types: ["bus"] },
+            isochrone_geom: { type: "Polygon", coordinates: [[[-46.71, -23.51], [-46.69, -23.51], [-46.69, -23.49], [-46.71, -23.49], [-46.71, -23.51]]] },
+            poi_counts: null,
+            poi_points: [{ kind: "poi", id: "poi-visible", name: "Escola visível", category: "school", address: "Rua A", lat: -23.501, lon: -46.701 }],
+            metrics: {},
+            listings: [],
+          },
+        },
+        {
+          zoneKey: "zone:journey-1:hidden",
+          journeyId: "journey-1",
+          zoneFingerprint: "hidden",
+          searchType: "rent",
+          usageType: "all",
+          savedAt: "2026-03-27T11:00:00Z",
+          note: null,
+          payload: {
+            fingerprint: "hidden",
+            journey_id: "journey-1",
+            transport_point: { id: "tp-hidden", name: "Seed oculta", source: "gtfs_stop", external_id: "stop-hidden", lat: -23.6, lon: -46.8, modal_types: ["bus"] },
+            isochrone_geom: { type: "Polygon", coordinates: [[[-46.81, -23.61], [-46.79, -23.61], [-46.79, -23.59], [-46.81, -23.59], [-46.81, -23.61]]] },
+            poi_counts: null,
+            poi_points: [{ kind: "poi", id: "poi-hidden", name: "POI oculto", category: "park", address: "Rua B", lat: -23.601, lon: -46.801 }],
+            metrics: {},
+            listings: [],
+          },
+        },
+      ],
+    });
+
+    renderWithQueryClient();
+
+    await waitFor(() => {
+      const zones = mapSourceData["saved-zones-source-runtime"] as { features: Array<{ properties: Record<string, unknown> }> };
+      const pois = mapSourceData["saved-zone-pois-source-runtime"] as { features: Array<{ properties: Record<string, unknown> }> };
+      const seeds = mapSourceData["saved-zone-transport-source-runtime"] as { features: Array<{ properties: Record<string, unknown> }> };
+
+      expect(zones.features.map((feature) => feature.properties.zone_key)).toEqual(["zone:journey-1:visible"]);
+      expect(pois.features.map((feature) => feature.properties.zone_key)).toEqual(["zone:journey-1:visible"]);
+      expect(seeds.features.map((feature) => feature.properties.zone_key)).toEqual(["zone:journey-1:visible"]);
+    });
+  });
+
+  it("registers saved map layer clicks and opens saved POI, seed and zone popups", async () => {
+    renderWithQueryClient();
+
+    await waitFor(() => {
+      expect(mapLayerClickHandlers["saved-zone-pois-layer"]).toBeTypeOf("function");
+      expect(mapLayerClickHandlers["saved-zone-transport-layer"]).toBeTypeOf("function");
+      expect(mapLayerClickHandlers["saved-zones-fill-layer"]).toBeTypeOf("function");
+      expect(mapLayerClickHandlers["saved-listings-layer"]).toBeTypeOf("function");
+    });
+
+    await act(async () => {
+      mapLayerClickHandlers["saved-zone-pois-layer"]({
+        lngLat: { lat: -23.51, lng: -46.71 },
+        features: [{ properties: { name: "Escola salva", category: "school", address: "Rua A" } }],
+      });
+    });
+    expect(lastPopupHtml).toContain("Escola salva");
+    expect(lastPopupHtml).toContain("Rua A");
+
+    await act(async () => {
+      mapLayerClickHandlers["saved-zone-transport-layer"]({
+        lngLat: { lat: -23.5, lng: -46.7 },
+        features: [{ properties: { name: "Seed salvo" } }],
+      });
+    });
+    expect(lastPopupHtml).toContain("Ponto seed salvo");
+    expect(lastPopupHtml).toContain("Seed salvo");
+
+    await act(async () => {
+      mapLayerClickHandlers["saved-zones-fill-layer"]({
+        lngLat: { lat: -23.5, lng: -46.7 },
+        features: [{ properties: { zone_key: "zone:journey-1:visible", label: "Zona visível" } }],
+      });
+    });
+    expect(useZoneFavoritesStore.getState().selectedZoneKey).toBe("zone:journey-1:visible");
+    expect(lastPopupHtml).toContain("Zona salva");
+    expect(lastPopupHtml).toContain("Zona visível");
+
+    await act(async () => {
+      mapLayerClickHandlers["saved-listings-layer"]({
+        features: [{ properties: { listing_key: "saved:listing-1" } }],
+      });
+    });
+    expect(useFavoritesStore.getState().selectedSavedListingKey).toBe("saved:listing-1");
+  });
+
+  it("keeps the saved POI popup when the saved zone polygon also receives the click", async () => {
+    renderWithQueryClient();
+
+    await waitFor(() => {
+      expect(mapLayerClickHandlers["saved-zone-pois-layer"]).toBeTypeOf("function");
+      expect(mapLayerClickHandlers["saved-zones-fill-layer"]).toBeTypeOf("function");
+    });
+
+    await act(async () => {
+      mapLayerClickHandlers["saved-zone-pois-layer"]({
+        point: { x: 42, y: 42 },
+        lngLat: { lat: -23.51, lng: -46.71 },
+        features: [{ properties: { name: "Farmácia salva", category: "pharmacy", address: "Rua dos Pontos" } }],
+      });
+    });
+    expect(lastPopupHtml).toContain("Farmácia salva");
+
+    mapQueryRenderedFeaturesMock.mockImplementation((_point: unknown, options: unknown) =>
+      Array.isArray((options as { layers?: string[] } | undefined)?.layers) &&
+      (options as { layers?: string[] }).layers?.includes("saved-zone-pois-layer")
+        ? [{ properties: { name: "Farmácia salva" } }]
+        : []
+    );
+
+    await act(async () => {
+      mapLayerClickHandlers["saved-zones-fill-layer"]({
+        point: { x: 42, y: 42 },
+        lngLat: { lat: -23.51, lng: -46.71 },
+        features: [{ properties: { zone_key: "zone:journey-1:visible", label: "Zona visível" } }],
+      });
+    });
+
+    expect(lastPopupHtml).toContain("Farmácia salva");
+    expect(lastPopupHtml).not.toContain("Zona salva");
+    expect(useZoneFavoritesStore.getState().selectedZoneKey).toBeNull();
   });
 
   it("clears selected transport and listing pins when the user clicks outside the pin hit area", async () => {
@@ -403,6 +622,70 @@ describe("FindIdealApp", () => {
 
     expect(useJourneyStore.getState().selectedTransportId).toBeNull();
     expect(useJourneyStore.getState().selectedListingKey).toBeNull();
+  });
+
+  it("only positions the reference point while the map picking mode is active", async () => {
+    useUIStore.setState((state) => ({ ...state, step: 1 }));
+    renderWithQueryClient();
+
+    await waitFor(() => {
+      expect(mapEventHandlers.click?.length).toBeGreaterThan(0);
+    });
+
+    await act(async () => {
+      emitMapEvent("click", {
+        point: { x: 20, y: 20 },
+        lngLat: { lat: -23.52, lng: -46.68 },
+        originalEvent: { target: document.body },
+      });
+    });
+    expect(useJourneyStore.getState().pickedCoord).toBeNull();
+
+    act(() => {
+      useJourneyStore.getState().setIsPickingReferencePoint(true);
+    });
+    await waitFor(() => {
+      expect(useJourneyStore.getState().isPickingReferencePoint).toBe(true);
+    });
+
+    await act(async () => {
+      emitMapEvent("click", {
+        point: { x: 24, y: 24 },
+        lngLat: { lat: -23.53, lng: -46.69 },
+        originalEvent: { target: document.body },
+      });
+    });
+
+    expect(useJourneyStore.getState().pickedCoord).toEqual({ lat: -23.53, lon: -46.69, label: "Ponto principal" });
+    expect(useJourneyStore.getState().isPickingReferencePoint).toBe(false);
+  });
+
+  it("does not position the reference point when picking mode clicks an interactive layer", async () => {
+    useUIStore.setState((state) => ({ ...state, step: 1 }));
+    useJourneyStore.setState((state) => ({ ...state, isPickingReferencePoint: true }));
+    mapQueryRenderedFeaturesMock.mockImplementation((_point: unknown, options: unknown) =>
+      Array.isArray((options as { layers?: string[] } | undefined)?.layers) &&
+      (options as { layers?: string[] }).layers?.includes("saved-zone-pois-layer")
+        ? [{}]
+        : []
+    );
+
+    renderWithQueryClient();
+
+    await waitFor(() => {
+      expect(mapEventHandlers.click?.length).toBeGreaterThan(0);
+    });
+
+    await act(async () => {
+      emitMapEvent("click", {
+        point: { x: 24, y: 24 },
+        lngLat: { lat: -23.53, lng: -46.69 },
+        originalEvent: { target: document.body },
+      });
+    });
+
+    expect(useJourneyStore.getState().pickedCoord).toBeNull();
+    expect(useJourneyStore.getState().isPickingReferencePoint).toBe(true);
   });
 
   it("loads transport points first, then lines, then green areas and finally flood areas", async () => {
@@ -587,7 +870,7 @@ describe("FindIdealApp", () => {
         maxLon: -46.58,
         maxLat: -23.48,
       }, 10, ["theft", "robbery", "violence", "sexual", "drugs", "other"]);
-      expect((mapSourceData["public-safety-source-runtime"] as { features?: Array<{ properties?: Record<string, unknown> }> }).features?.[0]?.properties.point_count).toBe(7);
+      expect((mapSourceData["public-safety-source-runtime"] as { features?: Array<{ properties?: Record<string, unknown> }> }).features?.[0]?.properties?.point_count).toBe(7);
       expect(mapSetLayoutPropertyMock).toHaveBeenCalledWith("safety-incident-heatmap-layer", "visibility", "visible");
       expect(mapSetLayoutPropertyMock).toHaveBeenCalledWith("safety-incident-layer", "visibility", "visible");
     });
@@ -595,6 +878,7 @@ describe("FindIdealApp", () => {
     const heatmapLayer = mapAddedLayers.find((layer) => layer.id === "safety-incident-heatmap-layer");
     const incidentLayer = mapAddedLayers.find((layer) => layer.id === "safety-incident-layer");
     expect(heatmapLayer?.paint?.["heatmap-opacity"]).toEqual(["interpolate", ["linear"], ["zoom"], 10, 0.6, 13, 0.78, 14, 0.48, 15, 0]);
+    expect(incidentLayer?.paint?.["circle-radius"]).toEqual(["interpolate", ["linear"], ["zoom"], 9, 3.6, 13, 5.2, 16, 6.4]);
     expect(incidentLayer?.paint?.["circle-opacity"]).toEqual(["interpolate", ["linear"], ["zoom"], 10, 0, 15, 0, 16, 0.9]);
     expect(incidentLayer?.paint?.["circle-stroke-opacity"]).toEqual(["interpolate", ["linear"], ["zoom"], 10, 0, 15, 0, 16, 0.92]);
     expect(incidentLayer?.paint?.["circle-stroke-width"]).toEqual(["interpolate", ["linear"], ["zoom"], 10, 0, 15, 0, 16, 1.5]);

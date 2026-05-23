@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     listings_prewarm_cron_minute: int = 0
     listings_prewarm_lookback_hours: int = 24
     listings_prewarm_limit: int = 100
-    listings_prewarm_max_address_duration_seconds: int = 60
+    listings_prewarm_max_address_duration_seconds: int = 90
     internal_api_token: str | None = None
     r2_bucket: str | None = None
     s3_bucket: str | None = None

@@ -1,4 +1,4 @@
-import { MapPin, Route, ShieldAlert, Trees, Droplets, Search, ArrowRight, Bus, Train, Blend, CarFront, Lock } from "lucide-react";
+import { Crosshair, MapPin, Route, ShieldAlert, Trees, Droplets, Search, ArrowRight, Bus, Train, Blend, CarFront, Lock } from "lucide-react";
 import { useState } from "react";
 import { apiActionHint, createJourney } from "../../api/client";
 import { GREEN_VEGETATION_LABELS, GREEN_VEGETATION_LEVELS, useJourneyStore } from "../../state";
@@ -26,9 +26,11 @@ const PUBLIC_TRANSPORT_OPTIONS = [
 export function Step1Config() {
   const config = useJourneyStore((state) => state.config);
   const pickedCoord = useJourneyStore((state) => state.pickedCoord);
+  const isPickingReferencePoint = useJourneyStore((state) => state.isPickingReferencePoint);
   const primaryReferenceLabel = useJourneyStore((state) => state.primaryReferenceLabel);
   const setConfig = useJourneyStore((state) => state.setConfig);
   const setEnrichment = useJourneyStore((state) => state.setEnrichment);
+  const setIsPickingReferencePoint = useJourneyStore((state) => state.setIsPickingReferencePoint);
   const setJourneyId = useJourneyStore((state) => state.setJourneyId);
   const setPrimaryReferenceLabel = useJourneyStore((state) => state.setPrimaryReferenceLabel);
   const goToStep = useUIStore((state) => state.goToStep);
@@ -159,7 +161,9 @@ export function Step1Config() {
                 <MapPin className="h-5 w-5" />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-slate-700">Clique no mapa para definir o ponto principal.</p>
+                <p className="text-sm font-medium text-slate-700">
+                  {isPickingReferencePoint ? "Clique no mapa para posicionar." : "Defina o ponto principal diretamente no mapa."}
+                </p>
                 <p className="mt-1 text-xs text-slate-500">
                   {pickedCoord
                     ? `Selecionado: ${pickedCoord.lat.toFixed(5)}, ${pickedCoord.lon.toFixed(5)}`
@@ -167,6 +171,15 @@ export function Step1Config() {
                 </p>
               </div>
             </div>
+            <button
+              type="button"
+              aria-pressed={isPickingReferencePoint}
+              onClick={() => setIsPickingReferencePoint(!isPickingReferencePoint)}
+              className={`mt-3 inline-flex w-full items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition-colors focus:outline-none focus:ring-2 focus:ring-pastel-violet-400 focus:ring-offset-2 ${isPickingReferencePoint ? "border-pastel-violet-300 bg-pastel-violet-500 text-white shadow-sm hover:bg-pastel-violet-600" : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"}`}
+            >
+              <Crosshair className="h-4 w-4" />
+              {isPickingReferencePoint ? "Clique no mapa para posicionar" : pickedCoord ? "Reposicionar no mapa" : "Colocar ponto no mapa"}
+            </button>
           </div>
 
           <div className="relative">

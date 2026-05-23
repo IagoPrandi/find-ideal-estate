@@ -8,7 +8,7 @@ import { FeedbackFormButton } from "../../components/layout/FeedbackFormButton";
 import { FavoritesPanel, WizardPanel } from "../../components/panels";
 import { AuthAccessCard } from "../auth/AuthAccessCard";
 import { getPoiCategoryMeta, getZonePoiSelectionKey, sortPoiPoints, ZonePoiPointLike, zoneNeedsPoiBackfill } from "../../domain/poi";
-import { applyListingsPanelFilters, getListingDisplayPrice, getListingSelectionKey } from "../../lib/listingFormat";
+import { applyListingsPanelFilters, filterListingsByMapViewport, getListingDisplayPrice, getListingSelectionKey } from "../../lib/listingFormat";
 import { getIncludedGreenVegetationLevels, useFavoritesStore, useJourneyStore, useUIStore, useZoneFavoritesStore } from "../../state";
 
 const MAPTILER_KEY =
@@ -30,15 +30,65 @@ const SAVED_ZONE_TRANSPORT_SOURCE_ID = "saved-zone-transport-source-runtime";
 const SAVED_LISTINGS_SOURCE_ID = "saved-listings-source-runtime";
 const LISTINGS_SOURCE_ID = "journey-listings-source-runtime";
 const SAFETY_SOURCE_ID = "public-safety-source-runtime";
-const PIN_INTERACTIVE_LAYER_LIST = ["transport-candidate-layer", "journey-listings-layer"] as const;
+const PIN_INTERACTIVE_LAYER_LIST = ["transport-candidate-layer", "journey-listings-layer", "saved-listings-layer"] as const;
 const TRANSPORT_CANDIDATE_PIN_ICON_ID = "transport-candidate-pin-icon";
 const TRANSPORT_CANDIDATE_SELECTED_PIN_ICON_ID = "transport-candidate-pin-selected-icon";
 const LISTING_PIN_ICON_ID = "listing-pin-icon";
 const LISTING_SELECTED_PIN_ICON_ID = "listing-pin-selected-icon";
 const SAVED_LISTING_PIN_ICON_ID = "saved-listing-pin-icon";
 const SAVED_LISTING_SELECTED_PIN_ICON_ID = "saved-listing-pin-selected-icon";
+const SAVED_ZONE_TRANSPORT_ICON_ID = "saved-zone-transport-diamond-icon";
+const SAVED_ZONE_POI_ICON_CATEGORIES = ["school", "supermarket", "pharmacy", "park", "restaurant", "gym", "default"] as const;
 const SELECTED_PIN_MARKER_STYLE_ID = "selected-map-pin-marker-styles";
-const POPUP_PERSIST_LAYER_LIST = [...BUS_LAYER_LIST, "zone-pois-highlight-layer", "zone-pois-layer", "safety-incident-layer"] as const;
+const POPUP_PERSIST_LAYER_LIST = [...BUS_LAYER_LIST, "zone-pois-highlight-layer", "zone-pois-layer", "safety-incident-layer", "saved-zone-pois-layer", "saved-zone-transport-layer", "saved-zones-fill-layer"] as const;
+const SAVED_ZONE_POINT_LAYER_LIST = ["saved-zone-pois-layer", "saved-zone-transport-layer", "saved-listings-layer"] as const;
+const REFERENCE_POINT_BLOCKING_LAYER_LIST = [
+  "bus-line-layer",
+  "bus-stop-layer",
+  "bus-terminal-layer",
+  "transport-candidate-layer",
+  "zones-runtime-fill-layer",
+  "zone-pois-layer",
+  "safety-incident-layer",
+  "journey-listings-layer",
+  "saved-zone-pois-layer",
+  "saved-zone-transport-layer",
+  "saved-zones-fill-layer",
+  "saved-listings-layer",
+] as const;
+const MAP_LAYER_STACK_ORDER = [
+  "green-layer",
+  "flood-layer",
+  "safety-incident-heatmap-layer",
+  "zones-runtime-fill-layer",
+  "saved-zones-fill-layer",
+  "zones-runtime-outline-layer",
+  "saved-zones-outline-layer",
+  "bus-line-layer",
+  "bus-line-direction-layer",
+  "metro-line-layer",
+  "train-line-layer",
+  "selected-bus-trace-casing-layer",
+  "selected-bus-trace-layer",
+  "selected-metro-trace-casing-layer",
+  "selected-metro-trace-layer",
+  "selected-train-trace-casing-layer",
+  "selected-train-trace-layer",
+  "zones-runtime-label-layer",
+  "saved-zone-transport-label-layer",
+  "zone-pois-highlight-layer",
+  "safety-incident-layer",
+  "metro-station-layer",
+  "train-station-layer",
+  "saved-zone-pois-layer",
+  "saved-zone-transport-layer",
+  "bus-stop-layer",
+  "bus-terminal-layer",
+  "transport-candidate-layer",
+  "zone-pois-layer",
+  "journey-listings-layer",
+  "saved-listings-layer",
+] as const;
 const LAYER_TOGGLE_BUTTON_CLASS = "pointer-events-auto flex h-8 w-8 items-center justify-center rounded-lg border border-slate-100 bg-white/95 text-slate-500 shadow-md backdrop-blur-md transition-colors hover:bg-pastel-violet-50 hover:text-pastel-violet-600";
 
 const ZONE_COLOR_PALETTE = [
@@ -391,8 +441,8 @@ const hexToRgb = (hex: string): [number, number, number] => {
 };
 
 const createBusIcon = (fillHex: string) => {
-  const width = 30;
-  const height = 30;
+  const width = 40;
+  const height = 40;
   const data = new Uint8Array(width * height * 4);
   const [fr, fg, fb] = hexToRgb(fillHex);
 
@@ -645,6 +695,56 @@ const createPoiIcon = (fillHex: string, category: string) => {
   return { width, height, data };
 };
 
+const createPolygonIcon = (fillHex: string, outerPoints: Array<[number, number]>, innerPoints: Array<[number, number]>) => {
+  const width = 24;
+  const height = 24;
+  const data = new Uint8Array(width * height * 4);
+  const [fr, fg, fb] = hexToRgb(fillHex);
+
+  const pointInPolygon = (x: number, y: number, points: Array<[number, number]>) => {
+    let inside = false;
+    for (let i = 0, j = points.length - 1; i < points.length; j = i, i += 1) {
+      const [xi, yi] = points[i];
+      const [xj, yj] = points[j];
+      const intersects = yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi;
+      if (intersects) inside = !inside;
+    }
+    return inside;
+  };
+
+  const setPixel = (x: number, y: number, r: number, g: number, b: number, a: number) => {
+    if (x < 0 || y < 0 || x >= width || y >= height) return;
+    const idx = (y * width + x) * 4;
+    data[idx] = r;
+    data[idx + 1] = g;
+    data[idx + 2] = b;
+    data[idx + 3] = a;
+  };
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const px = x + 0.5;
+      const py = y + 0.5;
+      if (pointInPolygon(px, py, outerPoints)) {
+        setPixel(x, y, 255, 255, 255, 255);
+      }
+      if (pointInPolygon(px, py, innerPoints)) {
+        setPixel(x, y, fr, fg, fb, 255);
+      }
+    }
+  }
+
+  return { width, height, data };
+};
+
+const createDiamondIcon = (fillHex: string) =>
+  createPolygonIcon(fillHex, [[12, 1], [23, 12], [12, 23], [1, 12]], [[12, 4], [20, 12], [12, 20], [4, 12]]);
+
+const createPentagonIcon = (fillHex: string) =>
+  createPolygonIcon(fillHex, [[12, 1], [23, 9], [19, 23], [5, 23], [1, 9]], [[12, 4], [20, 10], [17, 20], [7, 20], [4, 10]]);
+
+const getSavedZonePoiIconId = (category: string) => `saved-zone-poi-pentagon-${category}`;
+
 const toZonePoisFeatureCollection = (
   poiPoints: ZonePoiPointLike[],
   zoneFingerprint: string | null,
@@ -759,6 +859,26 @@ const safetyPopupContent = (crimeType: string, crimeGroupLabel: string, occurred
   </div>
 `;
 
+const savedSeedPopupContent = (name: string) => `
+  <div style="font-family: system-ui, -apple-system, Segoe UI, sans-serif; min-width: 220px;">
+    <p style="margin:0 0 4px; font-size:11px; letter-spacing:0.06em; text-transform:uppercase; color:#64748b;">Ponto seed salvo</p>
+    <p style="margin:0; font-size:13px; font-weight:700; color:#0f172a;">${escapeHtml(name)}</p>
+  </div>
+`;
+
+const savedZonePopupContent = (label: string) => `
+  <div style="font-family: system-ui, -apple-system, Segoe UI, sans-serif; min-width: 220px;">
+    <p style="margin:0 0 4px; font-size:11px; letter-spacing:0.06em; text-transform:uppercase; color:#64748b;">Zona salva</p>
+    <p style="margin:0; font-size:13px; font-weight:700; color:#0f172a;">${escapeHtml(label)}</p>
+  </div>
+`;
+
+function reorderMapLayers(map: maplibregl.Map) {
+  for (const layerId of MAP_LAYER_STACK_ORDER) {
+    map.moveLayer(layerId);
+  }
+}
+
 function renderLegendMarker(item: LayerLegendItem) {
   if (item.markerKind === "line") {
     return (
@@ -829,7 +949,9 @@ export function FindIdealApp() {
   });
   const step = useUIStore((state) => state.step);
   const pickedCoord = useJourneyStore((state) => state.pickedCoord);
+  const isPickingReferencePoint = useJourneyStore((state) => state.isPickingReferencePoint);
   const setPickedCoord = useJourneyStore((state) => state.setPickedCoord);
+  const setIsPickingReferencePoint = useJourneyStore((state) => state.setIsPickingReferencePoint);
   const journeyId = useJourneyStore((state) => state.journeyId);
   const selectedTransportId = useJourneyStore((state) => state.selectedTransportId);
   const selectedZoneFingerprint = useJourneyStore((state) => state.selectedZoneFingerprint);
@@ -839,20 +961,26 @@ export function FindIdealApp() {
   const listingsJobId = useJourneyStore((state) => state.listingsJobId);
   const listingsFilters = useJourneyStore((state) => state.listingsFilters);
   const listingsAddressScope = useJourneyStore((state) => state.listingsAddressScope);
+  const mapViewportBounds = useJourneyStore((state) => state.mapViewportBounds);
   const config = useJourneyStore((state) => state.config);
   const isFavoritesPanelOpen = useFavoritesStore((state) => state.isPanelOpen);
   const favoriteListings = useFavoritesStore((state) => state.favorites);
   const selectedSavedListingKey = useFavoritesStore((state) => state.selectedSavedListingKey);
+  const setSelectedSavedListingKey = useFavoritesStore((state) => state.setSelectedSavedListingKey);
   const savedZoneFavorites = useZoneFavoritesStore((state) => state.zoneFavorites);
+  const hiddenSavedZoneKeys = useZoneFavoritesStore((state) => state.hiddenZoneKeys);
   const selectedSavedZoneKey = useZoneFavoritesStore((state) => state.selectedZoneKey);
+  const setSelectedSavedZoneKey = useZoneFavoritesStore((state) => state.setSelectedZoneKey);
   const setSelectedTransportId = useJourneyStore((state) => state.setSelectedTransportId);
   const setSelectedListingKey = useJourneyStore((state) => state.setSelectedListingKey);
   const setSelectedPoiKey = useJourneyStore((state) => state.setSelectedPoiKey);
   const setSelectedZone = useJourneyStore((state) => state.setSelectedZone);
+  const setMapViewportBounds = useJourneyStore((state) => state.setMapViewportBounds);
   const [copiedCoordsToast, setCopiedCoordsToast] = useState<string | null>(null);
   const copiedToastTimerRef = useRef<number | undefined>(undefined);
   const zonesDataRef = useRef<Array<{ fingerprint: string; isochrone_geom: unknown }>>([]);
   const stepRef = useRef(step);
+  const isPickingReferencePointRef = useRef(isPickingReferencePoint);
   const sequentialLayerSettingsRef = useRef<SequentialLayerSettings>({
     layerVisibility: DEFAULT_LAYER_VISIBILITY,
     greenEnabled: config.enrichments.green,
@@ -909,6 +1037,10 @@ export function FindIdealApp() {
   }, [step]);
 
   useEffect(() => {
+    isPickingReferencePointRef.current = isPickingReferencePoint;
+  }, [isPickingReferencePoint]);
+
+  useEffect(() => {
     if (step >= 6) {
       setLayerVisibility((current) => current.listings ? current : { ...current, listings: true });
     }
@@ -962,7 +1094,7 @@ export function FindIdealApp() {
 
   const listingsQuery = useQuery({
     queryKey: ["zone-listings", journeyId, selectedZoneFingerprint, config.type, "all", listingsAddressScope],
-    queryFn: async () => getZoneListings(journeyId as string, selectedZoneFingerprint as string, config.type, "all", "all", listingsAddressScope),
+    queryFn: async () => getZoneListings(journeyId as string, selectedZoneFingerprint as string, config.type, "all", "all", listingsAddressScope, 9999, 0),
     enabled: Boolean(journeyId && selectedZoneFingerprint && step >= 6),
     refetchInterval: (query) => {
       if (step < 6) {
@@ -978,8 +1110,8 @@ export function FindIdealApp() {
   });
 
   const filteredMapListings = useMemo(
-    () => applyListingsPanelFilters(listingsQuery.data?.listings || [], listingsFilters),
-    [listingsFilters, listingsQuery.data?.listings]
+    () => applyListingsPanelFilters(filterListingsByMapViewport(listingsQuery.data?.listings || [], mapViewportBounds), listingsFilters),
+    [listingsFilters, listingsQuery.data?.listings, mapViewportBounds]
   );
 
   const activeSafetyGroups = useMemo(
@@ -1009,6 +1141,10 @@ export function FindIdealApp() {
     mapRef.current = map;
 
     map.on("load", () => {
+      const syncMapViewportBounds = () => {
+        setMapViewportBounds(getMapViewportBounds(map));
+      };
+
       const syncSequentialLayerLoadSequence = () => {
         setVisibleSequentialLayerGroupIndex(resolveVisibleSequentialLayerGroupIndex(map, sequentialLayerSettingsRef.current));
       };
@@ -1038,10 +1174,20 @@ export function FindIdealApp() {
       if (!map.hasImage(SAVED_LISTING_SELECTED_PIN_ICON_ID)) {
         map.addImage(SAVED_LISTING_SELECTED_PIN_ICON_ID, createPinIcon("#be123c"));
       }
+      if (!map.hasImage(SAVED_ZONE_TRANSPORT_ICON_ID)) {
+        map.addImage(SAVED_ZONE_TRANSPORT_ICON_ID, createDiamondIcon("#7c3aed"));
+      }
       for (const category of ["school", "supermarket", "pharmacy", "park", "restaurant", "gym", "default"] as const) {
         const meta = getPoiCategoryMeta(category === "default" ? undefined : category);
         if (!map.hasImage(meta.iconId)) {
           map.addImage(meta.iconId, createPoiIcon(meta.color, category));
+        }
+      }
+      for (const category of SAVED_ZONE_POI_ICON_CATEGORIES) {
+        const meta = getPoiCategoryMeta(category === "default" ? undefined : category);
+        const iconId = getSavedZonePoiIconId(category);
+        if (!map.hasImage(iconId)) {
+          map.addImage(iconId, createPentagonIcon(meta.color));
         }
       }
 
@@ -1302,7 +1448,7 @@ export function FindIdealApp() {
         layout: {
           visibility: "none",
           "icon-image": "bus-stop-icon",
-          "icon-size": ["interpolate", ["linear"], ["zoom"], 9, 0.28, 12, 0.36, 15, 0.46],
+          "icon-size": ["interpolate", ["linear"], ["zoom"], 9, 0.32, 12, 0.41, 15, 0.53],
           "icon-allow-overlap": true,
         },
       });
@@ -1316,7 +1462,7 @@ export function FindIdealApp() {
         layout: {
           visibility: "none",
           "icon-image": "bus-terminal-icon",
-          "icon-size": ["interpolate", ["linear"], ["zoom"], 9, 0.34, 12, 0.44, 15, 0.54],
+          "icon-size": ["interpolate", ["linear"], ["zoom"], 9, 0.39, 12, 0.51, 15, 0.62],
           "icon-allow-overlap": true,
         },
       });
@@ -1432,27 +1578,47 @@ export function FindIdealApp() {
 
       map.addLayer({
         id: "saved-zone-pois-layer",
-        type: "circle",
+        type: "symbol",
         source: SAVED_ZONE_POIS_SOURCE_ID,
+        layout: {
+          "icon-image": [
+            "match",
+            ["coalesce", ["get", "category"], "default"],
+            "school",
+            getSavedZonePoiIconId("school"),
+            "supermarket",
+            getSavedZonePoiIconId("supermarket"),
+            "pharmacy",
+            getSavedZonePoiIconId("pharmacy"),
+            "park",
+            getSavedZonePoiIconId("park"),
+            "restaurant",
+            getSavedZonePoiIconId("restaurant"),
+            "gym",
+            getSavedZonePoiIconId("gym"),
+            getSavedZonePoiIconId("default"),
+          ],
+          "icon-size": ["interpolate", ["linear"], ["zoom"], 10, 0.252, 14, 0.456, 17, 0.6],
+          "icon-allow-overlap": true,
+          "icon-ignore-placement": true,
+        },
         paint: {
-          "circle-color": ["coalesce", ["get", "color"], "#0ea5e9"],
-          "circle-radius": ["interpolate", ["linear"], ["zoom"], 10, 2.5, 14, 4.5, 17, 6],
-          "circle-stroke-color": "#ffffff",
-          "circle-stroke-width": 1.2,
-          "circle-opacity": 0.92,
+          "icon-opacity": 0.92,
         },
       });
 
       map.addLayer({
         id: "saved-zone-transport-layer",
-        type: "circle",
+        type: "symbol",
         source: SAVED_ZONE_TRANSPORT_SOURCE_ID,
+        layout: {
+          "icon-image": SAVED_ZONE_TRANSPORT_ICON_ID,
+          "icon-size": ["interpolate", ["linear"], ["zoom"], 9, 0.36, 14, 0.6, 17, 0.84],
+          "icon-allow-overlap": true,
+          "icon-ignore-placement": true,
+        },
         paint: {
-          "circle-color": "#f97316",
-          "circle-radius": ["interpolate", ["linear"], ["zoom"], 9, 6, 14, 10, 17, 14],
-          "circle-stroke-color": "#ffffff",
-          "circle-stroke-width": 2,
-          "circle-opacity": 0.96,
+          "icon-opacity": 0.96,
         },
       });
 
@@ -1470,7 +1636,7 @@ export function FindIdealApp() {
           "text-ignore-placement": true,
         },
         paint: {
-          "text-color": "#9a3412",
+          "text-color": "#6d28d9",
           "text-halo-color": "#ffffff",
           "text-halo-width": 1.6,
         },
@@ -1534,7 +1700,7 @@ export function FindIdealApp() {
         filter: ["!", ["has", "point_count"]],
         layout: { visibility: "none" },
         paint: {
-          "circle-radius": ["interpolate", ["linear"], ["zoom"], 9, 4.5, 13, 6.5, 16, 8],
+          "circle-radius": ["interpolate", ["linear"], ["zoom"], 9, 3.6, 13, 5.2, 16, 6.4],
           "circle-color": [
             "match",
             ["get", "crime_group"],
@@ -1613,6 +1779,8 @@ export function FindIdealApp() {
           "icon-opacity": ["case", ["boolean", ["get", "selected"], false], 0.001, 0.98],
         },
       });
+
+      reorderMapLayers(map);
 
       const openBusPopup = async (
         title: string,
@@ -1810,13 +1978,103 @@ export function FindIdealApp() {
         }
       });
 
+      map.on("click", "saved-zone-pois-layer", (event) => {
+        const feature = event.features?.[0];
+        const properties = feature?.properties as Record<string, unknown> | undefined;
+        if (!properties) {
+          return;
+        }
+
+        const name = typeof properties.name === "string" && properties.name.trim() ? properties.name.trim() : "POI salvo";
+        const address = typeof properties.address === "string" && properties.address.trim() ? properties.address.trim() : null;
+        const categoryMeta = getPoiCategoryMeta(typeof properties.category === "string" ? properties.category : undefined);
+
+        busPopupRef.current?.remove();
+        const popup = new maplibregl.Popup({ closeButton: true, closeOnClick: false, maxWidth: "320px" })
+          .setLngLat(event.lngLat)
+          .setHTML(poiPopupContent(name, categoryMeta.singularLabel, address))
+          .addTo(map);
+
+        busPopupRef.current = popup;
+        popup.on("close", () => {
+          if (busPopupRef.current === popup) {
+            busPopupRef.current = null;
+          }
+        });
+      });
+
+      map.on("click", "saved-zone-transport-layer", (event) => {
+        const feature = event.features?.[0];
+        const properties = feature?.properties as Record<string, unknown> | undefined;
+        const name = typeof properties?.name === "string" && properties.name.trim() ? properties.name.trim() : "Ponto seed";
+
+        busPopupRef.current?.remove();
+        const popup = new maplibregl.Popup({ closeButton: true, closeOnClick: false, maxWidth: "320px" })
+          .setLngLat(event.lngLat)
+          .setHTML(savedSeedPopupContent(name))
+          .addTo(map);
+
+        busPopupRef.current = popup;
+        popup.on("close", () => {
+          if (busPopupRef.current === popup) {
+            busPopupRef.current = null;
+          }
+        });
+      });
+
+      map.on("click", "saved-zones-fill-layer", (event) => {
+        const clickedSavedPointFeatures = map.queryRenderedFeatures(event.point, {
+          layers: [...SAVED_ZONE_POINT_LAYER_LIST],
+        });
+        if (clickedSavedPointFeatures.length > 0) {
+          return;
+        }
+
+        const feature = event.features?.[0];
+        const properties = feature?.properties as Record<string, unknown> | undefined;
+        const zoneKey = typeof properties?.zone_key === "string" && properties.zone_key.trim() ? properties.zone_key.trim() : null;
+        const label = typeof properties?.label === "string" && properties.label.trim() ? properties.label.trim() : zoneKey || "Zona salva";
+        if (zoneKey) {
+          setSelectedSavedZoneKey(zoneKey);
+        }
+
+        busPopupRef.current?.remove();
+        const popup = new maplibregl.Popup({ closeButton: true, closeOnClick: false, maxWidth: "320px" })
+          .setLngLat(event.lngLat)
+          .setHTML(savedZonePopupContent(label))
+          .addTo(map);
+
+        busPopupRef.current = popup;
+        popup.on("close", () => {
+          if (busPopupRef.current === popup) {
+            busPopupRef.current = null;
+          }
+        });
+      });
+
+      map.on("click", "saved-listings-layer", (event) => {
+        const feature = event.features?.[0];
+        const listingKey = feature?.properties?.listing_key;
+        if (typeof listingKey === "string" && listingKey.trim()) {
+          setSelectedSavedListingKey(listingKey);
+        }
+      });
+
       map.on("click", (event) => {
-        if (stepRef.current === 1) {
+        if (stepRef.current === 1 && isPickingReferencePointRef.current) {
+          const clickedInteractiveFeatures = map.queryRenderedFeatures(event.point, {
+            layers: [...REFERENCE_POINT_BLOCKING_LAYER_LIST],
+          });
+          if (clickedInteractiveFeatures.length > 0) {
+            return;
+          }
+
           setPickedCoord({
             lat: event.lngLat.lat,
             lon: event.lngLat.lng,
             label: "Ponto principal"
           });
+          setIsPickingReferencePoint(false);
         }
 
         const clickedPinFeatures = map.queryRenderedFeatures(event.point, {
@@ -1858,20 +2116,21 @@ export function FindIdealApp() {
           map.getCanvas().style.cursor = "pointer";
         });
         map.on("mouseleave", layerId, () => {
-          map.getCanvas().style.cursor = "";
+          map.getCanvas().style.cursor = stepRef.current === 1 && isPickingReferencePointRef.current ? "crosshair" : "";
         });
       }
 
-      for (const layerId of ["transport-candidate-layer", "zones-runtime-fill-layer", "zone-pois-highlight-layer", "zone-pois-layer", "journey-listings-layer", "safety-incident-layer"] as const) {
+      for (const layerId of ["transport-candidate-layer", "zones-runtime-fill-layer", "zone-pois-highlight-layer", "zone-pois-layer", "journey-listings-layer", "safety-incident-layer", "saved-zone-pois-layer", "saved-zone-transport-layer", "saved-zones-fill-layer", "saved-listings-layer"] as const) {
         map.on("mouseenter", layerId, () => {
           map.getCanvas().style.cursor = "pointer";
         });
         map.on("mouseleave", layerId, () => {
-          map.getCanvas().style.cursor = stepRef.current === 1 ? "crosshair" : "";
+          map.getCanvas().style.cursor = stepRef.current === 1 && isPickingReferencePointRef.current ? "crosshair" : "";
         });
       }
 
       map.on("moveend", syncSequentialLayerLoadSequence);
+      map.on("moveend", syncMapViewportBounds);
       map.on("sourcedata", (event) => {
         if (event.dataType !== "source" || typeof event.sourceId !== "string") {
           return;
@@ -1886,6 +2145,7 @@ export function FindIdealApp() {
       });
 
       syncSequentialLayerLoadSequence();
+      syncMapViewportBounds();
 
       setIsMapReady(true);
     });
@@ -1899,16 +2159,17 @@ export function FindIdealApp() {
       selectedTransportMarkerRef.current = null;
       selectedListingMarkerRef.current?.remove();
       selectedListingMarkerRef.current = null;
+      setMapViewportBounds(null);
       map.remove();
     };
-  }, [setPickedCoord, setSelectedListingKey, setSelectedPoiKey, setSelectedTransportId, setSelectedZone]);
+  }, [setIsPickingReferencePoint, setMapViewportBounds, setPickedCoord, setSelectedListingKey, setSelectedPoiKey, setSelectedSavedListingKey, setSelectedSavedZoneKey, setSelectedTransportId, setSelectedZone]);
 
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !isMapReady) return;
 
-    map.getCanvas().style.cursor = step === 1 ? "crosshair" : "";
-  }, [isMapReady, step]);
+    map.getCanvas().style.cursor = step === 1 && isPickingReferencePoint ? "crosshair" : "";
+  }, [isMapReady, isPickingReferencePoint, step]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -2302,7 +2563,10 @@ export function FindIdealApp() {
       return;
     }
 
-    const zoneFeatures: GeoJSON.Feature<GeoJSON.Geometry>[] = savedZoneFavorites
+    const hiddenZoneKeySet = new Set(hiddenSavedZoneKeys);
+    const visibleSavedZoneFavorites = savedZoneFavorites.filter((entry) => !hiddenZoneKeySet.has(entry.zoneKey));
+
+    const zoneFeatures: GeoJSON.Feature<GeoJSON.Geometry>[] = visibleSavedZoneFavorites
       .filter((entry) => entry.payload.isochrone_geom)
       .map((entry) => ({
         type: "Feature" as const,
@@ -2313,7 +2577,7 @@ export function FindIdealApp() {
         },
       }));
 
-    const poiFeatures: GeoJSON.Feature<GeoJSON.Point>[] = savedZoneFavorites.flatMap((entry) =>
+    const poiFeatures: GeoJSON.Feature<GeoJSON.Point>[] = visibleSavedZoneFavorites.flatMap((entry) =>
       (entry.payload.poi_points || []).map((poi, index) => {
         const meta = getPoiCategoryMeta(poi.category || null);
         return {
@@ -2331,7 +2595,7 @@ export function FindIdealApp() {
       }),
     );
 
-    const transportFeatures: GeoJSON.Feature<GeoJSON.Point>[] = savedZoneFavorites
+    const transportFeatures: GeoJSON.Feature<GeoJSON.Point>[] = visibleSavedZoneFavorites
       .filter((entry) => entry.payload.transport_point?.lat != null && entry.payload.transport_point?.lon != null)
       .map((entry) => {
         const tp = entry.payload.transport_point!;
@@ -2348,7 +2612,7 @@ export function FindIdealApp() {
     setGeoJsonSourceData(map, SAVED_ZONES_SOURCE_ID, { type: "FeatureCollection", features: zoneFeatures });
     setGeoJsonSourceData(map, SAVED_ZONE_POIS_SOURCE_ID, { type: "FeatureCollection", features: poiFeatures });
     setGeoJsonSourceData(map, SAVED_ZONE_TRANSPORT_SOURCE_ID, { type: "FeatureCollection", features: transportFeatures });
-  }, [isMapReady, savedZoneFavorites]);
+  }, [hiddenSavedZoneKeys, isMapReady, savedZoneFavorites]);
 
   useEffect(() => {
     const map = mapRef.current;

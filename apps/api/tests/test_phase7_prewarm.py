@@ -105,6 +105,7 @@ def test_set_target_status_records_duration_and_counts(monkeypatch) -> None:
     status = statuses["rent:residential:rua teste"]
     assert status["status"] == "completed"
     assert status["total_count"] == 12
+    assert status["platform_statuses"]["quintoandar"]["status"] == "queued"
     assert status["duration_ms"] >= 0
     assert len(persisted) == 2
 

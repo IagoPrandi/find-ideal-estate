@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueries } from "@tanstack/react-query";
-import { ArrowRight, ChevronsLeft, ChevronsRight, ExternalLink, Heart, Link2, Loader2, MapPin, MessageSquare, Trash2 } from "lucide-react";
+import { ArrowRight, ChevronsLeft, ChevronsRight, ExternalLink, Eye, EyeOff, Heart, Link2, Loader2, MapPin, MessageSquare, Trash2 } from "lucide-react";
 import type { FavoriteZoneEntry } from "../../api/client";
 import { getZoneFavoriteAnalytics } from "../../api/client";
 import { getPoiCategoryMeta, POI_CATEGORY_ORDER } from "../../domain/poi";
@@ -51,9 +51,11 @@ export function FavoritesPanel() {
   const zoneFavorites = useZoneFavoritesStore((state) => state.zoneFavorites);
   const removeZoneFavorite = useZoneFavoritesStore((state) => state.removeZoneFavorite);
   const selectedZoneKey = useZoneFavoritesStore((state) => state.selectedZoneKey);
+  const hiddenZoneKeys = useZoneFavoritesStore((state) => state.hiddenZoneKeys);
   const setSelectedZoneKey = useZoneFavoritesStore((state) => state.setSelectedZoneKey);
   const selectedZoneMetricIds = useZoneFavoritesStore((state) => state.selectedZoneMetricIds);
   const toggleZoneMetric = useZoneFavoritesStore((state) => state.toggleZoneMetric);
+  const toggleZoneMapVisibility = useZoneFavoritesStore((state) => state.toggleZoneMapVisibility);
   const updateZoneNote = useZoneFavoritesStore((state) => state.updateZoneNote);
   const selectedSavedListingKey = useFavoritesStore((state) => state.selectedSavedListingKey);
   const setSelectedSavedListingKey = useFavoritesStore((state) => state.setSelectedSavedListingKey);
@@ -654,6 +656,7 @@ export function FavoritesPanel() {
               orderedZones.map((entry) => {
                 const isExpanded = expandedZoneKey === entry.zoneKey;
                 const isSelected = selectedZoneKey === entry.zoneKey;
+                const isHiddenOnMap = hiddenZoneKeys.includes(entry.zoneKey);
                 const poiPoints = entry.payload.poi_points || [];
                 const activeFilter = poiCategoryFilter[entry.zoneKey] || "all";
                 const categoryCounts = new Map<string, number>();
@@ -679,13 +682,13 @@ export function FavoritesPanel() {
                     className={`overflow-hidden rounded-[24px] border bg-white shadow-sm transition-colors ${isSelected ? "border-pastel-violet-400 ring-1 ring-pastel-violet-300" : "border-slate-200"}`}
                     data-testid={`saved-zone-card-${entry.zoneKey}`}
                   >
-                    <button
-                      type="button"
-                      onClick={() => handleSelectZone(entry.zoneKey)}
-                      className="flex w-full items-start justify-between gap-3 px-4 py-4 text-left hover:bg-slate-50/60"
-                      aria-pressed={isSelected}
-                    >
-                      <div className="min-w-0">
+                    <div className="flex w-full items-start justify-between gap-3 px-4 py-4 hover:bg-slate-50/60">
+                      <button
+                        type="button"
+                        onClick={() => handleSelectZone(entry.zoneKey)}
+                        className="min-w-0 flex-1 text-left"
+                        aria-pressed={isSelected}
+                      >
                         <div className="flex flex-wrap items-center gap-2">
                           <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">Zona salva</p>
                           {(() => {
@@ -707,20 +710,35 @@ export function FavoritesPanel() {
                           Salvo em {new Date(entry.savedAt).toLocaleDateString("pt-BR")}
                           {transport?.name ? ` · Seed: ${transport.name}` : transport?.lat && transport?.lon ? ` · Seed: ${transport.lat.toFixed(4)}, ${transport.lon.toFixed(4)}` : ""}
                         </p>
+                      </button>
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        <button
+                          type="button"
+                          aria-label={isHiddenOnMap ? "Mostrar zona salva no mapa" : "Ocultar zona salva no mapa"}
+                          title={isHiddenOnMap ? "Mostrar zona salva no mapa" : "Ocultar zona salva no mapa"}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            toggleZoneMapVisibility(entry.zoneKey);
+                          }}
+                          className={`inline-flex h-9 w-9 items-center justify-center rounded-xl border transition ${isHiddenOnMap ? "border-slate-200 bg-slate-100 text-slate-500 hover:border-slate-300 hover:text-slate-700" : "border-pastel-violet-200 bg-pastel-violet-50 text-pastel-violet-700 hover:border-pastel-violet-300 hover:bg-pastel-violet-100"}`}
+                          data-testid={`saved-zone-visibility-${entry.zoneKey}`}
+                        >
+                          {isHiddenOnMap ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                        <button
+                          type="button"
+                          aria-label="Remover zona salva"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void removeZoneFavorite(entry.zoneKey);
+                          }}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 text-rose-600 transition hover:border-rose-300 hover:bg-rose-100"
+                          title="Remover zona salva"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
                       </div>
-                      <span
-                        role="button"
-                        aria-label="Remover zona salva"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          void removeZoneFavorite(entry.zoneKey);
-                        }}
-                        className="inline-flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-xl border border-rose-200 bg-rose-50 text-rose-600 transition hover:border-rose-300 hover:bg-rose-100"
-                        title="Remover zona salva"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </span>
-                    </button>
+                    </div>
                     <div className="grid grid-cols-2 gap-2 border-t border-slate-100 bg-slate-50/60 px-4 py-3 text-[11px] text-slate-600 sm:grid-cols-3">
                       <MetricChip label="Tempo" value={metrics.travel_time_minutes != null ? `${metrics.travel_time_minutes} min` : "--"} />
                       <MetricChip label="Área" value={metrics.zone_area_m2 != null ? `${(metrics.zone_area_m2 / 1_000_000).toFixed(2)} km²` : "--"} />

@@ -69,15 +69,24 @@ export type ListingsPanelFilters = {
   sortDirection: ListingsSortDirection;
 };
 
+export type MapViewportBounds = {
+  minLon: number;
+  minLat: number;
+  maxLon: number;
+  maxLat: number;
+};
+
 type JourneyState = {
   journeyId: string | null;
   config: JourneyConfig;
   listingsFilters: ListingsPanelFilters;
   listingsAddressScope: ListingsAddressScope;
+  mapViewportBounds: MapViewportBounds | null;
   selectedListingKey: string | null;
   selectedPoiKey: string | null;
   activePoiCategory: string;
   pickedCoord: PickedCoord | null;
+  isPickingReferencePoint: boolean;
   primaryReferenceLabel: string;
   selectedTransportId: string | null;
   selectedZoneId: string | null;
@@ -92,6 +101,7 @@ type JourneyState = {
   setConfig: (updater: Partial<JourneyConfig>) => void;
   setEnrichment: (key: keyof JourneyConfig["enrichments"], value: boolean) => void;
   setPickedCoord: (coord: PickedCoord | null) => void;
+  setIsPickingReferencePoint: (value: boolean) => void;
   setPrimaryReferenceLabel: (label: string) => void;
   setSelectedTransportId: (transportId: string | null) => void;
   setSelectedZone: (zoneId: string | null, zoneFingerprint: string | null) => void;
@@ -99,6 +109,7 @@ type JourneyState = {
   setAddressQuery: (query: string) => void;
   setListingsFilters: (updater: Partial<ListingsPanelFilters>) => void;
   setListingsAddressScope: (scope: ListingsAddressScope) => void;
+  setMapViewportBounds: (bounds: MapViewportBounds | null) => void;
   resetListingsFilters: () => void;
   setSelectedListingKey: (selectedListingKey: string | null) => void;
   setSelectedPoiKey: (selectedPoiKey: string | null) => void;
@@ -151,10 +162,12 @@ export const useJourneyStore = create<JourneyState>((set) => ({
   config: defaultConfig,
   listingsFilters: defaultListingsPanelFilters,
   listingsAddressScope: "all_addresses",
+  mapViewportBounds: null,
   selectedListingKey: null,
   selectedPoiKey: null,
   activePoiCategory: "all",
   pickedCoord: null,
+  isPickingReferencePoint: false,
   primaryReferenceLabel: "",
   selectedTransportId: null,
   selectedZoneId: null,
@@ -175,6 +188,7 @@ export const useJourneyStore = create<JourneyState>((set) => ({
         journeyId,
         listingsFilters: buildDefaultListingsPanelFilters(state.config),
         listingsAddressScope: "all_addresses",
+        mapViewportBounds: null,
         selectedListingKey: null,
         selectedPoiKey: null,
         activePoiCategory: "all",
@@ -214,6 +228,7 @@ export const useJourneyStore = create<JourneyState>((set) => ({
       }
     })),
   setPickedCoord: (pickedCoord) => set({ pickedCoord }),
+  setIsPickingReferencePoint: (isPickingReferencePoint) => set({ isPickingReferencePoint }),
   setPrimaryReferenceLabel: (primaryReferenceLabel) => set({ primaryReferenceLabel }),
   setSelectedTransportId: (selectedTransportId) => set({ selectedTransportId }),
   setSelectedZone: (selectedZoneId, selectedZoneFingerprint) =>
@@ -248,6 +263,7 @@ export const useJourneyStore = create<JourneyState>((set) => ({
       }
     })),
   setListingsAddressScope: (listingsAddressScope) => set({ listingsAddressScope }),
+  setMapViewportBounds: (mapViewportBounds) => set({ mapViewportBounds }),
   resetListingsFilters: () => set((state) => ({ listingsFilters: buildDefaultListingsPanelFilters(state.config) })),
   setSelectedListingKey: (selectedListingKey) => set({ selectedListingKey }),
   setSelectedPoiKey: (selectedPoiKey) => set({ selectedPoiKey }),
@@ -259,10 +275,12 @@ export const useJourneyStore = create<JourneyState>((set) => ({
       config: defaultConfig,
       listingsFilters: buildDefaultListingsPanelFilters(defaultConfig),
       listingsAddressScope: "all_addresses",
+      mapViewportBounds: null,
       selectedListingKey: null,
       selectedPoiKey: null,
       activePoiCategory: "all",
       pickedCoord: null,
+      isPickingReferencePoint: false,
       primaryReferenceLabel: "",
       selectedTransportId: null,
       selectedZoneId: null,

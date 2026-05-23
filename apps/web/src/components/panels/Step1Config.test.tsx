@@ -9,11 +9,34 @@ vi.mock("../../api/client", () => ({
   createJourney: vi.fn()
 }));
 
+vi.mock("../../features/auth/useEntitlements", () => ({
+  useEntitlements: () => ({
+    can_customize_distance: true,
+    can_customize_max_time: true,
+    max_walk_minutes_cap: null,
+    max_car_minutes_cap: null,
+  }),
+}));
+
 describe("Step1Config", () => {
   beforeEach(() => {
     useJourneyStore.getState().resetJourney();
     useUIStore.getState().resetUI();
     vi.mocked(createJourney).mockResolvedValue({ id: "journey-1" } as never);
+  });
+
+  it("shows the reference point placement button and toggles picking mode", () => {
+    render(<Step1Config />);
+
+    const button = screen.getByRole("button", { name: /Colocar ponto no mapa/i });
+    expect(button).toHaveAttribute("aria-pressed", "false");
+    expect(useJourneyStore.getState().isPickingReferencePoint).toBe(false);
+
+    fireEvent.click(button);
+
+    expect(useJourneyStore.getState().isPickingReferencePoint).toBe(true);
+    expect(screen.getByRole("button", { name: /Clique no mapa para posicionar/i })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByText(/Clique no mapa para posicionar\./i)).toBeInTheDocument();
   });
 
   it("shows the floating vegetation selector on hover and enables green when a level is chosen", () => {

@@ -6206,6 +6206,32 @@
 - Progress Tracker:
   - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
 
+## 2026-05-22 - Rolagem e detalhes de bateladas no admin
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+- Skill used:
+  - `skills/develop-frontend/SKILL.md`
+
+- Scope executed:
+  - `ScrapingAdminPage` passou a ter rolagem vertical propria, compensando o `body { overflow: hidden; }` global da aplicacao.
+  - A tabela expandida de bateladas ganhou rolagem interna para listas longas de enderecos.
+  - A secao de bateladas agora mostra, por endereco, status geral, total de imoveis, status de scraping por plataforma e quantidade de imoveis por plataforma.
+  - O worker de prewarm agora persiste `platform_statuses` em `target_statuses`, com status, contagem persistida e mensagem de erro por plataforma.
+
+- Verification executed:
+  - `npm run test:run -- src/features/admin/ScrapingAdminPage.test.tsx` -> `4 passed`.
+  - `.venv\Scripts\python.exe -m pytest apps/api/tests/test_phase7_prewarm.py -q --color=no` -> `8 passed`.
+  - `git diff --check` -> sem erros; apenas avisos de conversao LF/CRLF.
+  - `curl.exe -I http://localhost:5173/#/admin/scraping` -> `200 OK` usando servidor Vite ja ativo.
+  - Verificacao Playwright headless em `http://localhost:5173/#/admin/scraping` -> pagina com conteudo, sem Vite overlay; estado esperado sem sessao: `Acesso restrito`.
+  - `agent-browser` nao estava disponivel no PATH; a verificacao de navegador foi feita com Playwright local. Console registrou `ERR_CONNECTION_REFUSED` da API porque o backend nao estava ativo nesta verificacao.
+  - `npm run typecheck` ainda falha por erros preexistentes fora deste escopo (`src/api/client.ts`, `FavoritesPanel.tsx`, `Step2Transport.tsx`, testes antigos e re-export duplicado em `src/lib/api/index.ts`).
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
+
 ## 2026-05-21 - Levantamento de erros e vulnerabilidades existentes
 
 - Required docs opened:
@@ -6248,6 +6274,100 @@
   - `git diff --check` -> sem erros; apenas avisos de conversao LF/CRLF.
   - `npm run typecheck` ainda falha por erros preexistentes fora deste escopo (`src/api/client.ts`, `FavoritesPanel.tsx`, `Step2Transport.tsx`, testes antigos e re-export duplicado em `src/lib/api/index.ts`).
   - A suite completa `python -m pytest apps/api/tests/test_phase6_dashboard_analytics.py -q --color=no` ainda falha em 4 testes preexistentes de `fetch_zone_dashboard_analytics` que esperam 3 chamadas SQL, enquanto a funcao atual executa uma 4a consulta de historico.
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
+
+## 2026-05-22 - Ajustes visuais do mapa, zonas salvas e escopo Pro
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/develop-frontend/SKILL.md`
+
+- Skill used:
+  - `skills/develop-frontend/SKILL.md`
+
+- Scope executed:
+  - `FindIdealApp` atualizado para novos tamanhos de pontos de ônibus, redução das ocorrências de segurança, seed salvo em losango roxo e POIs salvos em pentágonos por categoria.
+  - Fontes GeoJSON de zonas/POIs/seeds salvos agora ignoram zonas marcadas como ocultas no mapa.
+  - `zone-favorites-store` passou a persistir `hiddenZoneKeys` nas preferências locais e ganhou `toggleZoneMapVisibility(zoneKey)`, limpando a seleção quando a zona selecionada é ocultada.
+  - Cards de zonas salvas ganharam botão `Eye`/`EyeOff` para ocultar/desocultar no mapa sem remover a zona da lista.
+  - Filtro `Escopo espacial` na Step 6 bloqueia `Todos os imóveis` abaixo do plano Pro, mostra a mensagem "Disponível a partir do plano Pro." e normaliza `all` para `inside_zone` quando necessário.
+
+- Verification executed:
+  - `npm run test:run -- src/features/app/FindIdealApp.test.tsx src/components/panels/FavoritesPanel.test.tsx src/components/panels/Step6Analysis.test.tsx` -> `41 passed`.
+  - `npm run typecheck` -> ainda falha por erros TypeScript preexistentes fora deste escopo principal (`src/api/client.ts`, notas em cards de imóveis no `FavoritesPanel`, `Step2Transport`, `Step6Analysis.test`, re-export duplicado em `src/lib/api/index.ts`, e testes antigos de `journey-store`).
+  - `git diff --check` -> sem erros; apenas avisos de conversão LF/CRLF.
+  - Verificação Playwright headless em `http://localhost:5173/` -> `200`, `title=BetterPlace`, 1 canvas MapLibre, painel de favoritos presente, sem erros de console.
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluída; política de confirmação explícita preservada.
+
+## 2026-05-22 - Ordem de camadas e ponto de referencia no mapa
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/develop-frontend/SKILL.md`
+
+- Skill used:
+  - `skills/develop-frontend/SKILL.md`
+
+- Scope executed:
+  - `FindIdealApp` passou a reordenar as camadas do mapa em ordem real bottom-to-top: poligonos, retas, pontos geometricos/anotacoes e icones clicaveis no topo.
+  - POIs salvos e ponto seed salvo tiveram `icon-size` aumentado em 20%.
+  - Layers salvos ganharam handlers de clique: POI salvo abre popup com nome/categoria/endereco, seed salvo abre popup proprio, zona salva seleciona a zona e abre popup, e imovel salvo seleciona o favorito.
+  - `journey-store` ganhou `isPickingReferencePoint` e `Step1Config` ganhou o botao `Colocar ponto no mapa` / `Clique no mapa para posicionar`.
+  - Clique comum no mapa so define o ponto de referencia quando o modo esta ativo; cliques sobre camadas interativas nao reposicionam o ponto.
+
+- Verification executed:
+  - `npm run test:run -- src/features/app/FindIdealApp.test.tsx src/components/panels/Step1Config.test.tsx` -> `26 passed`.
+  - `npm run typecheck` -> ainda falha por erros preexistentes fora deste escopo (`src/api/client.ts`, `FavoritesPanel.tsx`, `Step2Transport.tsx`, `Step6Analysis.test.tsx`, re-export duplicado em `src/lib/api/index.ts`, e testes antigos de `journey-store`).
+  - Verificacao Playwright headless em Vite local temporario (`127.0.0.1:5176`, com `VITE_MAPTILER_API_KEY=test-maptiler-key`) -> 1 canvas MapLibre, botao `Colocar ponto no mapa` visivel, clique alternou para `Clique no mapa para posicionar`; console registrou CORS de `auth/me` e 403 do MapTiler por chave placeholder.
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
+
+## 2026-05-23 - Popup correto para POI salvo sobre zona salva
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/develop-frontend/SKILL.md`
+
+- Skill used:
+  - `skills/develop-frontend/SKILL.md`
+
+- Scope executed:
+  - `FindIdealApp` agora faz o handler de `saved-zones-fill-layer` ignorar o clique quando o ponto clicado tambem contem POI salvo, seed salvo ou imovel salvo.
+  - Isso preserva o popup do ponto salvo quando ele esta sobre o poligono da zona salva.
+
+- Verification executed:
+  - `npm run test:run -- src/features/app/FindIdealApp.test.tsx` -> `22 passed`.
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
+
+## 2026-05-23 - Imoveis sincronizados com a visualizacao do mapa
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/develop-frontend/SKILL.md`
+
+- Skill used:
+  - `skills/develop-frontend/SKILL.md`
+
+- Scope executed:
+  - `journey-store` ganhou `mapViewportBounds`, atualizado pelo `FindIdealApp` na carga e no `moveend` do mapa.
+  - `FindIdealApp` e `Step6Analysis` passaram a usar o mesmo filtro por viewport para que pins no mapa e cards no painel sigam a area visivel.
+  - A query de imoveis usada pelo mapa agora solicita ate `9999` itens em cache antes do recorte por viewport, evitando divergencia com o painel quando ha mais de uma pagina.
+  - O painel informa quando existem imoveis carregados, mas nenhum esta visivel na area atual do mapa.
+
+- Verification executed:
+  - `npm run test:run -- src/features/app/FindIdealApp.test.tsx src/components/panels/Step6Analysis.test.tsx` -> `45 passed`.
+  - `npm run typecheck` -> ainda falha por erros preexistentes fora deste escopo (`src/api/client.ts`, `FavoritesPanel.tsx`, `Step2Transport.tsx`, `Step6Analysis.test.tsx`, re-export duplicado em `src/lib/api/index.ts`, e testes antigos de `journey-store`).
 
 - Progress Tracker:
   - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.

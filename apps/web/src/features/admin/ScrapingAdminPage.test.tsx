@@ -204,6 +204,70 @@ describe("ScrapingAdminPage", () => {
     expect(await screen.findByText("Batelada criada com 1 endereço(s).")).toBeInTheDocument();
   });
 
+  it("mostra status e quantidade de imóveis por plataforma em cada endereço da batelada", async () => {
+    vi.mocked(getAdminScrapingBatches).mockResolvedValue({
+      items: [
+        {
+          job: {
+            id: "job-batch-1",
+            journey_id: null,
+            job_type: "listings_prewarm",
+            state: "completed",
+            progress_percent: 100,
+            current_stage: "listings_prewarm",
+            cancel_requested_at: null,
+            started_at: "2026-05-18T12:00:00Z",
+            finished_at: "2026-05-18T12:03:00Z",
+            worker_id: "worker-1",
+            result_ref: null,
+            error_code: null,
+            error_message: null,
+            created_at: "2026-05-18T12:00:00Z",
+          },
+          trigger: "admin_run_now",
+          status: "partial",
+          target_count: 1,
+          processed_count: 1,
+          skipped_count: 0,
+          failed_count: 0,
+          duration_ms: 180000,
+          target_statuses: {
+            "rent:residential:rua teste": {
+              status: "partial",
+              search_location_label: "Rua Teste",
+              search_location_normalized: "rua teste",
+              search_type: "rent",
+              usage_type: "residential",
+              total_count: 2,
+              duration_ms: 120000,
+              platforms: ["quintoandar", "zapimoveis"],
+              platform_statuses: {
+                quintoandar: { status: "completed", listing_count: 2 },
+                zapimoveis: { status: "failed", listing_count: 0, error_message: "Timeout" },
+              },
+            },
+          },
+        },
+      ],
+      total_count: 1,
+      limit: 20,
+      offset: 0,
+    });
+
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("button", { name: /Bateladas/i }));
+    await user.click(await screen.findByRole("button", { name: /job-batch-1/i }));
+
+    expect(await screen.findByText("Rua Teste")).toBeInTheDocument();
+    expect(screen.getByText("QuintoAndar")).toBeInTheDocument();
+    expect(screen.getByText("ZAP Imóveis")).toBeInTheDocument();
+    expect(screen.getByText("2 imóvel(is)")).toBeInTheDocument();
+    expect(screen.getByText("0 imóvel(is)")).toBeInTheDocument();
+    expect(screen.getByText("Timeout")).toBeInTheDocument();
+  });
+
   it("permite liberar scraping imediato para um usuario", async () => {
     vi.mocked(updateAdminUserScrapingPermission).mockResolvedValue({
       id: "user-2",
