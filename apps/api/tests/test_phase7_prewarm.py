@@ -297,11 +297,11 @@ def test_enqueue_manual_listings_prewarm_deduplicates_addresses(monkeypatch) -> 
     assert len(manual_targets) == 2
 
 
-def test_platform_budget_defaults_to_sixty_seconds_and_caps_overrides(monkeypatch) -> None:
+def test_platform_budget_defaults_to_configured_limit_and_caps_overrides(monkeypatch) -> None:
     monkeypatch.delenv("LISTINGS_PREWARM_MAX_ADDRESS_DURATION_SECONDS", raising=False)
 
-    assert prewarm_handler._platform_budget_seconds({}) == 60.0
-    assert prewarm_handler._platform_budget_seconds({"max_address_duration_seconds": 120}) == 60.0
+    assert prewarm_handler._platform_budget_seconds({}) == 100.0
+    assert prewarm_handler._platform_budget_seconds({"max_address_duration_seconds": 120}) == 100.0
     assert prewarm_handler._platform_budget_seconds({"max_address_duration_seconds": 30}) == 30.0
     assert prewarm_handler._platform_budget_seconds({"max_platform_duration_seconds": 45}) == 45.0
 

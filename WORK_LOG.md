@@ -6206,6 +6206,36 @@
 - Progress Tracker:
   - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
 
+## 2026-05-23 - Backend atualizado na cloud AWS
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/release-config-management/SKILL.md`
+
+- Skill used:
+  - `skills/release-config-management/SKILL.md`
+
+- Scope executed:
+  - Backend publicado no EC2 `18.117.21.132` a partir do commit `527381cc96485ffb74d5094ef3d18757c2b71e06`.
+  - Backup criado no EC2 antes da troca: `/home/ubuntu/app_backups/app_before_backend_20260523T151220Z.tgz`.
+  - Imagens `api`, `worker`, `worker-prewarm` e `worker-scrape-browser` reconstruidas e containers recriados com `docker compose`.
+  - `docker/entrypoint.sh` foi reenviado do workspace local e normalizado para LF no EC2 apos detectar CRLF e uma tentativa anterior que corrompeu letras `r` no arquivo remoto.
+
+- Verification executed:
+  - Testes locais antes do deploy: `python -m pytest apps/api/tests/test_admin_scraping.py apps/api/tests/test_phase5_stale_revalidate.py apps/api/tests/test_phase5_scraping_lock.py apps/api/tests/test_phase7_prewarm.py -q` -> `38 passed`.
+  - Compilacao Python local: `python -m py_compile apps/api/src/main.py apps/api/src/api/routes/transport.py apps/api/src/core/config.py apps/api/src/workers/handlers/prewarm.py` -> sem erros.
+  - `docker compose ps` no EC2 -> `api` healthy; `redis`, `worker`, `worker-prewarm` e `worker-scrape-browser` up.
+  - `https://api.betterplace.com.br/health` -> `200 {"status":"ok","db":"ok","redis":"ok"}`.
+  - `alembic current` no container `api` -> `20260521_0036 (head)`.
+  - Runtime no container `api` -> `prewarm_default_budget=100.0`.
+  - `safety-incidents` com `Origin: https://www.betterplace.com.br` -> `200` com `Access-Control-Allow-Origin: https://www.betterplace.com.br`.
+  - Tiles `stops`, `green` e `lines` com `Origin: https://www.betterplace.com.br` -> `200` com CORS correto.
+  - Logs recentes filtrados por `error|exception|traceback|fatal|no such file|syntax error` -> sem ocorrencias apos a subida final.
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
+
 ## 2026-05-23 - Merge origin/main em feature/mobile-version
 
 - Required docs opened:
