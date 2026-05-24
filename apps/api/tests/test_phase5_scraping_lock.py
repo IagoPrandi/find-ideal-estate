@@ -24,6 +24,7 @@ from modules.listings.dedup import (  # noqa: E402
     upsert_property_and_ad,
 )
 from modules.listings.models import ZoneCacheStatus  # noqa: E402
+from modules.listings.scrapers.base import ScraperError, raise_if_access_blocked  # noqa: E402
 from workers.handlers import listings as listings_handler  # noqa: E402
 
 lock_module = importlib.import_module("modules.listings.scraping_lock")
@@ -31,6 +32,28 @@ scraping_lock = lock_module.scraping_lock
 
 os.environ.setdefault("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/find_ideal_estate")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/0")
+
+
+class _FakePageLocator:
+    def __init__(self, text: str) -> None:
+        self._text = text
+
+    async def inner_text(self, timeout: int = 0) -> str:
+        del timeout
+        return self._text
+
+
+class _FakePage:
+    def __init__(self, *, title: str, body: str) -> None:
+        self._title = title
+        self._body = body
+
+    async def title(self) -> str:
+        return self._title
+
+    def locator(self, selector: str) -> _FakePageLocator:
+        assert selector == "body"
+        return _FakePageLocator(self._body)
 
 
 class _FakeRedis:
@@ -60,6 +83,22 @@ class _FakeRedis:
                 self._store.pop(key, None)
                 return 1
             return 0
+
+
+def test_scraper_detects_cloudflare_block_page() -> None:
+    page = _FakePage(
+        title="Attention Required! | Cloudflare",
+        body="Sorry, you have been blocked. Cloudflare Ray ID: abc",
+    )
+
+    with pytest.raises(ScraperError, match="Cloudflare"):
+        asyncio.run(raise_if_access_blocked(page, "VivaReal"))
+
+
+def test_scraper_allows_regular_page() -> None:
+    page = _FakePage(title="Imoveis para alugar", body="Apartamentos e casas")
+
+    asyncio.run(raise_if_access_blocked(page, "VivaReal"))
 
 
 @pytest.fixture(autouse=True)

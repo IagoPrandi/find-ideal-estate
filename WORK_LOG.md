@@ -6236,6 +6236,34 @@
 - Progress Tracker:
   - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
 
+## 2026-05-23 - Hotfix de diagnostico para VivaReal e ZapImoveis na AWS
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/release-config-management/SKILL.md`
+
+- Skill used:
+  - `skills/release-config-management/SKILL.md`
+
+- Scope executed:
+  - Investigado o scraping em producao no EC2 `18.117.21.132`.
+  - Diagnostico direto no container `worker-scrape-browser` confirmou que VivaReal e ZapImoveis retornam pagina Cloudflare `Attention Required`, sem links de imovel e sem chamadas Glue.
+  - `apps/api/src/modules/listings/scrapers/base.py` ganhou `raise_if_access_blocked(...)` para detectar bloqueio Cloudflare.
+  - `apps/api/src/modules/listings/scrapers/vivareal.py` e `apps/api/src/modules/listings/scrapers/zapimoveis.py` passaram a chamar essa validacao apos navegacoes principais.
+  - Hotfix publicado no EC2; backup dos arquivos antigos em `/home/ubuntu/app_backups/scraper_hotfix_20260524T021353Z`.
+
+- Verification executed:
+  - Testes focados: `python -m pytest apps/api/tests/test_phase5_scraping_lock.py::test_scraper_detects_cloudflare_block_page apps/api/tests/test_phase5_scraping_lock.py::test_scraper_allows_regular_page apps/api/tests/test_phase5_scraping_lock.py::test_listings_step_records_platform_diagnostics apps/api/tests/test_phase7_prewarm.py::test_listings_prewarm_step_reuses_single_session_per_platform apps/api/tests/test_phase7_prewarm.py::test_listings_prewarm_step_resets_budget_for_each_platform_timeout -q` -> `5 passed`.
+  - Compilacao Python dos scrapers e handlers alterados -> sem erros.
+  - Suite ampla `test_phase5_scraping_lock.py + test_phase7_prewarm.py` nao completou porque o teste de integracao `test_scraping_lock_concurrency_has_no_duplicate_db_writes` tentou acessar Postgres local em `localhost:5432` e recebeu `ConnectionRefusedError`; os testes unitarios anteriores passaram.
+  - `https://api.betterplace.com.br/health` -> `200 {"status":"ok","db":"ok","redis":"ok"}`.
+  - `docker compose ps` no EC2 -> `api` healthy; `redis`, `worker`, `worker-prewarm` e `worker-scrape-browser` up.
+  - Execucao direta no `worker-scrape-browser` confirmou `ScraperError` explicito para `VivaReal bloqueou o acesso via Cloudflare` e `ZapImoveis bloqueou o acesso via Cloudflare`.
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
+
 ## 2026-05-23 - Merge origin/main em feature/mobile-version
 
 - Required docs opened:
