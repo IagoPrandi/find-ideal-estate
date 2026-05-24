@@ -6206,6 +6206,73 @@
 - Progress Tracker:
   - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
 
+## 2026-05-23 - Controle admin para remover restricoes de uso
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/security-threat-checklist/SKILL.md`
+
+- Skill used:
+  - `skills/security-threat-checklist/SKILL.md`
+
+- Security notes:
+  - Protected assets: permissao administrativa, cotas/creditos de uso e disponibilidade do scraping.
+  - Entrypoints: `PATCH /admin/users/{user_id}/usage-restrictions` e painel admin.
+  - Mitigations: endpoint protegido por `require_developer`, payload allowlisted por contrato Pydantic, update parametrizado via SQLAlchemy, cache de entitlements invalidado apos mudanca.
+  - Residual risk: producao precisa aplicar a migration antes do backend novo servir esse campo.
+
+- Scope executed:
+  - Adicionado `usage_restrictions_disabled` em contratos, auth status, schema web e migration `20260523_0037_usage_restrictions_toggle.py`.
+  - Criado endpoint admin `PATCH /admin/users/{user_id}/usage-restrictions`, restrito a desenvolvedor, com invalidacao de cache de entitlements.
+  - O bypass agora cobre entitlements de plano, consumo de creditos e scraping imediato no backend.
+  - A pagina admin ganhou botao por usuario para alternar entre `Restricoes ativas` e `Sem restricoes`.
+
+- Verification executed:
+  - `python -m pytest apps/api/tests/test_admin_scraping.py` -> `7 passed`.
+  - `python -m py_compile apps/api/src/api/routes/admin_users.py apps/api/src/api/routes/jobs.py apps/api/src/api/routes/listings.py apps/api/src/modules/auth/service.py apps/api/src/modules/plans/service.py packages/contracts/contracts/admin.py packages/contracts/contracts/auth.py apps/api/contracts/__init__.py` -> ok.
+  - `npm run test:run -- src/features/admin/ScrapingAdminPage.test.tsx src/state/favorites-store.test.ts` -> `13 passed`.
+  - `git diff --check` -> sem erros; apenas avisos de conversao LF/CRLF.
+  - `npm run typecheck` -> ainda falha por erros preexistentes fora deste escopo (`src/api/client.ts`, `FavoritesPanel.tsx`, `Step2Transport.tsx`, `Step6Analysis.test.tsx`, re-export duplicado em `src/lib/api/index.ts`, e testes antigos de `journey-store`).
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
+
+## 2026-05-24 - Controle global admin para remover restricoes de uso
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/security-threat-checklist/SKILL.md`
+  - `skills/develop-frontend/SKILL.md`
+
+- Skills used:
+  - `skills/security-threat-checklist/SKILL.md`, pois o escopo alterou operacao admin, autorizacao e limites de uso.
+  - `skills/develop-frontend/SKILL.md`, pois a secao de usuarios do painel admin recebeu novo controle operacional.
+
+- Security notes:
+  - Protected assets: cotas/creditos, acesso anonimo/cadastrado, disponibilidade de jobs e permissoes administrativas.
+  - Entrypoints: `GET/PATCH /admin/users/usage-restrictions/global`, `AuthStatusRead` e painel admin.
+  - Mitigations: endpoints globais protegidos por `require_developer`, payload allowlisted por Pydantic, SQL parametrizado, estado persistido em `app_settings`, sem fallback silencioso quando a tabela nao existe.
+  - Residual risk: producao precisa aplicar a migration `20260523_0038_global_usage_restrictions.py` antes de servir o backend novo.
+
+- Scope executed:
+  - Criada a tabela/configuracao `app_settings` para `usage_restrictions_disabled_globally`, com migration `20260523_0038_global_usage_restrictions.py`.
+  - Adicionado servico `modules/usage_restrictions` para ler/gravar o estado global.
+  - Admin ganhou rotas para consultar e alternar o bypass global de restricoes de uso.
+  - O bypass global cobre usuarios anonimos e cadastrados em entitlements, consumo de creditos, scraping imediato e customizacao de jornada.
+  - `AuthStatusRead` passou a expor `usage_restrictions_disabled_globally` para o frontend.
+  - A aba `Usuarios` do admin ganhou botao "Ativar sem restricoes para todos" / "Todos sem restricoes".
+
+- Verification executed:
+  - `python -m pytest apps/api/tests/test_admin_scraping.py` -> `8 passed`.
+  - `python -m py_compile apps/api/src/api/routes/admin_users.py apps/api/src/api/routes/auth.py apps/api/src/api/routes/account.py apps/api/src/api/routes/jobs.py apps/api/src/api/routes/listings.py apps/api/src/api/routes/journeys.py apps/api/src/modules/auth/service.py apps/api/src/modules/plans/service.py apps/api/src/modules/usage_restrictions/service.py packages/contracts/contracts/admin.py packages/contracts/contracts/auth.py apps/api/contracts/__init__.py` -> ok.
+  - `npm run test:run -- src/features/admin/ScrapingAdminPage.test.tsx src/state/favorites-store.test.ts` -> `14 passed`.
+  - `git diff --check` -> sem erros; apenas avisos de conversao LF/CRLF.
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
+
 ## 2026-05-23 - Backend atualizado na cloud AWS
 
 - Required docs opened:

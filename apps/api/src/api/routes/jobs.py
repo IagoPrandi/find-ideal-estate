@@ -10,6 +10,7 @@ from modules.auth.service import get_accessible_journey
 from modules.credits.service import InsufficientCreditsError, check_and_consume, consume_anonymous_credits
 from modules.jobs.events import job_events_stream
 from modules.jobs.service import create_job, get_job, request_job_cancellation
+from modules.usage_restrictions.service import get_global_usage_restrictions_disabled
 
 router = APIRouter(prefix="/jobs", tags=["jobs"])
 
@@ -28,11 +29,17 @@ async def create_job_endpoint(payload: JobCreate, response: Response, auth_conte
         )
     if payload.job_type in _CREDIT_JOB_TYPES:
         try:
+            global_bypass = await get_global_usage_restrictions_disabled()
             if auth_context.user is None:
-                session_id = auth_context.anonymous_session_id or ""
-                await consume_anonymous_credits(session_id, 20)
+                if not global_bypass:
+                    session_id = auth_context.anonymous_session_id or ""
+                    await consume_anonymous_credits(session_id, 20)
             else:
-                bypass = auth_context.user.role == "proprietario"
+                bypass = (
+                    global_bypass
+                    or auth_context.user.role == "proprietario"
+                    or getattr(auth_context.user, "usage_restrictions_disabled", False)
+                )
                 await check_and_consume(auth_context.user.id, payload.job_type.value, bypass=bypass)
         except InsufficientCreditsError as exc:
             raise HTTPException(

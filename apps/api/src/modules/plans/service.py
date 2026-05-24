@@ -9,6 +9,7 @@ from contracts import AccountPlanRead, PlanEntitlementsRead, PlanRead, ResolvedE
 from core.db import get_engine
 from core.redis import get_redis
 from modules.plans.exceptions import EntitlementExceeded, ViewWindowExpired
+from modules.usage_restrictions.service import get_global_usage_restrictions_disabled
 from sqlalchemy import text
 
 _ENTITLEMENTS_CACHE_TTL = 60
@@ -94,15 +95,26 @@ def _proprietario_resolved_entitlements() -> ResolvedEntitlements:
     return ResolvedEntitlements(plan=plan, entitlements=entitlements)
 
 
-async def _get_user_role(user_id: UUID) -> str:
+async def _get_user_usage_access(user_id: UUID) -> tuple[str, bool]:
     engine = get_engine()
     async with engine.connect() as conn:
         result = await conn.execute(
-            text("SELECT role FROM users WHERE id = :user_id LIMIT 1"),
+            text(
+                """
+                SELECT
+                    role,
+                    COALESCE(usage_restrictions_disabled, false) AS usage_restrictions_disabled
+                FROM users
+                WHERE id = :user_id
+                LIMIT 1
+                """
+            ),
             {"user_id": user_id},
         )
         row = result.mappings().first()
-    return (row["role"] if row else "user") or "user"
+    if row is None:
+        return "user", False
+    return (row["role"] or "user"), bool(row["usage_restrictions_disabled"])
 
 
 def _utc_now() -> datetime:
@@ -173,8 +185,11 @@ async def list_plans() -> list[PlanRead]:
 
 
 async def resolve_entitlements(user_id: UUID) -> ResolvedEntitlements:
-    role = await _get_user_role(user_id)
-    if role == _PROPRIETARIO_ROLE:
+    if await get_global_usage_restrictions_disabled():
+        return _proprietario_resolved_entitlements()
+
+    role, usage_restrictions_disabled = await _get_user_usage_access(user_id)
+    if role == _PROPRIETARIO_ROLE or usage_restrictions_disabled:
         return _proprietario_resolved_entitlements()
 
     cache_key = _ENTITLEMENTS_CACHE_KEY.format(user_id=str(user_id))

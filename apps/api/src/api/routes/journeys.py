@@ -27,6 +27,7 @@ from modules.journeys.service import (
     update_journey,
 )
 from modules.plans.service import resolve_entitlements
+from modules.usage_restrictions.service import get_global_usage_restrictions_disabled
 from modules.public_safety import classify_public_safety_group
 from modules.dashboard.analytics import fetch_zone_dashboard_analytics, fetch_zone_favorite_analytics
 from modules.public_safety import public_safety_group_case_sql
@@ -67,6 +68,9 @@ _TRAVEL_TIME_FIELD_ALIASES = (
 
 async def _enforce_snapshot_customization(snapshot: dict[str, Any], auth_context) -> None:
     """Silently overrides locked/capped parameters — UI already blocks invalid values."""
+    if await get_global_usage_restrictions_disabled():
+        return
+
     if auth_context.user is None:
         _clamp_range_value(
             snapshot,

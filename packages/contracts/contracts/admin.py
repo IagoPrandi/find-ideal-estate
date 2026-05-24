@@ -89,6 +89,7 @@ class AdminUserRead(BaseModel):
     is_active: bool
     is_superuser: bool
     can_start_immediate_scraping: bool = False
+    usage_restrictions_disabled: bool = False
     role: str
     created_at: datetime
 
@@ -100,9 +101,21 @@ class AdminUsersRead(BaseModel):
     offset: int
 
 
+class AdminUsageRestrictionsRead(BaseModel):
+    usage_restrictions_disabled_globally: bool = False
+
+
 class AdminUserRoleUpdateRequest(BaseModel):
     role: str
 
 
 class AdminUserScrapingPermissionUpdateRequest(BaseModel):
     can_start_immediate_scraping: bool
+
+
+class AdminUserUsageRestrictionsUpdateRequest(BaseModel):
+    usage_restrictions_disabled: bool
+
+
+class AdminGlobalUsageRestrictionsUpdateRequest(BaseModel):
+    usage_restrictions_disabled_globally: bool

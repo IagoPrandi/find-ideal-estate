@@ -10,6 +10,7 @@ import {
   AdminScrapingBatchesSchema,
   AdminScrapingOverviewSchema,
   AdminScrapingQueueSchema,
+  AdminUsageRestrictionsSchema,
   AdminUserSchema,
   AdminUsersSchema,
   AuthStatusReadSchema,
@@ -112,6 +113,7 @@ export type AdminScrapingQueue = z.output<typeof AdminScrapingQueueSchema>;
 export type AdminScrapingBatch = z.output<typeof AdminScrapingBatchSchema>;
 export type AdminScrapingBatches = z.output<typeof AdminScrapingBatchesSchema>;
 export type AdminRunNowResponse = z.output<typeof AdminRunNowResponseSchema>;
+export type AdminUsageRestrictions = z.output<typeof AdminUsageRestrictionsSchema>;
 export type AdminUser = z.output<typeof AdminUserSchema>;
 export type AdminUsers = z.output<typeof AdminUsersSchema>;
 export type FavoriteListingEntry = {
@@ -1079,6 +1081,19 @@ export async function getAdminUsers(q = ""): Promise<AdminUsers> {
   return (await requestJson(`/admin/users${params}`, AdminUsersSchema)) as AdminUsers;
 }
 
+export async function getAdminUsageRestrictions(): Promise<AdminUsageRestrictions> {
+  return (await requestJson("/admin/users/usage-restrictions/global", AdminUsageRestrictionsSchema)) as AdminUsageRestrictions;
+}
+
+export async function updateAdminGlobalUsageRestrictions(
+  usageRestrictionsDisabledGlobally: boolean,
+): Promise<AdminUsageRestrictions> {
+  return (await requestJson("/admin/users/usage-restrictions/global", AdminUsageRestrictionsSchema, {
+    method: "PATCH",
+    body: { usage_restrictions_disabled_globally: usageRestrictionsDisabledGlobally },
+  })) as AdminUsageRestrictions;
+}
+
 export async function updateAdminUserRole(userId: string, role: "user" | "proprietario"): Promise<AdminUser> {
   return (await requestJson(`/admin/users/${encodeURIComponent(userId)}/role`, AdminUserSchema, {
     method: "PATCH",
@@ -1093,5 +1108,15 @@ export async function updateAdminUserScrapingPermission(
   return (await requestJson(`/admin/users/${encodeURIComponent(userId)}/scraping-permission`, AdminUserSchema, {
     method: "PATCH",
     body: { can_start_immediate_scraping: canStartImmediateScraping },
+  })) as AdminUser;
+}
+
+export async function updateAdminUserUsageRestrictions(
+  userId: string,
+  usageRestrictionsDisabled: boolean,
+): Promise<AdminUser> {
+  return (await requestJson(`/admin/users/${encodeURIComponent(userId)}/usage-restrictions`, AdminUserSchema, {
+    method: "PATCH",
+    body: { usage_restrictions_disabled: usageRestrictionsDisabled },
   })) as AdminUser;
 }

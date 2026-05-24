@@ -187,6 +187,7 @@ def test_admin_user_scraping_permission_update(monkeypatch):
                 "is_active": True,
                 "is_superuser": False,
                 "can_start_immediate_scraping": True,
+                "usage_restrictions_disabled": False,
                 "role": "user",
                 "created_at": datetime.now(tz=timezone.utc),
             }
@@ -222,6 +223,89 @@ def test_admin_user_scraping_permission_update(monkeypatch):
     body = response.json()
     assert body["id"] == str(target_user_id)
     assert body["can_start_immediate_scraping"] is True
+
+
+def test_admin_user_usage_restrictions_update(monkeypatch):
+    developer = _user(is_superuser=True)
+    target_user_id = uuid4()
+    cache_invalidations = []
+    monkeypatch.setattr("api.routes.admin_common.build_request_auth_context", _auth_context(developer))
+
+    async def _invalidate(user_id):
+        cache_invalidations.append(user_id)
+
+    class _Result:
+        def mappings(self):
+            return self
+
+        def first(self):
+            return {
+                "id": target_user_id,
+                "email": "morador@example.com",
+                "display_name": "Morador",
+                "is_active": True,
+                "is_superuser": False,
+                "can_start_immediate_scraping": False,
+                "usage_restrictions_disabled": True,
+                "role": "user",
+                "created_at": datetime.now(tz=timezone.utc),
+            }
+
+    class _Conn:
+        async def execute(self, stmt, params):
+            sql = str(stmt)
+            assert "usage_restrictions_disabled" in sql
+            assert params["user_id"] == target_user_id
+            assert params["usage_restrictions_disabled"] is True
+            return _Result()
+
+    class _Begin:
+        async def __aenter__(self):
+            return _Conn()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    class _Engine:
+        def begin(self):
+            return _Begin()
+
+    monkeypatch.setattr("api.routes.admin_users.get_engine", lambda: _Engine())
+    monkeypatch.setattr("api.routes.admin_users.invalidate_entitlements_cache", _invalidate)
+
+    with TestClient(app) as client:
+        response = client.patch(
+            f"/admin/users/{target_user_id}/usage-restrictions",
+            json={"usage_restrictions_disabled": True},
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["id"] == str(target_user_id)
+    assert body["usage_restrictions_disabled"] is True
+    assert cache_invalidations == [target_user_id]
+
+
+def test_admin_global_usage_restrictions_update(monkeypatch):
+    developer = _user(is_superuser=True)
+    calls = []
+    monkeypatch.setattr("api.routes.admin_common.build_request_auth_context", _auth_context(developer))
+
+    async def _set_global(disabled: bool):
+        calls.append(disabled)
+        return disabled
+
+    monkeypatch.setattr("api.routes.admin_users.set_global_usage_restrictions_disabled", _set_global)
+
+    with TestClient(app) as client:
+        response = client.patch(
+            "/admin/users/usage-restrictions/global",
+            json={"usage_restrictions_disabled_globally": True},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["usage_restrictions_disabled_globally"] is True
+    assert calls == [True]
 
 
 def test_admin_user_role_update_rejects_invalid_role(monkeypatch):

@@ -18,6 +18,7 @@ if str(_SHARED_CONTRACTS_DIR) not in __path__:
 
 from .auth import AuthGoogleLoginRequest, AuthLoginRequest, AuthRegisterRequest, AuthStatusRead, AuthUserRead
 from .admin import (
+    AdminGlobalUsageRestrictionsUpdateRequest,
     AdminRunNowResponse,
     AdminScrapingBatchRead,
     AdminScrapingBatchesRead,
@@ -26,9 +27,11 @@ from .admin import (
     AdminScrapingQueueItemRead,
     AdminScrapingQueueMutationRead,
     AdminScrapingQueueRead,
+    AdminUsageRestrictionsRead,
     AdminUserRead,
     AdminUserRoleUpdateRequest,
     AdminUserScrapingPermissionUpdateRequest,
+    AdminUserUsageRestrictionsUpdateRequest,
     AdminUsersRead,
 )
 from .billing import (
@@ -100,6 +103,7 @@ __version__ = "0.1.0"
 __all__ = [
     "AccountCreditsRead",
     "AccountPlanRead",
+    "AdminGlobalUsageRestrictionsUpdateRequest",
     "AdminRunNowResponse",
     "AdminScrapingBatchRead",
     "AdminScrapingBatchesRead",
@@ -108,9 +112,11 @@ __all__ = [
     "AdminScrapingQueueItemRead",
     "AdminScrapingQueueMutationRead",
     "AdminScrapingQueueRead",
+    "AdminUsageRestrictionsRead",
     "AdminUserRead",
     "AdminUserRoleUpdateRequest",
     "AdminUserScrapingPermissionUpdateRequest",
+    "AdminUserUsageRestrictionsUpdateRequest",
     "AdminUsersRead",
     "AuthLoginRequest",
     "AuthGoogleLoginRequest",

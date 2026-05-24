@@ -87,10 +87,12 @@ describe("favorites stores", () => {
         is_active: true,
         is_superuser: false,
         can_start_immediate_scraping: false,
+        usage_restrictions_disabled: false,
         created_at: "2026-04-12T10:00:00Z",
         role: "user",
       },
       session_expires_at: "2026-05-12T10:00:00Z",
+      usage_restrictions_disabled_globally: false,
     });
 
     expect(useFavoritesStore.getState().isAuthenticated).toBe(true);
@@ -100,6 +102,7 @@ describe("favorites stores", () => {
       is_authenticated: false,
       user: null,
       session_expires_at: null,
+      usage_restrictions_disabled_globally: false,
     });
 
     expect(useFavoritesStore.getState().isAuthenticated).toBe(false);

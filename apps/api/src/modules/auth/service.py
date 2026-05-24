@@ -21,6 +21,7 @@ from core.db import get_engine
 from google.auth.transport import requests as google_auth_requests
 from google.oauth2 import id_token as google_id_token
 from modules.journeys.service import get_journey_for_access
+from modules.usage_restrictions.service import get_global_usage_restrictions_disabled
 from sqlalchemy import text
 
 AUTH_SESSION_COOKIE = "auth_session"
@@ -177,16 +178,18 @@ def _row_to_user(row) -> AuthUserRead:
         is_active=row["is_active"],
         is_superuser=row.get("is_superuser", False) or False,
         can_start_immediate_scraping=row.get("can_start_immediate_scraping", False) or False,
+        usage_restrictions_disabled=row.get("usage_restrictions_disabled", False) or False,
         created_at=row["created_at"],
         role=row.get("role", "user") or "user",
     )
 
 
-def build_auth_status(context: RequestAuthContext) -> AuthStatusRead:
+async def build_auth_status(context: RequestAuthContext) -> AuthStatusRead:
     return AuthStatusRead(
         is_authenticated=context.user is not None,
         user=context.user,
         session_expires_at=context.session_expires_at,
+        usage_restrictions_disabled_globally=await get_global_usage_restrictions_disabled(),
     )
 
 
@@ -200,6 +203,7 @@ async def get_user_by_email(email: str) -> tuple[AuthUserRead, str | None] | Non
                 SELECT
                     id, email, display_name, is_active, is_superuser,
                     COALESCE(can_start_immediate_scraping, false) AS can_start_immediate_scraping,
+                    COALESCE(usage_restrictions_disabled, false) AS usage_restrictions_disabled,
                     created_at, role, password_hash
                 FROM users
                 WHERE lower(email) = :email
@@ -222,6 +226,7 @@ async def _get_user_row_by_email(conn, email: str):
                 SELECT
                     id, email, display_name, is_active, is_superuser,
                     COALESCE(can_start_immediate_scraping, false) AS can_start_immediate_scraping,
+                    COALESCE(usage_restrictions_disabled, false) AS usage_restrictions_disabled,
                     created_at, role,
                     password_hash, google_subject
                 FROM users
@@ -242,6 +247,7 @@ async def _get_user_row_by_google_subject(conn, subject: str):
                 SELECT
                     id, email, display_name, is_active, is_superuser,
                     COALESCE(can_start_immediate_scraping, false) AS can_start_immediate_scraping,
+                    COALESCE(usage_restrictions_disabled, false) AS usage_restrictions_disabled,
                     created_at, role,
                     password_hash, google_subject
                 FROM users
@@ -394,7 +400,7 @@ async def register_user(
                 )
                 RETURNING
                     id, email, display_name, is_active, is_superuser,
-                    can_start_immediate_scraping, created_at, role
+                    can_start_immediate_scraping, usage_restrictions_disabled, created_at, role
                 """
             ),
             {
@@ -469,7 +475,7 @@ async def login_google_user(
                         WHERE id = :user_id
                         RETURNING
                             id, email, display_name, is_active, is_superuser,
-                            can_start_immediate_scraping, created_at,
+                            can_start_immediate_scraping, usage_restrictions_disabled, created_at,
                             role, password_hash, google_subject
                         """
                     ),
@@ -512,7 +518,7 @@ async def login_google_user(
                         )
                         RETURNING
                             id, email, display_name, is_active, is_superuser,
-                            can_start_immediate_scraping, created_at,
+                            can_start_immediate_scraping, usage_restrictions_disabled, created_at,
                             role, password_hash, google_subject
                         """
                     ),
@@ -561,6 +567,7 @@ async def get_authenticated_session_by_token(token: str) -> AuthenticatedSession
                     u.is_active,
                     u.is_superuser,
                     COALESCE(u.can_start_immediate_scraping, false) AS can_start_immediate_scraping,
+                    COALESCE(u.usage_restrictions_disabled, false) AS usage_restrictions_disabled,
                     u.created_at,
                     u.role,
                     s.expires_at

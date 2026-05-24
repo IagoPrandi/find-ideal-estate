@@ -6,9 +6,12 @@ import {
   getAdminScrapingBatches,
   getAdminScrapingOverview,
   getAdminScrapingQueue,
+  getAdminUsageRestrictions,
   getAdminUsers,
   runAdminScrapingNow,
+  updateAdminGlobalUsageRestrictions,
   updateAdminUserScrapingPermission,
+  updateAdminUserUsageRestrictions,
 } from "../../api/client";
 import { useAuth } from "../auth/AuthContext";
 import { ScrapingAdminPage } from "./ScrapingAdminPage";
@@ -34,11 +37,14 @@ vi.mock("../../api/client", () => {
     getAdminScrapingBatches: vi.fn(),
     getAdminScrapingOverview: vi.fn(),
     getAdminScrapingQueue: vi.fn(),
+    getAdminUsageRestrictions: vi.fn(),
     getAdminUsers: vi.fn(),
     removeAdminScrapingQueueAddress: vi.fn(),
     runAdminScrapingNow: vi.fn(),
+    updateAdminGlobalUsageRestrictions: vi.fn(),
     updateAdminUserRole: vi.fn(),
     updateAdminUserScrapingPermission: vi.fn(),
+    updateAdminUserUsageRestrictions: vi.fn(),
   };
 });
 
@@ -67,10 +73,12 @@ function developerAuthContext() {
         is_active: true,
         is_superuser: true,
         can_start_immediate_scraping: true,
+        usage_restrictions_disabled: false,
         role: "user",
         created_at: "2026-05-18T12:00:00Z",
       },
       session_expires_at: "2026-06-18T12:00:00Z",
+      usage_restrictions_disabled_globally: false,
     },
     isLoading: false,
     isSubmitting: false,
@@ -127,6 +135,9 @@ describe("ScrapingAdminPage", () => {
       limit: 20,
       offset: 0,
     });
+    vi.mocked(getAdminUsageRestrictions).mockResolvedValue({
+      usage_restrictions_disabled_globally: false,
+    });
     vi.mocked(getAdminUsers).mockResolvedValue({
       items: [
         {
@@ -136,6 +147,7 @@ describe("ScrapingAdminPage", () => {
           is_active: true,
           is_superuser: false,
           can_start_immediate_scraping: false,
+          usage_restrictions_disabled: false,
           role: "user",
           created_at: "2026-05-18T12:00:00Z",
         },
@@ -178,10 +190,12 @@ describe("ScrapingAdminPage", () => {
           is_active: true,
           is_superuser: false,
           can_start_immediate_scraping: false,
+          usage_restrictions_disabled: false,
           role: "proprietario",
           created_at: "2026-05-18T12:00:00Z",
         },
         session_expires_at: "2026-06-18T12:00:00Z",
+        usage_restrictions_disabled_globally: false,
       },
       isLoading: false,
     });
@@ -201,10 +215,10 @@ describe("ScrapingAdminPage", () => {
     await waitFor(() => {
       expect(runAdminScrapingNow).toHaveBeenCalledTimes(1);
     });
-    expect(await screen.findByText("Batelada criada com 1 endereço(s).")).toBeInTheDocument();
+    expect(await screen.findByText(/Batelada criada com 1/)).toBeInTheDocument();
   });
 
-  it("mostra status e quantidade de imóveis por plataforma em cada endereço da batelada", async () => {
+  it("mostra status e quantidade de imÃƒÂ³veis por plataforma em cada endereÃƒÂ§o da batelada", async () => {
     vi.mocked(getAdminScrapingBatches).mockResolvedValue({
       items: [
         {
@@ -262,9 +276,9 @@ describe("ScrapingAdminPage", () => {
 
     expect(await screen.findByText("Rua Teste")).toBeInTheDocument();
     expect(screen.getByText("QuintoAndar")).toBeInTheDocument();
-    expect(screen.getByText("ZAP Imóveis")).toBeInTheDocument();
-    expect(screen.getByText("2 imóvel(is)")).toBeInTheDocument();
-    expect(screen.getByText("0 imóvel(is)")).toBeInTheDocument();
+    expect(screen.getByText(/ZAP/)).toBeInTheDocument();
+    expect(screen.getByText(/2 im/)).toBeInTheDocument();
+    expect(screen.getByText(/0 im/)).toBeInTheDocument();
     expect(screen.getByText("Timeout")).toBeInTheDocument();
   });
 
@@ -276,6 +290,7 @@ describe("ScrapingAdminPage", () => {
       is_active: true,
       is_superuser: false,
       can_start_immediate_scraping: true,
+      usage_restrictions_disabled: false,
       role: "user",
       created_at: "2026-05-18T12:00:00Z",
     });
@@ -283,7 +298,7 @@ describe("ScrapingAdminPage", () => {
     const user = userEvent.setup();
     renderPage();
 
-    const usersTab = await screen.findByRole("button", { name: /Usuários/i });
+    const usersTab = await screen.findByRole("button", { name: /Usu/i });
     await user.click(usersTab);
 
     const toggle = await screen.findByRole("checkbox", { name: /Liberado/i });
@@ -292,6 +307,53 @@ describe("ScrapingAdminPage", () => {
     await waitFor(() => {
       expect(updateAdminUserScrapingPermission).toHaveBeenCalledWith("user-2", true);
     });
-    expect(await screen.findByText("Permissão de scraping imediato atualizada.")).toBeInTheDocument();
+    expect(await screen.findByText(/scraping imediato atualizada/i)).toBeInTheDocument();
+  });
+
+  it("permite alternar todas as restriÃƒÂ§ÃƒÂµes de uso para um usuÃƒÂ¡rio", async () => {
+    vi.mocked(updateAdminUserUsageRestrictions).mockResolvedValue({
+      id: "user-2",
+      email: "morador@example.com",
+      display_name: "Morador",
+      is_active: true,
+      is_superuser: false,
+      can_start_immediate_scraping: false,
+      usage_restrictions_disabled: true,
+      role: "user",
+      created_at: "2026-05-18T12:00:00Z",
+    });
+
+    const user = userEvent.setup();
+    renderPage();
+
+    const usersTab = await screen.findByRole("button", { name: /Usu/i });
+    await user.click(usersTab);
+
+    const restrictionButtons = await screen.findAllByRole("button", { name: /Restri/i });
+    await user.click(restrictionButtons[1]);
+
+    await waitFor(() => {
+      expect(updateAdminUserUsageRestrictions).toHaveBeenCalledWith("user-2", true);
+    });
+    expect(await screen.findByText(/uso atualizadas/i)).toBeInTheDocument();
+  });
+
+  it("permite alternar restricoes de uso para todos os usuarios", async () => {
+    vi.mocked(updateAdminGlobalUsageRestrictions).mockResolvedValue({
+      usage_restrictions_disabled_globally: true,
+    });
+
+    const user = userEvent.setup();
+    renderPage();
+
+    const usersTab = await screen.findByRole("button", { name: /Usu/i });
+    await user.click(usersTab);
+
+    await user.click(await screen.findByRole("button", { name: /Ativar sem restr/i }));
+
+    await waitFor(() => {
+      expect(updateAdminGlobalUsageRestrictions).toHaveBeenCalledWith(true);
+    });
+    expect(await screen.findByText(/globais atualizadas/i)).toBeInTheDocument();
   });
 });

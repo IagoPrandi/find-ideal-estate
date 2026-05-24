@@ -7,6 +7,7 @@ export const AuthUserReadSchema = z.object({
   is_active: z.boolean(),
   is_superuser: z.boolean().optional().default(false),
   can_start_immediate_scraping: z.boolean().optional().default(false),
+  usage_restrictions_disabled: z.boolean().optional().default(false),
   created_at: z.string(),
   role: z.string().optional().default("user"),
 });
@@ -14,7 +15,8 @@ export const AuthUserReadSchema = z.object({
 export const AuthStatusReadSchema = z.object({
   is_authenticated: z.boolean(),
   user: AuthUserReadSchema.nullable().optional(),
-  session_expires_at: z.string().nullable().optional()
+  session_expires_at: z.string().nullable().optional(),
+  usage_restrictions_disabled_globally: z.boolean().optional().default(false),
 });
 
 export const RunStatusSchema = z.object({
@@ -659,6 +661,7 @@ export const AdminUserSchema = z.object({
   is_active: z.boolean(),
   is_superuser: z.boolean(),
   can_start_immediate_scraping: z.boolean().optional().default(false),
+  usage_restrictions_disabled: z.boolean().optional().default(false),
   role: z.string(),
   created_at: z.string(),
 });
@@ -668,6 +671,10 @@ export const AdminUsersSchema = z.object({
   total_count: z.number(),
   limit: z.number(),
   offset: z.number(),
+});
+
+export const AdminUsageRestrictionsSchema = z.object({
+  usage_restrictions_disabled_globally: z.boolean().optional().default(false),
 });
 
 export type RunCreateResponse = {

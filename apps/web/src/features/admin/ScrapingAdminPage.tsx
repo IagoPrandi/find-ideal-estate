@@ -7,6 +7,8 @@ import {
   Play,
   Plus,
   RefreshCw,
+  ShieldCheck,
+  ShieldOff,
   Trash2,
   Users,
   XCircle,
@@ -19,11 +21,14 @@ import {
   getAdminScrapingBatches,
   getAdminScrapingOverview,
   getAdminScrapingQueue,
+  getAdminUsageRestrictions,
   getAdminUsers,
   removeAdminScrapingQueueAddress,
   runAdminScrapingNow,
+  updateAdminGlobalUsageRestrictions,
   updateAdminUserRole,
   updateAdminUserScrapingPermission,
+  updateAdminUserUsageRestrictions,
 } from "../../api/client";
 import { useAuth } from "../auth/AuthContext";
 
@@ -247,9 +252,16 @@ export function ScrapingAdminPage() {
     enabled: queriesEnabled,
   });
 
+  const usageRestrictionsQuery = useQuery({
+    queryKey: ["admin", "usage-restrictions"],
+    queryFn: getAdminUsageRestrictions,
+    enabled: queriesEnabled,
+  });
+
   const refreshAdminData = () => {
     void queryClient.invalidateQueries({ queryKey: ["admin", "scraping"] });
     void queryClient.invalidateQueries({ queryKey: ["admin", "users"] });
+    void queryClient.invalidateQueries({ queryKey: ["admin", "usage-restrictions"] });
   };
 
   const runNowMutation = useMutation({
@@ -310,9 +322,28 @@ export function ScrapingAdminPage() {
     onError: (error) => setNotice(toMessage(error)),
   });
 
+  const updateUsageRestrictionsMutation = useMutation({
+    mutationFn: ({ userId, disabled }: { userId: string; disabled: boolean }) => updateAdminUserUsageRestrictions(userId, disabled),
+    onSuccess: () => {
+      setNotice("Restrições de uso atualizadas.");
+      refreshAdminData();
+    },
+    onError: (error) => setNotice(toMessage(error)),
+  });
+
+  const updateGlobalUsageRestrictionsMutation = useMutation({
+    mutationFn: (disabled: boolean) => updateAdminGlobalUsageRestrictions(disabled),
+    onSuccess: () => {
+      setNotice("Restrições de uso globais atualizadas.");
+      refreshAdminData();
+    },
+    onError: (error) => setNotice(toMessage(error)),
+  });
+
   const activeJob = overviewQuery.data?.active_job || null;
   const hasActiveBatch = Boolean(activeJob && ACTIVE_STATES.has(activeJob.state));
   const runNowDisabled = hasActiveBatch || runNowMutation.isPending || (queueQuery.data?.total_count ?? 0) === 0;
+  const globalUsageRestrictionsDisabled = Boolean(usageRestrictionsQuery.data?.usage_restrictions_disabled_globally);
 
   const selectedBatch = useMemo(
     () => batchesQuery.data?.items.find((batch) => batch.job.id === expandedBatchId) || null,
@@ -560,21 +591,37 @@ export function ScrapingAdminPage() {
                 <Users className="h-5 w-5 text-slate-500" />
                 <h2 className="font-bold">Usuários</h2>
               </div>
-              <input
-                value={userSearch}
-                onChange={(event) => setUserSearch(event.target.value)}
-                className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-violet-400 md:w-80"
-                placeholder="Buscar por e-mail ou nome"
-              />
+              <div className="flex w-full flex-col gap-2 md:w-auto md:flex-row md:items-center">
+                <button
+                  type="button"
+                  disabled={updateGlobalUsageRestrictionsMutation.isPending || usageRestrictionsQuery.isLoading}
+                  onClick={() => updateGlobalUsageRestrictionsMutation.mutate(!globalUsageRestrictionsDisabled)}
+                  className={`inline-flex h-10 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-bold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                    globalUsageRestrictionsDisabled
+                      ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                      : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                  }`}
+                >
+                  {globalUsageRestrictionsDisabled ? <ShieldOff className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
+                  {globalUsageRestrictionsDisabled ? "Todos sem restrições" : "Ativar sem restrições para todos"}
+                </button>
+                <input
+                  value={userSearch}
+                  onChange={(event) => setUserSearch(event.target.value)}
+                  className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm outline-none focus:border-violet-400 md:w-80"
+                  placeholder="Buscar por e-mail ou nome"
+                />
+              </div>
             </div>
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[58rem] text-left text-sm">
+              <table className="w-full min-w-[68rem] text-left text-sm">
                 <thead className="bg-slate-50 text-[11px] uppercase tracking-[0.12em] text-slate-500">
                   <tr>
                     <th className="px-3 py-2">Usuário</th>
                     <th className="px-3 py-2">Criado em</th>
                     <th className="px-3 py-2">Função</th>
                     <th className="px-3 py-2">Scraping imediato</th>
+                    <th className="px-3 py-2">Restrições de uso</th>
                     <th className="px-3 py-2">Acesso</th>
                   </tr>
                 </thead>
@@ -615,6 +662,24 @@ export function ScrapingAdminPage() {
                           {user.is_superuser ? "Sempre liberado" : "Liberado"}
                         </label>
                       </td>
+                      <td className="px-3 py-2">
+                        <button
+                          type="button"
+                          disabled={updateUsageRestrictionsMutation.isPending}
+                          onClick={() => updateUsageRestrictionsMutation.mutate({
+                            userId: user.id,
+                            disabled: !Boolean(user.usage_restrictions_disabled),
+                          })}
+                          className={`inline-flex h-9 items-center justify-center gap-2 rounded-lg border px-3 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                            user.usage_restrictions_disabled
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                              : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                          }`}
+                        >
+                          {user.usage_restrictions_disabled ? <ShieldOff className="h-4 w-4" /> : <ShieldCheck className="h-4 w-4" />}
+                          {user.usage_restrictions_disabled ? "Sem restrições" : "Restrições ativas"}
+                        </button>
+                      </td>
                       <td className="px-3 py-2 text-slate-700">
                         {user.is_superuser ? "Desenvolvedor" : user.is_active ? "Ativo" : "Inativo"}
                       </td>
@@ -626,9 +691,9 @@ export function ScrapingAdminPage() {
           </section>
         ) : null}
 
-        {overviewQuery.error || queueQuery.error || batchesQuery.error || usersQuery.error ? (
+        {overviewQuery.error || queueQuery.error || batchesQuery.error || usersQuery.error || usageRestrictionsQuery.error ? (
           <div className="rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-semibold text-rose-700">
-            {toMessage(overviewQuery.error || queueQuery.error || batchesQuery.error || usersQuery.error)}
+            {toMessage(overviewQuery.error || queueQuery.error || batchesQuery.error || usersQuery.error || usageRestrictionsQuery.error)}
           </div>
         ) : null}
       </div>
