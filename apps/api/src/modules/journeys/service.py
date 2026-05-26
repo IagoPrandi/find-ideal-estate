@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from uuid import UUID
 
-from contracts import JourneyCreate, JourneyRead, JourneyReferencePoint, JourneyState, JourneyUpdate
+from contracts import JourneyCreate, JourneyPublicRead, JourneyRead, JourneyReferencePoint, JourneyShareRead, JourneyState, JourneyUpdate
 from core.db import get_engine
 from sqlalchemy import text
 from sqlalchemy.engine import RowMapping
@@ -46,6 +47,14 @@ def generate_anonymous_session_id() -> str:
     return secrets.token_urlsafe(32)
 
 
+def generate_share_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def _hash_share_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
 def default_expiration() -> datetime:
     return datetime.now(tz=timezone.utc) + timedelta(days=ANONYMOUS_SESSION_TTL_DAYS)
 
@@ -74,6 +83,22 @@ def _row_to_journey(row: RowMapping) -> JourneyRead:
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         expires_at=row["expires_at"],
+    )
+
+
+def to_public_journey(journey: JourneyRead) -> JourneyPublicRead:
+    return JourneyPublicRead(
+        id=journey.id,
+        state=journey.state,
+        input_snapshot=journey.input_snapshot,
+        selected_transport_point_id=journey.selected_transport_point_id,
+        selected_zone_id=journey.selected_zone_id,
+        selected_property_id=journey.selected_property_id,
+        last_completed_step=journey.last_completed_step,
+        secondary_reference_label=journey.secondary_reference_label,
+        secondary_reference_point=journey.secondary_reference_point,
+        created_at=journey.created_at,
+        updated_at=journey.updated_at,
     )
 
 
@@ -259,3 +284,101 @@ async def expire_journey(journey_id: UUID) -> JourneyRead | None:
     if row is None:
         return None
     return await get_journey(journey_id)
+
+
+async def create_journey_share(
+    journey_id: UUID,
+    *,
+    created_by_user_id: UUID | None = None,
+    created_by_anonymous_session_id: str | None = None,
+) -> JourneyShareRead:
+    token = generate_share_token()
+    token_hash = _hash_share_token(token)
+    engine = get_engine()
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                """
+                UPDATE journey_shares
+                SET revoked_at = now()
+                WHERE journey_id = :journey_id
+                  AND revoked_at IS NULL
+                """
+            ),
+            {"journey_id": journey_id},
+        )
+        result = await conn.execute(
+            text(
+                """
+                INSERT INTO journey_shares (
+                    journey_id,
+                    created_by_user_id,
+                    created_by_anonymous_session_id,
+                    token_hash
+                )
+                VALUES (
+                    :journey_id,
+                    :created_by_user_id,
+                    :created_by_anonymous_session_id,
+                    :token_hash
+                )
+                RETURNING journey_id, created_at, revoked_at
+                """
+            ),
+            {
+                "journey_id": journey_id,
+                "created_by_user_id": created_by_user_id,
+                "created_by_anonymous_session_id": created_by_anonymous_session_id,
+                "token_hash": token_hash,
+            },
+        )
+        row = result.mappings().one()
+    return JourneyShareRead(
+        token=token,
+        journey_id=row["journey_id"],
+        created_at=row["created_at"],
+        revoked_at=row["revoked_at"],
+    )
+
+
+async def get_active_journey_share(token: str) -> JourneyShareRead | None:
+    token_hash = _hash_share_token(token)
+    engine = get_engine()
+    async with engine.connect() as conn:
+        result = await conn.execute(
+            text(
+                """
+                SELECT journey_id, created_at, revoked_at
+                FROM journey_shares
+                WHERE token_hash = :token_hash
+                  AND revoked_at IS NULL
+                """
+            ),
+            {"token_hash": token_hash},
+        )
+        row = result.mappings().first()
+    if row is None:
+        return None
+    return JourneyShareRead(
+        token=token,
+        journey_id=row["journey_id"],
+        created_at=row["created_at"],
+        revoked_at=row["revoked_at"],
+    )
+
+
+async def revoke_journey_shares(journey_id: UUID) -> bool:
+    engine = get_engine()
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text(
+                """
+                UPDATE journey_shares
+                SET revoked_at = now()
+                WHERE journey_id = :journey_id
+                  AND revoked_at IS NULL
+                """
+            ),
+            {"journey_id": journey_id},
+        )
+    return bool(result.rowcount)

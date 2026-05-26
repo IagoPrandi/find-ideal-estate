@@ -6,6 +6,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
+from .listings import ListingCardRead
+
 
 class ZoneBadgeRead(BaseModel):
     """Single badge value with percentile and tier."""
@@ -38,6 +40,16 @@ class ZonePriceSummaryRead(BaseModel):
     active_listing_count: int = 0
 
 
+class ZoneTransportSummaryRead(BaseModel):
+    """Transport inventory intersecting a zone geometry."""
+
+    bus_stop_count: int = 0
+    bus_line_count: int = 0
+    bus_terminal_count: int = 0
+    train_metro_platform_count: int = 0
+    train_metro_line_count: int = 0
+
+
 class ZonePOIPointRead(BaseModel):
     """Single POI item persisted for a zone."""
     kind: str = "poi"
@@ -58,6 +70,7 @@ class ZoneRead(BaseModel):
     transport_point_id: UUID | None = None
     fingerprint: str
     state: str  # "pending", "generating", "enriching", "complete", "failed"
+    origin: str = "generated"
     is_circle_fallback: bool = False
     travel_time_minutes: int | None = None
     walk_distance_meters: int | None = None
@@ -72,9 +85,17 @@ class ZoneRead(BaseModel):
     badges: dict[str, ZoneBadgeRead] | None = None  # {"green_badge", "flood_badge", ...}
     journey_rankings: ZoneJourneyRankingsRead | None = None
     price_summary: ZonePriceSummaryRead | None = None
+    transport_summary: ZoneTransportSummaryRead | None = None
+    property_type_counts: dict[str, int] = {}
     badges_provisional: bool = True
     created_at: datetime
     updated_at: datetime
+
+
+class ManualZoneCreate(BaseModel):
+    geometry: dict[str, Any]
+    label: str | None = None
+    max_time_minutes: int | None = None
 
 
 class ZoneListResponse(BaseModel):
@@ -155,6 +176,7 @@ class FavoriteZonePayload(BaseModel):
 
     fingerprint: str
     journey_id: UUID
+    color: str | None = None
     transport_point_id: UUID | None = None
     transport_point: FavoriteZoneTransportPoint | None = None
     neighborhood_name: str | None = None
@@ -163,8 +185,10 @@ class FavoriteZonePayload(BaseModel):
     isochrone_geom: dict[str, Any] | None = None
     poi_counts: dict[str, int] | None = None
     poi_points: list[ZonePOIPointRead] = []
+    transport_summary: ZoneTransportSummaryRead | None = None
+    property_type_counts: dict[str, int] = {}
     metrics: FavoriteZoneMetricsSnapshot
-    listings: list[dict[str, Any]] = []
+    listings: list[ListingCardRead] = []
 
 
 class FavoriteZoneCreate(BaseModel):
@@ -183,8 +207,26 @@ class FavoriteZoneRead(BaseModel):
     usage_type: str
     saved_at: datetime
     payload: FavoriteZonePayload
+    color: str = "#0ea5e9"
+    share: "FavoriteZoneShareRead | None" = None
     note: str | None = None
 
 
 class FavoriteZoneNoteUpdate(BaseModel):
     note: str | None = None
+
+
+class FavoriteZoneColorUpdate(BaseModel):
+    color: str
+
+
+class FavoriteZoneShareRead(BaseModel):
+    token: str | None = None
+    zone_key: str
+    created_at: datetime
+    revoked_at: datetime | None = None
+
+
+class FavoriteZoneShareSnapshotRead(BaseModel):
+    share: FavoriteZoneShareRead
+    zone: FavoriteZoneRead

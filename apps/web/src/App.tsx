@@ -4,6 +4,8 @@ import { Analytics } from "@vercel/analytics/react";
 import { AuthProvider } from "./features/auth/AuthContext";
 import { ScrapingAdminPage } from "./features/admin/ScrapingAdminPage";
 import { FindIdealApp } from "./features/app/FindIdealApp";
+import { SharedJourneyPage } from "./features/share/SharedJourneyPage";
+import { SharedZonePage } from "./features/share/SharedZonePage";
 
 const queryClient = new QueryClient();
 
@@ -18,11 +20,19 @@ export default function App() {
   }, []);
 
   const isAdminRoute = hashRoute === "#/admin" || hashRoute === "#/admin/scraping";
+  const sharedJourneyPrefix = "#/jornada/compartilhada/";
+  const sharedJourneyToken = hashRoute.startsWith(sharedJourneyPrefix)
+    ? decodeURIComponent(hashRoute.slice(sharedJourneyPrefix.length))
+    : null;
+  const sharedZonePrefix = "#/zona/compartilhada/";
+  const sharedZoneToken = hashRoute.startsWith(sharedZonePrefix)
+    ? decodeURIComponent(hashRoute.slice(sharedZonePrefix.length))
+    : null;
 
   return (
     <QueryClientProvider client={client}>
       <AuthProvider>
-        {isAdminRoute ? <ScrapingAdminPage /> : <FindIdealApp />}
+        {sharedZoneToken ? <SharedZonePage token={sharedZoneToken} /> : sharedJourneyToken ? <SharedJourneyPage token={sharedJourneyToken} /> : isAdminRoute ? <ScrapingAdminPage /> : <FindIdealApp />}
         <Analytics />
       </AuthProvider>
     </QueryClientProvider>

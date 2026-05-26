@@ -117,22 +117,43 @@ async def geocode(
         await _write_ledger(session_id=session_id, cache_hit=False, status="rate_limited")
         raise ValueError("rate_limit_exceeded")
 
-    # 4. Call Mapbox Search Box API.
-    url = "https://api.mapbox.com/search/searchbox/v1/suggest"
+    # 4. Call Mapbox Geocoding API so the UI can position the selected address.
+    url = f"https://api.mapbox.com/geocoding/v5/mapbox.places/{q}.json"
     params = {
-        "q": q,
         "access_token": mapbox_token,
-        "session_token": session_id,
         "language": "pt",
         "country": "BR",
         "limit": 10,
+        "types": "address,poi,place,locality,neighborhood",
     }
     async with httpx.AsyncClient(timeout=10.0) as client:
         resp = await client.get(url, params=params)
         resp.raise_for_status()
         data = resp.json()
 
-    suggestions = data.get("suggestions", [])
+    suggestions: list[dict[str, Any]] = []
+    for feature in data.get("features", []):
+        center = feature.get("center")
+        if not isinstance(center, list) or len(center) < 2:
+            continue
+        try:
+            lon = float(center[0])
+            lat = float(center[1])
+        except (TypeError, ValueError):
+            continue
+        label = str(feature.get("place_name") or feature.get("text") or q)
+        suggestions.append(
+            {
+                "id": feature.get("id"),
+                "label": label,
+                "normalized": label,
+                "location_type": feature.get("place_type", ["address"])[0]
+                if isinstance(feature.get("place_type"), list) and feature.get("place_type")
+                else "address",
+                "lat": lat,
+                "lon": lon,
+            }
+        )
     payload = {"suggestions": suggestions}
 
     # 5. Store in cache.

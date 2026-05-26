@@ -25,6 +25,7 @@ import { useFavoritesStore, useJourneyStore, useUIStore, useZoneFavoritesStore }
 
 const FAVORITES_ANALYTICS_STALE_TIME = 30 * 60_000;
 const FAVORITES_ANALYTICS_GC_TIME = 60 * 60_000;
+const ZONE_COLOR_OPTIONS = ["#0ea5e9", "#8b5cf6", "#10b981", "#f97316", "#ef4444", "#14b8a6", "#eab308", "#ec4899"] as const;
 
 function MetricChip({ label, value }: { label: string; value: string }) {
   return (
@@ -57,6 +58,8 @@ export function FavoritesPanel() {
   const toggleZoneMetric = useZoneFavoritesStore((state) => state.toggleZoneMetric);
   const toggleZoneMapVisibility = useZoneFavoritesStore((state) => state.toggleZoneMapVisibility);
   const updateZoneNote = useZoneFavoritesStore((state) => state.updateZoneNote);
+  const updateZoneColor = useZoneFavoritesStore((state) => state.updateZoneColor);
+  const shareZone = useZoneFavoritesStore((state) => state.shareZone);
   const selectedSavedListingKey = useFavoritesStore((state) => state.selectedSavedListingKey);
   const setSelectedSavedListingKey = useFavoritesStore((state) => state.setSelectedSavedListingKey);
   const setJourneyId = useJourneyStore((state) => state.setJourneyId);
@@ -74,6 +77,7 @@ export function FavoritesPanel() {
   const [manualError, setManualError] = useState<string | null>(null);
   const [editingNoteKey, setEditingNoteKey] = useState<string | null>(null);
   const [noteText, setNoteText] = useState("");
+  const [zoneShareStatus, setZoneShareStatus] = useState<Record<string, string>>({});
 
   async function handleSubmitManualUrl(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -129,6 +133,23 @@ export function FavoritesPanel() {
   async function saveZoneNote(zoneKey: string) {
     await updateZoneNote(zoneKey, noteText);
     setEditingNoteKey(null);
+  }
+
+  async function handleShareZone(zoneKey: string) {
+    const token = await shareZone(zoneKey);
+    if (!token) {
+      setZoneShareStatus((current) => ({ ...current, [zoneKey]: "Não foi possível criar o link." }));
+      return;
+    }
+    const url = new URL(window.location.href);
+    url.hash = `#/zona/compartilhada/${encodeURIComponent(token)}`;
+    const shareUrl = url.toString();
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(shareUrl);
+      setZoneShareStatus((current) => ({ ...current, [zoneKey]: "Link da zona copiado." }));
+    } else {
+      setZoneShareStatus((current) => ({ ...current, [zoneKey]: shareUrl }));
+    }
   }
 
   function handleContinueFromZone(entry: FavoriteZoneEntry) {
@@ -294,7 +315,7 @@ export function FavoritesPanel() {
                     : `${favorites.length} ${favorites.length === 1 ? "imóvel salvo" : "imóveis salvos"} na sua conta.`
                   : orderedZones.length === 0
                     ? isAuthenticated
-                      ? "Salve zonas na etapa 4 para comparar POIs e métricas em qualquer navegador."
+                      ? "Salve zonas na etapa 4 para comparar pontos de interesse e métricas em qualquer navegador."
                       : "Entre na sua conta para salvar zonas da análise."
                     : `${orderedZones.length} ${orderedZones.length === 1 ? "zona salva" : "zonas salvas"} na sua conta.`}
               </p>
@@ -648,7 +669,7 @@ export function FavoritesPanel() {
                 </p>
                 <p className="mt-2 text-xs leading-relaxed text-slate-500">
                   {isAuthenticated
-                    ? "Use o coração ao lado do título da zona, na Etapa 4, para incluir aqui com POIs e métricas."
+                    ? "Use o coração ao lado do título da zona, na Etapa 4, para incluir aqui com pontos de interesse e métricas."
                     : "As zonas salvas ficam na sua conta, não no navegador atual."}
                 </p>
               </div>
@@ -673,6 +694,9 @@ export function FavoritesPanel() {
                   : poiPoints.filter((poi) => (poi.category || "other") === activeFilter);
                 const transport = entry.payload.transport_point;
                 const metrics = entry.payload.metrics;
+                const zoneColor = entry.color || entry.payload.color || "#0ea5e9";
+                const transportSummary = entry.payload.transport_summary;
+                const propertyTypeEntries = Object.entries(entry.payload.property_type_counts || {}).filter(([, count]) => Number(count) > 0);
                 return (
                   <article
                     key={entry.zoneKey}
@@ -727,6 +751,18 @@ export function FavoritesPanel() {
                         </button>
                         <button
                           type="button"
+                          aria-label="Compartilhar zona salva"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void handleShareZone(entry.zoneKey);
+                          }}
+                          className="inline-flex h-9 w-9 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:border-pastel-violet-300 hover:bg-pastel-violet-50 hover:text-pastel-violet-700"
+                          title="Compartilhar zona salva"
+                        >
+                          <Link2 className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
                           aria-label="Remover zona salva"
                           onClick={(event) => {
                             event.stopPropagation();
@@ -739,6 +775,34 @@ export function FavoritesPanel() {
                         </button>
                       </div>
                     </div>
+                    <div className="flex flex-wrap items-center gap-2 border-t border-slate-100 px-4 py-3">
+                      <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">Cor da zona</span>
+                      {ZONE_COLOR_OPTIONS.map((color) => (
+                        <button
+                          key={`${entry.zoneKey}:${color}`}
+                          type="button"
+                          aria-label={`Usar cor ${color}`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void updateZoneColor(entry.zoneKey, color);
+                          }}
+                          className={`h-7 w-7 rounded-full border-2 transition ${zoneColor.toLowerCase() === color ? "border-slate-900" : "border-white ring-1 ring-slate-200"}`}
+                          style={{ backgroundColor: color }}
+                        />
+                      ))}
+                      <input
+                        type="color"
+                        value={zoneColor}
+                        onChange={(event) => void updateZoneColor(entry.zoneKey, event.target.value)}
+                        className="h-7 w-9 cursor-pointer rounded border border-slate-200 bg-white p-0.5"
+                        aria-label="Escolher cor personalizada da zona"
+                      />
+                      {zoneShareStatus[entry.zoneKey] ? (
+                        <span className="ml-auto max-w-full truncate text-[11px] font-medium text-slate-500">{zoneShareStatus[entry.zoneKey]}</span>
+                      ) : entry.share ? (
+                        <span className="ml-auto text-[11px] font-medium text-slate-500">Compartilhamento ativo</span>
+                      ) : null}
+                    </div>
                     <div className="grid grid-cols-2 gap-2 border-t border-slate-100 bg-slate-50/60 px-4 py-3 text-[11px] text-slate-600 sm:grid-cols-3">
                       <MetricChip label="Tempo" value={metrics.travel_time_minutes != null ? `${metrics.travel_time_minutes} min` : "--"} />
                       <MetricChip label="Área" value={metrics.zone_area_m2 != null ? `${(metrics.zone_area_m2 / 1_000_000).toFixed(2)} km²` : "--"} />
@@ -749,6 +813,22 @@ export function FavoritesPanel() {
                       <MetricChip label="Homicídios/km²" value={metrics.homicide_density_per_km2 != null ? metrics.homicide_density_per_km2.toFixed(2) : "--"} />
                       <MetricChip label="Roubos/km²" value={metrics.robbery_density_per_km2 != null ? metrics.robbery_density_per_km2.toFixed(2) : "--"} />
                       <MetricChip label="Crimes/km²" value={metrics.crime_density_per_km2 != null ? metrics.crime_density_per_km2.toFixed(2) : "--"} />
+                      {transportSummary ? (
+                        <>
+                          <MetricChip label="Pontos de ônibus" value={String(transportSummary.bus_stop_count ?? 0)} />
+                          <MetricChip label="Linhas de ônibus" value={String(transportSummary.bus_line_count ?? 0)} />
+                          <MetricChip label="Terminais" value={String(transportSummary.bus_terminal_count ?? 0)} />
+                          <MetricChip label="Estações trem/metrô" value={String(transportSummary.train_metro_platform_count ?? 0)} />
+                          <MetricChip label="Linhas trem/metrô" value={String(transportSummary.train_metro_line_count ?? 0)} />
+                        </>
+                      ) : null}
+                      {propertyTypeEntries.map(([type, count]) => (
+                        <MetricChip
+                          key={`${entry.zoneKey}:property:${type}`}
+                          label={type === "residential" ? "Residenciais" : type === "commercial" ? "Comerciais" : type}
+                          value={String(count)}
+                        />
+                      ))}
                     </div>
                     {orderedCategoryKeys.length > 0 ? (
                       <div className="flex flex-wrap gap-1.5 border-t border-slate-100 px-4 py-3">
@@ -793,7 +873,7 @@ export function FavoritesPanel() {
                             onClick={() => setExpandedZoneKey(isExpanded ? null : entry.zoneKey)}
                             className="text-xs font-semibold text-pastel-violet-700 transition hover:text-pastel-violet-900"
                           >
-                            {isExpanded ? `Ocultar ${filteredPois.length} POIs` : `Ver ${filteredPois.length} POIs`}
+                            {isExpanded ? `Ocultar ${filteredPois.length} pontos de interesse` : `Ver ${filteredPois.length} pontos de interesse`}
                           </button>
                           <button
                             type="button"
@@ -834,7 +914,7 @@ export function FavoritesPanel() {
                       {isExpanded ? (
                         <ul className="mt-3 space-y-2 text-[11px] text-slate-600">
                           {filteredPois.length === 0 ? (
-                            <li className="text-slate-400">Nenhum POI nesta categoria.</li>
+                            <li className="text-slate-400">Nenhum ponto de interesse nesta categoria.</li>
                           ) : (
                             filteredPois.map((poi, index) => {
                               const meta = getPoiCategoryMeta(poi.category || "other");
@@ -843,7 +923,7 @@ export function FavoritesPanel() {
                                   <MapPin className="mt-0.5 h-3.5 w-3.5" style={{ color: meta.color }} />
                                   <div className="min-w-0 flex-1">
                                     <div className="flex flex-wrap items-center gap-1.5">
-                                      <p className="truncate font-semibold text-slate-800">{poi.name || meta.singularLabel || "POI sem nome"}</p>
+                                      <p className="truncate font-semibold text-slate-800">{poi.name || meta.singularLabel || "Ponto de interesse sem nome"}</p>
                                       <span
                                         className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold text-white"
                                         style={{ backgroundColor: meta.color }}
@@ -975,7 +1055,7 @@ export function FavoritesPanel() {
                           >
                             <td className="sticky left-0 z-[1] w-[8.4rem] min-w-[8.4rem] max-w-[8.4rem] border-r border-slate-200 bg-inherit px-2.5 py-2.5 align-top">
                               <p className="break-words whitespace-normal font-semibold leading-snug text-slate-900">{zoneName}</p>
-                              <p className="mt-0.5 text-[10px] text-slate-500">{`${entry.payload.poi_points?.length ?? 0} POIs`}</p>
+                              <p className="mt-0.5 text-[10px] text-slate-500">{`${entry.payload.poi_points?.length ?? 0} pontos de interesse`}</p>
                             </td>
                             {ZONE_METRIC_DEFINITIONS.filter((m) => selectedZoneMetricIds.includes(m.id)).map((metric) => (
                               <td key={`${entry.zoneKey}:${metric.id}`} className="whitespace-nowrap border-l border-slate-100 px-3 py-2.5 align-top text-slate-700">

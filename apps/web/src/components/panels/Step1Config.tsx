@@ -1,6 +1,7 @@
 import { Crosshair, MapPin, Route, ShieldAlert, Trees, Droplets, Search, ArrowRight, Bus, Train, Blend, CarFront, Lock } from "lucide-react";
-import { useState } from "react";
-import { apiActionHint, createJourney } from "../../api/client";
+import { useEffect, useState } from "react";
+import { apiActionHint, createJourney, geocodeReferenceAddress } from "../../api/client";
+import type { ReferenceAddressSuggestion } from "../../api/client";
 import { GREEN_VEGETATION_LABELS, GREEN_VEGETATION_LEVELS, useJourneyStore } from "../../state";
 import { useUIStore } from "../../state";
 import { useEntitlements } from "../../features/auth/useEntitlements";
@@ -30,6 +31,7 @@ export function Step1Config() {
   const primaryReferenceLabel = useJourneyStore((state) => state.primaryReferenceLabel);
   const setConfig = useJourneyStore((state) => state.setConfig);
   const setEnrichment = useJourneyStore((state) => state.setEnrichment);
+  const setPickedCoord = useJourneyStore((state) => state.setPickedCoord);
   const setIsPickingReferencePoint = useJourneyStore((state) => state.setIsPickingReferencePoint);
   const setJourneyId = useJourneyStore((state) => state.setJourneyId);
   const setPrimaryReferenceLabel = useJourneyStore((state) => state.setPrimaryReferenceLabel);
@@ -37,12 +39,17 @@ export function Step1Config() {
   const setMaxStep = useUIStore((state) => state.setMaxStep);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [referenceSuggestions, setReferenceSuggestions] = useState<ReferenceAddressSuggestion[]>([]);
+  const [isReferenceSuggestOpen, setIsReferenceSuggestOpen] = useState(false);
+  const [isLoadingReferenceSuggestions, setIsLoadingReferenceSuggestions] = useState(false);
+  const [activeReferenceSuggestionIndex, setActiveReferenceSuggestionIndex] = useState(-1);
   const [isGreenPopoverOpen, setIsGreenPopoverOpen] = useState(false);
   const { can_customize_distance, can_customize_max_time, max_walk_minutes_cap, max_car_minutes_cap } = useEntitlements();
   const greenEnabled = config.enrichments.green;
   const isWalkingMode = config.modal === "walk";
   const isDrivingMode = config.modal === "car";
   const isDirectIsochroneMode = isWalkingMode || isDrivingMode;
+  const referenceListboxId = "primary-reference-address-listbox";
 
   const zoneToggleCards = [
     { id: "safety", label: "Segurança", icon: ShieldAlert },
@@ -103,9 +110,57 @@ export function Step1Config() {
     );
   }
 
+  function selectReferenceSuggestion(suggestion: ReferenceAddressSuggestion) {
+    setPrimaryReferenceLabel(suggestion.label);
+    setPickedCoord({
+      lat: suggestion.lat,
+      lon: suggestion.lon,
+      label: suggestion.label,
+    });
+    setIsPickingReferencePoint(false);
+    setReferenceSuggestions([]);
+    setActiveReferenceSuggestionIndex(-1);
+    setIsReferenceSuggestOpen(false);
+    setError(null);
+  }
+
+  useEffect(() => {
+    const query = primaryReferenceLabel.trim();
+    if (!isReferenceSuggestOpen || query.length < 3) {
+      setReferenceSuggestions([]);
+      setActiveReferenceSuggestionIndex(-1);
+      return;
+    }
+
+    let cancelled = false;
+    const timeoutId = window.setTimeout(() => {
+      setIsLoadingReferenceSuggestions(true);
+      void geocodeReferenceAddress(query)
+        .then((items) => {
+          if (cancelled) return;
+          setReferenceSuggestions(items);
+          setActiveReferenceSuggestionIndex(items.length > 0 ? 0 : -1);
+        })
+        .catch((caughtError) => {
+          if (cancelled) return;
+          setReferenceSuggestions([]);
+          setActiveReferenceSuggestionIndex(-1);
+          setError(apiActionHint(caughtError));
+        })
+        .finally(() => {
+          if (!cancelled) setIsLoadingReferenceSuggestions(false);
+        });
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [isReferenceSuggestOpen, primaryReferenceLabel, setPrimaryReferenceLabel]);
+
   async function handleSubmit() {
     if (!pickedCoord) {
-      setError("Selecione um ponto no mapa antes de continuar.");
+      setError("Selecione um endereço ou posicione o ponto no mapa antes de continuar.");
       return;
     }
 
@@ -148,25 +203,100 @@ export function Step1Config() {
     <div className="flex h-full w-full min-w-0 flex-col animate-[fadeIn_0.3s_ease-out]">
       <div className="border-b border-slate-100 p-5">
         <h2 className="text-xl font-semibold tracking-tight text-slate-800">Configurar busca</h2>
-        <p className="mt-1 text-sm text-slate-500">Defina o perfil da jornada e escolha o ponto principal diretamente no mapa.</p>
+        <p className="mt-1 text-sm text-slate-500">Defina o perfil da jornada e selecione o endereço principal da análise.</p>
       </div>
 
       <div className="panel-scroll min-h-0 flex-1 overflow-y-auto bg-slate-50/50 px-5 py-5">
         <div className="space-y-6">
         <div className="space-y-3">
           <label className="text-sm font-medium text-slate-700">Ponto de referência principal</label>
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              type="search"
+              value={primaryReferenceLabel}
+              onChange={(event) => {
+                const nextValue = event.target.value;
+                if (pickedCoord?.label === primaryReferenceLabel && nextValue !== primaryReferenceLabel) {
+                  setPickedCoord(null);
+                }
+                setPrimaryReferenceLabel(nextValue);
+                setIsReferenceSuggestOpen(true);
+                setError(null);
+              }}
+              onFocus={() => setIsReferenceSuggestOpen(true)}
+              onBlur={() => {
+                window.setTimeout(() => setIsReferenceSuggestOpen(false), 160);
+              }}
+              onKeyDown={(event) => {
+                if (!isReferenceSuggestOpen || referenceSuggestions.length === 0) return;
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  setActiveReferenceSuggestionIndex((current) => Math.min(current + 1, referenceSuggestions.length - 1));
+                } else if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  setActiveReferenceSuggestionIndex((current) => Math.max(current - 1, 0));
+                } else if (event.key === "Enter" && activeReferenceSuggestionIndex >= 0) {
+                  event.preventDefault();
+                  selectReferenceSuggestion(referenceSuggestions[activeReferenceSuggestionIndex]);
+                } else if (event.key === "Escape") {
+                  setIsReferenceSuggestOpen(false);
+                }
+              }}
+              role="combobox"
+              aria-expanded={isReferenceSuggestOpen}
+              aria-controls={referenceListboxId}
+              aria-autocomplete="list"
+              placeholder="Busque um endereço"
+              className="gem-input pl-10"
+            />
+            {isReferenceSuggestOpen && (primaryReferenceLabel.trim().length >= 3 || isLoadingReferenceSuggestions) ? (
+              <div
+                id={referenceListboxId}
+                role="listbox"
+                className="absolute left-0 right-0 top-[calc(100%+0.4rem)] z-30 max-h-64 overflow-y-auto rounded-2xl border border-slate-200 bg-white py-2 shadow-xl"
+              >
+                {isLoadingReferenceSuggestions ? (
+                  <p className="px-4 py-3 text-sm text-slate-500">Buscando endereços...</p>
+                ) : referenceSuggestions.length === 0 ? (
+                  <p className="px-4 py-3 text-sm text-slate-500">Nenhum endereço encontrado.</p>
+                ) : (
+                  referenceSuggestions.map((suggestion, index) => (
+                    <button
+                      key={suggestion.id || `${suggestion.label}:${suggestion.lat}:${suggestion.lon}`}
+                      type="button"
+                      role="option"
+                      aria-selected={index === activeReferenceSuggestionIndex}
+                      onMouseEnter={() => setActiveReferenceSuggestionIndex(index)}
+                      onClick={() => selectReferenceSuggestion(suggestion)}
+                      className={`flex w-full items-start gap-3 px-4 py-3 text-left transition-colors ${index === activeReferenceSuggestionIndex ? "bg-pastel-violet-50" : "hover:bg-slate-50"}`}
+                    >
+                      <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-pastel-violet-500" />
+                      <span className="min-w-0">
+                        <span className="block text-sm font-semibold text-slate-800">{suggestion.label}</span>
+                        <span className="mt-0.5 block text-xs text-slate-500">
+                          {suggestion.normalized || `${suggestion.lat.toFixed(5)}, ${suggestion.lon.toFixed(5)}`}
+                        </span>
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
+            ) : null}
+          </div>
+
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
             <div className="flex items-start gap-3">
               <div className="rounded-xl bg-pastel-violet-50 p-2 text-pastel-violet-600">
-                <MapPin className="h-5 w-5" />
+                <Crosshair className="h-5 w-5" />
               </div>
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-slate-700">
-                  {isPickingReferencePoint ? "Clique no mapa para posicionar." : "Defina o ponto principal diretamente no mapa."}
+                  {isPickingReferencePoint ? "Clique no mapa para posicionar." : "Alternativa: posicionar manualmente no mapa."}
                 </p>
                 <p className="mt-1 text-xs text-slate-500">
                   {pickedCoord
-                    ? `Selecionado: ${pickedCoord.lat.toFixed(5)}, ${pickedCoord.lon.toFixed(5)}`
+                    ? `Selecionado: ${pickedCoord.label || `${pickedCoord.lat.toFixed(5)}, ${pickedCoord.lon.toFixed(5)}`}`
                     : "Nenhum ponto selecionado ainda."}
                 </p>
               </div>
@@ -182,16 +312,6 @@ export function Step1Config() {
             </button>
           </div>
 
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text"
-              value={primaryReferenceLabel}
-              onChange={(event) => setPrimaryReferenceLabel(event.target.value)}
-              placeholder="Ex.: trabalho, escola ou ponto de referência"
-              className="gem-input pl-10"
-            />
-          </div>
         </div>
 
         <div className="flex rounded-xl bg-slate-100 p-1">
