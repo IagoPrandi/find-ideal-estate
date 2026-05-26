@@ -69,6 +69,7 @@ export function FavoritesPanel() {
   const goToStep = useUIStore((state) => state.goToStep);
   const setMaxStep = useUIStore((state) => state.setMaxStep);
   const [expandedZoneKey, setExpandedZoneKey] = useState<string | null>(null);
+  const [expandedZoneTransportKey, setExpandedZoneTransportKey] = useState<string | null>(null);
   const [poiCategoryFilter, setPoiCategoryFilter] = useState<Record<string, string | "all">>({});
   const zoneCardRefs = useRef<Record<string, HTMLElement | null>>({});
   const addManualFavorite = useFavoritesStore((state) => state.addManualFavorite);
@@ -696,6 +697,9 @@ export function FavoritesPanel() {
                 const metrics = entry.payload.metrics;
                 const zoneColor = entry.color || entry.payload.color || "#0ea5e9";
                 const transportSummary = entry.payload.transport_summary;
+                const isTransportExpanded = expandedZoneTransportKey === entry.zoneKey;
+                const busLineNames = transportSummary?.bus_line_names || [];
+                const trainMetroLineNames = transportSummary?.train_metro_line_names || [];
                 const propertyTypeEntries = Object.entries(entry.payload.property_type_counts || {}).filter(([, count]) => Number(count) > 0);
                 return (
                   <article
@@ -816,10 +820,8 @@ export function FavoritesPanel() {
                       {transportSummary ? (
                         <>
                           <MetricChip label="Pontos de ônibus" value={String(transportSummary.bus_stop_count ?? 0)} />
-                          <MetricChip label="Linhas de ônibus" value={String(transportSummary.bus_line_count ?? 0)} />
-                          <MetricChip label="Terminais" value={String(transportSummary.bus_terminal_count ?? 0)} />
-                          <MetricChip label="Estações trem/metrô" value={String(transportSummary.train_metro_platform_count ?? 0)} />
-                          <MetricChip label="Linhas trem/metrô" value={String(transportSummary.train_metro_line_count ?? 0)} />
+                          <MetricChip label="Linhas nos pontos" value={String(transportSummary.bus_stop_line_count ?? transportSummary.bus_line_count ?? 0)} />
+                          <MetricChip label="Estações trem/metrô" value={String(transportSummary.train_metro_station_count ?? transportSummary.train_metro_platform_count ?? 0)} />
                         </>
                       ) : null}
                       {propertyTypeEntries.map(([type, count]) => (
@@ -830,6 +832,57 @@ export function FavoritesPanel() {
                         />
                       ))}
                     </div>
+                    {transportSummary ? (
+                      <div className="border-t border-slate-100 px-4 py-3">
+                        <button
+                          type="button"
+                          onClick={() => setExpandedZoneTransportKey(isTransportExpanded ? null : entry.zoneKey)}
+                          className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-pastel-violet-300 hover:bg-pastel-violet-50 hover:text-pastel-violet-700"
+                          aria-expanded={isTransportExpanded}
+                        >
+                          {isTransportExpanded ? "Ocultar transporte" : "Ver transporte"}
+                          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] text-slate-500">
+                            {(transportSummary.bus_line_names?.length || 0) + (transportSummary.train_metro_line_names?.length || 0)} linhas
+                          </span>
+                        </button>
+                        {isTransportExpanded ? (
+                          <div className="mt-3 max-h-48 overflow-y-auto rounded-2xl border border-slate-100 bg-slate-50/80 p-3 text-[11px] text-slate-600">
+                            <div className="grid gap-2 sm:grid-cols-2">
+                              <MetricChip label="Terminais de ônibus" value={String(transportSummary.bus_terminal_count ?? 0)} />
+                              <MetricChip label="Linhas de ônibus na zona" value={String(transportSummary.bus_line_count ?? 0)} />
+                              <MetricChip label="Linhas nos pontos" value={String(transportSummary.bus_stop_line_count ?? transportSummary.bus_line_count ?? 0)} />
+                              <MetricChip label="Linhas trem/metrô" value={String(transportSummary.train_metro_line_count ?? 0)} />
+                            </div>
+                            <div className="mt-3 space-y-3">
+                              <div>
+                                <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">Ônibus</p>
+                                {busLineNames.length > 0 ? (
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {busLineNames.map((name) => (
+                                      <span key={`${entry.zoneKey}:bus:${name}`} className="rounded-full border border-slate-200 bg-white px-2 py-1 font-semibold text-slate-700">{name}</span>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <p className="text-slate-400">Nomes de linhas indisponíveis.</p>
+                                )}
+                              </div>
+                              <div>
+                                <p className="mb-1 text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">Trem e metrô</p>
+                                {trainMetroLineNames.length > 0 ? (
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {trainMetroLineNames.map((name) => (
+                                      <span key={`${entry.zoneKey}:rail:${name}`} className="rounded-full border border-slate-200 bg-white px-2 py-1 font-semibold text-slate-700">{name}</span>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <p className="text-slate-400">Nomes de linhas indisponíveis.</p>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
                     {orderedCategoryKeys.length > 0 ? (
                       <div className="flex flex-wrap gap-1.5 border-t border-slate-100 px-4 py-3">
                         <button

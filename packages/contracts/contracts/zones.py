@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from .listings import ListingCardRead
 
@@ -48,6 +48,10 @@ class ZoneTransportSummaryRead(BaseModel):
     bus_terminal_count: int = 0
     train_metro_platform_count: int = 0
     train_metro_line_count: int = 0
+    bus_stop_line_count: int = 0
+    bus_line_names: list[str] = Field(default_factory=list)
+    train_metro_station_count: int = 0
+    train_metro_line_names: list[str] = Field(default_factory=list)
 
 
 class ZonePOIPointRead(BaseModel):

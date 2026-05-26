@@ -504,6 +504,10 @@ export type FavoriteZonePayload = {
     bus_terminal_count?: number;
     train_metro_platform_count?: number;
     train_metro_line_count?: number;
+    bus_stop_line_count?: number;
+    bus_line_names?: string[];
+    train_metro_station_count?: number;
+    train_metro_line_names?: string[];
   } | null;
   property_type_counts?: Record<string, number>;
   metrics: FavoriteZoneMetricsSnapshot;

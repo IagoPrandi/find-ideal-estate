@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronDown, Eye, EyeOff, Layers, PencilLine, Share2, X } from "lucide-react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { API_BASE, apiActionHint, createJourneyShare, createManualJourneyZone, getBusLineDetails, getBusStopDetails, getJourneyTransportPoints, getJourneyZonesList, getPublicSafetyIncidentsForViewport, getSelectedTransportTrace, getTransportStopDetails, getZoneListings } from "../../api/client";
+import { API_BASE, apiActionHint, createJourneyShare, createManualJourneyZone, getBusLineDetails, getBusStopDetails, getJourneyTransportPoints, getJourneyZonesList, getPublicSafetyIncidentsForViewport, getSelectedTransportTrace, getTransportStopDetails, getZoneListings, updateJourney } from "../../api/client";
 import { FeedbackFormButton } from "../../components/layout/FeedbackFormButton";
 import { FavoritesPanel, WizardPanel } from "../../components/panels";
 import { AuthAccessCard } from "../auth/AuthAccessCard";
@@ -986,6 +986,8 @@ export function FindIdealApp() {
   const goToStep = useUIStore((state) => state.goToStep);
   const setMaxStep = useUIStore((state) => state.setMaxStep);
   const pickedCoord = useJourneyStore((state) => state.pickedCoord);
+  const referenceInputMode = useJourneyStore((state) => state.referenceInputMode);
+  const pendingManualAreaDrawing = useJourneyStore((state) => state.pendingManualAreaDrawing);
   const isPickingReferencePoint = useJourneyStore((state) => state.isPickingReferencePoint);
   const setPickedCoord = useJourneyStore((state) => state.setPickedCoord);
   const setIsPickingReferencePoint = useJourneyStore((state) => state.setIsPickingReferencePoint);
@@ -1012,6 +1014,7 @@ export function FindIdealApp() {
   const setSelectedListingKey = useJourneyStore((state) => state.setSelectedListingKey);
   const setSelectedPoiKey = useJourneyStore((state) => state.setSelectedPoiKey);
   const setSelectedZone = useJourneyStore((state) => state.setSelectedZone);
+  const consumeManualAreaDrawingRequest = useJourneyStore((state) => state.consumeManualAreaDrawingRequest);
   const setMapViewportBounds = useJourneyStore((state) => state.setMapViewportBounds);
   const [copiedCoordsToast, setCopiedCoordsToast] = useState<string | null>(null);
   const [shareToast, setShareToast] = useState<{ title: string; detail?: string; tone: "success" | "error" } | null>(null);
@@ -1151,6 +1154,7 @@ export function FindIdealApp() {
       const zone = await createManualJourneyZone(journeyId, geometry, `Zona desenhada ${points.length} pontos`);
       await queryClient.invalidateQueries({ queryKey: ["journey-zones", journeyId] });
       setSelectedZone(zone.id, zone.fingerprint);
+      await updateJourney(journeyId, { selected_zone_id: zone.id, last_completed_step: 4 });
       setMaxStep(4);
       goToStep(4);
       setIsDrawingZone(false);
@@ -1161,6 +1165,14 @@ export function FindIdealApp() {
       setIsSavingManualZone(false);
     }
   }
+
+  useEffect(() => {
+    if (!pendingManualAreaDrawing || !journeyId) {
+      return;
+    }
+    consumeManualAreaDrawingRequest();
+    startDrawingZone();
+  }, [consumeManualAreaDrawingRequest, journeyId, pendingManualAreaDrawing]);
 
   useEffect(() => {
     stepRef.current = step;
@@ -2380,7 +2392,7 @@ export function FindIdealApp() {
       return;
     }
 
-    if (!pickedCoord) {
+    if (!pickedCoord || referenceInputMode === "area") {
       pickedMarkerRef.current?.remove();
       pickedMarkerRef.current = null;
       return;
@@ -2398,7 +2410,7 @@ export function FindIdealApp() {
     }
 
     map.easeTo({ center: [pickedCoord.lon, pickedCoord.lat], duration: 600, zoom: Math.max(map.getZoom(), 13) });
-  }, [isMapReady, pickedCoord]);
+  }, [isMapReady, pickedCoord, referenceInputMode]);
 
   useEffect(() => {
     const map = mapRef.current;

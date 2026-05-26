@@ -445,7 +445,7 @@ export function Step4Compare() {
 
   const hasLegacyPoiZones = useMemo(
     () =>
-      Boolean(query.data?.zones.some((zone) => zoneNeedsPoiBackfill(zone))),
+      Boolean(query.data?.zones.some((zone) => zone.origin !== "drawn" && zoneNeedsPoiBackfill(zone))),
     [query.data?.zones]
   );
 

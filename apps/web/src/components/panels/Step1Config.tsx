@@ -1,4 +1,4 @@
-import { Crosshair, MapPin, Route, ShieldAlert, Trees, Droplets, Search, ArrowRight, Bus, Train, Blend, CarFront, Lock } from "lucide-react";
+import { Crosshair, MapPin, Route, ShieldAlert, Trees, Droplets, Search, ArrowRight, Bus, Train, Blend, CarFront, Lock, PencilLine } from "lucide-react";
 import { useEffect, useState } from "react";
 import { apiActionHint, createJourney, geocodeReferenceAddress } from "../../api/client";
 import type { ReferenceAddressSuggestion } from "../../api/client";
@@ -29,9 +29,12 @@ export function Step1Config() {
   const pickedCoord = useJourneyStore((state) => state.pickedCoord);
   const isPickingReferencePoint = useJourneyStore((state) => state.isPickingReferencePoint);
   const primaryReferenceLabel = useJourneyStore((state) => state.primaryReferenceLabel);
+  const referenceInputMode = useJourneyStore((state) => state.referenceInputMode);
   const setConfig = useJourneyStore((state) => state.setConfig);
   const setEnrichment = useJourneyStore((state) => state.setEnrichment);
   const setPickedCoord = useJourneyStore((state) => state.setPickedCoord);
+  const setReferenceInputMode = useJourneyStore((state) => state.setReferenceInputMode);
+  const requestManualAreaDrawing = useJourneyStore((state) => state.requestManualAreaDrawing);
   const setIsPickingReferencePoint = useJourneyStore((state) => state.setIsPickingReferencePoint);
   const setJourneyId = useJourneyStore((state) => state.setJourneyId);
   const setPrimaryReferenceLabel = useJourneyStore((state) => state.setPrimaryReferenceLabel);
@@ -159,7 +162,7 @@ export function Step1Config() {
   }, [isReferenceSuggestOpen, primaryReferenceLabel, setPrimaryReferenceLabel]);
 
   async function handleSubmit() {
-    if (!pickedCoord) {
+    if (referenceInputMode === "point" && !pickedCoord) {
       setError("Selecione um endereço ou posicione o ponto no mapa antes de continuar.");
       return;
     }
@@ -170,11 +173,18 @@ export function Step1Config() {
     try {
       const journey = await createJourney({
         input_snapshot: {
-          reference_point: {
-            lat: pickedCoord.lat,
-            lon: pickedCoord.lon,
-            label: primaryReferenceLabel || pickedCoord.label || "Ponto selecionado no mapa"
-          },
+          reference_point: referenceInputMode === "point" && pickedCoord
+            ? {
+                lat: pickedCoord.lat,
+                lon: pickedCoord.lon,
+                label: primaryReferenceLabel || pickedCoord.label || "Ponto selecionado no mapa"
+              }
+            : {
+                lat: -23.55052,
+                lon: -46.63331,
+                label: "Área desenhada no mapa"
+              },
+          journey_input_mode: referenceInputMode,
           search_type: config.type,
           property_usage_type: config.propertyUsageType,
           transport_mode: config.modal,
@@ -190,6 +200,11 @@ export function Step1Config() {
       });
 
       setJourneyId(journey.id);
+      if (referenceInputMode === "area") {
+        setMaxStep(1);
+        requestManualAreaDrawing();
+        return;
+      }
       setMaxStep(isDirectIsochroneMode ? 3 : 2);
       goToStep(isDirectIsochroneMode ? 3 : 2);
     } catch (caughtError) {
@@ -208,8 +223,35 @@ export function Step1Config() {
 
       <div className="panel-scroll min-h-0 flex-1 overflow-y-auto bg-slate-50/50 px-5 py-5">
         <div className="space-y-6">
+        <div className="rounded-2xl border border-slate-200 bg-white p-1">
+          <div className="grid grid-cols-2 gap-1">
+            <button
+              type="button"
+              onClick={() => setReferenceInputMode("point")}
+              className={`flex min-w-0 items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-semibold transition ${referenceInputMode === "point" ? "bg-pastel-violet-500 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}
+              aria-pressed={referenceInputMode === "point"}
+            >
+              <MapPin className="h-4 w-4 shrink-0" />
+              Selecionar ponto
+            </button>
+            <button
+              type="button"
+              onClick={() => setReferenceInputMode("area")}
+              className={`flex min-w-0 items-center justify-center gap-2 rounded-xl px-3 py-2.5 text-sm font-semibold transition ${referenceInputMode === "area" ? "bg-pastel-violet-500 text-white shadow-sm" : "text-slate-600 hover:bg-slate-50"}`}
+              aria-pressed={referenceInputMode === "area"}
+            >
+              <PencilLine className="h-4 w-4 shrink-0" />
+              Desenhar área
+            </button>
+          </div>
+        </div>
+
         <div className="space-y-3">
-          <label className="text-sm font-medium text-slate-700">Ponto de referência principal</label>
+          <label className="text-sm font-medium text-slate-700">
+            {referenceInputMode === "point" ? "Ponto de referência principal" : "Área da análise"}
+          </label>
+          {referenceInputMode === "point" ? (
+          <>
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <input
@@ -311,6 +353,22 @@ export function Step1Config() {
               {isPickingReferencePoint ? "Clique no mapa para posicionar" : pickedCoord ? "Reposicionar no mapa" : "Colocar ponto no mapa"}
             </button>
           </div>
+          </>
+          ) : (
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="flex items-start gap-3">
+                <div className="rounded-xl bg-pastel-violet-50 p-2 text-pastel-violet-600">
+                  <PencilLine className="h-5 w-5" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-slate-800">Desenhe a área no mapa.</p>
+                  <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                    Ao continuar, clique no mapa para criar os vértices da área. A zona desenhada será enviada diretamente para comparação.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
         </div>
 
@@ -539,7 +597,15 @@ export function Step1Config() {
 
       <div className="border-t border-slate-100 bg-white p-5">
         <button type="button" onClick={handleSubmit} disabled={isSubmitting} className="gem-primary-button w-full disabled:cursor-not-allowed disabled:opacity-60">
-          {isSubmitting ? "Criando jornada..." : isWalkingMode ? "Gerar área acessível a pé" : isDrivingMode ? "Gerar área acessível de carro" : "Encontrar pontos de transporte próximos"}
+          {isSubmitting
+            ? "Criando jornada..."
+            : referenceInputMode === "area"
+              ? "Desenhar área no mapa"
+              : isWalkingMode
+                ? "Gerar área acessível a pé"
+                : isDrivingMode
+                  ? "Gerar área acessível de carro"
+                  : "Encontrar pontos de transporte próximos"}
           <ArrowRight className="h-4 w-4" />
         </button>
       </div>

@@ -147,7 +147,9 @@ async def _build_transport_summary_from_db(*, journey_id: UUID, zone_fingerprint
                       AND z.isochrone_geom IS NOT NULL
                     LIMIT 1
                 ), bus_routes AS (
-                    SELECT COUNT(DISTINCT COALESCE(NULLIF(gr.route_short_name, ''), gr.route_id))::INT AS count
+                    SELECT
+                        COUNT(DISTINCT COALESCE(NULLIF(gr.route_short_name, ''), gr.route_id))::INT AS count,
+                        ARRAY_REMOVE(ARRAY_AGG(DISTINCT COALESCE(NULLIF(gr.route_short_name, ''), NULLIF(gr.route_long_name, ''), gr.route_id) ORDER BY COALESCE(NULLIF(gr.route_short_name, ''), NULLIF(gr.route_long_name, ''), gr.route_id)), NULL) AS names
                     FROM zone_base zb
                     JOIN gtfs_stops s ON ST_Within(s.location, zb.isochrone_geom)
                     JOIN gtfs_stop_times st ON st.stop_id = s.stop_id
@@ -155,7 +157,9 @@ async def _build_transport_summary_from_db(*, journey_id: UUID, zone_fingerprint
                     JOIN gtfs_routes gr ON gr.route_id = gt.route_id
                     WHERE gr.route_type = 3
                 ), rail_routes AS (
-                    SELECT COUNT(DISTINCT COALESCE(NULLIF(gr.route_short_name, ''), gr.route_id))::INT AS count
+                    SELECT
+                        COUNT(DISTINCT COALESCE(NULLIF(gr.route_short_name, ''), gr.route_id))::INT AS count,
+                        ARRAY_REMOVE(ARRAY_AGG(DISTINCT COALESCE(NULLIF(gr.route_short_name, ''), NULLIF(gr.route_long_name, ''), gr.route_id) ORDER BY COALESCE(NULLIF(gr.route_short_name, ''), NULLIF(gr.route_long_name, ''), gr.route_id)), NULL) AS names
                     FROM zone_base zb
                     JOIN gtfs_stops s ON ST_Within(s.location, zb.isochrone_geom)
                     JOIN gtfs_stop_times st ON st.stop_id = s.stop_id
@@ -178,6 +182,8 @@ async def _build_transport_summary_from_db(*, journey_id: UUID, zone_fingerprint
                         FROM zone_base zb, geosampa_bus_lines g
                         WHERE ST_Intersects(g.geometry, zb.isochrone_geom)
                     ) AS bus_line_count,
+                    COALESCE((SELECT count FROM bus_routes), 0) AS bus_stop_line_count,
+                    COALESCE((SELECT names FROM bus_routes), ARRAY[]::TEXT[]) AS bus_line_names,
                     (
                         SELECT COUNT(DISTINCT md5(ST_AsEWKB(g.geometry)::text))::INT
                         FROM zone_base zb, geosampa_bus_terminals g
@@ -192,6 +198,15 @@ async def _build_transport_summary_from_db(*, journey_id: UUID, zone_fingerprint
                         FROM zone_base zb, geosampa_trem_stations g
                         WHERE ST_Within(ST_PointOnSurface(g.geometry), zb.isochrone_geom)
                     ) AS train_metro_platform_count,
+                    (
+                        SELECT COUNT(DISTINCT md5(ST_AsEWKB(g.geometry)::text))::INT
+                        FROM zone_base zb, geosampa_metro_stations g
+                        WHERE ST_Within(ST_PointOnSurface(g.geometry), zb.isochrone_geom)
+                    ) + (
+                        SELECT COUNT(DISTINCT md5(ST_AsEWKB(g.geometry)::text))::INT
+                        FROM zone_base zb, geosampa_trem_stations g
+                        WHERE ST_Within(ST_PointOnSurface(g.geometry), zb.isochrone_geom)
+                    ) AS train_metro_station_count,
                     COALESCE((SELECT count FROM rail_routes), 0) + (
                         SELECT COUNT(DISTINCT COALESCE(NULLIF(g.nm_linha_metro_trem, ''), NULLIF(g.nr_nome_linha, ''), md5(ST_AsEWKB(g.geometry)::text)))::INT
                         FROM zone_base zb, geosampa_metro_lines g
@@ -201,6 +216,23 @@ async def _build_transport_summary_from_db(*, journey_id: UUID, zone_fingerprint
                         FROM zone_base zb, geosampa_trem_lines g
                         WHERE ST_Intersects(g.geometry, zb.isochrone_geom)
                     ) AS train_metro_line_count
+                    ,
+                    ARRAY(
+                        SELECT DISTINCT line_name
+                        FROM (
+                            SELECT UNNEST(COALESCE((SELECT names FROM rail_routes), ARRAY[]::TEXT[])) AS line_name
+                            UNION ALL
+                            SELECT COALESCE(NULLIF(g.nm_linha_metro_trem, ''), NULLIF(g.nr_nome_linha, ''))
+                            FROM zone_base zb, geosampa_metro_lines g
+                            WHERE ST_Intersects(g.geometry, zb.isochrone_geom)
+                            UNION ALL
+                            SELECT NULLIF(g.nm_linha_metro_trem, '')
+                            FROM zone_base zb, geosampa_trem_lines g
+                            WHERE ST_Intersects(g.geometry, zb.isochrone_geom)
+                        ) names
+                        WHERE line_name IS NOT NULL AND line_name <> ''
+                        ORDER BY line_name
+                    ) AS train_metro_line_names
                 """
             ),
             {"journey_id": journey_id, "zone_fingerprint": zone_fingerprint},
@@ -214,6 +246,10 @@ async def _build_transport_summary_from_db(*, journey_id: UUID, zone_fingerprint
         bus_terminal_count=int(row.get("bus_terminal_count") or 0),
         train_metro_platform_count=int(row.get("train_metro_platform_count") or 0),
         train_metro_line_count=int(row.get("train_metro_line_count") or 0),
+        bus_stop_line_count=int(row.get("bus_stop_line_count") or 0),
+        bus_line_names=list(row.get("bus_line_names") or []),
+        train_metro_station_count=int(row.get("train_metro_station_count") or 0),
+        train_metro_line_names=list(row.get("train_metro_line_names") or []),
     )
 
 

@@ -282,7 +282,7 @@ async def list_transport_points_for_journey(journey_id: UUID) -> list[TransportP
     return await transport_service.list_transport_points_for_journey(journey_id)
 
 
-async def _fetch_zone_transport_summaries(journey_id: UUID) -> dict[str, dict[str, int]]:
+async def _fetch_zone_transport_summaries(journey_id: UUID) -> dict[str, dict[str, Any]]:
     engine = get_engine()
     async with engine.connect() as conn:
         result = await conn.execute(
@@ -297,7 +297,8 @@ async def _fetch_zone_transport_summaries(journey_id: UUID) -> dict[str, dict[st
                 ), bus_routes AS (
                     SELECT
                         zb.fingerprint,
-                        COUNT(DISTINCT COALESCE(NULLIF(gr.route_short_name, ''), gr.route_id))::INT AS gtfs_bus_line_count
+                        COUNT(DISTINCT COALESCE(NULLIF(gr.route_short_name, ''), gr.route_id))::INT AS gtfs_bus_line_count,
+                        ARRAY_REMOVE(ARRAY_AGG(DISTINCT COALESCE(NULLIF(gr.route_short_name, ''), NULLIF(gr.route_long_name, ''), gr.route_id) ORDER BY COALESCE(NULLIF(gr.route_short_name, ''), NULLIF(gr.route_long_name, ''), gr.route_id)), NULL) AS gtfs_bus_line_names
                     FROM zone_base zb
                     JOIN gtfs_stops s ON ST_Within(s.location, zb.isochrone_geom)
                     JOIN gtfs_stop_times st ON st.stop_id = s.stop_id
@@ -308,7 +309,8 @@ async def _fetch_zone_transport_summaries(journey_id: UUID) -> dict[str, dict[st
                 ), rail_routes AS (
                     SELECT
                         zb.fingerprint,
-                        COUNT(DISTINCT COALESCE(NULLIF(gr.route_short_name, ''), gr.route_id))::INT AS gtfs_rail_line_count
+                        COUNT(DISTINCT COALESCE(NULLIF(gr.route_short_name, ''), gr.route_id))::INT AS gtfs_rail_line_count,
+                        ARRAY_REMOVE(ARRAY_AGG(DISTINCT COALESCE(NULLIF(gr.route_short_name, ''), NULLIF(gr.route_long_name, ''), gr.route_id) ORDER BY COALESCE(NULLIF(gr.route_short_name, ''), NULLIF(gr.route_long_name, ''), gr.route_id)), NULL) AS gtfs_rail_line_names
                     FROM zone_base zb
                     JOIN gtfs_stops s ON ST_Within(s.location, zb.isochrone_geom)
                     JOIN gtfs_stop_times st ON st.stop_id = s.stop_id
@@ -333,6 +335,8 @@ async def _fetch_zone_transport_summaries(journey_id: UUID) -> dict[str, dict[st
                         FROM geosampa_bus_lines g
                         WHERE ST_Intersects(g.geometry, zb.isochrone_geom)
                     ) AS bus_line_count,
+                    COALESCE(br.gtfs_bus_line_count, 0) AS bus_stop_line_count,
+                    COALESCE(br.gtfs_bus_line_names, ARRAY[]::TEXT[]) AS bus_line_names,
                     (
                         SELECT COUNT(DISTINCT md5(ST_AsEWKB(g.geometry)::text))::INT
                         FROM geosampa_bus_terminals g
@@ -347,6 +351,15 @@ async def _fetch_zone_transport_summaries(journey_id: UUID) -> dict[str, dict[st
                         FROM geosampa_trem_stations g
                         WHERE ST_Within(ST_PointOnSurface(g.geometry), zb.isochrone_geom)
                     ) AS train_metro_platform_count,
+                    (
+                        SELECT COUNT(DISTINCT md5(ST_AsEWKB(g.geometry)::text))::INT
+                        FROM geosampa_metro_stations g
+                        WHERE ST_Within(ST_PointOnSurface(g.geometry), zb.isochrone_geom)
+                    ) + (
+                        SELECT COUNT(DISTINCT md5(ST_AsEWKB(g.geometry)::text))::INT
+                        FROM geosampa_trem_stations g
+                        WHERE ST_Within(ST_PointOnSurface(g.geometry), zb.isochrone_geom)
+                    ) AS train_metro_station_count,
                     COALESCE(rr.gtfs_rail_line_count, 0) + (
                         SELECT COUNT(DISTINCT COALESCE(NULLIF(g.nm_linha_metro_trem, ''), NULLIF(g.nr_nome_linha, ''), md5(ST_AsEWKB(g.geometry)::text)))::INT
                         FROM geosampa_metro_lines g
@@ -356,6 +369,23 @@ async def _fetch_zone_transport_summaries(journey_id: UUID) -> dict[str, dict[st
                         FROM geosampa_trem_lines g
                         WHERE ST_Intersects(g.geometry, zb.isochrone_geom)
                     ) AS train_metro_line_count
+                    ,
+                    ARRAY(
+                        SELECT DISTINCT line_name
+                        FROM (
+                            SELECT UNNEST(COALESCE(rr.gtfs_rail_line_names, ARRAY[]::TEXT[])) AS line_name
+                            UNION ALL
+                            SELECT COALESCE(NULLIF(g.nm_linha_metro_trem, ''), NULLIF(g.nr_nome_linha, ''))
+                            FROM geosampa_metro_lines g
+                            WHERE ST_Intersects(g.geometry, zb.isochrone_geom)
+                            UNION ALL
+                            SELECT NULLIF(g.nm_linha_metro_trem, '')
+                            FROM geosampa_trem_lines g
+                            WHERE ST_Intersects(g.geometry, zb.isochrone_geom)
+                        ) names
+                        WHERE line_name IS NOT NULL AND line_name <> ''
+                        ORDER BY line_name
+                    ) AS train_metro_line_names
                 FROM zone_base zb
                 LEFT JOIN bus_routes br ON br.fingerprint = zb.fingerprint
                 LEFT JOIN rail_routes rr ON rr.fingerprint = zb.fingerprint
@@ -372,6 +402,10 @@ async def _fetch_zone_transport_summaries(journey_id: UUID) -> dict[str, dict[st
             "bus_terminal_count": int(row.get("bus_terminal_count") or 0),
             "train_metro_platform_count": int(row.get("train_metro_platform_count") or 0),
             "train_metro_line_count": int(row.get("train_metro_line_count") or 0),
+            "bus_stop_line_count": int(row.get("bus_stop_line_count") or 0),
+            "bus_line_names": list(row.get("bus_line_names") or []),
+            "train_metro_station_count": int(row.get("train_metro_station_count") or 0),
+            "train_metro_line_names": list(row.get("train_metro_line_names") or []),
         }
         for row in rows
     }

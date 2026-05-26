@@ -110,6 +110,8 @@ Encontrar imóvel para alugar ou comprar em São Paulo é um processo fragmentad
 
 > **Observação de progresso (2026-05-25):** implementação em andamento para busca inicial por endereço geocodificado, zonas desenhadas manualmente, comparação expandida com transporte/imóveis por tipo, cor persistente de zonas salvas, snapshots de imóveis/POIs com ícones consistentes e compartilhamento público de zona salva individual. Documentos obrigatórios abertos nesta execução: `PRD.md`, `SKILLS_README.md`, `skills/best-practices/SKILL.md` e `skills/best-practices/references/agent-principles.md`. Skill usada: `best-practices`. Nenhuma fase foi marcada como concluída sem confirmação do responsável.
 
+> **Observação de progresso (2026-05-26, revisão):** refinado o fluxo para escolha explícita entre selecionar ponto e desenhar área, com zona desenhada indo direto para comparação sem job/tela de enriquecimento. Também foram planejados/aplicados detalhes expandíveis de transporte em zonas salvas e mapa na página pública de zona compartilhada. Documentos obrigatórios reabertos nesta execução: `PRD.md`, `SKILLS_README.md`, `skills/best-practices/SKILL.md` e `skills/best-practices/references/agent-principles.md`. Skill usada: `best-practices`. Nenhuma fase foi marcada como concluída sem confirmação do responsável.
+
 ---
 
 ## 3. Arquitetura do Sistema
