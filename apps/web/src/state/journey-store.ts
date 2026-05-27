@@ -3,6 +3,7 @@ import { create } from "zustand";
 export type SearchType = "rent" | "sale";
 export type TravelMode = "transit" | "walk" | "car";
 export type PublicTransportMode = "bus" | "rail" | "mixed";
+export type ReferenceInputMode = "point" | "area";
 export type ListingsSpatialScope = "all" | "inside_zone";
 export type ListingsAddressScope = "all_addresses" | "selected_address";
 export type ListingsUsageFilter = "all" | "residential" | "commercial";
@@ -86,6 +87,8 @@ type JourneyState = {
   selectedPoiKey: string | null;
   activePoiCategory: string;
   pickedCoord: PickedCoord | null;
+  referenceInputMode: ReferenceInputMode;
+  pendingManualAreaDrawing: boolean;
   isPickingReferencePoint: boolean;
   primaryReferenceLabel: string;
   selectedTransportId: string | null;
@@ -101,6 +104,9 @@ type JourneyState = {
   setConfig: (updater: Partial<JourneyConfig>) => void;
   setEnrichment: (key: keyof JourneyConfig["enrichments"], value: boolean) => void;
   setPickedCoord: (coord: PickedCoord | null) => void;
+  setReferenceInputMode: (mode: ReferenceInputMode) => void;
+  requestManualAreaDrawing: () => void;
+  consumeManualAreaDrawingRequest: () => void;
   setIsPickingReferencePoint: (value: boolean) => void;
   setPrimaryReferenceLabel: (label: string) => void;
   setSelectedTransportId: (transportId: string | null) => void;
@@ -167,6 +173,8 @@ export const useJourneyStore = create<JourneyState>((set) => ({
   selectedPoiKey: null,
   activePoiCategory: "all",
   pickedCoord: null,
+  referenceInputMode: "point",
+  pendingManualAreaDrawing: false,
   isPickingReferencePoint: false,
   primaryReferenceLabel: "",
   selectedTransportId: null,
@@ -228,6 +236,14 @@ export const useJourneyStore = create<JourneyState>((set) => ({
       }
     })),
   setPickedCoord: (pickedCoord) => set({ pickedCoord }),
+  setReferenceInputMode: (referenceInputMode) =>
+    set({
+      referenceInputMode,
+      isPickingReferencePoint: false,
+      pendingManualAreaDrawing: false,
+    }),
+  requestManualAreaDrawing: () => set({ pendingManualAreaDrawing: true, isPickingReferencePoint: false }),
+  consumeManualAreaDrawingRequest: () => set({ pendingManualAreaDrawing: false }),
   setIsPickingReferencePoint: (isPickingReferencePoint) => set({ isPickingReferencePoint }),
   setPrimaryReferenceLabel: (primaryReferenceLabel) => set({ primaryReferenceLabel }),
   setSelectedTransportId: (selectedTransportId) => set({ selectedTransportId }),
@@ -280,6 +296,8 @@ export const useJourneyStore = create<JourneyState>((set) => ({
       selectedPoiKey: null,
       activePoiCategory: "all",
       pickedCoord: null,
+      referenceInputMode: "point",
+      pendingManualAreaDrawing: false,
       isPickingReferencePoint: false,
       primaryReferenceLabel: "",
       selectedTransportId: null,

@@ -84,7 +84,7 @@ Encontrar imóvel para alugar ou comprar em São Paulo é um processo fragmentad
 | 3 | Transporte: GTFS + Valhalla + OTP | 🔄 Em progresso | Núcleo de mobilidade |
 | 4 | Zonas: isócronas + enriquecimento | ✅ Concluída | Zonas, badges e enriquecimento |
 | 5 | Imóveis: scrapers + dedup + cache | ✅ Concluída | Scraping, cache e deduplicação |
-| 6 | Dashboard + favoritos | 🔄 Em progresso | Dashboard, favoritos de imóveis e zonas |
+| 6 | Dashboard + favoritos | 🔄 Em progresso | Dashboard, favoritos de imóveis e zonas; compartilhamento de jornadas por link público |
 | 7 | Scheduler noturno / prewarm | ⬜ Não iniciada | Prewarm por demanda real e salvos Pro Max |
 | 8 | Auth + planos + ativação por Pix | 🔄 Em progresso | M8.1–M8.8 implementados; M8.9 (E2E) pendente |
 | 9 | Plano Pro Max: refresh dedicado | ⬜ Não iniciada | Fila e cadência próprias |
@@ -100,13 +100,17 @@ Encontrar imóvel para alugar ou comprar em São Paulo é um processo fragmentad
 | FE3 | Migração para Next.js App Router | ⬜ Não iniciada | Não bloqueia MVP |
 | FE4 | Seleção de transporte | ✅ Concluída | Pontos e linhas |
 | FE5 | Progressão SSE + zonas | ✅ Concluída | Zonas progressivas |
-| FE6 | Comparação de zonas | ✅ Concluída | Lista, badges e filtros |
+| FE6 | Comparação de zonas | ✅ Concluída | Lista, badges e filtros; visualização somente leitura de jornada compartilhada |
 | FE7 | Imóveis + dashboard | ✅ Concluída | Cards e dashboard |
 | FE8 | Auth + planos + Pix | 🔄 Em progresso | PlanosPage, ContaPage, PixModal, header badges implementados |
 | FE9 | UI Pro Max | ⬜ Não iniciada | Refresh, prioridade e badges |
 | FE10 | Stripe customer portal | ⬜ Backlog | Portal, checkout recorrente e proration |
 
 > **Regra de milestone:** uma fase só é marcada como concluída após confirmação explícita do responsável.
+
+> **Observação de progresso (2026-05-25):** implementação em andamento para busca inicial por endereço geocodificado, zonas desenhadas manualmente, comparação expandida com transporte/imóveis por tipo, cor persistente de zonas salvas, snapshots de imóveis/POIs com ícones consistentes e compartilhamento público de zona salva individual. Documentos obrigatórios abertos nesta execução: `PRD.md`, `SKILLS_README.md`, `skills/best-practices/SKILL.md` e `skills/best-practices/references/agent-principles.md`. Skill usada: `best-practices`. Nenhuma fase foi marcada como concluída sem confirmação do responsável.
+
+> **Observação de progresso (2026-05-26, revisão):** refinado o fluxo para escolha explícita entre selecionar ponto e desenhar área, com zona desenhada indo direto para comparação sem job/tela de enriquecimento. Também foram planejados/aplicados detalhes expandíveis de transporte em zonas salvas e mapa na página pública de zona compartilhada. Documentos obrigatórios reabertos nesta execução: `PRD.md`, `SKILLS_README.md`, `skills/best-practices/SKILL.md` e `skills/best-practices/references/agent-principles.md`. Skill usada: `best-practices`. Nenhuma fase foi marcada como concluída sem confirmação do responsável.
 
 ---
 

@@ -1,4 +1,6 @@
 from __future__ import annotations
+import hashlib
+import json
 from math import isfinite
 from typing import Any
 from uuid import UUID
@@ -6,11 +8,15 @@ from uuid import UUID
 from contracts import (
     JourneyCreate,
     JourneyRead,
+    JourneyShareRead,
+    JourneyShareSnapshotRead,
     JourneyUpdate,
+    ManualZoneCreate,
     TransportPointRead,
     ZoneDashboardAnalyticsRead,
     ZoneFavoriteAnalyticsRead,
     ZoneListResponse,
+    ZoneRead,
     ZoneSafetyIncidentCollectionRead,
 )
 from core.container import get_container
@@ -19,14 +25,19 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from api.routes.auth import get_optional_auth_context
 from modules.journeys.service import (
     ANONYMOUS_SESSION_COOKIE,
+    create_journey_share,
     create_journey,
     expire_journey,
     generate_anonymous_session_id,
+    get_active_journey_share,
     get_journey_for_access,
     get_journey,
+    revoke_journey_shares,
+    to_public_journey,
     update_journey,
 )
 from modules.plans.service import resolve_entitlements
+from modules.usage_restrictions.service import get_global_usage_restrictions_disabled
 from modules.public_safety import classify_public_safety_group
 from modules.dashboard.analytics import fetch_zone_dashboard_analytics, fetch_zone_favorite_analytics
 from modules.public_safety import public_safety_group_case_sql
@@ -67,6 +78,9 @@ _TRAVEL_TIME_FIELD_ALIASES = (
 
 async def _enforce_snapshot_customization(snapshot: dict[str, Any], auth_context) -> None:
     """Silently overrides locked/capped parameters — UI already blocks invalid values."""
+    if await get_global_usage_restrictions_disabled():
+        return
+
     if auth_context.user is None:
         _clamp_range_value(
             snapshot,
@@ -222,6 +236,17 @@ def _safe_ratio(numerator: float | None, denominator: float | None) -> float | N
     return numerator / denominator
 
 
+def _normalize_hex_color(value: str | None, default: str = "#0ea5e9") -> str:
+    if not isinstance(value, str):
+        return default
+    normalized = value.strip()
+    if len(normalized) == 7 and normalized.startswith("#"):
+        raw = normalized[1:]
+        if all(char in "0123456789abcdefABCDEF" for char in raw):
+            return f"#{raw.lower()}"
+    return default
+
+
 def _build_rank_map(values_by_key: dict[str, float | None], *, higher_is_better: bool) -> dict[str, dict[str, Any] | None]:
     sortable_items = [
         (key, value)
@@ -255,6 +280,198 @@ def _build_rank_map(values_by_key: dict[str, float | None], *, higher_is_better:
 async def list_transport_points_for_journey(journey_id: UUID) -> list[TransportPointRead]:
     transport_service = get_container().transport_service()
     return await transport_service.list_transport_points_for_journey(journey_id)
+
+
+async def _fetch_zone_transport_summaries(journey_id: UUID) -> dict[str, dict[str, Any]]:
+    engine = get_engine()
+    async with engine.connect() as conn:
+        result = await conn.execute(
+            text(
+                """
+                WITH zone_base AS (
+                    SELECT z.fingerprint, z.isochrone_geom
+                    FROM journey_zones jz
+                    JOIN zones z ON z.id = jz.zone_id
+                    WHERE jz.journey_id = :journey_id
+                      AND z.isochrone_geom IS NOT NULL
+                ), bus_routes AS (
+                    SELECT
+                        zb.fingerprint,
+                        COUNT(DISTINCT COALESCE(NULLIF(gr.route_short_name, ''), gr.route_id))::INT AS gtfs_bus_line_count,
+                        ARRAY_REMOVE(ARRAY_AGG(DISTINCT COALESCE(NULLIF(gr.route_short_name, ''), NULLIF(gr.route_long_name, ''), gr.route_id) ORDER BY COALESCE(NULLIF(gr.route_short_name, ''), NULLIF(gr.route_long_name, ''), gr.route_id)), NULL) AS gtfs_bus_line_names
+                    FROM zone_base zb
+                    JOIN gtfs_stops s ON ST_Within(s.location, zb.isochrone_geom)
+                    JOIN gtfs_stop_times st ON st.stop_id = s.stop_id
+                    JOIN gtfs_trips gt ON gt.trip_id = st.trip_id
+                    JOIN gtfs_routes gr ON gr.route_id = gt.route_id
+                    WHERE gr.route_type = 3
+                    GROUP BY zb.fingerprint
+                ), rail_routes AS (
+                    SELECT
+                        zb.fingerprint,
+                        COUNT(DISTINCT COALESCE(NULLIF(gr.route_short_name, ''), gr.route_id))::INT AS gtfs_rail_line_count,
+                        ARRAY_REMOVE(ARRAY_AGG(DISTINCT COALESCE(NULLIF(gr.route_short_name, ''), NULLIF(gr.route_long_name, ''), gr.route_id) ORDER BY COALESCE(NULLIF(gr.route_short_name, ''), NULLIF(gr.route_long_name, ''), gr.route_id)), NULL) AS gtfs_rail_line_names
+                    FROM zone_base zb
+                    JOIN gtfs_stops s ON ST_Within(s.location, zb.isochrone_geom)
+                    JOIN gtfs_stop_times st ON st.stop_id = s.stop_id
+                    JOIN gtfs_trips gt ON gt.trip_id = st.trip_id
+                    JOIN gtfs_routes gr ON gr.route_id = gt.route_id
+                    WHERE gr.route_type IN (1, 2)
+                    GROUP BY zb.fingerprint
+                )
+                SELECT
+                    zb.fingerprint,
+                    (
+                        SELECT COUNT(DISTINCT s.stop_id)::INT
+                        FROM gtfs_stops s
+                        WHERE ST_Within(s.location, zb.isochrone_geom)
+                    ) + (
+                        SELECT COUNT(DISTINCT md5(ST_AsEWKB(g.geometry)::text))::INT
+                        FROM geosampa_bus_stops g
+                        WHERE ST_Within(ST_PointOnSurface(g.geometry), zb.isochrone_geom)
+                    ) AS bus_stop_count,
+                    COALESCE(br.gtfs_bus_line_count, 0) + (
+                        SELECT COUNT(DISTINCT COALESCE(NULLIF(g.ln_nome, ''), md5(ST_AsEWKB(g.geometry)::text)))::INT
+                        FROM geosampa_bus_lines g
+                        WHERE ST_Intersects(g.geometry, zb.isochrone_geom)
+                    ) AS bus_line_count,
+                    COALESCE(br.gtfs_bus_line_count, 0) AS bus_stop_line_count,
+                    COALESCE(br.gtfs_bus_line_names, ARRAY[]::TEXT[]) AS bus_line_names,
+                    (
+                        SELECT COUNT(DISTINCT md5(ST_AsEWKB(g.geometry)::text))::INT
+                        FROM geosampa_bus_terminals g
+                        WHERE ST_Within(ST_PointOnSurface(g.geometry), zb.isochrone_geom)
+                    ) AS bus_terminal_count,
+                    (
+                        SELECT COUNT(DISTINCT md5(ST_AsEWKB(g.geometry)::text))::INT
+                        FROM geosampa_metro_stations g
+                        WHERE ST_Within(ST_PointOnSurface(g.geometry), zb.isochrone_geom)
+                    ) + (
+                        SELECT COUNT(DISTINCT md5(ST_AsEWKB(g.geometry)::text))::INT
+                        FROM geosampa_trem_stations g
+                        WHERE ST_Within(ST_PointOnSurface(g.geometry), zb.isochrone_geom)
+                    ) AS train_metro_platform_count,
+                    (
+                        SELECT COUNT(DISTINCT md5(ST_AsEWKB(g.geometry)::text))::INT
+                        FROM geosampa_metro_stations g
+                        WHERE ST_Within(ST_PointOnSurface(g.geometry), zb.isochrone_geom)
+                    ) + (
+                        SELECT COUNT(DISTINCT md5(ST_AsEWKB(g.geometry)::text))::INT
+                        FROM geosampa_trem_stations g
+                        WHERE ST_Within(ST_PointOnSurface(g.geometry), zb.isochrone_geom)
+                    ) AS train_metro_station_count,
+                    COALESCE(rr.gtfs_rail_line_count, 0) + (
+                        SELECT COUNT(DISTINCT COALESCE(NULLIF(g.nm_linha_metro_trem, ''), NULLIF(g.nr_nome_linha, ''), md5(ST_AsEWKB(g.geometry)::text)))::INT
+                        FROM geosampa_metro_lines g
+                        WHERE ST_Intersects(g.geometry, zb.isochrone_geom)
+                    ) + (
+                        SELECT COUNT(DISTINCT COALESCE(NULLIF(g.nm_linha_metro_trem, ''), md5(ST_AsEWKB(g.geometry)::text)))::INT
+                        FROM geosampa_trem_lines g
+                        WHERE ST_Intersects(g.geometry, zb.isochrone_geom)
+                    ) AS train_metro_line_count
+                    ,
+                    ARRAY(
+                        SELECT DISTINCT line_name
+                        FROM (
+                            SELECT UNNEST(COALESCE(rr.gtfs_rail_line_names, ARRAY[]::TEXT[])) AS line_name
+                            UNION ALL
+                            SELECT COALESCE(NULLIF(g.nm_linha_metro_trem, ''), NULLIF(g.nr_nome_linha, ''))
+                            FROM geosampa_metro_lines g
+                            WHERE ST_Intersects(g.geometry, zb.isochrone_geom)
+                            UNION ALL
+                            SELECT NULLIF(g.nm_linha_metro_trem, '')
+                            FROM geosampa_trem_lines g
+                            WHERE ST_Intersects(g.geometry, zb.isochrone_geom)
+                        ) names
+                        WHERE line_name IS NOT NULL AND line_name <> ''
+                        ORDER BY line_name
+                    ) AS train_metro_line_names
+                FROM zone_base zb
+                LEFT JOIN bus_routes br ON br.fingerprint = zb.fingerprint
+                LEFT JOIN rail_routes rr ON rr.fingerprint = zb.fingerprint
+                """
+            ),
+            {"journey_id": journey_id},
+        )
+        rows = result.mappings().all()
+
+    return {
+        str(row["fingerprint"]): {
+            "bus_stop_count": int(row.get("bus_stop_count") or 0),
+            "bus_line_count": int(row.get("bus_line_count") or 0),
+            "bus_terminal_count": int(row.get("bus_terminal_count") or 0),
+            "train_metro_platform_count": int(row.get("train_metro_platform_count") or 0),
+            "train_metro_line_count": int(row.get("train_metro_line_count") or 0),
+            "bus_stop_line_count": int(row.get("bus_stop_line_count") or 0),
+            "bus_line_names": list(row.get("bus_line_names") or []),
+            "train_metro_station_count": int(row.get("train_metro_station_count") or 0),
+            "train_metro_line_names": list(row.get("train_metro_line_names") or []),
+        }
+        for row in rows
+    }
+
+
+async def _fetch_zone_property_type_counts(
+    journey_id: UUID,
+    *,
+    search_type: str,
+    usage_type: str,
+) -> dict[str, dict[str, int]]:
+    engine = get_engine()
+    async with engine.connect() as conn:
+        result = await conn.execute(
+            text(
+                """
+                WITH journey_zone_base AS (
+                    SELECT z.fingerprint, z.isochrone_geom
+                    FROM journey_zones jz
+                    JOIN zones z ON z.id = jz.zone_id
+                    WHERE jz.journey_id = :journey_id
+                      AND z.isochrone_geom IS NOT NULL
+                ),
+                latest_active_ads AS (
+                    SELECT DISTINCT ON (la.property_id)
+                        la.property_id,
+                        la.usage_type AS ad_usage_type
+                    FROM listing_ads la
+                    JOIN LATERAL (
+                        SELECT 1
+                        FROM listing_snapshots ls
+                        WHERE ls.listing_ad_id = la.id
+                          AND (ls.availability_state = 'active' OR ls.availability_state IS NULL)
+                        ORDER BY ls.observed_at DESC
+                        LIMIT 1
+                    ) snapshot ON TRUE
+                    WHERE la.is_active = TRUE
+                      AND la.advertised_usage_type = :search_type
+                      AND (:usage_type = 'all' OR la.usage_type IS NULL OR la.usage_type = :usage_type)
+                    ORDER BY la.property_id, la.last_seen_at DESC
+                ),
+                zone_properties AS (
+                    SELECT
+                        jzb.fingerprint,
+                        COALESCE(p.usage_type, laa.ad_usage_type, 'unknown') AS property_type,
+                        p.id AS property_id
+                    FROM journey_zone_base jzb
+                    JOIN properties p
+                      ON p.location IS NOT NULL
+                     AND ST_Within(p.location, jzb.isochrone_geom)
+                    JOIN latest_active_ads laa ON laa.property_id = p.id
+                )
+                SELECT fingerprint, property_type, COUNT(DISTINCT property_id)::INT AS count
+                FROM zone_properties
+                GROUP BY fingerprint, property_type
+                """
+            ),
+            {"journey_id": journey_id, "search_type": search_type, "usage_type": usage_type},
+        )
+        rows = result.mappings().all()
+
+    out: dict[str, dict[str, int]] = {}
+    for row in rows:
+        fingerprint = str(row["fingerprint"])
+        out.setdefault(fingerprint, {})[str(row["property_type"] or "unknown")] = int(row.get("count") or 0)
+    return out
 
 
 async def list_zones_for_journey(journey_id: UUID) -> ZoneListResponse:
@@ -318,6 +535,7 @@ async def list_zones_for_journey(journey_id: UUID) -> ZoneListResponse:
                     z.transport_point_id,
                     z.fingerprint,
                     z.state,
+                    COALESCE(z.origin, 'generated') AS origin,
                     z.is_circle_fallback,
                     z.max_time_minutes AS travel_time_minutes,
                     tp.walk_distance_m AS walk_distance_meters,
@@ -444,6 +662,13 @@ async def list_zones_for_journey(journey_id: UUID) -> ZoneListResponse:
         )
         safety_rows = [dict(row) for row in journey_safety_result.mappings().all()]
 
+    transport_summaries = await _fetch_zone_transport_summaries(journey_id)
+    property_type_counts = await _fetch_zone_property_type_counts(
+        journey_id,
+        search_type=search_type,
+        usage_type=property_usage_type,
+    )
+
     zones = []
     completed_count = 0
     green_peers = [float(row["green_area_m2"] or 0.0) for row in rows if row["green_area_m2"] is not None]
@@ -495,6 +720,7 @@ async def list_zones_for_journey(journey_id: UUID) -> ZoneListResponse:
                 "transport_point_id": row["transport_point_id"],
                 "fingerprint": fingerprint,
                 "state": state,
+                "origin": row["origin"],
                 "is_circle_fallback": bool(row["is_circle_fallback"]),
                 "travel_time_minutes": row["travel_time_minutes"],
                 "walk_distance_meters": row["walk_distance_meters"],
@@ -517,6 +743,8 @@ async def list_zones_for_journey(journey_id: UUID) -> ZoneListResponse:
                     "p50_price": price_summary_rows.get(fingerprint, {}).get("p50_price"),
                     "active_listing_count": int(price_summary_rows.get(fingerprint, {}).get("active_listing_count") or 0),
                 },
+                "transport_summary": transport_summaries.get(fingerprint),
+                "property_type_counts": property_type_counts.get(fingerprint, {}),
                 "badges_provisional": bool(row["badges_provisional"]),
                 "created_at": row["created_at"],
                 "updated_at": row["updated_at"],
@@ -589,6 +817,123 @@ async def list_zone_safety_incidents_for_journey(
     return ZoneSafetyIncidentCollectionRead(features=features)
 
 
+def _validate_manual_zone_payload(payload: ManualZoneCreate) -> dict[str, Any]:
+    geometry = payload.geometry
+    if not isinstance(geometry, dict) or geometry.get("type") != "Polygon":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A zona desenhada deve ser um Polygon GeoJSON.")
+    coordinates = geometry.get("coordinates")
+    if not isinstance(coordinates, list) or not coordinates:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A zona desenhada precisa de coordenadas.")
+    outer_ring = coordinates[0]
+    if not isinstance(outer_ring, list) or len(outer_ring) < 4:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A zona desenhada precisa de pelo menos 3 vértices.")
+    first = outer_ring[0]
+    last = outer_ring[-1]
+    if first != last:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Finalize o desenho fechando o polígono.")
+    for point in outer_ring:
+        if not isinstance(point, list) or len(point) < 2:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Coordenada inválida na zona desenhada.")
+        lon, lat = point[0], point[1]
+        if not isinstance(lon, (int, float)) or not isinstance(lat, (int, float)):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Coordenada inválida na zona desenhada.")
+        if not (-180 <= float(lon) <= 180 and -90 <= float(lat) <= 90):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Coordenada fora do intervalo permitido.")
+    return geometry
+
+
+async def create_manual_zone_for_journey(journey_id: UUID, payload: ManualZoneCreate) -> ZoneRead:
+    geometry = _validate_manual_zone_payload(payload)
+    geometry_json = json.dumps(geometry, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+    fingerprint = "drawn:" + hashlib.sha256(f"{journey_id}:{geometry_json}".encode("utf-8")).hexdigest()[:24]
+    max_time_minutes = payload.max_time_minutes if payload.max_time_minutes is not None else 0
+    if max_time_minutes < 0 or max_time_minutes > 240:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Tempo máximo inválido para a zona desenhada.")
+
+    engine = get_engine()
+    async with engine.begin() as conn:
+        validation = await conn.execute(
+            text(
+                """
+                WITH raw AS (
+                    SELECT ST_SetSRID(ST_GeomFromGeoJSON(:geometry), 4326) AS geom
+                )
+                SELECT
+                    ST_IsValid(geom) AS is_valid,
+                    ST_GeometryType(geom) AS geom_type,
+                    ST_Area(geom::geography)::DOUBLE PRECISION AS area_m2
+                FROM raw
+                """
+            ),
+            {"geometry": geometry_json},
+        )
+        validation_row = validation.mappings().first()
+        if validation_row is None or not validation_row["is_valid"] or validation_row["geom_type"] != "ST_Polygon":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A zona desenhada tem geometria inválida.")
+        if float(validation_row.get("area_m2") or 0.0) < 1_000:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="A zona desenhada é pequena demais.")
+
+        insert = await conn.execute(
+            text(
+                """
+                INSERT INTO zones (
+                    journey_id,
+                    transport_point_id,
+                    modal,
+                    max_time_minutes,
+                    radius_meters,
+                    fingerprint,
+                    isochrone_geom,
+                    is_circle_fallback,
+                    origin,
+                    state,
+                    badges_provisional,
+                    updated_at
+                )
+                VALUES (
+                    :journey_id,
+                    NULL,
+                    'drawn',
+                    :max_time_minutes,
+                    0,
+                    :fingerprint,
+                    ST_SetSRID(ST_GeomFromGeoJSON(:geometry), 4326),
+                    FALSE,
+                    'drawn',
+                    'complete',
+                    FALSE,
+                    now()
+                )
+                ON CONFLICT (fingerprint) DO UPDATE SET updated_at = now()
+                RETURNING id
+                """
+            ),
+            {
+                "journey_id": journey_id,
+                "max_time_minutes": max_time_minutes,
+                "fingerprint": fingerprint,
+                "geometry": geometry_json,
+            },
+        )
+        zone_id = insert.scalar_one()
+        await conn.execute(
+            text(
+                """
+                INSERT INTO journey_zones (journey_id, zone_id, transport_point_id)
+                VALUES (:journey_id, :zone_id, NULL)
+                ON CONFLICT (journey_id, zone_id) DO NOTHING
+                """
+            ),
+            {"journey_id": journey_id, "zone_id": zone_id},
+        )
+
+    zones = await list_zones_for_journey(journey_id)
+    for zone in zones.zones:
+        if zone.fingerprint == fingerprint:
+            return zone
+    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="A zona desenhada foi criada, mas não pôde ser lida.")
+
+
 @router.post("", response_model=JourneyRead, status_code=status.HTTP_201_CREATED)
 async def create_journey_endpoint(
     payload: JourneyCreate,
@@ -610,6 +955,26 @@ async def create_journey_endpoint(
             samesite="lax",
         )
     return journey
+
+
+@router.get("/shares/{token}", response_model=JourneyShareSnapshotRead)
+async def get_journey_share_snapshot_endpoint(token: str) -> JourneyShareSnapshotRead:
+    share = await get_active_journey_share(token)
+    if share is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Compartilhamento não encontrado")
+
+    journey = await get_journey(share.journey_id)
+    if journey is None or getattr(journey.state, "value", journey.state) == "expired":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Jornada não encontrada")
+
+    transport_points = await list_transport_points_for_journey(share.journey_id)
+    zones = await list_zones_for_journey(share.journey_id)
+    return JourneyShareSnapshotRead(
+        share=share,
+        journey=to_public_journey(journey),
+        transport_points=transport_points,
+        zones=zones,
+    )
 
 
 @router.get("/{journey_id}", response_model=JourneyRead)
@@ -641,6 +1006,39 @@ async def delete_journey_endpoint(journey_id: UUID, auth_context=Depends(get_opt
     if journey is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Journey not found")
     return journey
+
+
+@router.post("/{journey_id}/share", response_model=JourneyShareRead)
+async def create_journey_share_endpoint(
+    journey_id: UUID,
+    auth_context=Depends(get_optional_auth_context),
+) -> JourneyShareRead:
+    await _get_accessible_journey_or_404(journey_id, auth_context)
+    return await create_journey_share(
+        journey_id,
+        created_by_user_id=auth_context.user.id if auth_context.user is not None else None,
+        created_by_anonymous_session_id=auth_context.anonymous_session_id,
+    )
+
+
+@router.delete("/{journey_id}/share", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_journey_share_endpoint(
+    journey_id: UUID,
+    auth_context=Depends(get_optional_auth_context),
+) -> Response:
+    await _get_accessible_journey_or_404(journey_id, auth_context)
+    await revoke_journey_shares(journey_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/{journey_id}/zones/manual", response_model=ZoneRead, status_code=status.HTTP_201_CREATED)
+async def create_manual_zone_endpoint(
+    journey_id: UUID,
+    payload: ManualZoneCreate,
+    auth_context=Depends(get_optional_auth_context),
+) -> ZoneRead:
+    await _get_accessible_journey_or_404(journey_id, auth_context)
+    return await create_manual_zone_for_journey(journey_id, payload)
 
 
 @router.get("/{journey_id}/transport-points", response_model=list[TransportPointRead])

@@ -26,6 +26,17 @@ const SORT_OPTIONS: Array<{ key: ZoneSortKey; label: string }> = [
   { key: "price", label: "Mais baratas" },
 ];
 
+const PROPERTY_TYPE_LABELS: Record<string, string> = {
+  residential: "Residenciais",
+  commercial: "Comerciais",
+  mixed: "Mistos",
+  unknown: "Sem tipo",
+};
+
+function formatPropertyTypeLabel(type: string) {
+  return PROPERTY_TYPE_LABELS[type] || type;
+}
+
 function formatRank(rank: JourneyRank | null | undefined) {
   if (!rank?.position || !rank?.total) {
     return "Sem base";
@@ -83,6 +94,15 @@ function ZoneMetricChip({
       <span className="font-semibold">{label}</span>
       <span>{value}</span>
     </span>
+  );
+}
+
+function MetricChip({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-xl bg-slate-50 px-2.5 py-2">
+      <span className="font-semibold text-slate-500">{label}</span>
+      <span className="font-bold text-slate-800">{value}</span>
+    </div>
   );
 }
 
@@ -161,7 +181,7 @@ function ZonePoiList({
   }, [isZoneSelected, selectedPoiKey, visiblePoints]);
 
   if (poiPoints.length === 0) {
-    return <p className="text-xs text-slate-500">Os POIs detalhados ainda não foram carregados para esta zona.</p>;
+    return <p className="text-xs text-slate-500">Os pontos de interesse detalhados ainda não foram carregados para esta zona.</p>;
   }
 
   return (
@@ -224,7 +244,7 @@ function ZonePoiList({
                   <span className="inline-flex h-2.5 w-2.5 rounded-full" style={{ backgroundColor: meta.color }} aria-hidden="true" />
                   <span className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">{meta.singularLabel}</span>
                 </div>
-                <p className="text-sm font-semibold text-slate-800">{point.name || "POI sem nome"}</p>
+                <p className="text-sm font-semibold text-slate-800">{point.name || "Ponto de interesse sem nome"}</p>
                 {point.address ? <p className="text-xs text-slate-500">{point.address}</p> : null}
               </button>
             </li>
@@ -243,6 +263,7 @@ function ZoneCard({
   journeyId,
   searchType,
   usageType,
+  poiBackfillPending,
 }: {
   zone: ZoneItem;
   isSelected: boolean;
@@ -251,9 +272,11 @@ function ZoneCard({
   journeyId: string | null;
   searchType: string;
   usageType: string;
+  poiBackfillPending?: boolean;
 }) {
   const isComplete = isZoneComplete(zone);
   const isProcessing = isZoneProcessing(zone);
+  const isPoiLoading = isProcessing || Boolean(poiBackfillPending);
   const statusLabel = getZoneStatusLabel(zone, isPrioritized);
   const showGreen = zone.green_vegetation_label !== null && zone.green_vegetation_label !== undefined;
   const poiPoints = zone.poi_points || [];
@@ -262,6 +285,9 @@ function ZoneCard({
   const priceTooltip = isComplete && priceP50 != null
     ? "Metade dos imóveis está abaixo desse valor e metade está acima, considerando o recorte padrão de imóveis para venda dentro da zona."
     : undefined;
+  const transportSummary = zone.transport_summary;
+  const propertyTypeCounts = zone.property_type_counts || {};
+  const propertyTypeEntries = Object.entries(propertyTypeCounts).filter(([, count]) => Number(count) > 0);
 
   const isAuthenticated = useZoneFavoritesStore((state) => state.isAuthenticated);
   const isZoneFavorite = useZoneFavoritesStore((state) => state.isZoneFavorite);
@@ -314,6 +340,11 @@ function ZoneCard({
                 Círculo aproximado
               </span>
             ) : null}
+            {zone.origin === "drawn" ? (
+              <span className="rounded bg-indigo-100 px-2 py-0.5 text-[11px] font-semibold text-indigo-700">
+                Desenhada
+              </span>
+            ) : null}
           </div>
         </div>
         <div className="flex items-center gap-1.5">
@@ -337,19 +368,19 @@ function ZoneCard({
         {showGreen || isProcessing ? <ZoneMetricChip label="Verde" value={isComplete ? formatRank(zone.journey_rankings?.green) : "Carregando"} tone="violet" /> : null}
         <ZoneMetricChip label="Alagamento" value={isComplete ? formatRank(zone.journey_rankings?.flood) : "Carregando"} tone="amber" />
         <ZoneMetricChip label="Valor mediano" value={priceChipValue} tone="rose" title={priceTooltip} />
-        <ZoneMetricChip label="POIs" value={isComplete ? String(poiPoints.length) : "Carregando"} tone="slate" />
+        <ZoneMetricChip label="Pontos de interesse" value={isPoiLoading ? "Carregando" : String(poiPoints.length)} tone="slate" />
       </div>
 
       <div className="mb-4 flex flex-wrap gap-3 text-xs text-slate-500">
         <span>{zone.walk_distance_meters ? `${Math.round(zone.walk_distance_meters)} m até o ponto de transporte` : "Sem distância consolidada"}</span>
         <span>
           {poiPoints.length > 0
-            ? `${poiPoints.length} POIs mapeados`
-            : isProcessing
-              ? "POIs detalhados em carregamento"
+            ? `${poiPoints.length} pontos de interesse mapeados`
+            : isPoiLoading
+              ? "Pontos de interesse detalhados em carregamento"
               : zone.poi_counts
-                ? `${Object.keys(zone.poi_counts).length} grupos de POIs`
-                : "POIs pendentes"}
+                ? `${Object.keys(zone.poi_counts).length} grupos de pontos de interesse`
+                : "Pontos de interesse pendentes"}
         </span>
         <span>
           {zone.price_summary?.active_listing_count
@@ -361,8 +392,25 @@ function ZoneCard({
         {showGreen ? <span>{zone.green_vegetation_label}</span> : null}
       </div>
 
+      {transportSummary || propertyTypeEntries.length > 0 ? (
+        <div className="mb-4 grid gap-2 rounded-2xl border border-slate-100 bg-white p-3 text-[11px] text-slate-600 sm:grid-cols-2">
+          {transportSummary ? (
+            <>
+              <MetricChip label="Pontos de ônibus" value={String(transportSummary.bus_stop_count ?? 0)} />
+              <MetricChip label="Linhas de ônibus" value={String(transportSummary.bus_line_count ?? 0)} />
+              <MetricChip label="Terminais" value={String(transportSummary.bus_terminal_count ?? 0)} />
+              <MetricChip label="Estações trem/metrô" value={String(transportSummary.train_metro_platform_count ?? 0)} />
+              <MetricChip label="Linhas trem/metrô" value={String(transportSummary.train_metro_line_count ?? 0)} />
+            </>
+          ) : null}
+          {propertyTypeEntries.map(([type, count]) => (
+            <MetricChip key={type} label={formatPropertyTypeLabel(type)} value={String(count)} />
+          ))}
+        </div>
+      ) : null}
+
       <div className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3">
-        <p className="mb-3 text-xs font-bold uppercase tracking-[0.14em] text-slate-500">POIs da zona</p>
+        <p className="mb-3 text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Pontos de interesse da zona</p>
         <ZonePoiList poiPoints={poiPoints} zoneFingerprint={zone.fingerprint} isZoneSelected={isSelected} onInteract={onSelect} />
       </div>
     </div>
@@ -398,11 +446,11 @@ export function Step4Compare() {
     [query.data?.zones]
   );
 
-  const hasLegacyPoiZones = useMemo(
-    () =>
-      Boolean(query.data?.zones.some((zone) => zoneNeedsPoiBackfill(zone))),
-    [query.data?.zones]
+  const hasPoiBackfillZones = useMemo(
+    () => Boolean(config.enrichments.pois && query.data?.zones.some((zone) => zoneNeedsPoiBackfill(zone))),
+    [config.enrichments.pois, query.data?.zones]
   );
+  const hasActiveZoneEnrichment = hasIncompleteZones || hasPoiBackfillZones || Boolean(zoneEnrichmentJobId);
 
   const zoneEnrichmentJobQuery = useQuery({
     queryKey: ["journey-zones-enrichment-job", zoneEnrichmentJobId],
@@ -420,7 +468,7 @@ export function Step4Compare() {
   }, [journeyId]);
 
   useEffect(() => {
-    if (!journeyId || !query.data || !hasLegacyPoiZones || hasIncompleteZones || zoneEnrichmentJobId) {
+    if (!journeyId || !query.data || !hasPoiBackfillZones || hasIncompleteZones || zoneEnrichmentJobId) {
       return;
     }
     if (legacyBackfillRequestedRef.current === journeyId) {
@@ -437,7 +485,7 @@ export function Step4Compare() {
       .catch((caughtError) => {
         setZoneEnrichmentError(apiActionHint(caughtError));
       });
-  }, [hasIncompleteZones, hasLegacyPoiZones, journeyId, query.data, setJobIds, zoneEnrichmentJobId]);
+  }, [hasIncompleteZones, hasPoiBackfillZones, journeyId, query.data, setJobIds, zoneEnrichmentJobId]);
 
   useEffect(() => {
     if (!zoneEnrichmentJobId) {
@@ -537,12 +585,12 @@ export function Step4Compare() {
       <div className="border-b border-slate-100 p-5">
         <div className="mb-1 flex items-center justify-between">
           <h2 className="text-xl font-semibold tracking-tight text-slate-800">Zonas encontradas</h2>
-          <span className={`rounded-md px-2 py-1 text-xs font-bold ${hasIncompleteZones ? "bg-sky-100 text-sky-700" : "bg-emerald-100 text-emerald-700"}`}>
-            {hasIncompleteZones ? "Enriquecendo" : "Pronto"}
+          <span className={`rounded-md px-2 py-1 text-xs font-bold ${hasActiveZoneEnrichment ? "bg-sky-100 text-sky-700" : "bg-emerald-100 text-emerald-700"}`}>
+            {hasActiveZoneEnrichment ? "Enriquecendo" : "Pronto"}
           </span>
         </div>
         <p className="text-sm text-slate-500">
-          {hasIncompleteZones
+          {hasActiveZoneEnrichment
             ? "As zonas já estão disponíveis. Os indicadores urbanos continuam sendo carregados em segundo plano."
             : "Compare as zonas pelo tempo de viagem e pelos indicadores enriquecidos."}
         </p>
@@ -621,6 +669,7 @@ export function Step4Compare() {
                   journeyId={journeyId}
                   searchType={config.type}
                   usageType={config.propertyUsageType}
+                  poiBackfillPending={config.enrichments.pois && zoneNeedsPoiBackfill(zone)}
                 />
               </div>
             );

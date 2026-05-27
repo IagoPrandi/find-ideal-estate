@@ -42,19 +42,24 @@ from modules.zones.isochrone_proxy import build_isochrone_proxy_circle
 from pydantic import BaseModel
 from sqlalchemy import text
 from modules.jobs.service import enqueue_job, get_job
+from modules.usage_restrictions.service import get_global_usage_restrictions_disabled
 
 router = APIRouter(prefix="/journeys", tags=["listings"])
 
 _DEFERRED_ADDRESS_NOTICE_REASON = "address_search_registered"
 
 
-def _is_scrape_authorized(auth_context: object) -> bool:
+async def _is_scrape_authorized(auth_context: object) -> bool:
+    if await get_global_usage_restrictions_disabled():
+        return True
+
     user = getattr(auth_context, "user", None)
     if user is None or not getattr(user, "is_active", False):
         return False
     return bool(
         getattr(user, "is_superuser", False)
         or getattr(user, "can_start_immediate_scraping", False)
+        or getattr(user, "usage_restrictions_disabled", False)
     )
 
 
@@ -307,7 +312,7 @@ async def listings_search(
                 total_count=0,
             )
 
-        if _is_scrape_authorized(auth_context):
+        if await _is_scrape_authorized(auth_context):
             await create_cache_record(
                 normalized_search_location,
                 zone_fingerprint=body.zone_fingerprint,
@@ -356,7 +361,7 @@ async def listings_search(
             journey_id,
             search_location_normalized=normalized_search_location,
         )
-        if active_job_id is None and _is_scrape_authorized(auth_context):
+        if active_job_id is None and await _is_scrape_authorized(auth_context):
             await create_cache_record(
                 normalized_search_location,
                 zone_fingerprint=body.zone_fingerprint,

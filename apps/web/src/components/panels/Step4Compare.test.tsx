@@ -349,6 +349,101 @@ describe("Step4Compare", () => {
     });
   });
 
+  it("starts a POI backfill for a drawn zone without POI data and then shows the loaded POIs", async () => {
+    let resolveBackfillJob: (job: { id: string }) => void = () => undefined;
+    vi.mocked(createZoneEnrichmentJob).mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveBackfillJob = resolve;
+      }) as never
+    );
+    vi.mocked(getJob).mockResolvedValue({ id: "job-poi-backfill", state: "completed", error_message: null } as never);
+    vi.mocked(getJourneyZonesList)
+      .mockResolvedValueOnce({
+        zones: [
+          {
+            id: "zone-drawn",
+            journey_id: "journey-1",
+            transport_point_id: null,
+            fingerprint: "zone-fp-1",
+            state: "complete",
+            origin: "drawn",
+            is_circle_fallback: false,
+            travel_time_minutes: null,
+            walk_distance_meters: null,
+            isochrone_geom: null,
+            green_area_m2: 1800,
+            green_vegetation_label: "Média vegetação",
+            flood_area_m2: 0,
+            safety_incidents_count: 2,
+            poi_counts: null,
+            poi_points: null,
+            badges: {},
+            badges_provisional: false,
+            created_at: "2026-03-29T10:00:00Z",
+            updated_at: "2026-03-29T10:00:00Z"
+          }
+        ],
+        total_count: 1,
+        completed_count: 1
+      } as never)
+      .mockResolvedValueOnce({
+        zones: [
+          {
+            id: "zone-drawn",
+            journey_id: "journey-1",
+            transport_point_id: null,
+            fingerprint: "zone-fp-1",
+            state: "complete",
+            origin: "drawn",
+            is_circle_fallback: false,
+            travel_time_minutes: null,
+            walk_distance_meters: null,
+            isochrone_geom: null,
+            green_area_m2: 1800,
+            green_vegetation_label: "Média vegetação",
+            flood_area_m2: 0,
+            safety_incidents_count: 2,
+            poi_counts: { school: 1, supermarket: 0, pharmacy: 0, park: 0, restaurant: 1, gym: 0 },
+            poi_points: [
+              {
+                kind: "poi",
+                id: "poi-drawn-1",
+                name: "Escola da Zona",
+                category: "school",
+                address: "Rua A, 10",
+                lat: -23.55,
+                lon: -46.63
+              }
+            ],
+            badges: {},
+            badges_provisional: false,
+            created_at: "2026-03-29T10:00:00Z",
+            updated_at: "2026-03-29T10:00:00Z"
+          }
+        ],
+        total_count: 1,
+        completed_count: 1
+      } as never);
+
+    renderWithQueryClient();
+
+    expect(await screen.findByText("Enriquecendo")).toBeInTheDocument();
+    expect(screen.getByText(/Pontos de interesse detalhados em carregamento/i)).toBeInTheDocument();
+
+    await act(async () => {
+      resolveBackfillJob({ id: "job-poi-backfill" });
+    });
+
+    await waitFor(() => {
+      expect(createZoneEnrichmentJob).toHaveBeenCalledWith("journey-1");
+      expect(getJob).toHaveBeenCalledWith("job-poi-backfill");
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("Escola da Zona")).toBeInTheDocument();
+    });
+  });
+
   it("shows partial zones immediately while enrichment keeps running in the background", async () => {
     useJourneyStore.setState((state) => ({
       ...state,

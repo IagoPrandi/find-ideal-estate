@@ -19,7 +19,8 @@ type AuthContextValue = {
 const GUEST_STATUS: AuthStatusRead = {
   is_authenticated: false,
   user: null,
-  session_expires_at: null
+  session_expires_at: null,
+  usage_restrictions_disabled_globally: false,
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);

@@ -38,6 +38,24 @@ const ANONYMOUS_DEFAULTS: EntitlementState = {
   max_transport_radius_m_cap: null,
 };
 
+const UNRESTRICTED_DEFAULTS: EntitlementState = {
+  isLoading: false,
+  can_customize_radius: true,
+  can_customize_max_time: true,
+  can_customize_distance: true,
+  max_active_metrics: null,
+  max_listing_favorites: null,
+  max_zone_favorites: null,
+  zone_selection_policy: "any",
+  planSlug: "sem-restricoes",
+  planName: "Sem restrições",
+  max_transit_minutes_cap: null,
+  max_walk_minutes_cap: null,
+  max_car_minutes_cap: null,
+  max_zone_radius_m_cap: null,
+  max_transport_radius_m_cap: null,
+};
+
 function planToEntitlements(accountPlan: AccountPlanRead): EntitlementState {
   return {
     isLoading: false,
@@ -67,6 +85,10 @@ export function useEntitlements(): EntitlementState {
     enabled: authStatus.is_authenticated,
     retry: false,
   });
+
+  if (authStatus.usage_restrictions_disabled_globally) {
+    return UNRESTRICTED_DEFAULTS;
+  }
 
   if (!authStatus.is_authenticated) {
     return ANONYMOUS_DEFAULTS;

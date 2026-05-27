@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from "@testing-librar
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { FindIdealApp } from "./FindIdealApp";
 import { useFavoritesStore, useJourneyStore, useUIStore, useZoneFavoritesStore } from "../../state";
-import { getBusLineDetails, getBusStopDetails, getJourneyTransportPoints, getJourneyZonesList, getPublicSafetyIncidentsForViewport, getSelectedTransportTrace, getTransportStopDetails, getZoneListings } from "../../api/client";
+import { createJourneyShare, createManualJourneyZone, getBusLineDetails, getBusStopDetails, getJourneyTransportPoints, getJourneyZonesList, getPublicSafetyIncidentsForViewport, getSelectedTransportTrace, getTransportStopDetails, getZoneListings, updateJourney } from "../../api/client";
 
 const mapEaseToMock = vi.fn();
 const mapSetLayoutPropertyMock = vi.fn();
@@ -43,7 +43,10 @@ vi.mock("../../api/client", () => ({
   getSelectedTransportTrace: vi.fn(),
   getJourneyZonesList: vi.fn(),
   getPublicSafetyIncidentsForViewport: vi.fn(),
-  getZoneListings: vi.fn()
+  getZoneListings: vi.fn(),
+  createJourneyShare: vi.fn(),
+  createManualJourneyZone: vi.fn(),
+  updateJourney: vi.fn()
 }));
 
 vi.mock("maplibre-gl", () => {
@@ -254,6 +257,18 @@ describe("FindIdealApp", () => {
     vi.mocked(getJourneyTransportPoints).mockResolvedValue([] as never);
     vi.mocked(getSelectedTransportTrace).mockResolvedValue({ type: "FeatureCollection", features: [] } as never);
     vi.mocked(getJourneyZonesList).mockResolvedValue({ zones: [], total_count: 0, completed_count: 0 } as never);
+    vi.mocked(createManualJourneyZone).mockResolvedValue({
+      id: "drawn-zone-1",
+      journey_id: "journey-1",
+      fingerprint: "drawn-fp-1",
+      state: "complete",
+      origin: "drawn",
+      isochrone_geom: {
+        type: "Polygon",
+        coordinates: [[[-46.7, -23.5], [-46.69, -23.5], [-46.69, -23.49], [-46.7, -23.5]]],
+      },
+    } as never);
+    vi.mocked(updateJourney).mockResolvedValue({ id: "journey-1" } as never);
     vi.mocked(getPublicSafetyIncidentsForViewport).mockResolvedValue({
       type: "FeatureCollection",
       features: [
@@ -291,6 +306,7 @@ describe("FindIdealApp", () => {
       total_count: 1,
       cache_age_hours: 0.1
     } as never);
+    vi.mocked(createJourneyShare).mockResolvedValue({ token: "share-token" } as never);
   });
 
   it("adds the open layout class when the favorites panel is visible", () => {
@@ -413,7 +429,7 @@ describe("FindIdealApp", () => {
       expect(mapAddedLayers.find((layer) => layer.id === "saved-zone-transport-layer")?.type).toBe("symbol");
       expect(mapAddedLayers.find((layer) => layer.id === "saved-zone-pois-layer")?.type).toBe("symbol");
       expect(mapAddedLayers.find((layer) => layer.id === "saved-zone-transport-layer")?.layout?.["icon-size"]).toEqual(["interpolate", ["linear"], ["zoom"], 9, 0.36, 14, 0.6, 17, 0.84]);
-      expect(mapAddedLayers.find((layer) => layer.id === "saved-zone-pois-layer")?.layout?.["icon-size"]).toEqual(["interpolate", ["linear"], ["zoom"], 10, 0.252, 14, 0.456, 17, 0.6]);
+      expect(mapAddedLayers.find((layer) => layer.id === "saved-zone-pois-layer")?.layout?.["icon-size"]).toEqual(["interpolate", ["linear"], ["zoom"], 10, 0.28, 14, 0.48, 17, 0.64]);
     });
 
     await waitFor(() => {
@@ -686,6 +702,75 @@ describe("FindIdealApp", () => {
 
     expect(useJourneyStore.getState().pickedCoord).toBeNull();
     expect(useJourneyStore.getState().isPickingReferencePoint).toBe(true);
+  });
+
+  it("starts the manual area drawing request, renders vertices and saves the drawn zone", async () => {
+    useUIStore.setState((state) => ({ ...state, step: 1, isCollapsed: false }));
+    useJourneyStore.setState((state) => ({
+      ...state,
+      journeyId: "journey-1",
+      pendingManualAreaDrawing: true,
+    }));
+
+    renderWithQueryClient();
+
+    await waitFor(() => {
+      expect(screen.getByText("0 vértices")).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: /^Desenhar área$/i })).not.toBeInTheDocument();
+      expect(useUIStore.getState().isCollapsed).toBe(true);
+      expect(useJourneyStore.getState().pendingManualAreaDrawing).toBe(false);
+    });
+
+    await act(async () => {
+      emitMapEvent("click", {
+        point: { x: 24, y: 24 },
+        lngLat: { lat: -23.5, lng: -46.7 },
+        originalEvent: { target: document.body },
+      });
+      emitMapEvent("click", {
+        point: { x: 25, y: 25 },
+        lngLat: { lat: -23.5, lng: -46.69 },
+        originalEvent: { target: document.body },
+      });
+      emitMapEvent("click", {
+        point: { x: 26, y: 26 },
+        lngLat: { lat: -23.49, lng: -46.69 },
+        originalEvent: { target: document.body },
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("3 vértices")).toBeInTheDocument();
+      const drawnSource = mapSourceData["drawn-zone-source-runtime"] as { features: Array<{ geometry: { type: string } }> };
+      expect(drawnSource.features.filter((feature) => feature.geometry.type === "Point")).toHaveLength(3);
+      expect(drawnSource.features.some((feature) => feature.geometry.type === "Polygon")).toBe(true);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: /Salvar área/i }));
+
+    await waitFor(() => {
+      expect(createManualJourneyZone).toHaveBeenCalledWith(
+        "journey-1",
+        {
+          type: "Polygon",
+          coordinates: [[[-46.7, -23.5], [-46.69, -23.5], [-46.69, -23.49], [-46.7, -23.5]]],
+        },
+        "Área desenhada 3 pontos"
+      );
+      expect(updateJourney).toHaveBeenCalledWith("journey-1", {
+        selected_zone_id: "drawn-zone-1",
+        last_completed_step: 4,
+      });
+      expect(useJourneyStore.getState().selectedZoneFingerprint).toBe("drawn-fp-1");
+      expect(useUIStore.getState().step).toBe(4);
+    });
+  });
+
+  it("does not show the idle floating drawing tool above the share button", () => {
+    renderWithQueryClient();
+
+    expect(screen.queryByRole("button", { name: /^Desenhar área$/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Compartilhar jornada/i })).toBeInTheDocument();
   });
 
   it("loads transport points first, then lines, then green areas and finally flood areas", async () => {

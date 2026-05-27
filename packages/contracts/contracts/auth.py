@@ -28,6 +28,7 @@ class AuthUserRead(BaseModel):
     is_active: bool
     is_superuser: bool = False
     can_start_immediate_scraping: bool = False
+    usage_restrictions_disabled: bool = False
     created_at: datetime
     role: str = "user"
 
@@ -36,3 +37,4 @@ class AuthStatusRead(BaseModel):
     is_authenticated: bool
     user: AuthUserRead | None = None
     session_expires_at: datetime | None = None
+    usage_restrictions_disabled_globally: bool = False

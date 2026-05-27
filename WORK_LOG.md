@@ -1,5 +1,7 @@
 # Work Log
 
+- 2026-05-27 (correção da ferramenta de desenhar área): `PRD.md`, `SKILLS_README.md` e `skills/develop-frontend/SKILL.md` foram abertos antes da execução. Skill usada: `develop-frontend`, pois o escopo corrigiu uma interação de UI no mapa. Em `apps/web/src/features/app/FindIdealApp.tsx`, o fluxo iniciado por "Desenhar área no mapa" agora colapsa o painel para liberar o mapa, mantém cursor de desenho mesmo ao sair de camadas interativas, mostra vértices desde o primeiro clique por meio da nova layer `drawn-zone-vertex-layer`, padroniza os textos de UI para "área" e salva a geometria manual indo direto para a comparação. Em `apps/web/src/features/app/FindIdealApp.test.tsx`, foi adicionada regressão cobrindo início do pedido de desenho, renderização dos vértices, criação da zona manual, seleção da zona criada e navegação para a etapa 4. Validação: `npm run test:run -- src/features/app/FindIdealApp.test.tsx -t "manual area drawing"` passou com `1 passed`; `npm run test:run -- src/components/panels/Step1Config.test.tsx src/features/app/FindIdealApp.test.tsx -t "manual area drawing|Step1Config"` passou com `6 passed`; `git diff --check` sem erros, apenas avisos LF/CRLF. Limite de validação: `npm run test:run -- src/features/app/FindIdealApp.test.tsx` ainda falha em teste preexistente de expectativa visual para `saved-zone-pois-layer` (`icon-size` esperado `0.252/0.456/0.6`, valor atual `0.28/0.48/0.64`), não relacionado ao desenho de área. Nenhuma milestone do PRD foi marcada, pois não houve confirmação explícita do responsável.
+
 - 2026-05-21 (deploy backend analytics de zonas favoritas): `PRD.md`, `SKILLS_README.md` e `skills/release-config-management/SKILL.md` foram abertos antes da execucao. Skill usada: `release-config-management`, pois o escopo foi rollout backend em producao. Alteracao publicada: `apps/api/src/modules/dashboard/analytics.py`, onde `fetch_zone_favorite_analytics` usa `asyncio.gather` para buscar em paralelo as paginas `preco`, `seguranca` e `ambiente`. Validacao local focada: `python -m pytest apps/api/tests/test_phase6_dashboard_analytics.py::test_fetch_zone_favorite_analytics_builds_lightweight_metrics apps/api/tests/test_phase6_dashboard_analytics.py::test_get_zone_favorite_analytics_route_returns_contract -q` passou com `2 passed`; `python -m py_compile apps/api/src/modules/dashboard/analytics.py apps/api/src/api/routes/journeys.py` passou. Limite de validacao: a suite ampla `apps/api/tests/test_phase6_dashboard_analytics.py -q` falhou em 4 testes antigos/adjacentes de `fetch_zone_dashboard_analytics`, funcao nao alterada neste rollout, por expectativas de numero de queries. Deploy: backup do arquivo anterior criado na EC2 em `/home/ubuntu/app_backups/analytics_before_20260521T220505Z.py.bak`; arquivo atualizado copiado para `/opt/app`; imagens `api`, `worker`, `worker-prewarm` e `worker-scrape-browser` reconstruidas e containers recriados. Validacao producao: containers `Up`, API `healthy`; Alembic segue em `20260521_0036 (head)`; `https://api.betterplace.com.br/health` retornou `200 {"status":"ok","db":"ok","redis":"ok"}`; introspeccao dentro do container `api` confirmou `asyncio.gather` em `fetch_zone_favorite_analytics`; logs recentes sem `error/exception/traceback/failed/fatal/no such file`. Nenhuma milestone do PRD foi marcada, pois nao houve confirmacao explicita do responsavel.
 
 - 2026-05-21 (deploy backend producao scraping imediato): `PRD.md`, `SKILLS_README.md` e `skills/release-config-management/SKILL.md` foram abertos antes da execucao. Skill usada: `release-config-management`, pois o escopo foi rollout backend em producao com migration, Docker Compose e RDS. Pre-check local: worktree limpo no commit `9a60bbff7f6058bd0765dd33a8cdcb7542d908b9` (`feat: add user permission for immediate listings scraping`) e teste focado `python -m pytest apps/api/tests/test_admin_scraping.py apps/api/tests/test_phase5_stale_revalidate.py apps/api/tests/test_phase5_scraping_lock.py apps/api/tests/test_phase7_prewarm.py -q` passou com `38 passed`. Deploy: archive Git backend (`apps/api`, `packages/contracts`, `infra`, `docker`, `alembic.ini`, `platforms.yaml`, `requirements.txt`, `docker-compose*.yml`) enviado para a EC2 `18.117.21.132` e extraido em `/opt/app`, preservando `.env`/dados locais. Backup de rollback criado em `/home/ubuntu/app_backups/app_before_backend_20260521T2140Z.tgz`. Containers `api`, `worker`, `worker-prewarm` e `worker-scrape-browser` foram reconstruidos e recriados. Durante o primeiro restart, `docker/entrypoint.sh` entrou com CRLF e causou `exec /app/docker/entrypoint.sh: no such file or directory`; corrigido na EC2 com `sed -i 's/\r$//' docker/entrypoint.sh`, seguido de novo rebuild/recreate. Validacao producao: containers finais `Up`, API `healthy`; Alembic em `20260521_0036 (head)`; `/health` publico retornou `200 {"status":"ok","db":"ok","redis":"ok"}`; RDS confirma coluna `users.can_start_immediate_scraping`; usuario `iago.oliveira2478@gmail.com` esta `is_active=true`, `is_superuser=true`, `can_start_immediate_scraping=true`, `role='proprietario'`; `/admin/users` sem sessao retorna `401`; logs recentes sem `error/exception/traceback/failed/fatal`. Nenhuma milestone do PRD foi marcada, pois nao houve confirmacao explicita do responsavel.
@@ -6206,6 +6208,301 @@
 - Progress Tracker:
   - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
 
+## 2026-05-26 - Restauracao da API AWS apos atualizacao de DATABASE_URL
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/best-practices/SKILL.md`
+  - `skills/best-practices/references/agent-principles.md`
+
+- Skill used:
+  - `skills/best-practices/SKILL.md`
+
+- Scope executed:
+  - `.env` local atualizado pelo responsavel foi preparado para producao sem expor segredos e enviado para o EC2.
+  - `DATABASE_URL` candidata foi testada dentro da imagem `onde_morar-api` antes de substituir o `.env` ativo.
+  - `.env` ativo do EC2 foi substituido com backup previo.
+  - `docker-compose.prod.yml` passou a preservar defaults de runtime para `MAPTILER_API_KEY`, `VALHALLA_URL`, `OTP_URL` e `DRAMATIQ_BROKER`, evitando falha de startup quando o override de producao substitui `environment`.
+  - `.env` remoto foi completado com `MAPTILER_API_KEY`, `VALHALLA_URL` e `OTP_URL` quando ausentes.
+  - Serviços `api`, `worker`, `worker-scrape-browser` e `worker-prewarm` foram recriados.
+
+- Verification executed:
+  - Teste direto de RDS com a nova `DATABASE_URL` dentro da imagem `onde_morar-api` -> `db_connection=OK`.
+  - EC2 local: `curl http://127.0.0.1:8000/health` -> `{\"status\":\"ok\",\"db\":\"ok\",\"redis\":\"ok\"}`.
+  - Publico: `https://api.betterplace.com.br/health` -> `200 OK`.
+  - Publico: `GET https://api.betterplace.com.br/transport/tiles/lines/10/378/581.pbf` -> `200 OK`, `Content-Type: application/vnd.mapbox-vector-tile`.
+  - Publico: `https://api.betterplace.com.br/auth/me` -> `200 OK` com JSON valido.
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
+
+## 2026-05-26 - Validacao do segredo RDS no deploy AWS
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/best-practices/SKILL.md`
+  - `skills/best-practices/references/agent-principles.md`
+
+- Skill used:
+  - `skills/best-practices/SKILL.md`
+
+- Scope executed:
+  - Confirmado que o backend e o Alembic usam apenas `DATABASE_URL` para conexao PostgreSQL.
+  - Confirmado que `AWS_DATABASE_SECRET_KEY` e `AWS_DATABASE_USERNAME` nao sao lidos pelo codigo atual.
+  - Gerada uma candidata de `DATABASE_URL` a partir de `AWS_DATABASE_USERNAME` + `AWS_DATABASE_SECRET_KEY` do `.env` local e testada no EC2 sem imprimir segredos.
+
+- Production diagnosis:
+  - A candidata de `DATABASE_URL` ainda falhou com `password authentication failed`.
+  - As informacoes visiveis no Secrets Manager (`nome`/`ARN`) nao substituem o valor do campo `password` do segredo.
+  - Para o deploy atual, o `.env` do EC2 precisa conter `DATABASE_URL` com a senha real do RDS, ou o codigo precisa ser alterado para buscar o segredo via AWS Secrets Manager com IAM role apropriada.
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
+
+## 2026-05-26 - Atualizacao do backend AWS e diagnostico 502
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/best-practices/SKILL.md`
+  - `skills/best-practices/references/agent-principles.md`
+  - `skills/best-practices/references/deploy-release.md`
+
+- Skill used:
+  - `skills/best-practices/SKILL.md`
+
+- Scope executed:
+  - Conexao SSH validada no EC2 `18.117.21.132`, com aplicacao em `/opt/app`.
+  - Backend empacotado de forma enxuta e enviado para o EC2, evitando `data_cache/` e caches pesados no contexto Docker.
+  - `.dockerignore` atualizado para excluir `data_cache/` do build context.
+  - `apps/api/contracts/__init__.py` sincronizado com os DTOs publicos de `packages/contracts`, corrigindo imports ausentes como `JourneyPublicRead`, `JourneyShareRead`, `FavoriteZoneShareRead` e `ZoneTransportSummaryRead`.
+  - `docker-compose.prod.yml` ajustado para nao sobrescrever `DATABASE_URL` via interpolacao YAML; a URL deve vir do `env_file`.
+  - `.gitattributes` atualizado com `*.sh text eol=lf` para evitar `exec /app/docker/entrypoint.sh: no such file or directory` causado por CRLF no container.
+  - Imagens `api`, `worker`, `worker-scrape-browser` e `worker-prewarm` rebuildadas no EC2.
+
+- Production diagnosis:
+  - O 502 em `https://api.betterplace.com.br/...` ocorre porque `api` e workers estao reiniciando.
+  - Logs do container mostram falha bloqueante no RDS: `password authentication failed for user "postgres"` ao conectar em `betterplace-database.cjuo6wwye3gv.us-east-2.rds.amazonaws.com`.
+  - Credenciais em `.env`, `.env.backup.*` e variaveis auxiliares disponiveis no EC2 foram testadas sem imprimir segredos; nenhuma autenticou no RDS.
+  - EC2 nao possui AWS CLI autenticada nem instance role utilizavel para consultar/resetar credenciais RDS.
+
+- Verification executed:
+  - `python -m pytest -q apps/api/tests/test_phase0_health.py` -> `2 passed`.
+  - `docker compose -f docker-compose.yml -f docker-compose.prod.yml build api worker worker-scrape-browser worker-prewarm` no EC2 -> build concluido.
+  - `curl http://127.0.0.1:8000/health` no EC2 -> falha porque a API reinicia durante `alembic upgrade head` por autenticacao RDS invalida.
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
+
+## 2026-05-23 - Controle admin para remover restricoes de uso
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/security-threat-checklist/SKILL.md`
+
+- Skill used:
+  - `skills/security-threat-checklist/SKILL.md`
+
+- Security notes:
+  - Protected assets: permissao administrativa, cotas/creditos de uso e disponibilidade do scraping.
+  - Entrypoints: `PATCH /admin/users/{user_id}/usage-restrictions` e painel admin.
+  - Mitigations: endpoint protegido por `require_developer`, payload allowlisted por contrato Pydantic, update parametrizado via SQLAlchemy, cache de entitlements invalidado apos mudanca.
+  - Residual risk: producao precisa aplicar a migration antes do backend novo servir esse campo.
+
+- Scope executed:
+  - Adicionado `usage_restrictions_disabled` em contratos, auth status, schema web e migration `20260523_0037_usage_restrictions_toggle.py`.
+  - Criado endpoint admin `PATCH /admin/users/{user_id}/usage-restrictions`, restrito a desenvolvedor, com invalidacao de cache de entitlements.
+  - O bypass agora cobre entitlements de plano, consumo de creditos e scraping imediato no backend.
+  - A pagina admin ganhou botao por usuario para alternar entre `Restricoes ativas` e `Sem restricoes`.
+
+- Verification executed:
+  - `python -m pytest apps/api/tests/test_admin_scraping.py` -> `7 passed`.
+  - `python -m py_compile apps/api/src/api/routes/admin_users.py apps/api/src/api/routes/jobs.py apps/api/src/api/routes/listings.py apps/api/src/modules/auth/service.py apps/api/src/modules/plans/service.py packages/contracts/contracts/admin.py packages/contracts/contracts/auth.py apps/api/contracts/__init__.py` -> ok.
+  - `npm run test:run -- src/features/admin/ScrapingAdminPage.test.tsx src/state/favorites-store.test.ts` -> `13 passed`.
+  - `git diff --check` -> sem erros; apenas avisos de conversao LF/CRLF.
+  - `npm run typecheck` -> ainda falha por erros preexistentes fora deste escopo (`src/api/client.ts`, `FavoritesPanel.tsx`, `Step2Transport.tsx`, `Step6Analysis.test.tsx`, re-export duplicado em `src/lib/api/index.ts`, e testes antigos de `journey-store`).
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
+
+## 2026-05-24 - Controle global admin para remover restricoes de uso
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/security-threat-checklist/SKILL.md`
+  - `skills/develop-frontend/SKILL.md`
+
+- Skills used:
+  - `skills/security-threat-checklist/SKILL.md`, pois o escopo alterou operacao admin, autorizacao e limites de uso.
+  - `skills/develop-frontend/SKILL.md`, pois a secao de usuarios do painel admin recebeu novo controle operacional.
+
+- Security notes:
+  - Protected assets: cotas/creditos, acesso anonimo/cadastrado, disponibilidade de jobs e permissoes administrativas.
+  - Entrypoints: `GET/PATCH /admin/users/usage-restrictions/global`, `AuthStatusRead` e painel admin.
+  - Mitigations: endpoints globais protegidos por `require_developer`, payload allowlisted por Pydantic, SQL parametrizado, estado persistido em `app_settings`, sem fallback silencioso quando a tabela nao existe.
+  - Residual risk: producao precisa aplicar a migration `20260523_0038_global_usage_restrictions.py` antes de servir o backend novo.
+
+- Scope executed:
+  - Criada a tabela/configuracao `app_settings` para `usage_restrictions_disabled_globally`, com migration `20260523_0038_global_usage_restrictions.py`.
+  - Adicionado servico `modules/usage_restrictions` para ler/gravar o estado global.
+  - Admin ganhou rotas para consultar e alternar o bypass global de restricoes de uso.
+  - O bypass global cobre usuarios anonimos e cadastrados em entitlements, consumo de creditos, scraping imediato e customizacao de jornada.
+  - `AuthStatusRead` passou a expor `usage_restrictions_disabled_globally` para o frontend.
+  - A aba `Usuarios` do admin ganhou botao "Ativar sem restricoes para todos" / "Todos sem restricoes".
+
+- Verification executed:
+  - `python -m pytest apps/api/tests/test_admin_scraping.py` -> `8 passed`.
+  - `python -m py_compile apps/api/src/api/routes/admin_users.py apps/api/src/api/routes/auth.py apps/api/src/api/routes/account.py apps/api/src/api/routes/jobs.py apps/api/src/api/routes/listings.py apps/api/src/api/routes/journeys.py apps/api/src/modules/auth/service.py apps/api/src/modules/plans/service.py apps/api/src/modules/usage_restrictions/service.py packages/contracts/contracts/admin.py packages/contracts/contracts/auth.py apps/api/contracts/__init__.py` -> ok.
+  - `npm run test:run -- src/features/admin/ScrapingAdminPage.test.tsx src/state/favorites-store.test.ts` -> `14 passed`.
+  - `git diff --check` -> sem erros; apenas avisos de conversao LF/CRLF.
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
+
+## 2026-05-26 - Tentativa de atualizar backend em producao bloqueada por RDS
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/release-config-management/SKILL.md`
+
+- Skill used:
+  - `skills/release-config-management/SKILL.md`, pois o escopo foi verificacao/rollout de backend em producao com Docker Compose, migrations e RDS.
+
+- Scope executed:
+  - Validado estado atual da EC2 `18.117.21.132`.
+  - `https://api.betterplace.com.br/health` retorna `502 Bad Gateway`.
+  - Containers `api`, `worker`, `worker-prewarm` e `worker-scrape-browser` permanecem em restart loop.
+  - Logs da API e workers confirmam falha de autenticacao no RDS: `password authentication failed for user "postgres"`.
+  - Comparacao mascarada confirmou que `DATABASE_URL` local e remoto sao identicos, com o mesmo hash SHA-256 e mesmo host RDS.
+  - Verificado que nao ha credenciais AWS configuradas localmente nem na EC2 para resetar a senha do RDS.
+
+- Blocker:
+  - Nao foi possivel concluir o rollout porque o RDS rejeita novas conexoes com a credencial atualmente configurada.
+  - Para prosseguir, e necessario corrigir a senha/`DATABASE_URL` no `.env` da EC2 ou fornecer credenciais AWS com permissao para resetar a senha do RDS.
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
+
+## 2026-05-26 - Rebuild API na EC2 com acesso SSH padrao
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/release-config-management/SKILL.md`
+  - `skills/security-threat-checklist/SKILL.md`
+
+- Skills used:
+  - `skills/release-config-management/SKILL.md`, pois o escopo foi rebuild/restart de backend em producao.
+  - `skills/security-threat-checklist/SKILL.md`, pois a verificacao envolveu credenciais instaladas e conexao RDS.
+
+- Scope executed:
+  - Usado o padrao de acesso indicado: `ssh -i "$env:USERPROFILE\.ssh\ssh-samsung.pem" -o BatchMode=yes -o ConnectTimeout=10 ubuntu@18.117.21.132`.
+  - Testadas sem exposicao de segredo as credenciais instaladas no `.env`: `DATABASE_URL`, `AWS_DATABASE_USERNAME` e `AWS_DATABASE_SECRET_KEY`.
+  - Variantes testadas contra o RDS via `psql`: `DATABASE_URL` atual, usuario/senha AWS em modo raw e usuario/senha AWS URL-encoded.
+  - Todas as variantes falharam com autenticacao rejeitada pelo RDS para o usuario `postgres`.
+  - Executado `docker compose -f docker-compose.yml -f docker-compose.prod.yml build api && docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d api` na EC2.
+
+- Verification executed:
+  - Build da imagem `onde_morar-api` concluiu.
+  - Container `api` foi recriado e iniciado.
+  - `https://api.betterplace.com.br/health` continua retornando `502`.
+  - `docker compose ps` mostra `api`, `worker`, `worker-prewarm` e `worker-scrape-browser` em restart loop.
+  - Logs da API continuam apontando `password authentication failed for user "postgres"`.
+
+- Blocker:
+  - A atualizacao nao fica operacional enquanto a senha/`DATABASE_URL` do RDS estiver invalida.
+  - E necessario corrigir a credencial no RDS ou atualizar o `.env` com uma `DATABASE_URL` que autentique.
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
+
+## 2026-05-23 - Backend atualizado na cloud AWS
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/release-config-management/SKILL.md`
+
+- Skill used:
+  - `skills/release-config-management/SKILL.md`
+
+- Scope executed:
+  - Backend publicado no EC2 `18.117.21.132` a partir do commit `527381cc96485ffb74d5094ef3d18757c2b71e06`.
+  - Backup criado no EC2 antes da troca: `/home/ubuntu/app_backups/app_before_backend_20260523T151220Z.tgz`.
+  - Imagens `api`, `worker`, `worker-prewarm` e `worker-scrape-browser` reconstruidas e containers recriados com `docker compose`.
+  - `docker/entrypoint.sh` foi reenviado do workspace local e normalizado para LF no EC2 apos detectar CRLF e uma tentativa anterior que corrompeu letras `r` no arquivo remoto.
+
+- Verification executed:
+  - Testes locais antes do deploy: `python -m pytest apps/api/tests/test_admin_scraping.py apps/api/tests/test_phase5_stale_revalidate.py apps/api/tests/test_phase5_scraping_lock.py apps/api/tests/test_phase7_prewarm.py -q` -> `38 passed`.
+  - Compilacao Python local: `python -m py_compile apps/api/src/main.py apps/api/src/api/routes/transport.py apps/api/src/core/config.py apps/api/src/workers/handlers/prewarm.py` -> sem erros.
+  - `docker compose ps` no EC2 -> `api` healthy; `redis`, `worker`, `worker-prewarm` e `worker-scrape-browser` up.
+  - `https://api.betterplace.com.br/health` -> `200 {"status":"ok","db":"ok","redis":"ok"}`.
+  - `alembic current` no container `api` -> `20260521_0036 (head)`.
+  - Runtime no container `api` -> `prewarm_default_budget=100.0`.
+  - `safety-incidents` com `Origin: https://www.betterplace.com.br` -> `200` com `Access-Control-Allow-Origin: https://www.betterplace.com.br`.
+  - Tiles `stops`, `green` e `lines` com `Origin: https://www.betterplace.com.br` -> `200` com CORS correto.
+  - Logs recentes filtrados por `error|exception|traceback|fatal|no such file|syntax error` -> sem ocorrencias apos a subida final.
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
+
+## 2026-05-23 - Hotfix de diagnostico para VivaReal e ZapImoveis na AWS
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/release-config-management/SKILL.md`
+
+- Skill used:
+  - `skills/release-config-management/SKILL.md`
+
+- Scope executed:
+  - Investigado o scraping em producao no EC2 `18.117.21.132`.
+  - Diagnostico direto no container `worker-scrape-browser` confirmou que VivaReal e ZapImoveis retornam pagina Cloudflare `Attention Required`, sem links de imovel e sem chamadas Glue.
+  - `apps/api/src/modules/listings/scrapers/base.py` ganhou `raise_if_access_blocked(...)` para detectar bloqueio Cloudflare.
+  - `apps/api/src/modules/listings/scrapers/vivareal.py` e `apps/api/src/modules/listings/scrapers/zapimoveis.py` passaram a chamar essa validacao apos navegacoes principais.
+  - Hotfix publicado no EC2; backup dos arquivos antigos em `/home/ubuntu/app_backups/scraper_hotfix_20260524T021353Z`.
+
+- Verification executed:
+  - Testes focados: `python -m pytest apps/api/tests/test_phase5_scraping_lock.py::test_scraper_detects_cloudflare_block_page apps/api/tests/test_phase5_scraping_lock.py::test_scraper_allows_regular_page apps/api/tests/test_phase5_scraping_lock.py::test_listings_step_records_platform_diagnostics apps/api/tests/test_phase7_prewarm.py::test_listings_prewarm_step_reuses_single_session_per_platform apps/api/tests/test_phase7_prewarm.py::test_listings_prewarm_step_resets_budget_for_each_platform_timeout -q` -> `5 passed`.
+  - Compilacao Python dos scrapers e handlers alterados -> sem erros.
+  - Suite ampla `test_phase5_scraping_lock.py + test_phase7_prewarm.py` nao completou porque o teste de integracao `test_scraping_lock_concurrency_has_no_duplicate_db_writes` tentou acessar Postgres local em `localhost:5432` e recebeu `ConnectionRefusedError`; os testes unitarios anteriores passaram.
+  - `https://api.betterplace.com.br/health` -> `200 {"status":"ok","db":"ok","redis":"ok"}`.
+  - `docker compose ps` no EC2 -> `api` healthy; `redis`, `worker`, `worker-prewarm` e `worker-scrape-browser` up.
+  - Execucao direta no `worker-scrape-browser` confirmou `ScraperError` explicito para `VivaReal bloqueou o acesso via Cloudflare` e `ZapImoveis bloqueou o acesso via Cloudflare`.
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
+
+## 2026-05-23 - Merge origin/main em feature/mobile-version
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/best-practices/SKILL.md`
+  - `skills/best-practices/references/agent-principles.md`
+
+- Skill used:
+  - `skills/best-practices/SKILL.md`
+
+- Scope executed:
+  - Branch atual confirmada como `feature/mobile-version`.
+  - `origin/main` atualizado via `git fetch origin main`.
+  - Merge normal executado com `git merge --no-ff origin/main -m "Merge origin/main into feature/mobile-version"`, preservando historico por commit de merge.
+  - Merge concluido sem conflitos pela estrategia `ort`.
+
+- Verification executed:
+  - `git status --short --branch` -> `feature/mobile-version` ficou `ahead 2` de `origin/feature/mobile-version`.
+  - `git log --oneline --decorate --graph --max-count=10` -> commit de merge no topo da branch.
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
+
 ## 2026-05-22 - Rolagem e detalhes de bateladas no admin
 
 - Required docs opened:
@@ -6371,3 +6668,30 @@
 
 - Progress Tracker:
   - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
+
+## 2026-05-27 - Zona desenhada sem transporte e com POIs
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/develop-frontend/SKILL.md`
+
+- Skill used:
+  - `skills/develop-frontend/SKILL.md`
+
+- Scope executed:
+  - `Step1Config` agora trata `Desenhar area` como fluxo proprio: oculta controles de deslocamento, opcoes de transporte, tempo e raio de transporte, mantendo tipo de imovel e analises urbanas.
+  - O snapshot de jornadas por area passa a gravar campos de transporte como `null`.
+  - `ProgressTracker` considera `referenceInputMode` e, no fluxo de area desenhada, mostra apenas Configuracao, Comparacao, Endereco e Analise.
+  - A ferramenta flutuante idle de desenho foi removida; permanecem apenas os controles ativos de vertices, salvar area e cancelar quando o desenho e iniciado pelo painel.
+  - `zoneNeedsPoiBackfill`, `Step4Compare` e o worker de `zone_enrichment` agora incluem zonas desenhadas/completas com `poi_counts` ou `poi_points` ausentes no backfill de POIs.
+  - A comparacao exibe estado de enriquecimento/carregamento enquanto os POIs pendentes sao carregados.
+
+- Verification executed:
+  - `npm run test:run -- src/components/panels/Step1Config.test.tsx src/components/panels/ProgressTracker.test.tsx src/components/panels/Step4Compare.test.tsx src/features/app/FindIdealApp.test.tsx` -> `42 passed`; warnings conhecidos de `act(...)` no `FindIdealApp.test.tsx`.
+  - `python -m pytest apps/api/tests/test_zone_enrichment_priority.py` -> `4 passed`.
+  - `npm run typecheck` -> ainda falha por erros TypeScript preexistentes fora deste escopo (`src/api/client.ts`, `FavoritesPanel.tsx`, `Step2Transport.tsx`, `Step6Analysis.test.tsx`, re-export duplicado em `src/lib/api/index.ts`, e testes antigos de `journey-store`).
+  - `pytest apps/api/tests/test_zone_enrichment_priority.py` direto nao rodou porque `pytest` nao esta no PATH; `python -m pytest` rodou com sucesso.
+
+- Progress Tracker:
+  - Nenhuma milestone do PRD foi marcada como concluida; politica de confirmacao explicita preservada.

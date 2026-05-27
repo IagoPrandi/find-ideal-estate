@@ -10,16 +10,25 @@ import {
   AdminScrapingBatchesSchema,
   AdminScrapingOverviewSchema,
   AdminScrapingQueueSchema,
+  AdminUsageRestrictionsSchema,
   AdminUserSchema,
   AdminUsersSchema,
   AuthStatusReadSchema,
   FavoriteListingBackendSchema,
+  FavoriteZoneShareReadSchema,
+  FavoriteZoneShareSnapshotReadSchema,
   FinalListingsJson,
   FinalizeResponse,
+  GeocodeResponseSchema,
   JobRead,
   JobReadSchema,
   JourneyRead,
   JourneyReadSchema,
+  JourneyShareRead,
+  JourneyShareReadSchema,
+  JourneyShareSnapshotRead,
+  JourneyShareSnapshotReadSchema,
+  JourneyZoneReadSchema,
   ListingsCollection,
   ListingsScrapePlanResponseSchema,
   ListingsScrapeResponse,
@@ -51,6 +60,7 @@ import {
   ZonesCollection,
   ZonesCollectionSchema,
   JourneyZonesListResponseSchema,
+  ReferenceAddressSuggestionBackendSchema,
   SearchAddressSuggestionBackendSchema,
   ListingPlatformVariantBackendSchema,
   ListingCardReadBackendSchema,
@@ -112,6 +122,7 @@ export type AdminScrapingQueue = z.output<typeof AdminScrapingQueueSchema>;
 export type AdminScrapingBatch = z.output<typeof AdminScrapingBatchSchema>;
 export type AdminScrapingBatches = z.output<typeof AdminScrapingBatchesSchema>;
 export type AdminRunNowResponse = z.output<typeof AdminRunNowResponseSchema>;
+export type AdminUsageRestrictions = z.output<typeof AdminUsageRestrictionsSchema>;
 export type AdminUser = z.output<typeof AdminUserSchema>;
 export type AdminUsers = z.output<typeof AdminUsersSchema>;
 export type FavoriteListingEntry = {
@@ -478,6 +489,7 @@ export type FavoriteZoneTransportPoint = {
 export type FavoriteZonePayload = {
   fingerprint: string;
   journey_id: string;
+  color?: string | null;
   transport_point_id?: string | null;
   transport_point?: FavoriteZoneTransportPoint | null;
   neighborhood_name?: string | null;
@@ -486,8 +498,20 @@ export type FavoriteZonePayload = {
   isochrone_geom?: unknown;
   poi_counts?: Record<string, number> | null;
   poi_points: FavoriteZonePoiPoint[];
+  transport_summary?: {
+    bus_stop_count?: number;
+    bus_line_count?: number;
+    bus_terminal_count?: number;
+    train_metro_platform_count?: number;
+    train_metro_line_count?: number;
+    bus_stop_line_count?: number;
+    bus_line_names?: string[];
+    train_metro_station_count?: number;
+    train_metro_line_names?: string[];
+  } | null;
+  property_type_counts?: Record<string, number>;
   metrics: FavoriteZoneMetricsSnapshot;
-  listings: unknown[];
+  listings: Array<z.output<typeof ListingCardReadBackendSchema>>;
 };
 
 export type FavoriteZoneEntry = {
@@ -498,10 +522,13 @@ export type FavoriteZoneEntry = {
   usageType: string;
   savedAt: string;
   payload: FavoriteZonePayload;
+  color?: string;
+  share?: z.output<typeof FavoriteZoneShareReadSchema> | null;
   note: string | null;
 };
 
-function mapFavoriteZoneEntry(entry: z.output<typeof FavoriteZoneBackendSchema>): FavoriteZoneEntry {
+function mapFavoriteZoneEntry(input: z.input<typeof FavoriteZoneBackendSchema>): FavoriteZoneEntry {
+  const entry = FavoriteZoneBackendSchema.parse(input);
   const raw = (entry.payload || {}) as Partial<FavoriteZonePayload>;
   const poiPoints: FavoriteZonePoiPoint[] = Array.isArray(raw.poi_points)
     ? (raw.poi_points as FavoriteZonePoiPoint[]).map((poi) => ({
@@ -546,9 +573,16 @@ function mapFavoriteZoneEntry(entry: z.output<typeof FavoriteZoneBackendSchema>)
       isochrone_geom: raw.isochrone_geom ?? null,
       poi_counts: raw.poi_counts ?? null,
       poi_points: poiPoints,
+      color: entry.color ?? raw.color ?? "#0ea5e9",
+      transport_summary: raw.transport_summary ?? null,
+      property_type_counts: raw.property_type_counts ?? {},
       metrics: (raw.metrics as FavoriteZoneMetricsSnapshot) || {},
-      listings: Array.isArray(raw.listings) ? (raw.listings as unknown[]) : [],
+      listings: Array.isArray(raw.listings)
+        ? raw.listings.map((listing) => ListingCardReadBackendSchema.parse(listing))
+        : [],
     },
+    color: entry.color ?? raw.color ?? "#0ea5e9",
+    share: entry.share ? FavoriteZoneShareReadSchema.parse(entry.share) : null,
     note: entry.note ?? null,
   };
 }
@@ -590,6 +624,41 @@ export async function updateZoneFavoriteNote(zoneKey: string, note: string): Pro
   return mapFavoriteZoneEntry(response);
 }
 
+export async function updateZoneFavoriteColor(zoneKey: string, color: string): Promise<FavoriteZoneEntry> {
+  const response = await requestJson(`/favorites/zones/${encodeURIComponent(zoneKey)}/color`, FavoriteZoneBackendSchema, {
+    method: "PATCH",
+    body: { color },
+  });
+  return mapFavoriteZoneEntry(response);
+}
+
+export type FavoriteZoneShareRead = z.output<typeof FavoriteZoneShareReadSchema>;
+
+export async function createZoneFavoriteShare(zoneKey: string): Promise<FavoriteZoneShareRead> {
+  return await requestJson(
+    `/favorites/zones/${encodeURIComponent(zoneKey)}/share`,
+    FavoriteZoneShareReadSchema,
+    { method: "POST" },
+  );
+}
+
+export async function revokeZoneFavoriteShare(zoneKey: string): Promise<void> {
+  await requestJson(`/favorites/zones/${encodeURIComponent(zoneKey)}/share`, z.object({}).optional(), {
+    method: "DELETE",
+  });
+}
+
+export async function getZoneFavoriteShare(token: string): Promise<FavoriteZoneEntry> {
+  const response = await requestJson(
+    `/zone-shares/${encodeURIComponent(token)}`,
+    FavoriteZoneShareSnapshotReadSchema,
+  );
+  return mapFavoriteZoneEntry({
+    ...response.zone,
+    share: response.share,
+  });
+}
+
 export async function updateListingFavoriteNote(listingKey: string, note: string): Promise<FavoriteListingEntry> {
   const response = await requestJson(`/favorites/${encodeURIComponent(listingKey)}/note`, FavoriteListingBackendSchema, {
     method: "PATCH",
@@ -599,6 +668,16 @@ export async function updateListingFavoriteNote(listingKey: string, note: string
 }
 
 export type SearchAddressSuggestion = z.output<typeof SearchAddressSuggestionBackendSchema>;
+export type ReferenceAddressSuggestion = z.output<typeof ReferenceAddressSuggestionBackendSchema>;
+
+export async function geocodeReferenceAddress(q: string): Promise<ReferenceAddressSuggestion[]> {
+  const response = await requestJson("/api/geocode", GeocodeResponseSchema, {
+    method: "POST",
+    body: { q },
+  });
+  return response.suggestions;
+}
+
 export async function getZoneAddressSuggestions(
   journeyId: string,
   zoneFingerprint: string,
@@ -848,11 +927,44 @@ export async function updateJourney(
   })) as JourneyRead;
 }
 
+export async function createJourneyShare(journeyId: string): Promise<JourneyShareRead> {
+  return (await requestJson(`/journeys/${encodeURIComponent(journeyId)}/share`, JourneyShareReadSchema, {
+    method: "POST"
+  })) as JourneyShareRead;
+}
+
+export async function revokeJourneyShare(journeyId: string): Promise<void> {
+  await requestJson(`/journeys/${encodeURIComponent(journeyId)}/share`, z.object({}).optional(), {
+    method: "DELETE"
+  });
+}
+
+export async function getJourneyShare(token: string): Promise<JourneyShareSnapshotRead> {
+  return (await requestJson(
+    `/journeys/shares/${encodeURIComponent(token)}`,
+    JourneyShareSnapshotReadSchema
+  )) as JourneyShareSnapshotRead;
+}
+
 export async function getJourneyZonesList(journeyId: string) {
   return (await requestJson(
     `/journeys/${journeyId}/zones`,
     JourneyZonesListResponseSchema
   )) as z.output<typeof JourneyZonesListResponseSchema>;
+}
+
+export async function createManualJourneyZone(
+  journeyId: string,
+  geometry: GeoJSON.Polygon,
+  label?: string | null
+) {
+  return await requestJson(`/journeys/${encodeURIComponent(journeyId)}/zones/manual`, JourneyZoneReadSchema, {
+    method: "POST",
+    body: {
+      geometry,
+      label: label ?? null,
+    },
+  });
 }
 
 export async function getJourneyZoneSafetyIncidents(
@@ -1079,6 +1191,19 @@ export async function getAdminUsers(q = ""): Promise<AdminUsers> {
   return (await requestJson(`/admin/users${params}`, AdminUsersSchema)) as AdminUsers;
 }
 
+export async function getAdminUsageRestrictions(): Promise<AdminUsageRestrictions> {
+  return (await requestJson("/admin/users/usage-restrictions/global", AdminUsageRestrictionsSchema)) as AdminUsageRestrictions;
+}
+
+export async function updateAdminGlobalUsageRestrictions(
+  usageRestrictionsDisabledGlobally: boolean,
+): Promise<AdminUsageRestrictions> {
+  return (await requestJson("/admin/users/usage-restrictions/global", AdminUsageRestrictionsSchema, {
+    method: "PATCH",
+    body: { usage_restrictions_disabled_globally: usageRestrictionsDisabledGlobally },
+  })) as AdminUsageRestrictions;
+}
+
 export async function updateAdminUserRole(userId: string, role: "user" | "proprietario"): Promise<AdminUser> {
   return (await requestJson(`/admin/users/${encodeURIComponent(userId)}/role`, AdminUserSchema, {
     method: "PATCH",
@@ -1093,5 +1218,15 @@ export async function updateAdminUserScrapingPermission(
   return (await requestJson(`/admin/users/${encodeURIComponent(userId)}/scraping-permission`, AdminUserSchema, {
     method: "PATCH",
     body: { can_start_immediate_scraping: canStartImmediateScraping },
+  })) as AdminUser;
+}
+
+export async function updateAdminUserUsageRestrictions(
+  userId: string,
+  usageRestrictionsDisabled: boolean,
+): Promise<AdminUser> {
+  return (await requestJson(`/admin/users/${encodeURIComponent(userId)}/usage-restrictions`, AdminUserSchema, {
+    method: "PATCH",
+    body: { usage_restrictions_disabled: usageRestrictionsDisabled },
   })) as AdminUser;
 }

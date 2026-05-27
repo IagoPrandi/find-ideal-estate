@@ -7,6 +7,8 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
 from .enums import JourneyState
+from .transport import TransportPointRead
+from .zones import ZoneListResponse
 
 
 class JourneyReferencePoint(BaseModel):
@@ -48,3 +50,33 @@ class JourneyRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     expires_at: datetime | None = None
+
+
+class JourneyPublicRead(BaseModel):
+    model_config = ConfigDict(use_enum_values=True)
+
+    id: UUID
+    state: JourneyState
+    input_snapshot: dict[str, Any] | None = None
+    selected_transport_point_id: UUID | None = None
+    selected_zone_id: UUID | None = None
+    selected_property_id: UUID | None = None
+    last_completed_step: int | None = None
+    secondary_reference_label: str | None = None
+    secondary_reference_point: JourneyReferencePoint | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class JourneyShareRead(BaseModel):
+    token: str
+    journey_id: UUID
+    created_at: datetime
+    revoked_at: datetime | None = None
+
+
+class JourneyShareSnapshotRead(BaseModel):
+    share: JourneyShareRead
+    journey: JourneyPublicRead
+    transport_points: list[TransportPointRead] = []
+    zones: ZoneListResponse

@@ -10,12 +10,15 @@ services:
     depends_on: !override
       redis:
         condition: service_healthy
-    environment:
-      DATABASE_URL: ${DATABASE_URL:?Defina DATABASE_URL apontando para o RDS}
+    environment: !override
       DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
       DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-5}
       DB_POOL_TIMEOUT_SECONDS: ${DB_POOL_TIMEOUT_SECONDS:-30}
       REDIS_URL: redis://redis:6379/0
+      DRAMATIQ_BROKER: ${DRAMATIQ_BROKER:-redis}
+      MAPTILER_API_KEY: ${MAPTILER_API_KEY:-${VITE_MAPTILER_API_KEY:-local-dev-key}}
+      VALHALLA_URL: ${VALHALLA_URL:-http://host.docker.internal:8002}
+      OTP_URL: ${OTP_URL:-http://otp:8080}
     volumes: []
 
   worker:
@@ -24,12 +27,15 @@ services:
     depends_on: !override
       redis:
         condition: service_healthy
-    environment:
-      DATABASE_URL: ${DATABASE_URL:?Defina DATABASE_URL apontando para o RDS}
+    environment: !override
       DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
       DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-5}
       DB_POOL_TIMEOUT_SECONDS: ${DB_POOL_TIMEOUT_SECONDS:-30}
       REDIS_URL: redis://redis:6379/0
+      DRAMATIQ_BROKER: ${DRAMATIQ_BROKER:-redis}
+      MAPTILER_API_KEY: ${MAPTILER_API_KEY:-${VITE_MAPTILER_API_KEY:-local-dev-key}}
+      VALHALLA_URL: ${VALHALLA_URL:-http://host.docker.internal:8002}
+      OTP_URL: ${OTP_URL:-http://otp:8080}
     volumes: []
 
   worker-scrape-browser:
@@ -37,12 +43,15 @@ services:
     depends_on: !override
       redis:
         condition: service_healthy
-    environment:
-      DATABASE_URL: ${DATABASE_URL:?Defina DATABASE_URL apontando para o RDS}
+    environment: !override
       DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
       DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-5}
       DB_POOL_TIMEOUT_SECONDS: ${DB_POOL_TIMEOUT_SECONDS:-30}
       REDIS_URL: redis://redis:6379/0
+      DRAMATIQ_BROKER: ${DRAMATIQ_BROKER:-redis}
+      MAPTILER_API_KEY: ${MAPTILER_API_KEY:-${VITE_MAPTILER_API_KEY:-local-dev-key}}
+      VALHALLA_URL: ${VALHALLA_URL:-http://host.docker.internal:8002}
+      OTP_URL: ${OTP_URL:-http://otp:8080}
     volumes: []
 
   worker-prewarm:
@@ -50,12 +59,15 @@ services:
     depends_on: !override
       redis:
         condition: service_healthy
-    environment:
-      DATABASE_URL: ${DATABASE_URL:?Defina DATABASE_URL apontando para o RDS}
+    environment: !override
       DB_POOL_SIZE: ${DB_POOL_SIZE:-5}
       DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-5}
       DB_POOL_TIMEOUT_SECONDS: ${DB_POOL_TIMEOUT_SECONDS:-30}
       REDIS_URL: redis://redis:6379/0
+      DRAMATIQ_BROKER: ${DRAMATIQ_BROKER:-redis}
+      MAPTILER_API_KEY: ${MAPTILER_API_KEY:-${VITE_MAPTILER_API_KEY:-local-dev-key}}
+      VALHALLA_URL: ${VALHALLA_URL:-http://host.docker.internal:8002}
+      OTP_URL: ${OTP_URL:-http://otp:8080}
     volumes: []
 
   postgres:

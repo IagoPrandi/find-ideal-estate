@@ -64,6 +64,32 @@ class ScraperDisallowedError(ScraperError):
     """Raised when robots.txt disallows scraping the target path."""
 
 
+async def raise_if_access_blocked(page: Any, platform_label: str) -> None:
+    """Detect public anti-bot block pages before treating a scrape as empty."""
+    title = ""
+    body = ""
+    try:
+        title = await page.title()
+    except Exception:
+        title = ""
+    try:
+        body = await page.locator("body").inner_text(timeout=2500)
+    except Exception:
+        body = ""
+
+    haystack = f"{title}\n{body}".lower()
+    blocked_markers = (
+        "attention required! | cloudflare",
+        "sorry, you have been blocked",
+        "cloudflare ray id",
+        "you are unable to access",
+    )
+    if any(marker in haystack for marker in blocked_markers):
+        raise ScraperError(
+            f"{platform_label} bloqueou o acesso via Cloudflare; scraping não executado."
+        )
+
+
 def check_robots_txt(base_url: str, path: str, user_agent: str = "*") -> bool:
     """
     Returns True if the given path is allowed for `user_agent` in robots.txt.

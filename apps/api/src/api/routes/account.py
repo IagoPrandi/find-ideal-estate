@@ -8,7 +8,7 @@ from fastapi import APIRouter, Cookie, Depends, HTTPException, status
 from modules.auth.service import AUTH_SESSION_COOKIE, RequestAuthContext, build_request_auth_context
 from modules.credits.service import get_user_credits
 from modules.journeys.service import ANONYMOUS_SESSION_COOKIE
-from modules.plans.service import get_active_plan_activation
+from modules.plans.service import get_active_plan_activation, resolve_entitlements
 
 router = APIRouter(prefix="/account", tags=["account"])
 
@@ -28,6 +28,16 @@ async def _require_auth(
 
 @router.get("/plan", response_model=AccountPlanRead)
 async def get_my_plan(ctx: RequestAuthContext = Depends(_require_auth)) -> AccountPlanRead:
+    resolved = await resolve_entitlements(ctx.user.id)
+    if resolved.plan.slug == "proprietario":
+        return AccountPlanRead(
+            plan=resolved.plan,
+            status="active",
+            started_at=None,
+            ends_at=None,
+            entitlements=resolved.entitlements,
+        )
+
     plan = await get_active_plan_activation(ctx.user.id)
     if plan is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Nenhum plano ativo encontrado.")

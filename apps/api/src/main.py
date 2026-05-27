@@ -8,6 +8,8 @@ from api.routes.admin_users import router as admin_users_router
 from api.routes.auth import router as auth_router
 from api.routes.billing import router as billing_router
 from api.routes.favorites import router as favorites_router
+from api.routes.zone_favorites import alias_router as zone_favorites_alias_router
+from api.routes.zone_favorites import public_router as zone_favorite_shares_router
 from api.routes.zone_favorites import router as zone_favorites_router
 from api.routes.geocode import router as geocode_router
 from api.routes.health import router as health_router
@@ -99,6 +101,8 @@ app.include_router(admin_scraping_router)
 app.include_router(admin_users_router)
 app.include_router(favorites_router)
 app.include_router(zone_favorites_router)
+app.include_router(zone_favorites_alias_router)
+app.include_router(zone_favorite_shares_router)
 app.include_router(internal_router)
 app.include_router(geocode_router)
 app.include_router(transport_router)

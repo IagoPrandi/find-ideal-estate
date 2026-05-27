@@ -7,6 +7,7 @@ export const AuthUserReadSchema = z.object({
   is_active: z.boolean(),
   is_superuser: z.boolean().optional().default(false),
   can_start_immediate_scraping: z.boolean().optional().default(false),
+  usage_restrictions_disabled: z.boolean().optional().default(false),
   created_at: z.string(),
   role: z.string().optional().default("user"),
 });
@@ -14,7 +15,8 @@ export const AuthUserReadSchema = z.object({
 export const AuthStatusReadSchema = z.object({
   is_authenticated: z.boolean(),
   user: AuthUserReadSchema.nullable().optional(),
-  session_expires_at: z.string().nullable().optional()
+  session_expires_at: z.string().nullable().optional(),
+  usage_restrictions_disabled_globally: z.boolean().optional().default(false),
 });
 
 export const RunStatusSchema = z.object({
@@ -65,6 +67,7 @@ export const JourneyZoneReadSchema = z.object({
   transport_point_id: z.string().nullable().optional(),
   fingerprint: z.string(),
   state: z.string(),
+  origin: z.string().optional().default("generated"),
   is_circle_fallback: z.boolean().optional().default(false),
   travel_time_minutes: z.number().nullable().optional(),
   walk_distance_meters: z.number().nullable().optional(),
@@ -113,6 +116,18 @@ export const JourneyZoneReadSchema = z.object({
     p50_price: z.number().nullable().optional(),
     active_listing_count: z.number().optional().default(0),
   }).nullable().optional(),
+  transport_summary: z.object({
+    bus_stop_count: z.number().optional().default(0),
+    bus_line_count: z.number().optional().default(0),
+    bus_terminal_count: z.number().optional().default(0),
+    train_metro_platform_count: z.number().optional().default(0),
+    train_metro_line_count: z.number().optional().default(0),
+    bus_stop_line_count: z.number().optional().default(0),
+    bus_line_names: z.array(z.string()).optional().default([]),
+    train_metro_station_count: z.number().optional().default(0),
+    train_metro_line_names: z.array(z.string()).optional().default([]),
+  }).nullable().optional(),
+  property_type_counts: z.record(z.number()).optional().default({}),
   badges_provisional: z.any().nullable().optional(),
   created_at: z.string().nullable().optional(),
   updated_at: z.string().nullable().optional()
@@ -131,6 +146,15 @@ export const SearchAddressSuggestionBackendSchema = z.object({
   location_type: z.string(),
   lat: z.number(),
   lon: z.number()
+});
+
+export const ReferenceAddressSuggestionBackendSchema = SearchAddressSuggestionBackendSchema.extend({
+  id: z.string().nullable().optional()
+});
+
+export const GeocodeResponseSchema = z.object({
+  suggestions: z.array(ReferenceAddressSuggestionBackendSchema),
+  cache_hit: z.boolean().optional().default(false)
 });
 
 // Backend: POST /journeys/{journey_id}/listings/search
@@ -213,7 +237,21 @@ export const FavoriteZoneBackendSchema = z.object({
   usage_type: z.string(),
   saved_at: z.string(),
   payload: z.any(),
+  color: z.string().optional().default("#0ea5e9"),
+  share: z.any().nullable().optional(),
   note: z.string().nullable().optional(),
+});
+
+export const FavoriteZoneShareReadSchema = z.object({
+  token: z.string().nullable().optional(),
+  zone_key: z.string(),
+  created_at: z.string(),
+  revoked_at: z.string().nullable().optional(),
+});
+
+export const FavoriteZoneShareSnapshotReadSchema = z.object({
+  share: FavoriteZoneShareReadSchema,
+  zone: FavoriteZoneBackendSchema,
 });
 
 export const ListingsScrapePlatformDiagnosticsSchema = z.object({
@@ -569,6 +607,26 @@ export const JourneyReadSchema = z.object({
   expires_at: z.string().nullish()
 });
 
+export const JourneyPublicReadSchema = JourneyReadSchema.omit({
+  user_id: true,
+  anonymous_session_id: true,
+  expires_at: true
+});
+
+export const JourneyShareReadSchema = z.object({
+  token: z.string(),
+  journey_id: z.string(),
+  created_at: z.string(),
+  revoked_at: z.string().nullish()
+});
+
+export const JourneyShareSnapshotReadSchema = z.object({
+  share: JourneyShareReadSchema,
+  journey: JourneyPublicReadSchema,
+  transport_points: z.array(TransportPointReadSchema).default([]),
+  zones: JourneyZonesListResponseSchema
+});
+
 export const JobReadSchema = z.object({
   id: z.string(),
   journey_id: z.string().nullish(),
@@ -659,6 +717,7 @@ export const AdminUserSchema = z.object({
   is_active: z.boolean(),
   is_superuser: z.boolean(),
   can_start_immediate_scraping: z.boolean().optional().default(false),
+  usage_restrictions_disabled: z.boolean().optional().default(false),
   role: z.string(),
   created_at: z.string(),
 });
@@ -668,6 +727,10 @@ export const AdminUsersSchema = z.object({
   total_count: z.number(),
   limit: z.number(),
   offset: z.number(),
+});
+
+export const AdminUsageRestrictionsSchema = z.object({
+  usage_restrictions_disabled_globally: z.boolean().optional().default(false),
 });
 
 export type RunCreateResponse = {
@@ -870,6 +933,12 @@ export type JourneyRead = {
   updated_at: string;
   expires_at?: string | null;
 };
+
+export type JourneyPublicRead = z.output<typeof JourneyPublicReadSchema>;
+
+export type JourneyShareRead = z.output<typeof JourneyShareReadSchema>;
+
+export type JourneyShareSnapshotRead = z.output<typeof JourneyShareSnapshotReadSchema>;
 
 export type JobRead = {
   id: string;

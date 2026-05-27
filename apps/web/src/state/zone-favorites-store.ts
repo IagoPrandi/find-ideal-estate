@@ -71,6 +71,8 @@ type ZoneFavoritesState = {
   toggleZoneMetric: (metricId: ZoneMetricId) => void;
   toggleZoneMapVisibility: (zoneKey: string) => void;
   updateZoneNote: (zoneKey: string, note: string) => Promise<boolean>;
+  updateZoneColor: (zoneKey: string, color: string) => Promise<boolean>;
+  shareZone: (zoneKey: string) => Promise<string | null>;
   setPanelOpen: (value: boolean) => void;
   togglePanel: () => void;
   setActiveTab: (value: ZoneFavoritesPanelTab) => void;
@@ -109,6 +111,16 @@ async function deleteAccountZoneFavoriteApi(zoneKey: string) {
 async function updateZoneNoteApi(zoneKey: string, note: string) {
   const client = await import("../api/client");
   return client.updateZoneFavoriteNote(zoneKey, note);
+}
+
+async function updateZoneColorApi(zoneKey: string, color: string) {
+  const client = await import("../api/client");
+  return client.updateZoneFavoriteColor(zoneKey, color);
+}
+
+async function createZoneShareApi(zoneKey: string) {
+  const client = await import("../api/client");
+  return client.createZoneFavoriteShare(zoneKey);
 }
 
 export const useZoneFavoritesStore = create<ZoneFavoritesState>((set, get) => ({
@@ -201,6 +213,7 @@ export const useZoneFavoritesStore = create<ZoneFavoritesState>((set, get) => ({
       payload: {
         fingerprint: zoneFingerprint,
         journey_id: journeyId,
+        color: "#0ea5e9",
         transport_point_id: null,
         transport_point: null,
         neighborhood_name: null,
@@ -209,9 +222,13 @@ export const useZoneFavoritesStore = create<ZoneFavoritesState>((set, get) => ({
         isochrone_geom: null,
         poi_counts: null,
         poi_points: [],
+        transport_summary: null,
+        property_type_counts: {},
         metrics: {},
         listings: [],
       },
+      color: "#0ea5e9",
+      share: null,
       note: null,
     };
 
@@ -312,6 +329,43 @@ export const useZoneFavoritesStore = create<ZoneFavoritesState>((set, get) => ({
       return true;
     } catch {
       return false;
+    }
+  },
+  updateZoneColor: async (zoneKey, color) => {
+    if (!get().isAuthenticated) return false;
+    const previous = get().zoneFavorites.find((entry) => entry.zoneKey === zoneKey) || null;
+    set((state) => ({
+      zoneFavorites: state.zoneFavorites.map((entry) =>
+        entry.zoneKey === zoneKey ? { ...entry, color, payload: { ...entry.payload, color } } : entry,
+      ),
+    }));
+    try {
+      const updated = await updateZoneColorApi(zoneKey, color);
+      set((state) => ({
+        zoneFavorites: state.zoneFavorites.map((entry) => entry.zoneKey === zoneKey ? updated : entry),
+      }));
+      return true;
+    } catch {
+      if (previous) {
+        set((state) => ({
+          zoneFavorites: state.zoneFavorites.map((entry) => entry.zoneKey === zoneKey ? previous : entry),
+        }));
+      }
+      return false;
+    }
+  },
+  shareZone: async (zoneKey) => {
+    if (!get().isAuthenticated) return null;
+    try {
+      const share = await createZoneShareApi(zoneKey);
+      set((state) => ({
+        zoneFavorites: state.zoneFavorites.map((entry) =>
+          entry.zoneKey === zoneKey ? { ...entry, share } : entry,
+        ),
+      }));
+      return share.token ?? null;
+    } catch {
+      return null;
     }
   },
   setPanelOpen: (value) => set({ isPanelOpen: value }),

@@ -11,7 +11,7 @@ import re
 import unicodedata
 from typing import Any
 
-from .base import ScraperBase, _get_by_path
+from .base import ScraperBase, _get_by_path, raise_if_access_blocked
 from .vivareal import (
     _build_glue_ui_query,
     _glue_try_resolve_location_url,
@@ -165,12 +165,14 @@ class ZapImoveisScraper(ScraperBase):
 
         try:
             await page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
+            await raise_if_access_blocked(page, "ZapImóveis")
             try:
                 await page.wait_for_load_state("networkidle", timeout=15000)
             except Exception:
                 # Some pages keep background requests open; continue with a
                 # human-like pause so hydration can still complete.
                 await self._human_delay(2000, 3000)
+            await raise_if_access_blocked(page, "ZapImóveis")
 
             if self.search_address.strip():
                 glue_query = _build_glue_ui_query(self.search_address)
@@ -195,10 +197,12 @@ class ZapImoveisScraper(ScraperBase):
                         wait_until="domcontentloaded",
                         timeout=60000,
                     )
+                    await raise_if_access_blocked(page, "ZapImóveis")
                     try:
                         await page.wait_for_load_state("networkidle", timeout=15000)
                     except Exception:
                         await self._human_delay(1600, 2600)
+                    await raise_if_access_blocked(page, "ZapImóveis")
 
             max_pages = self._configured_max_pages(default=4)
             for _ in range(max_pages):

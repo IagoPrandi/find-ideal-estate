@@ -7,6 +7,7 @@ from contracts import AuthGoogleLoginRequest, AuthLoginRequest, AuthRegisterRequ
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response, status
 from modules.auth.service import (
     AUTH_SESSION_COOKIE,
+    RequestAuthContext,
     build_auth_status,
     build_request_auth_context,
     login_google_user,
@@ -52,7 +53,7 @@ async def get_current_auth_status(
     response: Response,
     auth_context=Depends(get_optional_auth_context),
 ) -> AuthStatusRead:
-    status_payload = build_auth_status(auth_context)
+    status_payload = await build_auth_status(auth_context)
     if not status_payload.is_authenticated and auth_context.session_token:
         _clear_auth_cookie(response)
     return status_payload
@@ -76,10 +77,13 @@ async def register_user_endpoint(
 
     max_age_seconds = _session_max_age_seconds(expires_at)
     _set_auth_cookie(response, session_token, max_age_seconds=max_age_seconds)
-    return AuthStatusRead(
-        is_authenticated=True,
-        user=user,
-        session_expires_at=expires_at,
+    return await build_auth_status(
+        RequestAuthContext(
+            user=user,
+            session_expires_at=expires_at,
+            session_token=session_token,
+            anonymous_session_id=auth_context.anonymous_session_id,
+        )
     )
 
 
@@ -99,10 +103,13 @@ async def login_user_endpoint(
 
     max_age_seconds = _session_max_age_seconds(expires_at)
     _set_auth_cookie(response, session_token, max_age_seconds=max_age_seconds)
-    return AuthStatusRead(
-        is_authenticated=True,
-        user=user,
-        session_expires_at=expires_at,
+    return await build_auth_status(
+        RequestAuthContext(
+            user=user,
+            session_expires_at=expires_at,
+            session_token=session_token,
+            anonymous_session_id=auth_context.anonymous_session_id,
+        )
     )
 
 
@@ -128,10 +135,13 @@ async def login_google_user_endpoint(
 
     max_age_seconds = _session_max_age_seconds(expires_at)
     _set_auth_cookie(response, session_token, max_age_seconds=max_age_seconds)
-    return AuthStatusRead(
-        is_authenticated=True,
-        user=user,
-        session_expires_at=expires_at,
+    return await build_auth_status(
+        RequestAuthContext(
+            user=user,
+            session_expires_at=expires_at,
+            session_token=session_token,
+            anonymous_session_id=auth_context.anonymous_session_id,
+        )
     )
 
 
@@ -142,4 +152,11 @@ async def logout_user_endpoint(
 ) -> AuthStatusRead:
     await revoke_session_by_token(auth_context.session_token)
     _clear_auth_cookie(response)
-    return AuthStatusRead(is_authenticated=False, user=None, session_expires_at=None)
+    return await build_auth_status(
+        RequestAuthContext(
+            user=None,
+            session_expires_at=None,
+            session_token=None,
+            anonymous_session_id=auth_context.anonymous_session_id,
+        )
+    )
