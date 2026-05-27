@@ -1,5 +1,7 @@
 # Work Log
 
+- 2026-05-27 (correção da ferramenta de desenhar área): `PRD.md`, `SKILLS_README.md` e `skills/develop-frontend/SKILL.md` foram abertos antes da execução. Skill usada: `develop-frontend`, pois o escopo corrigiu uma interação de UI no mapa. Em `apps/web/src/features/app/FindIdealApp.tsx`, o fluxo iniciado por "Desenhar área no mapa" agora colapsa o painel para liberar o mapa, mantém cursor de desenho mesmo ao sair de camadas interativas, mostra vértices desde o primeiro clique por meio da nova layer `drawn-zone-vertex-layer`, padroniza os textos de UI para "área" e salva a geometria manual indo direto para a comparação. Em `apps/web/src/features/app/FindIdealApp.test.tsx`, foi adicionada regressão cobrindo início do pedido de desenho, renderização dos vértices, criação da zona manual, seleção da zona criada e navegação para a etapa 4. Validação: `npm run test:run -- src/features/app/FindIdealApp.test.tsx -t "manual area drawing"` passou com `1 passed`; `npm run test:run -- src/components/panels/Step1Config.test.tsx src/features/app/FindIdealApp.test.tsx -t "manual area drawing|Step1Config"` passou com `6 passed`; `git diff --check` sem erros, apenas avisos LF/CRLF. Limite de validação: `npm run test:run -- src/features/app/FindIdealApp.test.tsx` ainda falha em teste preexistente de expectativa visual para `saved-zone-pois-layer` (`icon-size` esperado `0.252/0.456/0.6`, valor atual `0.28/0.48/0.64`), não relacionado ao desenho de área. Nenhuma milestone do PRD foi marcada, pois não houve confirmação explícita do responsável.
+
 - 2026-05-21 (deploy backend analytics de zonas favoritas): `PRD.md`, `SKILLS_README.md` e `skills/release-config-management/SKILL.md` foram abertos antes da execucao. Skill usada: `release-config-management`, pois o escopo foi rollout backend em producao. Alteracao publicada: `apps/api/src/modules/dashboard/analytics.py`, onde `fetch_zone_favorite_analytics` usa `asyncio.gather` para buscar em paralelo as paginas `preco`, `seguranca` e `ambiente`. Validacao local focada: `python -m pytest apps/api/tests/test_phase6_dashboard_analytics.py::test_fetch_zone_favorite_analytics_builds_lightweight_metrics apps/api/tests/test_phase6_dashboard_analytics.py::test_get_zone_favorite_analytics_route_returns_contract -q` passou com `2 passed`; `python -m py_compile apps/api/src/modules/dashboard/analytics.py apps/api/src/api/routes/journeys.py` passou. Limite de validacao: a suite ampla `apps/api/tests/test_phase6_dashboard_analytics.py -q` falhou em 4 testes antigos/adjacentes de `fetch_zone_dashboard_analytics`, funcao nao alterada neste rollout, por expectativas de numero de queries. Deploy: backup do arquivo anterior criado na EC2 em `/home/ubuntu/app_backups/analytics_before_20260521T220505Z.py.bak`; arquivo atualizado copiado para `/opt/app`; imagens `api`, `worker`, `worker-prewarm` e `worker-scrape-browser` reconstruidas e containers recriados. Validacao producao: containers `Up`, API `healthy`; Alembic segue em `20260521_0036 (head)`; `https://api.betterplace.com.br/health` retornou `200 {"status":"ok","db":"ok","redis":"ok"}`; introspeccao dentro do container `api` confirmou `asyncio.gather` em `fetch_zone_favorite_analytics`; logs recentes sem `error/exception/traceback/failed/fatal/no such file`. Nenhuma milestone do PRD foi marcada, pois nao houve confirmacao explicita do responsavel.
 
 - 2026-05-21 (deploy backend producao scraping imediato): `PRD.md`, `SKILLS_README.md` e `skills/release-config-management/SKILL.md` foram abertos antes da execucao. Skill usada: `release-config-management`, pois o escopo foi rollout backend em producao com migration, Docker Compose e RDS. Pre-check local: worktree limpo no commit `9a60bbff7f6058bd0765dd33a8cdcb7542d908b9` (`feat: add user permission for immediate listings scraping`) e teste focado `python -m pytest apps/api/tests/test_admin_scraping.py apps/api/tests/test_phase5_stale_revalidate.py apps/api/tests/test_phase5_scraping_lock.py apps/api/tests/test_phase7_prewarm.py -q` passou com `38 passed`. Deploy: archive Git backend (`apps/api`, `packages/contracts`, `infra`, `docker`, `alembic.ini`, `platforms.yaml`, `requirements.txt`, `docker-compose*.yml`) enviado para a EC2 `18.117.21.132` e extraido em `/opt/app`, preservando `.env`/dados locais. Backup de rollback criado em `/home/ubuntu/app_backups/app_before_backend_20260521T2140Z.tgz`. Containers `api`, `worker`, `worker-prewarm` e `worker-scrape-browser` foram reconstruidos e recriados. Durante o primeiro restart, `docker/entrypoint.sh` entrou com CRLF e causou `exec /app/docker/entrypoint.sh: no such file or directory`; corrigido na EC2 com `sed -i 's/\r$//' docker/entrypoint.sh`, seguido de novo rebuild/recreate. Validacao producao: containers finais `Up`, API `healthy`; Alembic em `20260521_0036 (head)`; `/health` publico retornou `200 {"status":"ok","db":"ok","redis":"ok"}`; RDS confirma coluna `users.can_start_immediate_scraping`; usuario `iago.oliveira2478@gmail.com` esta `is_active=true`, `is_superuser=true`, `can_start_immediate_scraping=true`, `role='proprietario'`; `/admin/users` sem sessao retorna `401`; logs recentes sem `error/exception/traceback/failed/fatal`. Nenhuma milestone do PRD foi marcada, pois nao houve confirmacao explicita do responsavel.
@@ -6666,3 +6668,30 @@
 
 - Progress Tracker:
   - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
+
+## 2026-05-27 - Zona desenhada sem transporte e com POIs
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/develop-frontend/SKILL.md`
+
+- Skill used:
+  - `skills/develop-frontend/SKILL.md`
+
+- Scope executed:
+  - `Step1Config` agora trata `Desenhar area` como fluxo proprio: oculta controles de deslocamento, opcoes de transporte, tempo e raio de transporte, mantendo tipo de imovel e analises urbanas.
+  - O snapshot de jornadas por area passa a gravar campos de transporte como `null`.
+  - `ProgressTracker` considera `referenceInputMode` e, no fluxo de area desenhada, mostra apenas Configuracao, Comparacao, Endereco e Analise.
+  - A ferramenta flutuante idle de desenho foi removida; permanecem apenas os controles ativos de vertices, salvar area e cancelar quando o desenho e iniciado pelo painel.
+  - `zoneNeedsPoiBackfill`, `Step4Compare` e o worker de `zone_enrichment` agora incluem zonas desenhadas/completas com `poi_counts` ou `poi_points` ausentes no backfill de POIs.
+  - A comparacao exibe estado de enriquecimento/carregamento enquanto os POIs pendentes sao carregados.
+
+- Verification executed:
+  - `npm run test:run -- src/components/panels/Step1Config.test.tsx src/components/panels/ProgressTracker.test.tsx src/components/panels/Step4Compare.test.tsx src/features/app/FindIdealApp.test.tsx` -> `42 passed`; warnings conhecidos de `act(...)` no `FindIdealApp.test.tsx`.
+  - `python -m pytest apps/api/tests/test_zone_enrichment_priority.py` -> `4 passed`.
+  - `npm run typecheck` -> ainda falha por erros TypeScript preexistentes fora deste escopo (`src/api/client.ts`, `FavoritesPanel.tsx`, `Step2Transport.tsx`, `Step6Analysis.test.tsx`, re-export duplicado em `src/lib/api/index.ts`, e testes antigos de `journey-store`).
+  - `pytest apps/api/tests/test_zone_enrichment_priority.py` direto nao rodou porque `pytest` nao esta no PATH; `python -m pytest` rodou com sucesso.
+
+- Progress Tracker:
+  - Nenhuma milestone do PRD foi marcada como concluida; politica de confirmacao explicita preservada.

@@ -23,6 +23,8 @@ from workers.middleware import emit_stage_progress
 from workers.queue import QUEUE_ENRICHMENT
 from workers.runtime import run_job_with_retry
 
+REQUIRED_POI_CATEGORIES = ("school", "supermarket", "pharmacy", "park", "restaurant", "gym")
+
 
 def _parse_bool(value: Any, default: bool) -> bool:
     if isinstance(value, bool):
@@ -143,27 +145,48 @@ async def dispatch_enrichment_subjobs(
     }
 
 
-async def _load_remaining_zones(job_id: UUID) -> list[tuple[UUID, UUID | None, UUID | None]]:
+def _zone_requires_enrichment(
+    state: str | None,
+    poi_counts: Any,
+    poi_points: Any,
+    enrichments: dict[str, bool],
+) -> bool:
+    if state != "complete":
+        return True
+    if not enrichments.get("pois", True):
+        return False
+    if not isinstance(poi_counts, dict):
+        return True
+    if poi_points is None:
+        return True
+    return any(category not in poi_counts for category in REQUIRED_POI_CATEGORIES)
+
+
+async def _load_remaining_zones(job_id: UUID, enrichments: dict[str, bool]) -> list[tuple[UUID, UUID | None, UUID | None]]:
     engine = get_engine()
     async with engine.begin() as conn:
         zones_result = await conn.execute(
             text(
                 """
-                SELECT z.id, jz.journey_id, j.selected_zone_id
+                SELECT z.id, jz.journey_id, j.selected_zone_id, z.state, z.poi_counts, z.poi_points
                 FROM journey_zones jz
                 JOIN jobs jb ON jb.journey_id = jz.journey_id
                 JOIN journeys j ON j.id = jz.journey_id
                 JOIN zones z ON z.id = jz.zone_id
                 WHERE jb.id = :job_id
-                  AND z.state <> 'complete'
+                  AND (z.state <> 'complete' OR :include_pois = true)
                 ORDER BY jz.created_at ASC, z.created_at ASC
                 """
             ),
-            {"job_id": job_id},
+            {"job_id": job_id, "include_pois": bool(enrichments.get("pois", True))},
         )
         zone_rows = zones_result.fetchall()
 
-    return [(row[0], row[1], row[2]) for row in zone_rows]
+    return [
+        (row[0], row[1], row[2])
+        for row in zone_rows
+        if _zone_requires_enrichment(row[3], row[4], row[5], enrichments)
+    ]
 
 
 def _pick_next_zone_row(
@@ -221,7 +244,7 @@ async def _zone_enrichment_step(job_id: UUID) -> None:
 
     while processed_count < total:
         await check_cancellation(job_id)
-        remaining_rows = await _load_remaining_zones(job_id)
+        remaining_rows = await _load_remaining_zones(job_id, enrichment_flags)
         next_zone_row = _pick_next_zone_row(remaining_rows)
         if next_zone_row is None:
             break

@@ -17,7 +17,8 @@ type Props = {
 
 export function ProgressTracker({ currentStep, maxStep, isCollapsed, onStepClick, onToggleCollapse }: Props) {
   const modal = useJourneyStore((state) => state.config.modal);
-  const visibleSteps = getVisibleWizardSteps(modal);
+  const referenceInputMode = useJourneyStore((state) => state.referenceInputMode);
+  const visibleSteps = getVisibleWizardSteps(modal, referenceInputMode);
 
   return (
     <div className="flex items-center justify-between rounded-3xl border border-slate-200 bg-white/95 p-2.5 shadow-md backdrop-blur-md transition-all">

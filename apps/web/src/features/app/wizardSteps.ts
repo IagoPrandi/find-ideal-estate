@@ -1,6 +1,6 @@
 import { BarChart3, Layers, MapPinned, MapPin, RefreshCw, Settings2, Train } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import type { TravelMode } from "../../state/journey-store";
+import type { ReferenceInputMode, TravelMode } from "../../state/journey-store";
 
 /** Alinhado a PRD §9 (Etapas da jornada) e rótulos de `FRONTEND_GEMINI.html`. */
 export const WIZARD_STEP_IDS = [1, 2, 3, 4, 5, 6] as const;
@@ -20,7 +20,11 @@ export const WIZARD_STEPS: {
   { id: 6, title: "Análise", desc: "Imóveis e painel analítico", Icon: BarChart3 }
 ];
 
-export function getVisibleWizardSteps(modal: TravelMode) {
+export function getVisibleWizardSteps(modal: TravelMode, referenceInputMode: ReferenceInputMode = "point") {
+  if (referenceInputMode === "area") {
+    return WIZARD_STEPS.filter((step) => step.id === 1 || step.id >= 4);
+  }
+
   if (modal === "walk" || modal === "car") {
     return WIZARD_STEPS.filter((step) => step.id !== 2);
   }

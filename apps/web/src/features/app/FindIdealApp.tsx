@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, ChevronDown, Eye, EyeOff, Layers, PencilLine, Share2, X } from "lucide-react";
+import { Check, ChevronDown, Eye, EyeOff, Layers, Share2, X } from "lucide-react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { API_BASE, apiActionHint, createJourneyShare, createManualJourneyZone, getBusLineDetails, getBusStopDetails, getJourneyTransportPoints, getJourneyZonesList, getPublicSafetyIncidentsForViewport, getSelectedTransportTrace, getTransportStopDetails, getZoneListings, updateJourney } from "../../api/client";
@@ -68,6 +68,7 @@ const MAP_LAYER_STACK_ORDER = [
   "zones-runtime-outline-layer",
   "saved-zones-outline-layer",
   "drawn-zone-outline-layer",
+  "drawn-zone-vertex-layer",
   "bus-line-layer",
   "bus-line-direction-layer",
   "metro-line-layer",
@@ -781,7 +782,14 @@ const toZonePoisFeatureCollection = (
 });
 
 const toDrawnZoneFeatureCollection = (points: Array<[number, number]>): GeoJSON.FeatureCollection => {
-  const features: GeoJSON.Feature[] = [];
+  const features: GeoJSON.Feature[] = points.map((point, index) => ({
+    type: "Feature",
+    geometry: {
+      type: "Point",
+      coordinates: point,
+    },
+    properties: { kind: "vertex", index: index + 1 },
+  }));
   if (points.length >= 2) {
     features.push({
       type: "Feature",
@@ -985,6 +993,7 @@ export function FindIdealApp() {
   const step = useUIStore((state) => state.step);
   const goToStep = useUIStore((state) => state.goToStep);
   const setMaxStep = useUIStore((state) => state.setMaxStep);
+  const setCollapsed = useUIStore((state) => state.setCollapsed);
   const pickedCoord = useJourneyStore((state) => state.pickedCoord);
   const referenceInputMode = useJourneyStore((state) => state.referenceInputMode);
   const pendingManualAreaDrawing = useJourneyStore((state) => state.pendingManualAreaDrawing);
@@ -1118,16 +1127,19 @@ export function FindIdealApp() {
     }
   }
 
-  function startDrawingZone() {
+  const startDrawingZone = useCallback((options: { collapsePanel?: boolean } = {}) => {
     if (!journeyId) {
-      setManualZoneError("Crie a jornada antes de desenhar uma zona.");
+      setManualZoneError("Crie a jornada antes de desenhar uma área.");
       return;
     }
     setManualZoneError(null);
     setDrawnZonePoints([]);
     setIsPickingReferencePoint(false);
+    if (options.collapsePanel) {
+      setCollapsed(true);
+    }
     setIsDrawingZone(true);
-  }
+  }, [journeyId, setCollapsed, setIsPickingReferencePoint]);
 
   function cancelDrawingZone() {
     setIsDrawingZone(false);
@@ -1141,7 +1153,7 @@ export function FindIdealApp() {
     }
     const points = drawnZonePointsRef.current;
     if (points.length < 3) {
-      setManualZoneError("Desenhe pelo menos 3 vértices para criar uma zona.");
+      setManualZoneError("Desenhe pelo menos 3 vértices para criar uma área.");
       return;
     }
     setIsSavingManualZone(true);
@@ -1151,7 +1163,7 @@ export function FindIdealApp() {
         type: "Polygon",
         coordinates: [[...points, points[0]]],
       };
-      const zone = await createManualJourneyZone(journeyId, geometry, `Zona desenhada ${points.length} pontos`);
+      const zone = await createManualJourneyZone(journeyId, geometry, `Área desenhada ${points.length} pontos`);
       await queryClient.invalidateQueries({ queryKey: ["journey-zones", journeyId] });
       setSelectedZone(zone.id, zone.fingerprint);
       await updateJourney(journeyId, { selected_zone_id: zone.id, last_completed_step: 4 });
@@ -1171,8 +1183,8 @@ export function FindIdealApp() {
       return;
     }
     consumeManualAreaDrawingRequest();
-    startDrawingZone();
-  }, [consumeManualAreaDrawingRequest, journeyId, pendingManualAreaDrawing]);
+    startDrawingZone({ collapsePanel: true });
+  }, [consumeManualAreaDrawingRequest, journeyId, pendingManualAreaDrawing, startDrawingZone]);
 
   useEffect(() => {
     stepRef.current = step;
@@ -1735,6 +1747,19 @@ export function FindIdealApp() {
           "line-width": 2.4,
           "line-dasharray": [2, 1],
           "line-opacity": 0.95,
+        },
+      });
+
+      map.addLayer({
+        id: "drawn-zone-vertex-layer",
+        type: "circle",
+        source: DRAWN_ZONE_SOURCE_ID,
+        filter: ["==", ["get", "kind"], "vertex"],
+        paint: {
+          "circle-color": "#7c3aed",
+          "circle-radius": 5,
+          "circle-stroke-color": "#ffffff",
+          "circle-stroke-width": 2,
         },
       });
 
@@ -2331,7 +2356,7 @@ export function FindIdealApp() {
           map.getCanvas().style.cursor = "pointer";
         });
         map.on("mouseleave", layerId, () => {
-          map.getCanvas().style.cursor = stepRef.current === 1 && isPickingReferencePointRef.current ? "crosshair" : "";
+          map.getCanvas().style.cursor = isDrawingZoneRef.current || (stepRef.current === 1 && isPickingReferencePointRef.current) ? "crosshair" : "";
         });
       }
 
@@ -2340,7 +2365,7 @@ export function FindIdealApp() {
           map.getCanvas().style.cursor = "pointer";
         });
         map.on("mouseleave", layerId, () => {
-          map.getCanvas().style.cursor = stepRef.current === 1 && isPickingReferencePointRef.current ? "crosshair" : "";
+          map.getCanvas().style.cursor = isDrawingZoneRef.current || (stepRef.current === 1 && isPickingReferencePointRef.current) ? "crosshair" : "";
         });
       }
 
@@ -2383,8 +2408,8 @@ export function FindIdealApp() {
     const map = mapRef.current;
     if (!map || !isMapReady) return;
 
-    map.getCanvas().style.cursor = step === 1 && isPickingReferencePoint ? "crosshair" : "";
-  }, [isMapReady, isPickingReferencePoint, step]);
+    map.getCanvas().style.cursor = isDrawingZone || (step === 1 && isPickingReferencePoint) ? "crosshair" : "";
+  }, [isDrawingZone, isMapReady, isPickingReferencePoint, step]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -2610,7 +2635,7 @@ export function FindIdealApp() {
         const hasIncompleteZones = response.zones.some(
           (zone) => typeof zone.state === "string" && zone.state !== "complete" && zone.state !== "failed"
         );
-        const hasLegacyPoiZones = response.zones.some((zone) => zoneNeedsPoiBackfill(zone));
+        const hasPoiBackfillZones = config.enrichments.pois && response.zones.some((zone) => zoneNeedsPoiBackfill(zone));
         const selectedPoiPoints = ((selectedZone?.poi_points || []) as ZonePoiPointLike[]);
         setGeoJsonSourceData(
           activeMap,
@@ -2619,7 +2644,7 @@ export function FindIdealApp() {
         );
         setSelectedZonePoiState({ zoneFingerprint: selectedZoneFingerprint || null, poiPoints: selectedPoiPoints });
 
-        if (hasIncompleteZones || hasLegacyPoiZones) {
+        if (hasIncompleteZones || hasPoiBackfillZones) {
           pollTimeout = window.setTimeout(() => {
             void syncZones().catch(() => {
               if (!cancelled) {
@@ -2647,7 +2672,7 @@ export function FindIdealApp() {
         window.clearTimeout(pollTimeout);
       }
     };
-  }, [isMapReady, journeyId, selectedZoneFingerprint, step]);
+  }, [config.enrichments.pois, isMapReady, journeyId, selectedZoneFingerprint, step]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -3020,7 +3045,7 @@ export function FindIdealApp() {
       <AuthAccessCard />
       <FavoritesPanel />
       <div className="map-side-controls pointer-events-none absolute bottom-14 right-4 z-40 flex flex-col items-end gap-2">
-        {step >= 4 || journeyId ? (
+        {manualZoneError || isDrawingZone ? (
           <div className="pointer-events-auto flex max-w-[min(22rem,calc(100vw-2rem))] flex-col items-end gap-2">
             {manualZoneError ? (
               <p className="rounded-lg border border-rose-200 bg-white/95 px-3 py-2 text-xs font-medium text-rose-700 shadow-md">{manualZoneError}</p>
@@ -3035,7 +3060,7 @@ export function FindIdealApp() {
                   className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-pastel-violet-500 px-3 text-xs font-semibold text-white transition hover:bg-pastel-violet-600 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-500"
                 >
                   <Check className="h-3.5 w-3.5" />
-                  Salvar
+                  Salvar área
                 </button>
                 <button
                   type="button"
@@ -3046,17 +3071,7 @@ export function FindIdealApp() {
                   <X className="h-4 w-4" />
                 </button>
               </div>
-            ) : (
-              <button
-                type="button"
-                onClick={startDrawingZone}
-                disabled={!journeyId}
-                className="pointer-events-auto inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white/95 px-3 py-2 text-xs font-semibold text-slate-700 shadow-md backdrop-blur-md transition hover:bg-pastel-violet-50 hover:text-pastel-violet-700 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <PencilLine className="h-4 w-4" />
-                Desenhar zona
-              </button>
-            )}
+            ) : null}
           </div>
         ) : null}
         {isLayerMenuOpen ? (

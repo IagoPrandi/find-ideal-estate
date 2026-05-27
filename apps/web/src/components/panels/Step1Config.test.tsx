@@ -129,4 +129,40 @@ describe("Step1Config", () => {
     expect(useUIStore.getState().step).toBe(3);
     expect(useUIStore.getState().maxStep).toBe(3);
   });
+
+  it("hides transport controls and stores a transport-free snapshot in area mode", async () => {
+    render(<Step1Config />);
+
+    fireEvent.click(screen.getByRole("button", { name: /Desenhar área/i }));
+
+    expect(screen.getByText(/Tipo de imóvel para analisar/i)).toBeInTheDocument();
+    expect(screen.getByText(/Análises nas zonas/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Como pretende se deslocar/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Público/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/Raio de busca do transporte/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Tempo de caminhada/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Tempo de carro/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Residencial/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Desenhar área no mapa/i }));
+
+    await waitFor(() => {
+      expect(createJourney).toHaveBeenCalledWith(
+        expect.objectContaining({
+          input_snapshot: expect.objectContaining({
+            journey_input_mode: "area",
+            property_usage_type: "residential",
+            transport_mode: null,
+            public_transport_mode: null,
+            max_travel_minutes: null,
+            zone_radius_meters: null,
+            transport_search_radius_meters: null,
+          })
+        })
+      );
+    });
+
+    expect(useJourneyStore.getState().pendingManualAreaDrawing).toBe(true);
+    expect(useUIStore.getState().step).toBe(1);
+  });
 });

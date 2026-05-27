@@ -78,6 +78,30 @@ describe("ProgressTracker", () => {
     expect(screen.getByRole("button", { name: /Ir para etapa Zonas/i })).toBeInTheDocument();
   });
 
+  it("hides transport and generated zone steps when the journey input is a drawn area", () => {
+    useJourneyStore.setState((state) => ({
+      ...state,
+      referenceInputMode: "area"
+    }));
+
+    render(
+      <ProgressTracker
+        currentStep={4}
+        maxStep={4}
+        isCollapsed={false}
+        onStepClick={vi.fn()}
+        onToggleCollapse={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole("button", { name: /Ir para etapa Configuração/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Ir para etapa Comparação/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Ir para etapa Endereço/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Ir para etapa Análise/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Ir para etapa Transporte/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Ir para etapa Zonas/i })).not.toBeInTheDocument();
+  });
+
   it("calls onStepClick for unlocked steps", () => {
     const onStepClick = vi.fn();
 

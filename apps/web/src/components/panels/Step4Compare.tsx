@@ -263,6 +263,7 @@ function ZoneCard({
   journeyId,
   searchType,
   usageType,
+  poiBackfillPending,
 }: {
   zone: ZoneItem;
   isSelected: boolean;
@@ -271,9 +272,11 @@ function ZoneCard({
   journeyId: string | null;
   searchType: string;
   usageType: string;
+  poiBackfillPending?: boolean;
 }) {
   const isComplete = isZoneComplete(zone);
   const isProcessing = isZoneProcessing(zone);
+  const isPoiLoading = isProcessing || Boolean(poiBackfillPending);
   const statusLabel = getZoneStatusLabel(zone, isPrioritized);
   const showGreen = zone.green_vegetation_label !== null && zone.green_vegetation_label !== undefined;
   const poiPoints = zone.poi_points || [];
@@ -365,7 +368,7 @@ function ZoneCard({
         {showGreen || isProcessing ? <ZoneMetricChip label="Verde" value={isComplete ? formatRank(zone.journey_rankings?.green) : "Carregando"} tone="violet" /> : null}
         <ZoneMetricChip label="Alagamento" value={isComplete ? formatRank(zone.journey_rankings?.flood) : "Carregando"} tone="amber" />
         <ZoneMetricChip label="Valor mediano" value={priceChipValue} tone="rose" title={priceTooltip} />
-        <ZoneMetricChip label="Pontos de interesse" value={isComplete ? String(poiPoints.length) : "Carregando"} tone="slate" />
+        <ZoneMetricChip label="Pontos de interesse" value={isPoiLoading ? "Carregando" : String(poiPoints.length)} tone="slate" />
       </div>
 
       <div className="mb-4 flex flex-wrap gap-3 text-xs text-slate-500">
@@ -373,7 +376,7 @@ function ZoneCard({
         <span>
           {poiPoints.length > 0
             ? `${poiPoints.length} pontos de interesse mapeados`
-            : isProcessing
+            : isPoiLoading
               ? "Pontos de interesse detalhados em carregamento"
               : zone.poi_counts
                 ? `${Object.keys(zone.poi_counts).length} grupos de pontos de interesse`
@@ -443,11 +446,11 @@ export function Step4Compare() {
     [query.data?.zones]
   );
 
-  const hasLegacyPoiZones = useMemo(
-    () =>
-      Boolean(query.data?.zones.some((zone) => zone.origin !== "drawn" && zoneNeedsPoiBackfill(zone))),
-    [query.data?.zones]
+  const hasPoiBackfillZones = useMemo(
+    () => Boolean(config.enrichments.pois && query.data?.zones.some((zone) => zoneNeedsPoiBackfill(zone))),
+    [config.enrichments.pois, query.data?.zones]
   );
+  const hasActiveZoneEnrichment = hasIncompleteZones || hasPoiBackfillZones || Boolean(zoneEnrichmentJobId);
 
   const zoneEnrichmentJobQuery = useQuery({
     queryKey: ["journey-zones-enrichment-job", zoneEnrichmentJobId],
@@ -465,7 +468,7 @@ export function Step4Compare() {
   }, [journeyId]);
 
   useEffect(() => {
-    if (!journeyId || !query.data || !hasLegacyPoiZones || hasIncompleteZones || zoneEnrichmentJobId) {
+    if (!journeyId || !query.data || !hasPoiBackfillZones || hasIncompleteZones || zoneEnrichmentJobId) {
       return;
     }
     if (legacyBackfillRequestedRef.current === journeyId) {
@@ -482,7 +485,7 @@ export function Step4Compare() {
       .catch((caughtError) => {
         setZoneEnrichmentError(apiActionHint(caughtError));
       });
-  }, [hasIncompleteZones, hasLegacyPoiZones, journeyId, query.data, setJobIds, zoneEnrichmentJobId]);
+  }, [hasIncompleteZones, hasPoiBackfillZones, journeyId, query.data, setJobIds, zoneEnrichmentJobId]);
 
   useEffect(() => {
     if (!zoneEnrichmentJobId) {
@@ -582,12 +585,12 @@ export function Step4Compare() {
       <div className="border-b border-slate-100 p-5">
         <div className="mb-1 flex items-center justify-between">
           <h2 className="text-xl font-semibold tracking-tight text-slate-800">Zonas encontradas</h2>
-          <span className={`rounded-md px-2 py-1 text-xs font-bold ${hasIncompleteZones ? "bg-sky-100 text-sky-700" : "bg-emerald-100 text-emerald-700"}`}>
-            {hasIncompleteZones ? "Enriquecendo" : "Pronto"}
+          <span className={`rounded-md px-2 py-1 text-xs font-bold ${hasActiveZoneEnrichment ? "bg-sky-100 text-sky-700" : "bg-emerald-100 text-emerald-700"}`}>
+            {hasActiveZoneEnrichment ? "Enriquecendo" : "Pronto"}
           </span>
         </div>
         <p className="text-sm text-slate-500">
-          {hasIncompleteZones
+          {hasActiveZoneEnrichment
             ? "As zonas já estão disponíveis. Os indicadores urbanos continuam sendo carregados em segundo plano."
             : "Compare as zonas pelo tempo de viagem e pelos indicadores enriquecidos."}
         </p>
@@ -666,6 +669,7 @@ export function Step4Compare() {
                   journeyId={journeyId}
                   searchType={config.type}
                   usageType={config.propertyUsageType}
+                  poiBackfillPending={config.enrichments.pois && zoneNeedsPoiBackfill(zone)}
                 />
               </div>
             );

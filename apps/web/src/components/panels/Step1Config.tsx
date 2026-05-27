@@ -52,6 +52,7 @@ export function Step1Config() {
   const isWalkingMode = config.modal === "walk";
   const isDrivingMode = config.modal === "car";
   const isDirectIsochroneMode = isWalkingMode || isDrivingMode;
+  const isAreaMode = referenceInputMode === "area";
   const referenceListboxId = "primary-reference-address-listbox";
 
   const zoneToggleCards = [
@@ -187,11 +188,11 @@ export function Step1Config() {
           journey_input_mode: referenceInputMode,
           search_type: config.type,
           property_usage_type: config.propertyUsageType,
-          transport_mode: config.modal,
-          public_transport_mode: config.modal === "transit" ? config.publicTransportMode : null,
-          max_travel_minutes: config.time,
-          zone_radius_meters: isDirectIsochroneMode ? null : config.zoneRadiusMeters,
-          transport_search_radius_meters: isDirectIsochroneMode ? null : config.transportSearchRadiusMeters,
+          transport_mode: isAreaMode ? null : config.modal,
+          public_transport_mode: !isAreaMode && config.modal === "transit" ? config.publicTransportMode : null,
+          max_travel_minutes: isAreaMode ? null : config.time,
+          zone_radius_meters: isAreaMode || isDirectIsochroneMode ? null : config.zoneRadiusMeters,
+          transport_search_radius_meters: isAreaMode || isDirectIsochroneMode ? null : config.transportSearchRadiusMeters,
           enrichments: {
             ...config.enrichments,
             green_vegetation_level: config.greenVegetationLevel
@@ -200,7 +201,7 @@ export function Step1Config() {
       });
 
       setJourneyId(journey.id);
-      if (referenceInputMode === "area") {
+      if (isAreaMode) {
         setMaxStep(1);
         requestManualAreaDrawing();
         return;
@@ -416,126 +417,130 @@ export function Step1Config() {
           </div>
         </div>
 
-        <div className="space-y-3">
-          <label className="text-sm font-medium text-slate-700">Como pretende se deslocar?</label>
-          <div className="grid grid-cols-3 gap-2">
-            <button
-              type="button"
-              onClick={() => setConfig({ modal: "transit" })}
-              className={`flex flex-col items-center justify-center rounded-xl border p-3 transition-all ${config.modal === "transit" ? "border-pastel-violet-400 bg-pastel-violet-50 text-pastel-violet-600" : "border-slate-200 text-slate-600 hover:border-slate-300"}`}
-            >
-              <Bus className="mb-1 h-5 w-5" />
-              <span className="text-xs font-medium">Público</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setConfig({ modal: "walk" })}
-              className={`flex flex-col items-center justify-center rounded-xl border p-3 transition-all ${config.modal === "walk" ? "border-pastel-violet-400 bg-pastel-violet-50 text-pastel-violet-600" : "border-slate-200 text-slate-600 hover:border-slate-300"}`}
-            >
-              <Route className="mb-1 h-5 w-5" />
-              <span className="text-xs font-medium">A pé</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setConfig({ modal: "car" })}
-              className={`flex flex-col items-center justify-center rounded-xl border p-3 transition-all ${config.modal === "car" ? "border-pastel-violet-400 bg-pastel-violet-50 text-pastel-violet-600" : "border-slate-200 text-slate-600 hover:border-slate-300"}`}
-            >
-              <CarFront className="mb-1 h-5 w-5" />
-              <span className="text-xs font-medium">Carro</span>
-            </button>
-          </div>
-
-          {config.modal === "transit" ? (
-            <div className="grid grid-cols-2 gap-2 rounded-2xl border border-pastel-violet-100 bg-pastel-violet-50/60 p-2 animate-[fadeIn_0.2s_ease-out]">
-              {PUBLIC_TRANSPORT_OPTIONS.map((option, index) => {
-                const isActive = config.publicTransportMode === option.id;
-                const Icon = option.Icon;
-                const isLastOddItem = PUBLIC_TRANSPORT_OPTIONS.length % 2 === 1 && index === PUBLIC_TRANSPORT_OPTIONS.length - 1;
-                return (
-                  <button
-                    key={option.id}
-                    type="button"
-                    onClick={() => setConfig({ publicTransportMode: option.id })}
-                    className={`flex min-w-0 items-center justify-center gap-2 rounded-xl border px-3 py-3 text-center text-xs font-medium transition-all ${isLastOddItem ? "col-span-2 mx-auto w-full max-w-[220px]" : "w-full"} ${isActive ? "border-pastel-violet-400 bg-white text-pastel-violet-700 shadow-sm" : "border-transparent bg-white/70 text-slate-600 hover:border-pastel-violet-200 hover:bg-white"}`}
-                    aria-pressed={isActive}
-                  >
-                    <Icon className="h-4 w-4 shrink-0" />
-                    <span className="leading-tight">{option.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
-        </div>
-
-        {isDirectIsochroneMode ? (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5">
-                <label htmlFor="direct-travel-time-minutes" className="text-sm font-medium text-slate-700">{isWalkingMode ? "Tempo de caminhada" : "Tempo de carro"}</label>
-                {!can_customize_max_time && (
-                  <span title="Disponível a partir do plano Básico" className="inline-flex cursor-help items-center text-slate-400">
-                    <Lock className="h-3.5 w-3.5" />
-                  </span>
-                )}
+        {!isAreaMode ? (
+          <>
+            <div className="space-y-3">
+              <label className="text-sm font-medium text-slate-700">Como pretende se deslocar?</label>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setConfig({ modal: "transit" })}
+                  className={`flex flex-col items-center justify-center rounded-xl border p-3 transition-all ${config.modal === "transit" ? "border-pastel-violet-400 bg-pastel-violet-50 text-pastel-violet-600" : "border-slate-200 text-slate-600 hover:border-slate-300"}`}
+                >
+                  <Bus className="mb-1 h-5 w-5" />
+                  <span className="text-xs font-medium">Público</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfig({ modal: "walk" })}
+                  className={`flex flex-col items-center justify-center rounded-xl border p-3 transition-all ${config.modal === "walk" ? "border-pastel-violet-400 bg-pastel-violet-50 text-pastel-violet-600" : "border-slate-200 text-slate-600 hover:border-slate-300"}`}
+                >
+                  <Route className="mb-1 h-5 w-5" />
+                  <span className="text-xs font-medium">A pé</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setConfig({ modal: "car" })}
+                  className={`flex flex-col items-center justify-center rounded-xl border p-3 transition-all ${config.modal === "car" ? "border-pastel-violet-400 bg-pastel-violet-50 text-pastel-violet-600" : "border-slate-200 text-slate-600 hover:border-slate-300"}`}
+                >
+                  <CarFront className="mb-1 h-5 w-5" />
+                  <span className="text-xs font-medium">Carro</span>
+                </button>
               </div>
-              <span className="text-sm font-bold text-pastel-violet-600">{config.time} min</span>
+
+              {config.modal === "transit" ? (
+                <div className="grid grid-cols-2 gap-2 rounded-2xl border border-pastel-violet-100 bg-pastel-violet-50/60 p-2 animate-[fadeIn_0.2s_ease-out]">
+                  {PUBLIC_TRANSPORT_OPTIONS.map((option, index) => {
+                    const isActive = config.publicTransportMode === option.id;
+                    const Icon = option.Icon;
+                    const isLastOddItem = PUBLIC_TRANSPORT_OPTIONS.length % 2 === 1 && index === PUBLIC_TRANSPORT_OPTIONS.length - 1;
+                    return (
+                      <button
+                        key={option.id}
+                        type="button"
+                        onClick={() => setConfig({ publicTransportMode: option.id })}
+                        className={`flex min-w-0 items-center justify-center gap-2 rounded-xl border px-3 py-3 text-center text-xs font-medium transition-all ${isLastOddItem ? "col-span-2 mx-auto w-full max-w-[220px]" : "w-full"} ${isActive ? "border-pastel-violet-400 bg-white text-pastel-violet-700 shadow-sm" : "border-transparent bg-white/70 text-slate-600 hover:border-pastel-violet-200 hover:bg-white"}`}
+                        aria-pressed={isActive}
+                      >
+                        <Icon className="h-4 w-4 shrink-0" />
+                        <span className="leading-tight">{option.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
             </div>
-            {(() => {
-              const cap = isWalkingMode ? max_walk_minutes_cap : max_car_minutes_cap;
-              const maxVal = cap ?? 60;
-              return (
-                <>
-                  <input
-                    id="direct-travel-time-minutes"
-                    type="range"
-                    min="5"
-                    max={maxVal}
-                    step="5"
-                    value={config.time}
-                    disabled={!can_customize_max_time}
-                    onChange={can_customize_max_time ? (event) => setConfig({ time: Math.min(Number(event.target.value), maxVal) }) : undefined}
-                    className={`w-full accent-pastel-violet-500 ${!can_customize_max_time ? "cursor-not-allowed opacity-50" : ""}`}
-                  />
-                  {!can_customize_max_time
-                    ? <p className="text-xs text-slate-400">Disponível a partir do plano Básico.</p>
-                    : cap !== null
-                      ? <p className="text-xs text-slate-400">Máximo de {cap} min no seu plano.</p>
-                      : null
-                  }
-                </>
-              );
-            })()}
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-1.5">
-                <label htmlFor="transport-search-radius" className="text-sm font-medium text-slate-700">Raio de busca do transporte</label>
+
+            {isDirectIsochroneMode ? (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <label htmlFor="direct-travel-time-minutes" className="text-sm font-medium text-slate-700">{isWalkingMode ? "Tempo de caminhada" : "Tempo de carro"}</label>
+                    {!can_customize_max_time && (
+                      <span title="Disponível a partir do plano Básico" className="inline-flex cursor-help items-center text-slate-400">
+                        <Lock className="h-3.5 w-3.5" />
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-sm font-bold text-pastel-violet-600">{config.time} min</span>
+                </div>
+                {(() => {
+                  const cap = isWalkingMode ? max_walk_minutes_cap : max_car_minutes_cap;
+                  const maxVal = cap ?? 60;
+                  return (
+                    <>
+                      <input
+                        id="direct-travel-time-minutes"
+                        type="range"
+                        min="5"
+                        max={maxVal}
+                        step="5"
+                        value={config.time}
+                        disabled={!can_customize_max_time}
+                        onChange={can_customize_max_time ? (event) => setConfig({ time: Math.min(Number(event.target.value), maxVal) }) : undefined}
+                        className={`w-full accent-pastel-violet-500 ${!can_customize_max_time ? "cursor-not-allowed opacity-50" : ""}`}
+                      />
+                      {!can_customize_max_time
+                        ? <p className="text-xs text-slate-400">Disponível a partir do plano Básico.</p>
+                        : cap !== null
+                          ? <p className="text-xs text-slate-400">Máximo de {cap} min no seu plano.</p>
+                          : null
+                      }
+                    </>
+                  );
+                })()}
+              </div>
+            ) : (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5">
+                    <label htmlFor="transport-search-radius" className="text-sm font-medium text-slate-700">Raio de busca do transporte</label>
+                    {!can_customize_distance && (
+                      <span title="Disponível a partir do plano Básico" className="inline-flex cursor-help items-center text-slate-400">
+                        <Lock className="h-3.5 w-3.5" />
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-sm font-bold text-pastel-violet-600">{config.transportSearchRadiusMeters} m</span>
+                </div>
+                <input
+                  id="transport-search-radius"
+                  type="range"
+                  min="200"
+                  max="2500"
+                  step="100"
+                  value={config.transportSearchRadiusMeters}
+                  disabled={!can_customize_distance}
+                  onChange={can_customize_distance ? (event) => setConfig({ transportSearchRadiusMeters: Number(event.target.value) }) : undefined}
+                  className={`w-full accent-pastel-violet-500 ${!can_customize_distance ? "cursor-not-allowed opacity-50" : ""}`}
+                />
                 {!can_customize_distance && (
-                  <span title="Disponível a partir do plano Básico" className="inline-flex cursor-help items-center text-slate-400">
-                    <Lock className="h-3.5 w-3.5" />
-                  </span>
+                  <p className="text-xs text-slate-400">Disponível a partir do plano Básico.</p>
                 )}
               </div>
-              <span className="text-sm font-bold text-pastel-violet-600">{config.transportSearchRadiusMeters} m</span>
-            </div>
-            <input
-              id="transport-search-radius"
-              type="range"
-              min="200"
-              max="2500"
-              step="100"
-              value={config.transportSearchRadiusMeters}
-              disabled={!can_customize_distance}
-              onChange={can_customize_distance ? (event) => setConfig({ transportSearchRadiusMeters: Number(event.target.value) }) : undefined}
-              className={`w-full accent-pastel-violet-500 ${!can_customize_distance ? "cursor-not-allowed opacity-50" : ""}`}
-            />
-            {!can_customize_distance && (
-              <p className="text-xs text-slate-400">Disponível a partir do plano Básico.</p>
             )}
-          </div>
-        )}
+          </>
+        ) : null}
 
         <section aria-labelledby="zone-analysis-heading" className="space-y-3 border-t border-slate-100 pt-2">
           <h3 id="zone-analysis-heading" className="text-sm font-medium text-slate-700">Análises nas zonas</h3>

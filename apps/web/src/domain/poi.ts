@@ -91,7 +91,7 @@ export function getZonePoiSelectionKey(point: ZonePoiPointLike, zoneFingerprint:
 export function zoneNeedsPoiBackfill(zone: ZonePoiBackfillCandidate) {
   const poiCounts = zone.poi_counts;
   if (!poiCounts) {
-    return false;
+    return true;
   }
 
   if (zone.poi_points === null || zone.poi_points === undefined) {
