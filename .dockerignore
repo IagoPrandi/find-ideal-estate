@@ -8,6 +8,7 @@ apps/web/node_modules/
 ui/node_modules/
 .env
 cache/
+data_cache/
 profiles/
 .profiles/
 onde_morar_profiles/

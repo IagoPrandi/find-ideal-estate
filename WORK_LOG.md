@@ -6206,6 +6206,94 @@
 - Progress Tracker:
   - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
 
+## 2026-05-26 - Restauracao da API AWS apos atualizacao de DATABASE_URL
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/best-practices/SKILL.md`
+  - `skills/best-practices/references/agent-principles.md`
+
+- Skill used:
+  - `skills/best-practices/SKILL.md`
+
+- Scope executed:
+  - `.env` local atualizado pelo responsavel foi preparado para producao sem expor segredos e enviado para o EC2.
+  - `DATABASE_URL` candidata foi testada dentro da imagem `onde_morar-api` antes de substituir o `.env` ativo.
+  - `.env` ativo do EC2 foi substituido com backup previo.
+  - `docker-compose.prod.yml` passou a preservar defaults de runtime para `MAPTILER_API_KEY`, `VALHALLA_URL`, `OTP_URL` e `DRAMATIQ_BROKER`, evitando falha de startup quando o override de producao substitui `environment`.
+  - `.env` remoto foi completado com `MAPTILER_API_KEY`, `VALHALLA_URL` e `OTP_URL` quando ausentes.
+  - Serviços `api`, `worker`, `worker-scrape-browser` e `worker-prewarm` foram recriados.
+
+- Verification executed:
+  - Teste direto de RDS com a nova `DATABASE_URL` dentro da imagem `onde_morar-api` -> `db_connection=OK`.
+  - EC2 local: `curl http://127.0.0.1:8000/health` -> `{\"status\":\"ok\",\"db\":\"ok\",\"redis\":\"ok\"}`.
+  - Publico: `https://api.betterplace.com.br/health` -> `200 OK`.
+  - Publico: `GET https://api.betterplace.com.br/transport/tiles/lines/10/378/581.pbf` -> `200 OK`, `Content-Type: application/vnd.mapbox-vector-tile`.
+  - Publico: `https://api.betterplace.com.br/auth/me` -> `200 OK` com JSON valido.
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
+
+## 2026-05-26 - Validacao do segredo RDS no deploy AWS
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/best-practices/SKILL.md`
+  - `skills/best-practices/references/agent-principles.md`
+
+- Skill used:
+  - `skills/best-practices/SKILL.md`
+
+- Scope executed:
+  - Confirmado que o backend e o Alembic usam apenas `DATABASE_URL` para conexao PostgreSQL.
+  - Confirmado que `AWS_DATABASE_SECRET_KEY` e `AWS_DATABASE_USERNAME` nao sao lidos pelo codigo atual.
+  - Gerada uma candidata de `DATABASE_URL` a partir de `AWS_DATABASE_USERNAME` + `AWS_DATABASE_SECRET_KEY` do `.env` local e testada no EC2 sem imprimir segredos.
+
+- Production diagnosis:
+  - A candidata de `DATABASE_URL` ainda falhou com `password authentication failed`.
+  - As informacoes visiveis no Secrets Manager (`nome`/`ARN`) nao substituem o valor do campo `password` do segredo.
+  - Para o deploy atual, o `.env` do EC2 precisa conter `DATABASE_URL` com a senha real do RDS, ou o codigo precisa ser alterado para buscar o segredo via AWS Secrets Manager com IAM role apropriada.
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
+
+## 2026-05-26 - Atualizacao do backend AWS e diagnostico 502
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/best-practices/SKILL.md`
+  - `skills/best-practices/references/agent-principles.md`
+  - `skills/best-practices/references/deploy-release.md`
+
+- Skill used:
+  - `skills/best-practices/SKILL.md`
+
+- Scope executed:
+  - Conexao SSH validada no EC2 `18.117.21.132`, com aplicacao em `/opt/app`.
+  - Backend empacotado de forma enxuta e enviado para o EC2, evitando `data_cache/` e caches pesados no contexto Docker.
+  - `.dockerignore` atualizado para excluir `data_cache/` do build context.
+  - `apps/api/contracts/__init__.py` sincronizado com os DTOs publicos de `packages/contracts`, corrigindo imports ausentes como `JourneyPublicRead`, `JourneyShareRead`, `FavoriteZoneShareRead` e `ZoneTransportSummaryRead`.
+  - `docker-compose.prod.yml` ajustado para nao sobrescrever `DATABASE_URL` via interpolacao YAML; a URL deve vir do `env_file`.
+  - `.gitattributes` atualizado com `*.sh text eol=lf` para evitar `exec /app/docker/entrypoint.sh: no such file or directory` causado por CRLF no container.
+  - Imagens `api`, `worker`, `worker-scrape-browser` e `worker-prewarm` rebuildadas no EC2.
+
+- Production diagnosis:
+  - O 502 em `https://api.betterplace.com.br/...` ocorre porque `api` e workers estao reiniciando.
+  - Logs do container mostram falha bloqueante no RDS: `password authentication failed for user "postgres"` ao conectar em `betterplace-database.cjuo6wwye3gv.us-east-2.rds.amazonaws.com`.
+  - Credenciais em `.env`, `.env.backup.*` e variaveis auxiliares disponiveis no EC2 foram testadas sem imprimir segredos; nenhuma autenticou no RDS.
+  - EC2 nao possui AWS CLI autenticada nem instance role utilizavel para consultar/resetar credenciais RDS.
+
+- Verification executed:
+  - `python -m pytest -q apps/api/tests/test_phase0_health.py` -> `2 passed`.
+  - `docker compose -f docker-compose.yml -f docker-compose.prod.yml build api worker worker-scrape-browser worker-prewarm` no EC2 -> build concluido.
+  - `curl http://127.0.0.1:8000/health` no EC2 -> falha porque a API reinicia durante `alembic upgrade head` por autenticacao RDS invalida.
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
+
 ## 2026-05-23 - Controle admin para remover restricoes de uso
 
 - Required docs opened:
@@ -6269,6 +6357,64 @@
   - `python -m py_compile apps/api/src/api/routes/admin_users.py apps/api/src/api/routes/auth.py apps/api/src/api/routes/account.py apps/api/src/api/routes/jobs.py apps/api/src/api/routes/listings.py apps/api/src/api/routes/journeys.py apps/api/src/modules/auth/service.py apps/api/src/modules/plans/service.py apps/api/src/modules/usage_restrictions/service.py packages/contracts/contracts/admin.py packages/contracts/contracts/auth.py apps/api/contracts/__init__.py` -> ok.
   - `npm run test:run -- src/features/admin/ScrapingAdminPage.test.tsx src/state/favorites-store.test.ts` -> `14 passed`.
   - `git diff --check` -> sem erros; apenas avisos de conversao LF/CRLF.
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
+
+## 2026-05-26 - Tentativa de atualizar backend em producao bloqueada por RDS
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/release-config-management/SKILL.md`
+
+- Skill used:
+  - `skills/release-config-management/SKILL.md`, pois o escopo foi verificacao/rollout de backend em producao com Docker Compose, migrations e RDS.
+
+- Scope executed:
+  - Validado estado atual da EC2 `18.117.21.132`.
+  - `https://api.betterplace.com.br/health` retorna `502 Bad Gateway`.
+  - Containers `api`, `worker`, `worker-prewarm` e `worker-scrape-browser` permanecem em restart loop.
+  - Logs da API e workers confirmam falha de autenticacao no RDS: `password authentication failed for user "postgres"`.
+  - Comparacao mascarada confirmou que `DATABASE_URL` local e remoto sao identicos, com o mesmo hash SHA-256 e mesmo host RDS.
+  - Verificado que nao ha credenciais AWS configuradas localmente nem na EC2 para resetar a senha do RDS.
+
+- Blocker:
+  - Nao foi possivel concluir o rollout porque o RDS rejeita novas conexoes com a credencial atualmente configurada.
+  - Para prosseguir, e necessario corrigir a senha/`DATABASE_URL` no `.env` da EC2 ou fornecer credenciais AWS com permissao para resetar a senha do RDS.
+
+- Progress Tracker:
+  - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
+
+## 2026-05-26 - Rebuild API na EC2 com acesso SSH padrao
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/release-config-management/SKILL.md`
+  - `skills/security-threat-checklist/SKILL.md`
+
+- Skills used:
+  - `skills/release-config-management/SKILL.md`, pois o escopo foi rebuild/restart de backend em producao.
+  - `skills/security-threat-checklist/SKILL.md`, pois a verificacao envolveu credenciais instaladas e conexao RDS.
+
+- Scope executed:
+  - Usado o padrao de acesso indicado: `ssh -i "$env:USERPROFILE\.ssh\ssh-samsung.pem" -o BatchMode=yes -o ConnectTimeout=10 ubuntu@18.117.21.132`.
+  - Testadas sem exposicao de segredo as credenciais instaladas no `.env`: `DATABASE_URL`, `AWS_DATABASE_USERNAME` e `AWS_DATABASE_SECRET_KEY`.
+  - Variantes testadas contra o RDS via `psql`: `DATABASE_URL` atual, usuario/senha AWS em modo raw e usuario/senha AWS URL-encoded.
+  - Todas as variantes falharam com autenticacao rejeitada pelo RDS para o usuario `postgres`.
+  - Executado `docker compose -f docker-compose.yml -f docker-compose.prod.yml build api && docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d api` na EC2.
+
+- Verification executed:
+  - Build da imagem `onde_morar-api` concluiu.
+  - Container `api` foi recriado e iniciado.
+  - `https://api.betterplace.com.br/health` continua retornando `502`.
+  - `docker compose ps` mostra `api`, `worker`, `worker-prewarm` e `worker-scrape-browser` em restart loop.
+  - Logs da API continuam apontando `password authentication failed for user "postgres"`.
+
+- Blocker:
+  - A atualizacao nao fica operacional enquanto a senha/`DATABASE_URL` do RDS estiver invalida.
+  - E necessario corrigir a credencial no RDS ou atualizar o `.env` com uma `DATABASE_URL` que autentique.
 
 - Progress Tracker:
   - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
