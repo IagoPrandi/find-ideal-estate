@@ -16,6 +16,11 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from modules.listings.classification import infer_listing_usage_type_from_url  # noqa: E402
+from modules.listings.scrapers.loft import (  # noqa: E402
+    _build_loft_scrape_url,
+    _extract_from_loft_next_data,
+    _parse_loft_listing,
+)
 from modules.listings.scrapers.quintoandar import (  # noqa: E402
     _extract_from_quintoandar_dom_rows,
     _extract_from_quintoandar_payload,
@@ -124,6 +129,122 @@ def _make_quintoandar_api_payload(n: int) -> dict:
         {"_source": {**h, "type": "RESIDENTIAL"}}
         for h in houses.values()
     ]}}}}}
+
+
+def _make_loft_next_payload(n: int, search_type: str = "rent") -> dict:
+    listings = []
+    for i in range(1, n + 1):
+        listing = {
+            "id": f"loft{i:04d}",
+            "price": 650000 + i * 1000 if search_type == "sale" else None,
+            "rentalPrice": 3000 + i * 100,
+            "complexFee": 450,
+            "propertyTax": 90,
+            "area": 55 + i,
+            "bedrooms": 2,
+            "restrooms": 1,
+            "parkingSpots": 1,
+            "image": "banner.jpg",
+            "address": {
+                "streetFullName": "Rua Guaipá",
+                "neighborhood": "Vila Leopoldina",
+                "city": "São Paulo",
+                "state": "SP",
+                "lat": "-23.5212571",
+                "lng": "-46.7304601",
+            },
+        }
+        listings.append({"listing": listing, "listingsCount": 1, "groupedListings": []})
+    return {
+        "props": {
+            "pageProps": {
+                "dehydratedState": {
+                    "queries": [
+                        {
+                            "state": {
+                                "data": {
+                                    "listings": listings,
+                                    "pagination": {
+                                        "page": 0,
+                                        "hitsPerPage": 38,
+                                        "totalPages": 1,
+                                    },
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        }
+    }
+
+
+# ---------------------------------------------------------------------------
+# Loft
+# ---------------------------------------------------------------------------
+
+class TestLoftExtraction:
+    def test_builds_address_search_urls_for_sale_and_rent(self) -> None:
+        sale_url = _build_loft_scrape_url("Rua Guaipá", "sale")
+        rent_url = _build_loft_scrape_url("Rua Guaipá", "rent")
+
+        assert sale_url.startswith("https://loft.com.br/venda/imoveis/sp/sao-paulo?")
+        assert rent_url.startswith("https://loft.com.br/aluguel/imoveis/sp/sao-paulo?")
+        assert "q=Rua+Guaip" in sale_url
+
+    def test_next_data_yields_five_listings(self) -> None:
+        payload = _make_loft_next_payload(8)
+        results, pagination = _extract_from_loft_next_data(payload, "rent")
+
+        assert len(results) >= 5
+        assert pagination["totalPages"] == 1
+        for r in results:
+            assert r["platform"] == "loft"
+            assert r["platform_listing_id"]
+            assert r["url"].startswith("https://loft.com.br/imovel/")
+
+    def test_parser_uses_rental_price_for_rent(self) -> None:
+        result = _parse_loft_listing(
+            {
+                "id": "c94at7ar",
+                "price": 915000,
+                "rentalPrice": 5500,
+                "area": 99,
+                "bedrooms": 2,
+                "restrooms": 2,
+                "parkingSpots": 1,
+                "image": "banner.jpg",
+                "address": {
+                    "streetFullName": "Rua Guaipá",
+                    "neighborhood": "Vila Leopoldina",
+                    "city": "São Paulo",
+                    "state": "SP",
+                    "lat": "-23.5212571",
+                    "lng": "-46.7304601",
+                },
+            },
+            "rent",
+        )
+
+        assert result is not None
+        assert result["price_brl"] == 5500.0
+        assert result["lat"] == -23.5212571
+        assert result["lon"] == -46.7304601
+        assert result["image_url"] == "https://content.loft.com.br/homes/c94at7ar/mobile_banner.jpg"
+
+    def test_parser_uses_sale_price_for_sale(self) -> None:
+        result = _parse_loft_listing(
+            {
+                "id": "1qo6sje",
+                "price": 590000,
+                "rentalPrice": 4500,
+                "address": {"streetFullName": "Rua Guaipu"},
+            },
+            "sale",
+        )
+
+        assert result is not None
+        assert result["price_brl"] == 590000.0
 
 
 # ---------------------------------------------------------------------------

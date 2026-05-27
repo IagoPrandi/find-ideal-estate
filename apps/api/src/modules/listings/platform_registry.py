@@ -15,6 +15,7 @@ import yaml
 from core.config import ConfigurationError, get_settings
 from modules.listings.models import FREE_PLATFORMS
 from modules.listings.scrapers import (
+    LoftScraper,
     QuintoAndarScraper,
     ScraperBase,
     VivaRealScraper,
@@ -66,6 +67,7 @@ class PlatformRegistry:
     """Registry of configured platforms and scraper class mappings."""
 
     _SCRAPER_MAP: dict[str, type[ScraperBase]] = {
+        "loft": LoftScraper,
         "quintoandar": QuintoAndarScraper,
         "zapimoveis": ZapImoveisScraper,
         "vivareal": VivaRealScraper,

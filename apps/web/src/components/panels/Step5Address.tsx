@@ -39,27 +39,25 @@ export function Step5Address() {
     setError(null);
     setJobIds({ listingsJobId: null });
 
-    setMaxStep(6);
-    goToStep(6);
-
-    void searchZoneListings(journeyId, zoneFingerprint, {
-      search_location_normalized: address.normalized,
-      search_location_label: address.label,
-      search_location_type: address.locationType,
-      search_type: config.type,
-      usage_type: config.propertyUsageType,
-      start_scraping: true,
-    })
-      .then((result) => {
-        setJobIds({ listingsJobId: result.job_id || null });
-      })
-      .catch((caughtError) => {
-        setJobIds({ listingsJobId: null });
-        setError(apiActionHint(caughtError));
-      })
-      .finally(() => {
-        setSubmitting(false);
+    try {
+      const result = await searchZoneListings(journeyId, zoneFingerprint, {
+        search_location_normalized: address.normalized,
+        search_location_label: address.label,
+        search_location_type: address.locationType,
+        search_type: config.type,
+        usage_type: config.propertyUsageType,
+        start_scraping: true,
       });
+
+      setJobIds({ listingsJobId: result.job_id || null });
+      setMaxStep(6);
+      goToStep(6);
+    } catch (caughtError) {
+      setJobIds({ listingsJobId: null });
+      setError(apiActionHint(caughtError));
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   function selectSuggestion(suggestion: SearchAddressSuggestion) {

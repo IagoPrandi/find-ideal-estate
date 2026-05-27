@@ -167,6 +167,7 @@ def _normalize_legacy_platform(platform: str) -> str:
     aliases = {
         "quinto_andar": "quintoandar",
         "quintoandar": "quintoandar",
+        "loft": "loft",
         "vivareal": "vivareal",
         "zapimoveis": "zapimoveis",
     }

@@ -17,6 +17,7 @@ from modules.listings.platform_registry import (  # noqa: E402
 def test_normalize_platform_name_aliases() -> None:
     assert normalize_platform_name("quinto_andar") == "quintoandar"
     assert normalize_platform_name("Quinto-Andar") == "quintoandar"
+    assert normalize_platform_name(" Loft ") == "loft"
     assert normalize_platform_name(" ZAPIMOVEIS ") == "zapimoveis"
 
 
@@ -25,6 +26,7 @@ def test_registry_loads_known_platforms() -> None:
     registry = PlatformRegistry(root / "platforms.yaml")
 
     available = registry.available_platforms()
+    assert "loft" in available
     assert "quintoandar" in available
     assert "zapimoveis" in available
     assert "vivareal" in available
@@ -46,7 +48,12 @@ def test_registry_default_free_platforms_include_vivareal() -> None:
     root = Path(__file__).resolve().parents[3]
     registry = PlatformRegistry(root / "platforms.yaml")
 
-    assert registry.default_free_platforms() == ["quintoandar", "vivareal", "zapimoveis"]
+    assert registry.default_free_platforms() == [
+        "loft",
+        "quintoandar",
+        "vivareal",
+        "zapimoveis",
+    ]
 
 
 def test_registry_rejects_unknown_platform() -> None:

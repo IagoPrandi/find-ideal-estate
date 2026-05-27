@@ -118,8 +118,56 @@ describe("Step5Address", () => {
       );
     });
 
-    expect(useUIStore.getState().step).toBe(6);
-    expect(useJourneyStore.getState().listingsJobId).toBe("listings-job-1");
+    await waitFor(() => {
+      expect(useUIStore.getState().step).toBe(6);
+      expect(useJourneyStore.getState().listingsJobId).toBe("listings-job-1");
+    });
+  });
+
+  it("waits for the listings search response before opening results", async () => {
+    let resolveSearch: (value: unknown) => void;
+    const pendingSearch = new Promise((resolve) => {
+      resolveSearch = resolve;
+    });
+    vi.mocked(getZoneAddressSuggestions).mockResolvedValue([
+      {
+        label: "Rua Guaipa, Vila Leopoldina, Sao Paulo-SP",
+        normalized: "rua guaipa vila leopoldina sao paulo-sp",
+        location_type: "street",
+        lat: -23.520908,
+        lon: -46.727037
+      }
+    ]);
+    vi.mocked(searchZoneListings).mockReturnValue(pendingSearch as never);
+
+    const user = userEvent.setup();
+    render(<Step5Address />);
+
+    const input = screen.getByLabelText("Endereço de busca na zona");
+    await user.click(input);
+
+    const option = await screen.findByRole("option", { name: /Rua Guaipa/i });
+    await user.click(option);
+
+    await waitFor(() => {
+      expect(searchZoneListings).toHaveBeenCalled();
+    });
+
+    expect(useUIStore.getState().step).not.toBe(6);
+    expect(screen.getByText("Iniciando busca...")).toBeInTheDocument();
+
+    resolveSearch!({
+      source: "none",
+      job_id: "listings-job-1",
+      freshness_status: "no_cache",
+      listings: [],
+      total_count: 0,
+    });
+
+    await waitFor(() => {
+      expect(useUIStore.getState().step).toBe(6);
+      expect(useJourneyStore.getState().listingsJobId).toBe("listings-job-1");
+    });
   });
 
   it("allows proceeding to step 6 when the address is only scheduled for later prewarm", async () => {
@@ -151,7 +199,9 @@ describe("Step5Address", () => {
     const option = await screen.findByRole("option", { name: /Rua Guaipa/i });
     await user.click(option);
 
-    expect(useJourneyStore.getState().listingsJobId).toBeNull();
-    expect(useUIStore.getState().step).toBe(6);
+    await waitFor(() => {
+      expect(useJourneyStore.getState().listingsJobId).toBeNull();
+      expect(useUIStore.getState().step).toBe(6);
+    });
   });
 });

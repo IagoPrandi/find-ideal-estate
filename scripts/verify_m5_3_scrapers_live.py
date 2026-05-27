@@ -14,6 +14,7 @@ if str(API_SRC) not in sys.path:
     sys.path.insert(0, str(API_SRC))
 
 from modules.listings.scrapers import (  # noqa: E402
+    LoftScraper,
     QuintoAndarScraper,
     ScraperDisallowedError,
     ScraperError,
@@ -22,6 +23,7 @@ from modules.listings.scrapers import (  # noqa: E402
 )
 
 SCRAPERS = {
+    "loft": LoftScraper,
     "quintoandar": QuintoAndarScraper,
     "zapimoveis": ZapImoveisScraper,
     "vivareal": VivaRealScraper,

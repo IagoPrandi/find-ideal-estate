@@ -337,6 +337,30 @@ async def listings_search(
 
         return _build_deferred_address_response()
 
+    # Cache hit -- return listings immediately. Authorized operators still
+    # trigger an explicit background refresh when the frontend asked to scrape.
+    if result_source == "cache_hit" and body.start_scraping:
+        active_job_id = await _find_active_listings_job_id(
+            journey_id,
+            search_location_normalized=normalized_search_location,
+        )
+        if active_job_id is None and await _is_scrape_authorized(auth_context):
+            await create_cache_record(
+                normalized_search_location,
+                zone_fingerprint=body.zone_fingerprint,
+                config_hash=config_hash,
+            )
+            active_job_id = await _enqueue_listings_scrape_job(
+                journey_id=journey_id,
+                zone_fingerprint=body.zone_fingerprint,
+                search_location_normalized=normalized_search_location,
+                search_address=body.search_location_label,
+                search_type=body.search_type,
+                usage_type=body.usage_type,
+                platforms=platforms,
+                force_refresh=True,
+            )
+
     # Cache hit or partial hit -- return listings
     display_platforms = _cache_display_platforms(cache, platforms)
     listing_cards_raw = await fetch_listing_cards_for_zone(
@@ -380,6 +404,7 @@ async def listings_search(
 
     return ListingsRequestResult(
         source="cache",
+        job_id=active_job_id,
         freshness_status=freshness,
         listings=listing_cards_raw,  # type: ignore[arg-type]
         total_count=len(listing_cards_raw),
@@ -591,9 +616,15 @@ async def get_zone_listings(
 
     age_hours = cache_age_hours(cache)
     freshness = "fresh"
+    active_job_id = await _find_active_listings_job_id(
+        journey_id,
+        zone_fingerprint=zone_fingerprint,
+        search_location_normalized=latest_search_location,
+    )
 
     return ListingsRequestResult(
         source="cache",
+        job_id=active_job_id,
         freshness_status=freshness,
         listings=listing_cards_page,  # type: ignore[arg-type]
         total_count=effective_offset + len(listing_cards_page),
