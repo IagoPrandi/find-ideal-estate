@@ -26,11 +26,13 @@ Shared schema output per listing:
 
 from .base import ScraperBase, ScraperDisallowedError, ScraperError
 from .quintoandar import QuintoAndarScraper
+from .loft import LoftScraper
 from .vivareal import VivaRealScraper
 from .zapimoveis import ZapImoveisScraper
 
 __all__ = [
     "QuintoAndarScraper",
+    "LoftScraper",
     "VivaRealScraper",
     "ZapImoveisScraper",
     "ScraperBase",

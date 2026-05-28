@@ -6695,3 +6695,29 @@
 
 - Progress Tracker:
   - Nenhuma milestone do PRD foi marcada como concluida; politica de confirmacao explicita preservada.
+
+## 2026-05-27 - Merge do banco local de scraping para o RDS
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/release-config-management/SKILL.md`
+
+- Skill used:
+  - `skills/release-config-management/SKILL.md`
+
+- Scope executed:
+  - Exportados do Postgres local apenas os dados de scraping/cache: `properties`, `listing_ads`, `listing_snapshots`, `zone_listing_caches`, `scraping_degradation_events` e `property_price_rollups`.
+  - Dados de usuários, jornadas, sessões e `listing_search_requests` não foram importados para evitar poluir dados de produção.
+  - O merge foi executado no RDS via EC2 com workers pausados durante a escrita e API mantida online.
+  - Criados schemas operacionais no RDS para rastreabilidade: `staging_scraping_20260527192550` e `backup_scraping_20260527192550`.
+  - A transação final foi commitada com upsert por chaves naturais e deduplicação de `zone_listing_caches` por `search_location_normalized`.
+
+- Verification executed:
+  - Health local no EC2: `{"status":"ok","db":"ok","redis":"ok"}`.
+  - Health público: `https://api.betterplace.com.br/health` -> `{"status":"ok","db":"ok","redis":"ok"}`.
+  - Contagens finais no RDS: `properties=8959`, `listing_ads=12604`, `listing_snapshots=30477`, `zone_listing_caches=112`, `scraping_degradation_events=311`, `property_price_rollups=34`.
+  - Checagens de integridade: `listing_ads_missing_property=0`, `snapshots_missing_ad=0`, `zone_caches_null_search_location=0`.
+
+- Progress Tracker:
+  - Nenhuma milestone do PRD foi marcada como concluída; política de confirmação explícita preservada.

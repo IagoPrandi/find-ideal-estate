@@ -41,6 +41,9 @@ function platformLabel(value: string | null | undefined) {
     return "Plataforma";
   }
   const normalized = value.trim().toLowerCase();
+  if (normalized === "loft") {
+    return "Loft";
+  }
   if (normalized === "quintoandar") {
     return "QuintoAndar";
   }

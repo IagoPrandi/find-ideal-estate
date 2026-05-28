@@ -874,6 +874,110 @@ def test_listings_search_reuses_cache_across_different_zones_and_configs(monkeyp
     assert body["source"] == "cache"
 
 
+def test_authorized_listings_search_refreshes_usable_cache(monkeypatch) -> None:
+    job_id = uuid4()
+    calls = {"create_cache": 0, "enqueue": 0}
+
+    class _Registry:
+        def default_free_platforms(self):
+            return ["quintoandar", "loft"]
+
+        def resolve_names(self, names):
+            return list(names)
+
+    async def _fake_address_cache(_normalized, **_kwargs):
+        return {
+            "status": "complete",
+            "zone_fingerprint": "zone-a",
+            "platforms_completed": ["quintoandar", "loft"],
+            "expires_at": datetime.now(tz=timezone.utc) + timedelta(hours=6),
+            "scraped_at": datetime.now(tz=timezone.utc),
+            "created_at": datetime.now(tz=timezone.utc) - timedelta(minutes=5),
+        }
+
+    def _fake_cache_is_usable(record):
+        return bool(record)
+
+    async def _fake_record_search_request(**_kwargs):
+        return None
+
+    async def _fake_create_cache_record(_normalized, **_kwargs):
+        calls["create_cache"] += 1
+        return uuid4()
+
+    async def _fake_find_active_job(*_args, **_kwargs):
+        return None
+
+    async def _fake_enqueue(**kwargs):
+        calls["enqueue"] += 1
+        assert kwargs["force_refresh"] is True
+        assert kwargs["platforms"] == ["quintoandar", "loft"]
+        return job_id
+
+    async def _fake_fetch_listing_cards_for_zone(**_kwargs):
+        return _fake_cards()
+
+    monkeypatch.setattr("api.routes.listings.get_platform_registry", lambda: _Registry())
+    monkeypatch.setattr(
+        "api.routes.listings.find_usable_cache_for_search_location", _fake_address_cache
+    )
+    monkeypatch.setattr("api.routes.listings.cache_is_usable", _fake_cache_is_usable)
+    monkeypatch.setattr("api.routes.listings.record_search_request", _fake_record_search_request)
+    monkeypatch.setattr("api.routes.listings.create_cache_record", _fake_create_cache_record)
+    monkeypatch.setattr("api.routes.listings._find_active_listings_job_id", _fake_find_active_job)
+    monkeypatch.setattr("api.routes.listings._enqueue_listings_scrape_job", _fake_enqueue)
+    monkeypatch.setattr("api.routes.listings.fetch_listing_cards_for_zone", _fake_fetch_listing_cards_for_zone)
+
+    app.dependency_overrides[get_optional_auth_context] = lambda: _authorized_auth_context(
+        can_start_immediate_scraping=True,
+    )
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                f"/journeys/{uuid4()}/listings/search",
+                json={**_payload(), "platforms": ["quintoandar", "loft"]},
+            )
+    finally:
+        app.dependency_overrides.pop(get_optional_auth_context, None)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source"] == "cache"
+    assert body["job_id"] == str(job_id)
+    assert body["freshness_status"] == "no_cache"
+    assert calls == {"create_cache": 1, "enqueue": 1}
+
+
+def test_scrape_plan_returns_configured_platforms(monkeypatch) -> None:
+    class _Registry:
+        def default_free_platforms(self):
+            return ["loft", "quintoandar"]
+
+        def resolve_names(self, names):
+            return list(names)
+
+        def scraper_config_for(self, platform):
+            return {"max_pages": {"loft": 1, "quintoandar": 4}[platform]}
+
+    monkeypatch.setattr("api.routes.listings.get_platform_registry", lambda: _Registry())
+
+    with TestClient(app) as client:
+        response = client.get(
+            f"/journeys/{uuid4()}/listings/scrape-plan?search_type=rent&usage_type=residential"
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "search_type": "rent",
+        "usage_type": "residential",
+        "total_pages": 5,
+        "platforms": [
+            {"platform": "loft", "max_pages": 1},
+            {"platform": "quintoandar", "max_pages": 4},
+        ],
+    }
+
+
 
 
 def test_get_zone_listings_no_cache_exposes_active_job_id(monkeypatch) -> None:
