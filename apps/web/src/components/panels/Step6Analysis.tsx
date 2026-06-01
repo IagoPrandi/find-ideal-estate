@@ -41,6 +41,9 @@ function platformLabel(value: string | null | undefined) {
     return "Plataforma";
   }
   const normalized = value.trim().toLowerCase();
+  if (normalized === "loft") {
+    return "Loft";
+  }
   if (normalized === "quintoandar") {
     return "QuintoAndar";
   }
@@ -49,9 +52,6 @@ function platformLabel(value: string | null | undefined) {
   }
   if (normalized === "zapimoveis") {
     return "ZapImóveis";
-  }
-  if (normalized === "loft") {
-    return "Loft";
   }
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
@@ -66,7 +66,7 @@ function availablePlatformsLabel(platforms: string[] | null | undefined, primary
 
 function freshnessLabel(value: string | null | undefined) {
   if (value === "no_cache") {
-    return "Sem cache consolidado";
+    return "Scraping em andamento";
   }
   if (value === "queued_for_next_prewarm") {
     return "Busca iniciada";
@@ -217,7 +217,6 @@ export function Step6Analysis() {
   const lastScrolledListingKeyRef = useRef<string | null>(null);
   const lastProgressRunKeyRef = useRef<string | null>(null);
   const autoCollapsedProgressRunKeyRef = useRef<string | null>(null);
-  const autoCollapsedFiltersRunKeyRef = useRef<string | null>(null);
   const lastListingsAvailabilityRef = useRef<{ runKey: string; freshnessStatus: string | null } | null>(null);
   const [isProgressCollapsed, setIsProgressCollapsed] = useState(false);
   const [isFiltersCollapsed, setIsFiltersCollapsed] = useState(false);
@@ -259,7 +258,7 @@ export function Step6Analysis() {
       if (!data) {
         return 5000;
       }
-      const jobId = data.job_id || persistedListingsJobId || null;
+      const jobId = persistedListingsJobId || data.job_id || null;
       const cachedJob = jobId
         ? queryClient.getQueryData<{ state?: string | null }>(["listings-job", jobId])
         : null;
@@ -272,7 +271,7 @@ export function Step6Analysis() {
     }
   });
 
-  const effectiveListingsJobId = listingsQuery.data?.job_id || persistedListingsJobId || null;
+  const effectiveListingsJobId = persistedListingsJobId || listingsQuery.data?.job_id || null;
 
   const listingsJobQuery = useQuery({
     queryKey: ["listings-job", effectiveListingsJobId],
@@ -291,12 +290,7 @@ export function Step6Analysis() {
   const isScraping = listingsQuery.isLoading
     || hasActiveListingsJob
     || (Boolean(effectiveListingsJobId) && !listingsJobQuery.data)
-    || (
-      listingsQuery.data?.freshness_status === "no_cache"
-      && Boolean(effectiveListingsJobId)
-      && !hasInterruptedListingsJob
-      && !listingsJobState
-    );
+    || (listingsQuery.data?.freshness_status === "no_cache" && !hasInterruptedListingsJob && !listingsJobState);
 
   const bgListingsQuery = useQuery({
     queryKey: ["zone-listings-bg", journeyId, zoneFingerprint, config.type, listingsAddressScope, selectedAddress?.normalized || "no-address"],
@@ -305,14 +299,6 @@ export function Step6Analysis() {
     staleTime: 5 * 60_000,
     gcTime: 10 * 60_000,
   });
-
-  useEffect(() => {
-    const activeJobId = listingsQuery.data?.job_id || null;
-    if (!activeJobId || activeJobId === persistedListingsJobId || hasInterruptedListingsJob) {
-      return;
-    }
-    setJobIds({ listingsJobId: activeJobId });
-  }, [hasInterruptedListingsJob, listingsQuery.data?.job_id, persistedListingsJobId, setJobIds]);
 
   const rawListings = useMemo(() => {
     const p1 = listingsQuery.data?.listings ?? [];
@@ -347,8 +333,6 @@ export function Step6Analysis() {
   const overallDuration = formatDuration(scrapeDiagnostics?.total_duration_ms);
   const freshnessStatusLabel = hasInterruptedListingsJob
     ? (listingsJobState === "cancelled_partial" ? "Scraping interrompido" : "Scraping falhou")
-    : isScraping
-    ? "Scraping em andamento"
     : freshnessLabel(listingsQuery.data?.freshness_status);
   const interruptedScrapeMessage = hasInterruptedListingsJob && listingsQuery.data?.freshness_status === "no_cache"
     ? (listingsJobQuery.data?.error_message === "missing_heartbeat"
@@ -596,20 +580,8 @@ export function Step6Analysis() {
     }
     lastProgressRunKeyRef.current = progressRunKey;
     autoCollapsedProgressRunKeyRef.current = null;
-    autoCollapsedFiltersRunKeyRef.current = null;
     setIsProgressCollapsed((current) => (current ? false : current));
   }, [progressRunKey]);
-
-  useEffect(() => {
-    if (!isScraping || displayedListings.length === 0) {
-      return;
-    }
-    if (autoCollapsedFiltersRunKeyRef.current === progressRunKey) {
-      return;
-    }
-    autoCollapsedFiltersRunKeyRef.current = progressRunKey;
-    setIsFiltersCollapsed(true);
-  }, [displayedListings.length, isScraping, progressRunKey]);
 
   useEffect(() => {
     if (!hasCompletedListingsGeneration) {

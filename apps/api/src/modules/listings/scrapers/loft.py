@@ -1,56 +1,170 @@
-"""Loft Playwright scraper.
-
-Strategy:
-    1. Navigate to Loft public search pages for sale/rent.
-    2. Parse the server-rendered Next.js dehydrated search data.
-    3. Follow public pagination through the `pagina` query parameter.
-
-robots.txt: Loft disallows /health_check and /explorar, but allows the public
-search pages under /venda/imoveis and /aluguel/imoveis.
-"""
+"""Loft scraper based on the public search page's hydrated listing payload."""
 
 from __future__ import annotations
 
+import asyncio
 import json
+import re
+import unicodedata
 from typing import Any
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.request import Request, urlopen
 
-from .base import ScraperBase, _as_float, _as_int, _get_by_path, _normalize_image_url
+from .base import REALISTIC_USER_AGENT, ScraperBase, ScraperError, _as_float, _as_int, _get_by_path
 
 LOFT_BASE = "https://loft.com.br"
-LOFT_IMAGE_BASE = "https://content.loft.com.br/homes"
 
 
-def _build_loft_scrape_url(search_address: str, search_type: str, page: int = 0) -> str:
+def _loft_slugify(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", text or "")
+    ascii_text = normalized.encode("ascii", "ignore").decode("ascii")
+    lowered = ascii_text.lower().strip()
+    lowered = re.sub(r"\s+", " ", lowered)
+    lowered = re.sub(r"[^a-z0-9\s\-]", "", lowered)
+    return re.sub(r"-{2,}", "-", lowered.replace(" ", "-")).strip("-")
+
+
+def _build_loft_search_url(search_address: str, search_type: str, configured_start: list[str]) -> str:
+    if configured_start:
+        return configured_start[0].rstrip("/")
+
+    city = "sao-paulo"
+    state = "sp"
+    parts = [part.strip() for part in (search_address or "").split(",") if part.strip()]
+    if len(parts) >= 3:
+        city_state = parts[2]
+        match = re.search(r"^(.*?)(?:\s*-\s*([A-Za-z]{2}))?$", city_state)
+        if match:
+            city = _loft_slugify(match.group(1) or city) or city
+            state = (match.group(2) or state).strip().lower() or state
     transaction = "venda" if search_type == "sale" else "aluguel"
-    params: dict[str, str] = {}
-    query = (search_address or "").strip()
-    if query:
-        params["q"] = query
-    if page > 0:
-        params["pagina"] = str(page + 1)
-
-    query_string = urlencode(params)
-    suffix = f"?{query_string}" if query_string else ""
-    return f"{LOFT_BASE}/{transaction}/imoveis/sp/sao-paulo{suffix}"
+    return f"{LOFT_BASE}/{transaction}/imoveis/{state}/{city}"
 
 
-def _loft_url_with_page(url: str, page: int) -> str:
-    if page <= 0:
-        return url
-
-    parts = urlsplit(url)
-    query = dict(parse_qsl(parts.query, keep_blank_values=True))
-    query["pagina"] = str(page + 1)
-    return urlunsplit(
-        (
-            parts.scheme,
-            parts.netloc,
-            parts.path,
-            urlencode(query),
-            parts.fragment,
-        )
+def _extract_next_data(html: str) -> dict[str, Any]:
+    match = re.search(
+        r'<script[^>]+id=["\']__NEXT_DATA__["\'][^>]*>(.*?)</script>',
+        html,
+        flags=re.DOTALL | re.IGNORECASE,
     )
+    if not match:
+        raise ScraperError("Loft search page did not include __NEXT_DATA__")
+    try:
+        payload = json.loads(match.group(1))
+    except json.JSONDecodeError as exc:
+        raise ScraperError("Loft __NEXT_DATA__ payload is invalid JSON") from exc
+    if not isinstance(payload, dict):
+        raise ScraperError("Loft __NEXT_DATA__ payload has unexpected shape")
+    return payload
+
+
+def _find_listing_groups(payload: Any) -> list[dict[str, Any]]:
+    groups: list[dict[str, Any]] = []
+
+    def walk(node: Any) -> None:
+        if isinstance(node, dict):
+            listing = node.get("listing")
+            if isinstance(listing, dict):
+                groups.append(node)
+            for value in node.values():
+                walk(value)
+            return
+        if isinstance(node, list):
+            for value in node:
+                walk(value)
+
+    walk(payload)
+    return groups
+
+
+def _listing_url(listing: dict[str, Any]) -> str:
+    listing_id = str(listing.get("id") or listing.get("objectID") or "").strip()
+    if not listing_id:
+        return LOFT_BASE
+    address = listing.get("address") if isinstance(listing.get("address"), dict) else {}
+    title_parts = [
+        str(listing.get("homeType") or listing.get("propertyType") or "imovel"),
+        str(address.get("streetName") or address.get("streetFullName") or ""),
+        str(address.get("neighborhood") or ""),
+        str(address.get("city") or ""),
+        f"{listing.get('bedrooms')} quartos" if listing.get("bedrooms") is not None else "",
+        f"{listing.get('area')}m2" if listing.get("area") is not None else "",
+    ]
+    slug = _loft_slugify(" ".join(part for part in title_parts if part))
+    return f"{LOFT_BASE}/imovel/{slug}/{listing_id}" if slug else f"{LOFT_BASE}/imovel/{listing_id}"
+
+
+def _address_label(listing: dict[str, Any]) -> str | None:
+    address = listing.get("address") if isinstance(listing.get("address"), dict) else {}
+    facets = address.get("facets") if isinstance(address.get("facets"), dict) else {}
+    for key in ("street", "neighborhood", "city"):
+        value = facets.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    parts = [
+        address.get("streetFullName") or address.get("streetName"),
+        address.get("neighborhood"),
+        address.get("city"),
+        address.get("state"),
+    ]
+    label = ", ".join(str(part).strip() for part in parts if str(part or "").strip())
+    return label or None
+
+
+def _parse_loft_groups(groups: list[dict[str, Any]], search_type: str) -> list[dict[str, Any]]:
+    parsed: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for group in groups:
+        listing = group.get("listing")
+        if not isinstance(listing, dict):
+            continue
+
+        listing_id = str(listing.get("id") or listing.get("objectID") or "").strip()
+        if not listing_id or listing_id in seen:
+            continue
+        seen.add(listing_id)
+
+        if search_type == "rent":
+            price = _as_float(listing.get("rentalPrice") or _get_by_path(group, "groupSummary.rentalPriceMin"))
+        else:
+            price = _as_float(listing.get("price") or _get_by_path(group, "groupSummary.priceMin"))
+        if price is None:
+            continue
+
+        lat = _as_float(_get_by_path(listing, "location.lat") or _get_by_path(listing, "_geoloc.lat") or _get_by_path(listing, "address.lat"))
+        lon = _as_float(_get_by_path(listing, "location.lon") or _get_by_path(listing, "_geoloc.lng") or _get_by_path(listing, "address.lng"))
+
+        parsed.append(
+            {
+                "platform": "loft",
+                "platform_listing_id": listing_id,
+                "url": _listing_url(listing),
+                "image_url": None,
+                "lat": lat,
+                "lon": lon,
+                "price_brl": price,
+                "area_m2": _as_float(listing.get("area") or _get_by_path(group, "groupSummary.areaMin")),
+                "bedrooms": _as_int(listing.get("bedrooms")),
+                "bathrooms": _as_int(listing.get("restrooms") or listing.get("bathrooms")),
+                "parking": _as_int(listing.get("parkingSpots")),
+                "address": _address_label(listing),
+                "condo_fee_brl": _as_float(listing.get("complexFee") or _get_by_path(group, "groupSummary.complexMin")),
+                "iptu_brl": _as_float(listing.get("propertyTax")),
+            }
+        )
+    return parsed
+
+
+def _fetch_loft_html(url: str) -> str:
+    req = Request(
+        url,
+        headers={
+            "User-Agent": REALISTIC_USER_AGENT,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+        },
+    )
+    with urlopen(req, timeout=45) as response:
+        return response.read().decode("utf-8", errors="ignore")
 
 
 class LoftScraper(ScraperBase):
@@ -58,254 +172,20 @@ class LoftScraper(ScraperBase):
     base_url = LOFT_BASE
 
     async def scrape(self) -> list[dict[str, Any]]:
-        self._check_robots("/venda/imoveis/" if self.search_type == "sale" else "/aluguel/imoveis/")
-        return await self._scrape_once_in_fresh_context()
+        return await self._scrape_via_http()
 
     async def _scrape_with_context(self, context: Any) -> list[dict[str, Any]]:
-        await context.set_extra_http_headers(
-            {
-                "referer": "https://loft.com.br/",
-                "accept-language": "pt-BR,pt;q=0.9,en;q=0.8",
-            }
+        del context
+        return await self._scrape_via_http()
+
+    async def _scrape_via_http(self) -> list[dict[str, Any]]:
+        self._check_robots("/venda/imoveis/" if self.search_type == "sale" else "/aluguel/imoveis/")
+        url = _build_loft_search_url(
+            self.search_address,
+            self.search_type,
+            self._configured_start_urls(),
         )
-
-        page = await context.new_page()
-        listings: list[dict[str, Any]] = []
-        seen: set[str] = set()
-
-        configured_start = self._configured_start_urls()
-        if configured_start and not self.search_address.strip():
-            first_url = configured_start[0]
-        else:
-            first_url = _build_loft_scrape_url(self.search_address, self.search_type)
-
-        try:
-            max_pages = self._configured_max_pages(default=2)
-            total_pages: int | None = None
-
-            for page_idx in range(max_pages):
-                if total_pages is not None and page_idx >= total_pages:
-                    break
-
-                target_url = (
-                    _loft_url_with_page(first_url, page_idx)
-                    if configured_start and not self.search_address.strip()
-                    else _build_loft_scrape_url(
-                        self.search_address,
-                        self.search_type,
-                        page=page_idx,
-                    )
-                )
-                await page.goto(target_url, wait_until="domcontentloaded", timeout=60000)
-                try:
-                    await page.wait_for_load_state("networkidle", timeout=8000)
-                except Exception:
-                    await self._human_delay(1000, 1800)
-
-                next_data_raw = await page.evaluate(
-                    "() => { const el = document.getElementById('__NEXT_DATA__'); "
-                    "return el ? el.textContent : null; }"
-                )
-                if not next_data_raw:
-                    break
-
-                try:
-                    payload = json.loads(next_data_raw)
-                except json.JSONDecodeError:
-                    break
-
-                page_listings, pagination = _extract_from_loft_next_data(
-                    payload,
-                    self.search_type,
-                )
-                if total_pages is None:
-                    total_pages = _as_int(
-                        pagination.get("totalPages") if isinstance(pagination, dict) else None
-                    )
-
-                before_count = len(seen)
-                for item in page_listings:
-                    lid = str(item.get("platform_listing_id") or "").strip()
-                    if not lid or lid in seen:
-                        continue
-                    seen.add(lid)
-                    listings.append(item)
-
-                if len(seen) == before_count:
-                    break
-        finally:
-            await page.close()
-
-        return listings
-
-
-def _extract_from_loft_next_data(
-    payload: dict[str, Any],
-    search_type: str,
-) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    queries = _get_by_path(payload, "props.pageProps.dehydratedState.queries")
-    if not isinstance(queries, list):
-        return [], {}
-
-    for query in queries:
-        data = _get_by_path(query, "state.data")
-        if not isinstance(data, dict):
-            continue
-        raw_listings = data.get("listings")
-        if not isinstance(raw_listings, list):
-            continue
-
-        parsed: list[dict[str, Any]] = []
-        for row in raw_listings:
-            for raw_listing in _iter_loft_listing_nodes(row):
-                item = _parse_loft_listing(raw_listing, search_type)
-                if item:
-                    parsed.append(item)
-        if parsed:
-            pagination = data.get("pagination")
-            return parsed, pagination if isinstance(pagination, dict) else {}
-
-    return [], {}
-
-
-def _iter_loft_listing_nodes(row: Any) -> list[dict[str, Any]]:
-    if not isinstance(row, dict):
-        return []
-
-    nodes: list[dict[str, Any]] = []
-    primary = row.get("listing")
-    if isinstance(primary, dict):
-        nodes.append(primary)
-
-    grouped = row.get("groupedListings")
-    if isinstance(grouped, list):
-        for item in grouped:
-            if isinstance(item, dict):
-                nodes.append(item.get("listing") if isinstance(item.get("listing"), dict) else item)
-
-    if not nodes and ("id" in row or "objectID" in row):
-        nodes.append(row)
-
-    return nodes
-
-
-def _parse_loft_listing(raw: dict[str, Any], search_type: str) -> dict[str, Any] | None:
-    listing_id = str(raw.get("id") or raw.get("objectID") or "").strip()
-    if not listing_id:
-        return None
-
-    if search_type == "rent":
-        price = _as_float(raw.get("rentalPrice") or raw.get("price"))
-    else:
-        price = _as_float(raw.get("price") or raw.get("rentalPrice"))
-    if price is None:
-        return None
-
-    address_node = raw.get("address") if isinstance(raw.get("address"), dict) else {}
-    lat = _as_geo_float(
-        _get_by_path(raw, "location.lat")
-        or _get_by_path(raw, "_geoloc.lat")
-        or address_node.get("lat")
-        or raw.get("lat")
-        or raw.get("latitude")
-    )
-    lon = _as_geo_float(
-        _get_by_path(raw, "location.lon")
-        or _get_by_path(raw, "location.lng")
-        or _get_by_path(raw, "_geoloc.lng")
-        or _get_by_path(raw, "_geoloc.lon")
-        or address_node.get("lng")
-        or address_node.get("lon")
-        or raw.get("lng")
-        or raw.get("lon")
-        or raw.get("longitude")
-    )
-
-    image_url = _loft_image_url(raw, listing_id)
-    address = _loft_address(address_node)
-
-    return {
-        "platform": "loft",
-        "platform_listing_id": listing_id,
-        "url": f"{LOFT_BASE}/imovel/{listing_id}",
-        "image_url": image_url,
-        "lat": lat,
-        "lon": lon,
-        "price_brl": price,
-        "area_m2": _as_float(raw.get("area") or raw.get("usableArea")),
-        "bedrooms": _as_int(raw.get("bedrooms")),
-        "bathrooms": _as_int(raw.get("restrooms") or raw.get("bathrooms")),
-        "parking": _as_int(raw.get("parkingSpots") or raw.get("parking")),
-        "address": address,
-        "condo_fee_brl": _as_float(raw.get("complexFee") or raw.get("condoFee")),
-        "iptu_brl": _as_float(raw.get("propertyTax") or raw.get("iptu")),
-    }
-
-
-def _loft_address(address_node: dict[str, Any]) -> str | None:
-    if not address_node:
-        return None
-
-    street = (
-        address_node.get("streetFullName")
-        or " ".join(
-            str(v).strip()
-            for v in (
-                address_node.get("streetType"),
-                address_node.get("streetName"),
-            )
-            if str(v or "").strip()
-        )
-        or address_node.get("streetName")
-    )
-    parts = [
-        street,
-        address_node.get("number"),
-        address_node.get("neighborhood") or _get_by_path(address_node, "neighbourhood.name"),
-        address_node.get("city"),
-        address_node.get("state"),
-    ]
-    cleaned = [str(part).strip() for part in parts if str(part or "").strip()]
-    return ", ".join(cleaned) if cleaned else None
-
-
-def _as_geo_float(value: Any) -> float | None:
-    if isinstance(value, bool) or value is None:
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        normalized = value.strip().replace(" ", "")
-        if not normalized:
-            return None
-        if "," in normalized and "." not in normalized:
-            normalized = normalized.replace(",", ".")
-        try:
-            return float(normalized)
-        except ValueError:
-            return None
-    return None
-
-
-def _loft_image_url(raw: dict[str, Any], listing_id: str) -> str | None:
-    candidates = [
-        raw.get("image_url"),
-        raw.get("imageUrl"),
-        raw.get("image"),
-        raw.get("image_thumbnail"),
-        raw.get("image_icon"),
-        _get_by_path(raw, "photos.0.url"),
-        _get_by_path(raw, "photos.0"),
-    ]
-    for candidate in candidates:
-        normalized = _normalize_image_url(
-            candidate,
-            platform_base=LOFT_BASE,
-            filename_prefix=f"{LOFT_IMAGE_BASE}/{listing_id}",
-        )
-        if normalized:
-            if normalized.endswith("/banner.jpg"):
-                return f"{LOFT_IMAGE_BASE}/{listing_id}/mobile_banner.jpg"
-            return normalized
-
-    return f"{LOFT_IMAGE_BASE}/{listing_id}/mobile_banner.jpg"
+        html = await asyncio.to_thread(_fetch_loft_html, url)
+        payload = _extract_next_data(html)
+        groups = _find_listing_groups(payload)
+        return _parse_loft_groups(groups, self.search_type)

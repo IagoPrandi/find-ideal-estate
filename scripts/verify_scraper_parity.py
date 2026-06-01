@@ -13,7 +13,6 @@ if str(API_SRC) not in sys.path:
     sys.path.insert(0, str(API_SRC))
 
 from modules.listings.scrapers import (  # noqa: E402
-    LoftScraper,
     QuintoAndarScraper,
     ScraperError,
     VivaRealScraper,
@@ -21,14 +20,12 @@ from modules.listings.scrapers import (  # noqa: E402
 )
 
 SCRAPERS: dict[str, type] = {
-    "loft": LoftScraper,
     "quintoandar": QuintoAndarScraper,
     "vivareal": VivaRealScraper,
     "zapimoveis": ZapImoveisScraper,
 }
 
 DEFAULT_EXPECTED_COUNTS = {
-    "loft": 20,
     "quintoandar": 20,
     "vivareal": 20,
     "zapimoveis": 20,

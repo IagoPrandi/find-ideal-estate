@@ -1,15 +1,5 @@
 # Work Log
 
-- 2026-05-27 (scraping por plataforma em cache hit autorizado): `PRD.md`, `SKILLS_README.md` e `skills/security-threat-checklist/SKILL.md` foram abertos antes da execução. Skill usada: `security-threat-checklist`, pois o ajuste toca autorização, endpoint público autenticado, fila Dramatiq e escrita em cache/job. Diagnóstico: após o cache ficar `complete`, `POST /listings/search` retornava os imóveis do cache sem enfileirar novo job; por isso, para o usuário autorizado, a tela não via nova execução por plataforma. Correção em `apps/api/src/api/routes/listings.py`: quando `start_scraping=true` e o usuário tem autorização de scraping imediato, cache hit agora retorna os cards existentes e também enfileira um `listings_scrape` com `force_refresh=true`; se já houver job ativo para o mesmo endereço na jornada, a rota reaproveita esse `job_id`. `GET /zones/{zone}/listings` também passa a expor `job_id` ativo mesmo com cache usável, permitindo a UI acompanhar o progresso por plataforma durante revalidação. Validação: `python -m pytest apps/api/tests/test_phase5_stale_revalidate.py -q` passou com `18 passed`; `python -m compileall apps/api/src/api/routes/listings.py` passou; `npm.cmd --prefix apps/web run test:run -- src/components/panels/Step5Address.test.tsx src/components/panels/Step6Analysis.test.tsx` passou com `29 passed` e warnings React `act(...)` preexistentes. Ação operacional local: reiniciados `onde_morar-api-1`, `onde_morar-worker-scrape-browser-1` e `onde_morar-worker-prewarm-1`. Nenhuma milestone do PRD foi marcada como concluída, pois não houve confirmação explícita do responsável.
-
-- 2026-05-27 (runtime do scraping imediato com Loft): `PRD.md`, `SKILLS_README.md` e `skills/security-threat-checklist/SKILL.md` foram abertos antes da execução. Skill usada: `security-threat-checklist`, pois o diagnóstico envolveu autorização, fila Redis/Dramatiq, worker de scraping e escrita no banco. Diagnóstico: o endpoint `/listings/search` estava sendo chamado e criava jobs, mas o `worker-scrape-browser` ainda rodava com registry antigo sem `loft`, causando `PlatformRegistryError: Unknown platform 'loft'` e jobs `failed/retrying`. Ação operacional: reiniciado `worker-scrape-browser` e `worker-prewarm` para recarregar `platforms.yaml` e módulos novos; reenfileirado um job órfão criado durante o diagnóstico com bootstrap correto. Correção em `apps/web/src/components/panels/Step6Analysis.tsx`: o painel agora prefere o `job_id` ativo retornado por `getZoneListings` sobre um `listingsJobId` antigo persistido no Zustand, evitando ficar preso consultando job falhado quando a API já expõe um job ativo mais novo. Validação: job `16331404-2318-45eb-863d-1cff0ebca75f` concluiu com `completed`, `progress_percent=100`, `total_scraped=101` e plataformas concluídas `loft`, `quintoandar`, `vivareal`, `zapimoveis`; cache do endereço ficou `complete` com `preliminary_count=101`; `npm.cmd --prefix apps/web run test:run -- src/components/panels/Step6Analysis.test.tsx` passou com `25 passed`. Nenhuma milestone do PRD foi marcada como concluída, pois não houve confirmação explícita do responsável.
-
-- 2026-05-27 (disparo visível do scraping imediato): `PRD.md`, `SKILLS_README.md` e `skills/security-threat-checklist/SKILL.md` foram abertos antes da execução. Skill usada: `security-threat-checklist`, pois o escopo revisou o fluxo autenticado que dispara scraping imediato e evita mascarar falha de permissão/job. Correção em `apps/web/src/components/panels/Step5Address.tsx`: a etapa 5 agora aguarda a resposta de `POST /journeys/{id}/listings/search` antes de abrir Resultados, preserva `start_scraping: true` e só grava `listingsJobId`/avança para a etapa 6 depois que a API retorna; em erro, permanece na etapa 5 mostrando a mensagem da API. Correção em `apps/web/src/components/panels/Step6Analysis.tsx`: `no_cache` sem `job_id` não é mais apresentado como "Scraping em andamento"; esse rótulo fica restrito a job efetivamente ativo/pendente. Validação: `npm.cmd --prefix apps/web run test:run -- src/components/panels/Step5Address.test.tsx` passou com `4 passed`; `npm.cmd --prefix apps/web run test:run -- src/components/panels/Step6Analysis.test.tsx` passou com `24 passed`. Observação: os testes de Step5 continuam emitindo warnings React `act(...)` preexistentes. Nenhuma milestone do PRD foi marcada como concluída, pois não houve confirmação explícita do responsável.
-
-- 2026-05-27 (cards de imóveis visíveis durante scraping): `PRD.md`, `SKILLS_README.md` e `skills/develop-frontend/SKILL.md` foram abertos antes da execução. Skill usada: `develop-frontend`, pois o escopo corrigiu comportamento visual no painel de resultados. Correção em `apps/web/src/components/panels/Step6Analysis.tsx`: quando resultados parciais chegam enquanto o scraping ainda está ativo, os filtros de imóveis são recolhidos automaticamente uma única vez por execução, deixando os cards visíveis sem impedir que o usuário reabra os filtros. O rótulo da plataforma `loft` também passou a aparecer como `Loft`. Teste adicionado em `Step6Analysis.test.tsx` cobrindo scraping em andamento com imóvel parcial da Loft, filtros recolhidos, card visível e reabertura manual dos filtros. Validação: `npm.cmd --prefix apps/web run test:run -- src/components/panels/Step6Analysis.test.tsx` passou com `23 passed`. Nenhuma milestone do PRD foi marcada como concluída, pois não houve confirmação explícita do responsável.
-
-- 2026-05-27 (scraper Loft): `PRD.md`, `SKILLS_README.md`, `skills/best-practices/SKILL.md` e `skills/best-practices/references/agent-principles.md` foram abertos antes da execução. Skill usada: `best-practices`, pois o escopo adicionou código backend, registro de plataforma e testes. Implementação: novo `LoftScraper` em `apps/api/src/modules/listings/scrapers/loft.py`, usando páginas públicas `/venda/imoveis/sp/sao-paulo` e `/aluguel/imoveis/sp/sao-paulo`, parser de `__NEXT_DATA__`, paginação via `pagina`, preço correto para venda/aluguel, coordenadas, imagem pública `content.loft.com.br/homes/{id}/mobile_banner.jpg` e URL canônica `https://loft.com.br/imovel/{id}`. Registro: `platforms.yaml`, `PlatformRegistry`, exports de scrapers, constantes de plataforma e scripts de verificação passaram a incluir `loft`. Validação: `python -m pytest apps/api/tests/test_platform_registry.py apps/api/tests/test_phase5_scraper_extraction.py` passou com `36 passed`; `python -m compileall apps/api/src/modules/listings/scrapers/loft.py` passou; smoke live Loft aluguel para `Rua Guaipa, Vila Leopoldina, Sao Paulo, SP` retornou `11` imóveis e passou; smoke live Loft venda retornou `57` imóveis e passou. Limite de validação: `python -m ruff check ...` não rodou porque `ruff` não está instalado no ambiente (`No module named ruff`). Nenhuma milestone do PRD foi marcada como concluída, pois não houve confirmação explícita do responsável.
-
 - 2026-05-27 (correção da ferramenta de desenhar área): `PRD.md`, `SKILLS_README.md` e `skills/develop-frontend/SKILL.md` foram abertos antes da execução. Skill usada: `develop-frontend`, pois o escopo corrigiu uma interação de UI no mapa. Em `apps/web/src/features/app/FindIdealApp.tsx`, o fluxo iniciado por "Desenhar área no mapa" agora colapsa o painel para liberar o mapa, mantém cursor de desenho mesmo ao sair de camadas interativas, mostra vértices desde o primeiro clique por meio da nova layer `drawn-zone-vertex-layer`, padroniza os textos de UI para "área" e salva a geometria manual indo direto para a comparação. Em `apps/web/src/features/app/FindIdealApp.test.tsx`, foi adicionada regressão cobrindo início do pedido de desenho, renderização dos vértices, criação da zona manual, seleção da zona criada e navegação para a etapa 4. Validação: `npm run test:run -- src/features/app/FindIdealApp.test.tsx -t "manual area drawing"` passou com `1 passed`; `npm run test:run -- src/components/panels/Step1Config.test.tsx src/features/app/FindIdealApp.test.tsx -t "manual area drawing|Step1Config"` passou com `6 passed`; `git diff --check` sem erros, apenas avisos LF/CRLF. Limite de validação: `npm run test:run -- src/features/app/FindIdealApp.test.tsx` ainda falha em teste preexistente de expectativa visual para `saved-zone-pois-layer` (`icon-size` esperado `0.252/0.456/0.6`, valor atual `0.28/0.48/0.64`), não relacionado ao desenho de área. Nenhuma milestone do PRD foi marcada, pois não houve confirmação explícita do responsável.
 
 - 2026-05-21 (deploy backend analytics de zonas favoritas): `PRD.md`, `SKILLS_README.md` e `skills/release-config-management/SKILL.md` foram abertos antes da execucao. Skill usada: `release-config-management`, pois o escopo foi rollout backend em producao. Alteracao publicada: `apps/api/src/modules/dashboard/analytics.py`, onde `fetch_zone_favorite_analytics` usa `asyncio.gather` para buscar em paralelo as paginas `preco`, `seguranca` e `ambiente`. Validacao local focada: `python -m pytest apps/api/tests/test_phase6_dashboard_analytics.py::test_fetch_zone_favorite_analytics_builds_lightweight_metrics apps/api/tests/test_phase6_dashboard_analytics.py::test_get_zone_favorite_analytics_route_returns_contract -q` passou com `2 passed`; `python -m py_compile apps/api/src/modules/dashboard/analytics.py apps/api/src/api/routes/journeys.py` passou. Limite de validacao: a suite ampla `apps/api/tests/test_phase6_dashboard_analytics.py -q` falhou em 4 testes antigos/adjacentes de `fetch_zone_dashboard_analytics`, funcao nao alterada neste rollout, por expectativas de numero de queries. Deploy: backup do arquivo anterior criado na EC2 em `/home/ubuntu/app_backups/analytics_before_20260521T220505Z.py.bak`; arquivo atualizado copiado para `/opt/app`; imagens `api`, `worker`, `worker-prewarm` e `worker-scrape-browser` reconstruidas e containers recriados. Validacao producao: containers `Up`, API `healthy`; Alembic segue em `20260521_0036 (head)`; `https://api.betterplace.com.br/health` retornou `200 {"status":"ok","db":"ok","redis":"ok"}`; introspeccao dentro do container `api` confirmou `asyncio.gather` em `fetch_zone_favorite_analytics`; logs recentes sem `error/exception/traceback/failed/fatal/no such file`. Nenhuma milestone do PRD foi marcada, pois nao houve confirmacao explicita do responsavel.
@@ -6218,37 +6208,6 @@
 - Progress Tracker:
   - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
 
-## 2026-05-27 - Atualizacao do backend em producao
-
-- Required docs opened:
-  - `PRD.md`
-  - `SKILLS_README.md`
-  - `skills/best-practices/SKILL.md`
-  - `skills/best-practices/references/agent-principles.md`
-
-- Skill used:
-  - `skills/best-practices/SKILL.md`
-
-- Scope executed:
-  - Backend do commit `df301e68dfef9563eb225f03db058e39479df2bf` enviado para o EC2 `18.117.21.132` em `/opt/app`.
-  - `.env` de producao preservado.
-  - Backup dos arquivos compose criado em `/opt/app/.deploy_backups`.
-  - `docker/entrypoint.sh` normalizado para LF e permissao executavel garantida.
-  - Imagens `api`, `worker`, `worker-scrape-browser` e `worker-prewarm` rebuildadas.
-  - Servicos `api`, `worker`, `worker-scrape-browser` e `worker-prewarm` recriados.
-
-- Verification executed:
-  - Local: `python -m pytest -q apps/api/tests/test_phase0_health.py` -> `2 passed`.
-  - Local: `docker compose -f docker-compose.yml -f docker-compose.prod.yml config --quiet` -> passou, com avisos de interpolacao do `.env` local.
-  - EC2 local: `curl http://127.0.0.1:8000/health` -> `{\"status\":\"ok\",\"db\":\"ok\",\"redis\":\"ok\"}`.
-  - Publico: `https://api.betterplace.com.br/health` -> `200 OK`.
-  - Publico: `GET https://api.betterplace.com.br/transport/tiles/lines/10/378/581.pbf` -> `200 OK`, `Content-Type: application/vnd.mapbox-vector-tile`.
-  - Publico: `https://api.betterplace.com.br/auth/me` -> `200 OK` com JSON valido.
-  - `docker compose ps` no EC2 -> `api` healthy; `redis`, `worker`, `worker-prewarm` e `worker-scrape-browser` Up.
-
-- Progress Tracker:
-  - Nenhuma milestone foi marcada como concluida; politica de confirmacao explicita preservada.
-
 ## 2026-05-26 - Restauracao da API AWS apos atualizacao de DATABASE_URL
 
 - Required docs opened:
@@ -6736,3 +6695,53 @@
 
 - Progress Tracker:
   - Nenhuma milestone do PRD foi marcada como concluida; politica de confirmacao explicita preservada.
+
+## 2026-05-27 - Merge do banco local de scraping para o RDS
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/release-config-management/SKILL.md`
+
+- Skill used:
+  - `skills/release-config-management/SKILL.md`
+
+- Scope executed:
+  - Exportados do Postgres local apenas os dados de scraping/cache: `properties`, `listing_ads`, `listing_snapshots`, `zone_listing_caches`, `scraping_degradation_events` e `property_price_rollups`.
+  - Dados de usuários, jornadas, sessões e `listing_search_requests` não foram importados para evitar poluir dados de produção.
+  - O merge foi executado no RDS via EC2 com workers pausados durante a escrita e API mantida online.
+  - Criados schemas operacionais no RDS para rastreabilidade: `staging_scraping_20260527192550` e `backup_scraping_20260527192550`.
+  - A transação final foi commitada com upsert por chaves naturais e deduplicação de `zone_listing_caches` por `search_location_normalized`.
+
+- Verification executed:
+  - Health local no EC2: `{"status":"ok","db":"ok","redis":"ok"}`.
+  - Health público: `https://api.betterplace.com.br/health` -> `{"status":"ok","db":"ok","redis":"ok"}`.
+  - Contagens finais no RDS: `properties=8959`, `listing_ads=12604`, `listing_snapshots=30477`, `zone_listing_caches=112`, `scraping_degradation_events=311`, `property_price_rollups=34`.
+  - Checagens de integridade: `listing_ads_missing_property=0`, `snapshots_missing_ad=0`, `zone_caches_null_search_location=0`.
+
+- Progress Tracker:
+  - Nenhuma milestone do PRD foi marcada como concluída; política de confirmação explícita preservada.
+
+## 2026-06-01 - Resolução de conflitos do PR Loft
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/release-config-management/SKILL.md`
+
+- Skill used:
+  - `skills/release-config-management/SKILL.md`
+
+- Scope executed:
+  - Criada worktree isolada para `feature/scraping-loft`.
+  - Executado merge de `refs/remotes/origin/main` na branch do PR #7.
+  - Conflitos resolvidos alinhando a árvore da branch ao estado atual de `origin/main`.
+  - Mantido apenas este registro operacional adicional no `WORK_LOG.md`.
+
+- Verification executed:
+  - Nenhum arquivo permaneceu em estado de conflito.
+  - `git diff --name-status refs/remotes/origin/main` mostra apenas `WORK_LOG.md`.
+  - `git merge-tree --write-tree refs/remotes/origin/main refs/remotes/origin/feature/scraping-loft` será reexecutado após push para validar o PR no GitHub.
+
+- Progress Tracker:
+  - Nenhuma milestone do PRD foi marcada como concluída; política de confirmação explícita preservada.

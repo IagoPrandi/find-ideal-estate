@@ -112,6 +112,7 @@ function readStringList(value: unknown): string[] {
 
 function platformLabel(platform: string): string {
   const labels: Record<string, string> = {
+    loft: "Loft",
     quintoandar: "QuintoAndar",
     vivareal: "Viva Real",
     zapimoveis: "ZAP Imóveis",

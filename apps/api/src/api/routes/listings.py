@@ -42,7 +42,6 @@ from modules.zones.isochrone_proxy import build_isochrone_proxy_circle
 from pydantic import BaseModel
 from sqlalchemy import text
 from modules.jobs.service import enqueue_job, get_job
-from modules.usage_restrictions.service import get_global_usage_restrictions_disabled
 
 router = APIRouter(prefix="/journeys", tags=["listings"])
 
@@ -50,9 +49,6 @@ _DEFERRED_ADDRESS_NOTICE_REASON = "address_search_registered"
 
 
 async def _is_scrape_authorized(auth_context: object) -> bool:
-    if await get_global_usage_restrictions_disabled():
-        return True
-
     user = getattr(auth_context, "user", None)
     if user is None or not getattr(user, "is_active", False):
         return False
@@ -337,30 +333,6 @@ async def listings_search(
 
         return _build_deferred_address_response()
 
-    # Cache hit -- return listings immediately. Authorized operators still
-    # trigger an explicit background refresh when the frontend asked to scrape.
-    if result_source == "cache_hit" and body.start_scraping:
-        active_job_id = await _find_active_listings_job_id(
-            journey_id,
-            search_location_normalized=normalized_search_location,
-        )
-        if active_job_id is None and await _is_scrape_authorized(auth_context):
-            await create_cache_record(
-                normalized_search_location,
-                zone_fingerprint=body.zone_fingerprint,
-                config_hash=config_hash,
-            )
-            active_job_id = await _enqueue_listings_scrape_job(
-                journey_id=journey_id,
-                zone_fingerprint=body.zone_fingerprint,
-                search_location_normalized=normalized_search_location,
-                search_address=body.search_location_label,
-                search_type=body.search_type,
-                usage_type=body.usage_type,
-                platforms=platforms,
-                force_refresh=True,
-            )
-
     # Cache hit or partial hit -- return listings
     display_platforms = _cache_display_platforms(cache, platforms)
     listing_cards_raw = await fetch_listing_cards_for_zone(
@@ -377,35 +349,32 @@ async def listings_search(
     age_hours = cache_age_hours(cache)
     freshness = "fresh"
 
-    # Listings cache remains valid by default; background refresh only happens
-    # for explicit partial-hit flows.
-    should_revalidate = result_source == "cache_partial"
-    if should_revalidate:
+    if body.start_scraping and await _is_scrape_authorized(auth_context):
         active_job_id = await _find_active_listings_job_id(
             journey_id,
             search_location_normalized=normalized_search_location,
         )
-        if active_job_id is None and await _is_scrape_authorized(auth_context):
-            await create_cache_record(
-                normalized_search_location,
-                zone_fingerprint=body.zone_fingerprint,
-                config_hash=config_hash,
-            )
-            await _enqueue_listings_scrape_job(
-                journey_id=journey_id,
-                zone_fingerprint=body.zone_fingerprint,
-                search_location_normalized=normalized_search_location,
-                search_address=body.search_location_label,
-                search_type=body.search_type,
-                usage_type=body.usage_type,
-                platforms=platforms,
-                force_refresh=True,
-            )
+    if body.start_scraping and active_job_id is None and await _is_scrape_authorized(auth_context):
+        await create_cache_record(
+            normalized_search_location,
+            zone_fingerprint=body.zone_fingerprint,
+            config_hash=config_hash,
+        )
+        active_job_id = await _enqueue_listings_scrape_job(
+            journey_id=journey_id,
+            zone_fingerprint=body.zone_fingerprint,
+            search_location_normalized=normalized_search_location,
+            search_address=body.search_location_label,
+            search_type=body.search_type,
+            usage_type=body.usage_type,
+            platforms=platforms,
+            force_refresh=True,
+        )
 
     return ListingsRequestResult(
         source="cache",
         job_id=active_job_id,
-        freshness_status=freshness,
+        freshness_status="no_cache" if active_job_id else freshness,
         listings=listing_cards_raw,  # type: ignore[arg-type]
         total_count=len(listing_cards_raw),
         cache_age_hours=age_hours,
@@ -425,12 +394,27 @@ async def get_listings_scrape_plan(
 ) -> ListingsScrapePlanResponse:
     if await get_accessible_journey(journey_id, auth_context) is None:
         raise HTTPException(status_code=404, detail="Journey not found")
-    _ = platforms
+    try:
+        registry = get_platform_registry()
+    except PlatformRegistryError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    raw_platforms = platforms or registry.default_free_platforms()
+    try:
+        canonical_platforms = registry.resolve_names(raw_platforms)
+    except PlatformRegistryError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    plan_platforms = [
+        ListingsScrapePlanPlatform(
+            platform=platform,
+            max_pages=int(registry.scraper_config_for(platform).get("max_pages") or 1),
+        )
+        for platform in canonical_platforms
+    ]
     return ListingsScrapePlanResponse(
         search_type=search_type,
         usage_type=usage_type,
-        total_pages=0,
-        platforms=[],
+        total_pages=sum(item.max_pages for item in plan_platforms),
+        platforms=plan_platforms,
     )
 
 
@@ -616,15 +600,9 @@ async def get_zone_listings(
 
     age_hours = cache_age_hours(cache)
     freshness = "fresh"
-    active_job_id = await _find_active_listings_job_id(
-        journey_id,
-        zone_fingerprint=zone_fingerprint,
-        search_location_normalized=latest_search_location,
-    )
 
     return ListingsRequestResult(
         source="cache",
-        job_id=active_job_id,
         freshness_status=freshness,
         listings=listing_cards_page,  # type: ignore[arg-type]
         total_count=effective_offset + len(listing_cards_page),

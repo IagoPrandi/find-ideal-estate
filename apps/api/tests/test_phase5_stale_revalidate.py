@@ -57,29 +57,6 @@ def _stub_accessible_journey(monkeypatch):
     monkeypatch.setattr("api.routes.listings.get_accessible_journey", _fake_accessible_journey)
 
 
-@pytest.fixture(autouse=True)
-def _stub_active_listings_job_lookup(monkeypatch):
-    async def _fake_find_active_job(*_args, **_kwargs):
-        return None
-
-    monkeypatch.setattr("api.routes.listings._find_active_listings_job_id", _fake_find_active_job)
-
-
-@pytest.fixture(autouse=True)
-def _stub_scrape_authorization(monkeypatch):
-    async def _fake_is_scrape_authorized(auth_context):
-        user = getattr(auth_context, "user", None)
-        return bool(
-            user
-            and (
-                getattr(user, "is_superuser", False)
-                or getattr(user, "can_start_immediate_scraping", False)
-            )
-        )
-
-    monkeypatch.setattr("api.routes.listings._is_scrape_authorized", _fake_is_scrape_authorized)
-
-
 def _payload() -> dict[str, object]:
     return {
         "zone_fingerprint": "zone-a",
@@ -406,155 +383,6 @@ def test_listings_search_fresh_cache_hit_does_not_enqueue_revalidation(monkeypat
     assert calls["enqueue"] == 0
 
 
-def test_listings_search_cache_hit_enqueues_force_refresh_for_authorized_user(monkeypatch) -> None:
-    cache = {
-        "status": "complete",
-        "zone_fingerprint": "zone-a",
-        "platforms_completed": ["quintoandar", "zapimoveis"],
-        "expires_at": datetime.now(tz=timezone.utc) + timedelta(hours=6),
-        "scraped_at": datetime.now(tz=timezone.utc) - timedelta(minutes=30),
-        "created_at": datetime.now(tz=timezone.utc) - timedelta(minutes=35),
-    }
-    calls = {"record": 0, "create_cache": 0, "enqueue": 0}
-    job_id = uuid4()
-
-    class _Registry:
-        def default_free_platforms(self):
-            return ["quintoandar", "zapimoveis"]
-
-        def resolve_names(self, names):
-            return list(names)
-
-    async def _fake_address_cache(_normalized, **_kwargs):
-        return cache
-
-    def _fake_cache_is_usable(record):
-        return bool(record)
-
-    async def _fake_record_search_request(**_kwargs):
-        calls["record"] += 1
-
-    async def _fake_fetch_listing_cards_for_zone(**_kwargs):
-        return _fake_cards()
-
-    async def _fake_create_cache_record(_normalized, **_kwargs):
-        calls["create_cache"] += 1
-        return uuid4()
-
-    async def _fake_enqueue(**kwargs):
-        calls["enqueue"] += 1
-        assert kwargs["force_refresh"] is True
-        assert kwargs["search_location_normalized"] == _payload()["search_location_normalized"]
-        return job_id
-
-    monkeypatch.setattr("api.routes.listings.get_platform_registry", lambda: _Registry())
-    monkeypatch.setattr(
-        "api.routes.listings.find_usable_cache_for_search_location", _fake_address_cache
-    )
-    monkeypatch.setattr("api.routes.listings.cache_is_usable", _fake_cache_is_usable)
-    monkeypatch.setattr("api.routes.listings.record_search_request", _fake_record_search_request)
-    monkeypatch.setattr(
-        "api.routes.listings.fetch_listing_cards_for_zone",
-        _fake_fetch_listing_cards_for_zone,
-    )
-    monkeypatch.setattr("api.routes.listings.create_cache_record", _fake_create_cache_record)
-    monkeypatch.setattr("api.routes.listings._enqueue_listings_scrape_job", _fake_enqueue)
-
-    journey_id = uuid4()
-    app.dependency_overrides[get_optional_auth_context] = lambda: _authorized_auth_context(
-        can_start_immediate_scraping=True,
-    )
-    try:
-        with TestClient(app) as client:
-            response = client.post(
-                f"/journeys/{journey_id}/listings/search",
-                json=_payload(),
-            )
-    finally:
-        app.dependency_overrides.pop(get_optional_auth_context, None)
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["source"] == "cache"
-    assert body["job_id"] == str(job_id)
-    assert body["freshness_status"] == "fresh"
-    assert body["total_count"] == 1
-    assert calls == {"record": 1, "create_cache": 1, "enqueue": 1}
-
-
-def test_listings_search_cache_hit_reuses_active_refresh_job(monkeypatch) -> None:
-    cache = {
-        "status": "complete",
-        "zone_fingerprint": "zone-a",
-        "platforms_completed": ["quintoandar", "zapimoveis"],
-        "expires_at": datetime.now(tz=timezone.utc) + timedelta(hours=6),
-        "scraped_at": datetime.now(tz=timezone.utc) - timedelta(minutes=30),
-        "created_at": datetime.now(tz=timezone.utc) - timedelta(minutes=35),
-    }
-    active_job_id = uuid4()
-
-    class _Registry:
-        def default_free_platforms(self):
-            return ["quintoandar", "zapimoveis"]
-
-        def resolve_names(self, names):
-            return list(names)
-
-    async def _fake_address_cache(_normalized, **_kwargs):
-        return cache
-
-    def _fake_cache_is_usable(record):
-        return bool(record)
-
-    async def _fake_record_search_request(**_kwargs):
-        return None
-
-    async def _fake_fetch_listing_cards_for_zone(**_kwargs):
-        return _fake_cards()
-
-    async def _fake_find_active_job(*_args, **_kwargs):
-        return active_job_id
-
-    async def _fake_create_cache_record(_normalized, **_kwargs):
-        raise AssertionError("create_cache_record should not run when an active refresh exists")
-
-    async def _fake_enqueue(**_kwargs):
-        raise AssertionError("_enqueue_listings_scrape_job should not run when an active refresh exists")
-
-    monkeypatch.setattr("api.routes.listings.get_platform_registry", lambda: _Registry())
-    monkeypatch.setattr(
-        "api.routes.listings.find_usable_cache_for_search_location", _fake_address_cache
-    )
-    monkeypatch.setattr("api.routes.listings.cache_is_usable", _fake_cache_is_usable)
-    monkeypatch.setattr("api.routes.listings.record_search_request", _fake_record_search_request)
-    monkeypatch.setattr(
-        "api.routes.listings.fetch_listing_cards_for_zone",
-        _fake_fetch_listing_cards_for_zone,
-    )
-    monkeypatch.setattr("api.routes.listings._find_active_listings_job_id", _fake_find_active_job)
-    monkeypatch.setattr("api.routes.listings.create_cache_record", _fake_create_cache_record)
-    monkeypatch.setattr("api.routes.listings._enqueue_listings_scrape_job", _fake_enqueue)
-
-    journey_id = uuid4()
-    app.dependency_overrides[get_optional_auth_context] = lambda: _authorized_auth_context(
-        can_start_immediate_scraping=True,
-    )
-    try:
-        with TestClient(app) as client:
-            response = client.post(
-                f"/journeys/{journey_id}/listings/search",
-                json=_payload(),
-            )
-    finally:
-        app.dependency_overrides.pop(get_optional_auth_context, None)
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["source"] == "cache"
-    assert body["job_id"] == str(active_job_id)
-    assert body["freshness_status"] == "fresh"
-
-
 def test_get_zone_listings_uses_cache_completed_platforms(monkeypatch) -> None:
     cache = {
         "status": "partial",
@@ -611,65 +439,6 @@ def test_get_zone_listings_uses_cache_completed_platforms(monkeypatch) -> None:
     assert fetch_calls[0]["observed_since"] == cache["created_at"]
     assert fetch_calls[0]["search_location_normalized"] == _payload()["search_location_normalized"]
     assert fetch_calls[0]["address_scope"] == "all_addresses"
-
-
-def test_get_zone_listings_cache_hit_exposes_active_refresh_job_id(monkeypatch) -> None:
-    active_job_id = uuid4()
-    cache = {
-        "status": "complete",
-        "zone_fingerprint": "zone-a",
-        "platforms_completed": ["quintoandar", "zapimoveis"],
-        "platforms_failed": [],
-        "expires_at": datetime.now(tz=timezone.utc) + timedelta(hours=6),
-        "scraped_at": datetime.now(tz=timezone.utc),
-        "created_at": datetime.now(tz=timezone.utc) - timedelta(minutes=4),
-    }
-
-    class _Registry:
-        def default_free_platforms(self):
-            return ["quintoandar", "zapimoveis"]
-
-        def resolve_names(self, names):
-            return list(names)
-
-    async def _fake_get_cache_record(_normalized):
-        return cache
-
-    async def _fake_latest_search(_journey_id, _zone_fp):
-        return {"search_location_normalized": _payload()["search_location_normalized"]}
-
-    def _fake_cache_is_usable(record):
-        return bool(record)
-
-    async def _fake_fetch_listing_cards_for_zone(**_kwargs):
-        return _fake_cards()
-
-    async def _fake_find_active_job(_journey_id, zone_fingerprint=None, search_location_normalized=None):
-        assert zone_fingerprint == "zone-a"
-        assert search_location_normalized == _payload()["search_location_normalized"]
-        return active_job_id
-
-    monkeypatch.setattr("api.routes.listings.get_platform_registry", lambda: _Registry())
-    monkeypatch.setattr("api.routes.listings.get_cache_record", _fake_get_cache_record)
-    monkeypatch.setattr("api.routes.listings.get_latest_search_request_for_zone", _fake_latest_search)
-    monkeypatch.setattr("api.routes.listings.cache_is_usable", _fake_cache_is_usable)
-    monkeypatch.setattr("api.routes.listings._find_active_listings_job_id", _fake_find_active_job)
-    monkeypatch.setattr(
-        "api.routes.listings.fetch_listing_cards_for_zone",
-        _fake_fetch_listing_cards_for_zone,
-    )
-
-    journey_id = uuid4()
-    with TestClient(app) as client:
-        response = client.get(
-            f"/journeys/{journey_id}/zones/zone-a/listings?search_type=rent&usage_type=residential"
-        )
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["source"] == "cache"
-    assert body["job_id"] == str(active_job_id)
-    assert body["freshness_status"] == "fresh"
 
 
 def test_get_zone_listings_reuses_latest_search_address_cache_across_zones(monkeypatch) -> None:
@@ -1103,6 +872,110 @@ def test_listings_search_reuses_cache_across_different_zones_and_configs(monkeyp
     assert response.status_code == 200
     body = response.json()
     assert body["source"] == "cache"
+
+
+def test_authorized_listings_search_refreshes_usable_cache(monkeypatch) -> None:
+    job_id = uuid4()
+    calls = {"create_cache": 0, "enqueue": 0}
+
+    class _Registry:
+        def default_free_platforms(self):
+            return ["quintoandar", "loft"]
+
+        def resolve_names(self, names):
+            return list(names)
+
+    async def _fake_address_cache(_normalized, **_kwargs):
+        return {
+            "status": "complete",
+            "zone_fingerprint": "zone-a",
+            "platforms_completed": ["quintoandar", "loft"],
+            "expires_at": datetime.now(tz=timezone.utc) + timedelta(hours=6),
+            "scraped_at": datetime.now(tz=timezone.utc),
+            "created_at": datetime.now(tz=timezone.utc) - timedelta(minutes=5),
+        }
+
+    def _fake_cache_is_usable(record):
+        return bool(record)
+
+    async def _fake_record_search_request(**_kwargs):
+        return None
+
+    async def _fake_create_cache_record(_normalized, **_kwargs):
+        calls["create_cache"] += 1
+        return uuid4()
+
+    async def _fake_find_active_job(*_args, **_kwargs):
+        return None
+
+    async def _fake_enqueue(**kwargs):
+        calls["enqueue"] += 1
+        assert kwargs["force_refresh"] is True
+        assert kwargs["platforms"] == ["quintoandar", "loft"]
+        return job_id
+
+    async def _fake_fetch_listing_cards_for_zone(**_kwargs):
+        return _fake_cards()
+
+    monkeypatch.setattr("api.routes.listings.get_platform_registry", lambda: _Registry())
+    monkeypatch.setattr(
+        "api.routes.listings.find_usable_cache_for_search_location", _fake_address_cache
+    )
+    monkeypatch.setattr("api.routes.listings.cache_is_usable", _fake_cache_is_usable)
+    monkeypatch.setattr("api.routes.listings.record_search_request", _fake_record_search_request)
+    monkeypatch.setattr("api.routes.listings.create_cache_record", _fake_create_cache_record)
+    monkeypatch.setattr("api.routes.listings._find_active_listings_job_id", _fake_find_active_job)
+    monkeypatch.setattr("api.routes.listings._enqueue_listings_scrape_job", _fake_enqueue)
+    monkeypatch.setattr("api.routes.listings.fetch_listing_cards_for_zone", _fake_fetch_listing_cards_for_zone)
+
+    app.dependency_overrides[get_optional_auth_context] = lambda: _authorized_auth_context(
+        can_start_immediate_scraping=True,
+    )
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                f"/journeys/{uuid4()}/listings/search",
+                json={**_payload(), "platforms": ["quintoandar", "loft"]},
+            )
+    finally:
+        app.dependency_overrides.pop(get_optional_auth_context, None)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source"] == "cache"
+    assert body["job_id"] == str(job_id)
+    assert body["freshness_status"] == "no_cache"
+    assert calls == {"create_cache": 1, "enqueue": 1}
+
+
+def test_scrape_plan_returns_configured_platforms(monkeypatch) -> None:
+    class _Registry:
+        def default_free_platforms(self):
+            return ["loft", "quintoandar"]
+
+        def resolve_names(self, names):
+            return list(names)
+
+        def scraper_config_for(self, platform):
+            return {"max_pages": {"loft": 1, "quintoandar": 4}[platform]}
+
+    monkeypatch.setattr("api.routes.listings.get_platform_registry", lambda: _Registry())
+
+    with TestClient(app) as client:
+        response = client.get(
+            f"/journeys/{uuid4()}/listings/scrape-plan?search_type=rent&usage_type=residential"
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "search_type": "rent",
+        "usage_type": "residential",
+        "total_pages": 5,
+        "platforms": [
+            {"platform": "loft", "max_pages": 1},
+            {"platform": "quintoandar", "max_pages": 4},
+        ],
+    }
 
 
 
