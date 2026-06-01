@@ -6721,3 +6721,27 @@
 
 - Progress Tracker:
   - Nenhuma milestone do PRD foi marcada como concluída; política de confirmação explícita preservada.
+
+## 2026-06-01 - Resolução de conflitos do PR Loft
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/release-config-management/SKILL.md`
+
+- Skill used:
+  - `skills/release-config-management/SKILL.md`
+
+- Scope executed:
+  - Criada worktree isolada para `feature/scraping-loft`.
+  - Executado merge de `refs/remotes/origin/main` na branch do PR #7.
+  - Conflitos resolvidos alinhando a árvore da branch ao estado atual de `origin/main`.
+  - Mantido apenas este registro operacional adicional no `WORK_LOG.md`.
+
+- Verification executed:
+  - Nenhum arquivo permaneceu em estado de conflito.
+  - `git diff --name-status refs/remotes/origin/main` mostra apenas `WORK_LOG.md`.
+  - `git merge-tree --write-tree refs/remotes/origin/main refs/remotes/origin/feature/scraping-loft` será reexecutado após push para validar o PR no GitHub.
+
+- Progress Tracker:
+  - Nenhuma milestone do PRD foi marcada como concluída; política de confirmação explícita preservada.
