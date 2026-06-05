@@ -22,7 +22,7 @@ router = APIRouter(prefix="/admin/billing", tags=["admin"])
 _PROPRIETARIO_ROLE = "proprietario"
 
 
-async def _require_proprietario(
+async def _require_billing_operator(
     auth_session: Annotated[str | None, Cookie(alias=AUTH_SESSION_COOKIE)] = None,
     anonymous_session_id: Annotated[str | None, Cookie(alias=ANONYMOUS_SESSION_COOKIE)] = None,
 ) -> RequestAuthContext:
@@ -31,16 +31,22 @@ async def _require_proprietario(
         anonymous_session_id=anonymous_session_id,
     )
     if ctx.user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Autenticação necessária.")
-    if ctx.user.role != _PROPRIETARIO_ROLE:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acesso restrito a proprietários.")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Autenticação necessária.",
+        )
+    if not ctx.user.is_superuser and ctx.user.role != _PROPRIETARIO_ROLE:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso restrito a administradores.",
+        )
     return ctx
 
 
 @router.post("/pix/{payment_id}/confirm", response_model=PaymentStatusRead)
 async def admin_confirm_pix(
     payment_id: UUID,
-    ctx: RequestAuthContext = Depends(_require_proprietario),
+    ctx: RequestAuthContext = Depends(_require_billing_operator),
 ) -> PaymentStatusRead:
     try:
         await activate_plan_from_pix(payment_id)
@@ -57,10 +63,14 @@ async def admin_confirm_pix(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
 
-@router.post("/plans/{plan_slug}/activate", response_model=AccountPlanRead, status_code=status.HTTP_200_OK)
+@router.post(
+    "/plans/{plan_slug}/activate",
+    response_model=AccountPlanRead,
+    status_code=status.HTTP_200_OK,
+)
 async def proprietario_activate_plan(
     plan_slug: str,
-    ctx: RequestAuthContext = Depends(_require_proprietario),
+    ctx: RequestAuthContext = Depends(_require_billing_operator),
 ) -> AccountPlanRead:
     try:
         await activate_plan_direct(user_id=ctx.user.id, plan_slug=plan_slug)
@@ -69,5 +79,8 @@ async def proprietario_activate_plan(
 
     plan = await get_active_plan_activation(ctx.user.id)
     if plan is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plano não encontrado após ativação.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Plano não encontrado após ativação.",
+        )
     return plan

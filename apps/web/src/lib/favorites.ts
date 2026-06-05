@@ -21,6 +21,7 @@ export type FavoriteComparisonItem = {
   savedAt: string;
   listing: ListingCardRead;
   analytics: ZoneFavoriteAnalytics | null;
+  note?: string | null;
 };
 
 type FavoriteMetricDefinition = {

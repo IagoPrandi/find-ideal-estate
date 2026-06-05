@@ -25,6 +25,10 @@ from modules.listings.scrapers.quintoandar import (  # noqa: E402
     _to_quintoandar_location_slug,
 )
 from modules.listings.scrapers.firecrawl import extract_firecrawl_listings  # noqa: E402
+from modules.listings.scrapers.loft import (  # noqa: E402
+    _build_loft_search_params,
+    _parse_loft_groups,
+)
 from modules.listings.scrapers.vivareal import (  # noqa: E402
     _extract_from_dom_rows,
     _extract_from_glue_payload,
@@ -258,6 +262,62 @@ class TestListingUsageInferenceFromUrl:
     def test_falls_back_to_bedrooms_when_url_has_no_signal(self) -> None:
         assert infer_listing_usage_type_from_url("https://www.example.com/imovel/123", 0) == "commercial"
         assert infer_listing_usage_type_from_url("https://www.example.com/imovel/123", 2) == "residential"
+
+
+class TestLoftExtraction:
+    def test_search_params_include_neighborhood_from_scraper_label(self) -> None:
+        params = _build_loft_search_params("Rua Schilling, Vila Leopoldina, Sao Paulo, SP", "rent")
+
+        assert ("cities[]", "sao paulo, sp") in params
+        assert ("transactionType[]", "for_rent") in params
+        assert ("neighborhood[]", "vila leopoldina, sao paulo, sp") in params
+
+    def test_landscape_api_payload_yields_listings_with_coordinates(self) -> None:
+        payload = [
+            {
+                "id": "loft-1",
+                "rentalPrice": 4200,
+                "homeType": "apartment",
+                "area": 62,
+                "bedrooms": 2,
+                "restrooms": 2,
+                "parkingSpots": 1,
+                "complexFee": 650,
+                "propertyTax": 120,
+                "address": {
+                    "streetFullName": "Rua Schilling",
+                    "neighborhood": "Vila Leopoldina",
+                    "city": "Sao Paulo",
+                    "state": "SP",
+                    "lat": "-23.5209",
+                    "lng": "-46.7270",
+                    "facets": {
+                        "street": "Rua Schilling, Vila Leopoldina, Sao Paulo, SP",
+                    },
+                },
+            }
+        ]
+
+        results = _parse_loft_groups(payload, "rent")
+
+        assert results == [
+            {
+                "platform": "loft",
+                "platform_listing_id": "loft-1",
+                "url": "https://loft.com.br/imovel/apartment-rua-schilling-vila-leopoldina-sao-paulo-2-quartos-62m2/loft-1",
+                "image_url": None,
+                "lat": -23.5209,
+                "lon": -46.727,
+                "price_brl": 4200.0,
+                "area_m2": 62.0,
+                "bedrooms": 2,
+                "bathrooms": 2,
+                "parking": 1,
+                "address": "Rua Schilling, Vila Leopoldina, Sao Paulo, SP",
+                "condo_fee_brl": 650.0,
+                "iptu_brl": 120.0,
+            }
+        ]
 
 
 # ---------------------------------------------------------------------------

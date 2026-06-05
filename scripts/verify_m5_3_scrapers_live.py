@@ -16,6 +16,7 @@ if str(API_SRC) not in sys.path:
 from modules.listings.scrapers import (  # noqa: E402
     FirecrawlVivaRealScraper,
     FirecrawlZapImoveisScraper,
+    LoftScraper,
     QuintoAndarScraper,
     ScraperDisallowedError,
     ScraperError,
@@ -24,6 +25,7 @@ from modules.listings.scrapers import (  # noqa: E402
 )
 
 SCRAPERS = {
+    "loft": LoftScraper,
     "quintoandar": QuintoAndarScraper,
     "zapimoveis": ZapImoveisScraper,
     "vivareal": VivaRealScraper,

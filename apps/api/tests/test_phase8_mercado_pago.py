@@ -24,7 +24,13 @@ os.environ.setdefault("MERCADO_PAGO_ENVIRONMENT", "test")
 os.environ.setdefault("MERCADO_PAGO_ACCESS_TOKEN_TEST", "test-token")
 os.environ.setdefault("MERCADO_PAGO_WEBHOOK_SECRET", "test-webhook-secret")
 
-from contracts import AuthUserRead, PixCheckoutResponse  # noqa: E402
+from contracts import (  # noqa: E402
+    AccountPlanRead,
+    AuthUserRead,
+    PixCheckoutResponse,
+    PlanEntitlementsRead,
+    PlanRead,
+)
 from core.config import get_settings  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from modules.billing.mercado_pago import (  # noqa: E402
@@ -143,7 +149,14 @@ def test_pix_checkout_passes_authenticated_user_to_service(monkeypatch):
             },
         )()
 
-    async def _create_pix_checkout(*, user_id, plan_slug, payer_email, payer_display_name, payment_type):
+    async def _create_pix_checkout(
+        *,
+        user_id,
+        plan_slug,
+        payer_email,
+        payer_display_name,
+        payment_type,
+    ):
         captured["user_id"] = user_id
         captured["plan_slug"] = plan_slug
         captured["payer_email"] = payer_email
@@ -177,6 +190,111 @@ def test_pix_checkout_passes_authenticated_user_to_service(monkeypatch):
     assert captured["payer_email"] == "ana@example.com"
     assert captured["payer_display_name"] == "Ana Silva"
     assert captured["payment_type"] == "plan_activation"
+
+
+def _account_plan_payload(slug: str = "pro") -> AccountPlanRead:
+    plan = PlanRead(
+        id=uuid4(),
+        slug=slug,
+        name="Pro",
+        price_brl=Decimal("90.99"),
+        monthly_credits=4000,
+        is_paid=True,
+        display_order=3,
+    )
+    entitlements = PlanEntitlementsRead(
+        max_listing_favorites=100,
+        max_zone_favorites=20,
+        retention_days=30,
+        can_customize_radius=True,
+        can_customize_max_time=True,
+        can_customize_distance=True,
+        max_active_metrics=None,
+        transport_line_policy="unlocked",
+        zone_selection_policy="any",
+        auto_refresh_policy="none",
+        pro_max_refresh_max_zones=None,
+        pro_max_refresh_max_listings=None,
+        pro_max_refresh_cadence_days=None,
+        pro_max_refresh_eligibility_days=None,
+        rollover_percent=100,
+        rollover_cycles=12,
+        cycle_length_days=30,
+    )
+    return AccountPlanRead(
+        plan=plan,
+        status="active",
+        started_at=datetime.now(tz=timezone.utc),
+        ends_at=datetime.now(tz=timezone.utc),
+        entitlements=entitlements,
+    )
+
+
+def test_admin_billing_plan_activation_allows_superuser(monkeypatch):
+    user_payload = _auth_user_payload()
+    user_payload["is_superuser"] = True
+    user = AuthUserRead.model_validate(user_payload)
+    captured = {}
+
+    async def _context(*, session_token=None, anonymous_session_id=None):
+        return type(
+            "Ctx",
+            (),
+            {
+                "user": user,
+                "session_expires_at": datetime.now(tz=timezone.utc),
+                "session_token": session_token,
+                "anonymous_session_id": anonymous_session_id,
+            },
+        )()
+
+    async def _activate_plan_direct(*, user_id, plan_slug):
+        captured["user_id"] = user_id
+        captured["plan_slug"] = plan_slug
+
+    async def _get_active_plan_activation(user_id):
+        captured["active_plan_user_id"] = user_id
+        return _account_plan_payload("pro")
+
+    monkeypatch.setattr("api.routes.admin_billing.build_request_auth_context", _context)
+    monkeypatch.setattr("api.routes.admin_billing.activate_plan_direct", _activate_plan_direct)
+    monkeypatch.setattr(
+        "api.routes.admin_billing.get_active_plan_activation",
+        _get_active_plan_activation,
+    )
+
+    with TestClient(app) as client:
+        response = client.post("/admin/billing/plans/pro/activate")
+
+    assert response.status_code == 200
+    assert captured["user_id"] == user.id
+    assert captured["plan_slug"] == "pro"
+    assert captured["active_plan_user_id"] == user.id
+    assert response.json()["plan"]["slug"] == "pro"
+
+
+def test_admin_billing_plan_activation_rejects_regular_user(monkeypatch):
+    user = AuthUserRead.model_validate(_auth_user_payload())
+
+    async def _context(*, session_token=None, anonymous_session_id=None):
+        return type(
+            "Ctx",
+            (),
+            {
+                "user": user,
+                "session_expires_at": datetime.now(tz=timezone.utc),
+                "session_token": session_token,
+                "anonymous_session_id": anonymous_session_id,
+            },
+        )()
+
+    monkeypatch.setattr("api.routes.admin_billing.build_request_auth_context", _context)
+
+    with TestClient(app) as client:
+        response = client.post("/admin/billing/plans/pro/activate")
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "Acesso restrito a administradores."}
 
 
 def test_checkout_preference_omits_payer_in_test_for_non_testuser_email(monkeypatch):
@@ -328,7 +446,11 @@ def test_get_payment_status_reconciles_mercado_pago_payment_by_reference(monkeyp
     assert state["linked"] == {
         "payment_id": payment_id,
         "external_payment_id": "987654321",
-        "provider_payload": {"id": 987654321, "external_reference": str(payment_id), "status": "approved"},
+        "provider_payload": {
+            "id": 987654321,
+            "external_reference": str(payment_id),
+            "status": "approved",
+        },
     }
     assert state["synchronized"] == [payment_id]
 

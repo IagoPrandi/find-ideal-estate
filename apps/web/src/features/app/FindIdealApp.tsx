@@ -8,7 +8,7 @@ import { FeedbackFormButton } from "../../components/layout/FeedbackFormButton";
 import { FavoritesPanel, WizardPanel } from "../../components/panels";
 import { AuthAccessCard } from "../auth/AuthAccessCard";
 import { getPoiCategoryMeta, getZonePoiSelectionKey, sortPoiPoints, ZonePoiPointLike, zoneNeedsPoiBackfill } from "../../domain/poi";
-import { applyListingsPanelFilters, filterListingsByMapViewport, getListingDisplayPrice, getListingSelectionKey } from "../../lib/listingFormat";
+import { applyListingsPanelFilters, filterListingsByMapViewport, getListingDisplayPrice, getListingSelectionKey, getPlatformColor, normalizePlatformKey } from "../../lib/listingFormat";
 import { getIncludedGreenVegetationLevels, useFavoritesStore, useJourneyStore, useUIStore, useZoneFavoritesStore } from "../../state";
 
 const MAPTILER_KEY =
@@ -35,10 +35,12 @@ const SAFETY_SOURCE_ID = "public-safety-source-runtime";
 const PIN_INTERACTIVE_LAYER_LIST = ["transport-candidate-layer", "journey-listings-layer", "saved-listings-layer"] as const;
 const TRANSPORT_CANDIDATE_PIN_ICON_ID = "transport-candidate-pin-icon";
 const TRANSPORT_CANDIDATE_SELECTED_PIN_ICON_ID = "transport-candidate-pin-selected-icon";
-const LISTING_PIN_ICON_ID = "listing-pin-icon";
-const LISTING_SELECTED_PIN_ICON_ID = "listing-pin-selected-icon";
-const SAVED_LISTING_PIN_ICON_ID = "saved-listing-pin-icon";
-const SAVED_LISTING_SELECTED_PIN_ICON_ID = "saved-listing-pin-selected-icon";
+const PLATFORM_PIN_KEYS = ["loft", "quintoandar", "vivareal", "zapimoveis", "default"] as const;
+const LISTING_PIN_ICON_PREFIX = "listing-pin";
+const LISTING_SELECTED_PIN_ICON_PREFIX = "listing-pin-selected";
+const SAVED_LISTING_PIN_ICON_PREFIX = "saved-listing-pin";
+const SAVED_LISTING_SELECTED_PIN_ICON_PREFIX = "saved-listing-pin-selected";
+const SAVED_ZONE_LISTING_PIN_ICON_PREFIX = "saved-zone-listing-pin";
 const SAVED_ZONE_TRANSPORT_ICON_ID = "saved-zone-transport-diamond-icon";
 const SELECTED_PIN_MARKER_STYLE_ID = "selected-map-pin-marker-styles";
 const POPUP_PERSIST_LAYER_LIST = [...BUS_LAYER_LIST, "zone-pois-highlight-layer", "zone-pois-layer", "safety-incident-layer", "saved-zone-pois-layer", "saved-zone-transport-layer", "saved-zone-listings-layer", "saved-zones-fill-layer"] as const;
@@ -96,6 +98,9 @@ const MAP_LAYER_STACK_ORDER = [
   "saved-listings-layer",
 ] as const;
 const LAYER_TOGGLE_BUTTON_CLASS = "pointer-events-auto flex h-8 w-8 items-center justify-center rounded-lg border border-slate-100 bg-white/95 text-slate-500 shadow-md backdrop-blur-md transition-colors hover:bg-pastel-violet-50 hover:text-pastel-violet-600";
+
+const getPlatformPinIconId = (prefix: string, platform: string | null | undefined) =>
+  `${prefix}-${normalizePlatformKey(platform)}`;
 
 const ZONE_COLOR_PALETTE = [
   { fill: "#bfdbfe", outline: "#2563eb", label: "#1d4ed8" },
@@ -240,8 +245,10 @@ const BASE_LAYER_LEGEND_ITEMS: Record<Exclude<MapOverlayLayerKey, "safety">, Lay
     { id: "poi-gym", label: getPoiCategoryMeta("gym").singularLabel, markerKind: "dot", color: getPoiCategoryMeta("gym").color },
   ],
   listings: [
-    { id: "listing-default", label: "Imóvel", markerKind: "pin", color: "#845ef7" },
-    { id: "listing-selected", label: "Selecionado", markerKind: "pin", color: "#5b21b6" },
+    { id: "listing-loft", label: "Loft", markerKind: "pin", color: getPlatformColor("loft") },
+    { id: "listing-quintoandar", label: "QuintoAndar", markerKind: "pin", color: getPlatformColor("quintoandar") },
+    { id: "listing-vivareal", label: "VivaReal", markerKind: "pin", color: getPlatformColor("vivareal") },
+    { id: "listing-zapimoveis", label: "ZapImóveis", markerKind: "pin", color: getPlatformColor("zapimoveis") },
   ],
   flood: [
     { id: "flood-fill", label: "Mancha de alagamento", markerKind: "fill", color: "rgba(55,138,221,0.24)", borderColor: "#378add" },
@@ -254,8 +261,10 @@ const BASE_LAYER_LEGEND_ITEMS: Record<Exclude<MapOverlayLayerKey, "safety">, Lay
     { id: "saved-zone-transport", label: "Ponto seed", markerKind: "pin", color: "#1001b4" },
   ],
   savedListings: [
-    { id: "saved-listing", label: "Imóvel salvo", markerKind: "pin", color: "#d33ff4" },
-    { id: "saved-listing-selected", label: "Selecionado", markerKind: "pin", color: "#ea2afc" },
+    { id: "saved-listing-loft", label: "Loft", markerKind: "pin", color: getPlatformColor("loft") },
+    { id: "saved-listing-quintoandar", label: "QuintoAndar", markerKind: "pin", color: getPlatformColor("quintoandar") },
+    { id: "saved-listing-vivareal", label: "VivaReal", markerKind: "pin", color: getPlatformColor("vivareal") },
+    { id: "saved-listing-zapimoveis", label: "ZapImóveis", markerKind: "pin", color: getPlatformColor("zapimoveis") },
   ],
 };
 
@@ -433,6 +442,8 @@ const toListingsFeatureCollection = (
         properties: {
           listing_key: listingKey,
           platform: String(listing.platform || "Plataforma"),
+          icon_id: getPlatformPinIconId(LISTING_PIN_ICON_PREFIX, String(listing.platform || "")),
+          selected_icon_id: getPlatformPinIconId(LISTING_SELECTED_PIN_ICON_PREFIX, String(listing.platform || "")),
           price: getListingDisplayPrice(listing as never) || 0,
           selected: listingKey !== "" && listingKey === selectedListingKey
         }
@@ -546,6 +557,24 @@ const createPinIcon = (fillHex: string) => {
     };
   } catch {
     return createEmptyStyleImage(width, height);
+  }
+};
+
+const registerPlatformPinImages = (map: maplibregl.Map) => {
+  for (const platform of PLATFORM_PIN_KEYS) {
+    const color = getPlatformColor(platform);
+    const entries = [
+      { id: getPlatformPinIconId(LISTING_PIN_ICON_PREFIX, platform), color },
+      { id: getPlatformPinIconId(LISTING_SELECTED_PIN_ICON_PREFIX, platform), color },
+      { id: getPlatformPinIconId(SAVED_LISTING_PIN_ICON_PREFIX, platform), color },
+      { id: getPlatformPinIconId(SAVED_LISTING_SELECTED_PIN_ICON_PREFIX, platform), color },
+      { id: getPlatformPinIconId(SAVED_ZONE_LISTING_PIN_ICON_PREFIX, platform), color },
+    ];
+    for (const entry of entries) {
+      if (!map.hasImage(entry.id)) {
+        map.addImage(entry.id, createPinIcon(entry.color));
+      }
+    }
   }
 };
 
@@ -748,8 +777,6 @@ const createDiamondIcon = (fillHex: string) =>
 
 const normalizeHexColor = (value: string | null | undefined, fallback = "#0ea5e9") =>
   typeof value === "string" && /^#[0-9a-fA-F]{6}$/.test(value.trim()) ? value.trim().toLowerCase() : fallback;
-
-const getSavedZoneListingIconId = (color: string) => `saved-zone-listing-pin-${normalizeHexColor(color).slice(1)}`;
 
 const toZonePoisFeatureCollection = (
   poiPoints: ZonePoiPointLike[],
@@ -1331,19 +1358,7 @@ export function FindIdealApp() {
       if (!map.hasImage(TRANSPORT_CANDIDATE_SELECTED_PIN_ICON_ID)) {
         map.addImage(TRANSPORT_CANDIDATE_SELECTED_PIN_ICON_ID, createPinIcon("#845ef7"));
       }
-      if (!map.hasImage(LISTING_PIN_ICON_ID)) {
-        map.addImage(LISTING_PIN_ICON_ID, createPinIcon("#845ef7"));
-      }
-      if (!map.hasImage(LISTING_SELECTED_PIN_ICON_ID)) {
-        map.addImage(LISTING_SELECTED_PIN_ICON_ID, createPinIcon("#5b21b6"));
-      }
-      if (!map.hasImage(SAVED_LISTING_PIN_ICON_ID)) {
-        // Rosa dos botões "salvar/remover" (rose-500).
-        map.addImage(SAVED_LISTING_PIN_ICON_ID, createPinIcon("#f43f5e"));
-      }
-      if (!map.hasImage(SAVED_LISTING_SELECTED_PIN_ICON_ID)) {
-        map.addImage(SAVED_LISTING_SELECTED_PIN_ICON_ID, createPinIcon("#be123c"));
-      }
+      registerPlatformPinImages(map);
       if (!map.hasImage(SAVED_ZONE_TRANSPORT_ICON_ID)) {
         map.addImage(SAVED_ZONE_TRANSPORT_ICON_ID, createDiamondIcon("#7c3aed"));
       }
@@ -1853,12 +1868,7 @@ export function FindIdealApp() {
         type: "symbol",
         source: SAVED_LISTINGS_SOURCE_ID,
         layout: {
-          "icon-image": [
-            "case",
-            ["boolean", ["get", "selected"], false],
-            SAVED_LISTING_SELECTED_PIN_ICON_ID,
-            SAVED_LISTING_PIN_ICON_ID,
-          ],
+          "icon-image": ["case", ["boolean", ["get", "selected"], false], ["get", "selected_icon_id"], ["get", "icon_id"]],
           "icon-size": ["interpolate", ["linear"], ["zoom"], 10, 0.45, 14, 0.58, 17, 0.72],
           "icon-anchor": "bottom",
           "icon-allow-overlap": true,
@@ -1975,7 +1985,7 @@ export function FindIdealApp() {
         type: "symbol",
         source: LISTINGS_SOURCE_ID,
         layout: {
-          "icon-image": ["case", ["boolean", ["get", "selected"], false], LISTING_SELECTED_PIN_ICON_ID, LISTING_PIN_ICON_ID],
+          "icon-image": ["case", ["boolean", ["get", "selected"], false], ["get", "selected_icon_id"], ["get", "icon_id"]],
           "icon-size": ["interpolate", ["linear"], ["zoom"], 9, 0.46, 12, 0.56, 15, 0.68],
           "icon-anchor": "bottom",
           "icon-allow-overlap": true,
@@ -2750,7 +2760,7 @@ export function FindIdealApp() {
     selectedListingMarkerRef.current = buildSelectedPinMarker(
       map,
       [selectedListing.lon, selectedListing.lat],
-      "#5b21b6",
+      getPlatformColor(selectedListing.platform),
       "listing"
     );
   }, [filteredMapListings, isMapReady, layerVisibility.listings, selectedListingKey, step]);
@@ -2805,14 +2815,6 @@ export function FindIdealApp() {
 
     const hiddenZoneKeySet = new Set(hiddenSavedZoneKeys);
     const visibleSavedZoneFavorites = savedZoneFavorites.filter((entry) => !hiddenZoneKeySet.has(entry.zoneKey));
-    for (const entry of visibleSavedZoneFavorites) {
-      const color = normalizeHexColor(entry.color || entry.payload.color);
-      const iconId = getSavedZoneListingIconId(color);
-      if (!map.hasImage(iconId)) {
-        map.addImage(iconId, createPinIcon(color));
-      }
-    }
-
     const zoneFeatures: GeoJSON.Feature<GeoJSON.Geometry>[] = visibleSavedZoneFavorites
       .filter((entry) => entry.payload.isochrone_geom)
       .map((entry) => {
@@ -2849,8 +2851,6 @@ export function FindIdealApp() {
     );
 
     const zoneListingFeatures: GeoJSON.Feature<GeoJSON.Point>[] = visibleSavedZoneFavorites.flatMap((entry) => {
-      const color = normalizeHexColor(entry.color || entry.payload.color);
-      const iconId = getSavedZoneListingIconId(color);
       return (entry.payload.listings || [])
         .filter((listing) => typeof listing.lat === "number" && typeof listing.lon === "number")
         .map((listing, index) => ({
@@ -2860,7 +2860,8 @@ export function FindIdealApp() {
             zone_key: entry.zoneKey,
             listing_key: `${entry.zoneKey}:listing:${listing.property_id || listing.platform_listing_id || index}`,
             address: listing.address_normalized || "",
-            icon_id: iconId,
+            platform: listing.platform || null,
+            icon_id: getPlatformPinIconId(SAVED_ZONE_LISTING_PIN_ICON_PREFIX, listing.platform),
           },
         }));
     });
@@ -2898,6 +2899,9 @@ export function FindIdealApp() {
         properties: {
           listing_key: entry.listingKey,
           address: entry.listing.address_normalized || "",
+          platform: entry.listing.platform || null,
+          icon_id: getPlatformPinIconId(SAVED_LISTING_PIN_ICON_PREFIX, entry.listing.platform),
+          selected_icon_id: getPlatformPinIconId(SAVED_LISTING_SELECTED_PIN_ICON_PREFIX, entry.listing.platform),
           selected: entry.listingKey === selectedSavedListingKey,
         },
       }));

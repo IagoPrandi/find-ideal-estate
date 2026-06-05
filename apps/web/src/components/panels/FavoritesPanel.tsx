@@ -20,7 +20,7 @@ import {
   formatZoneMetricValue,
   ZONE_METRIC_DEFINITIONS,
 } from "../../lib/zone-favorites";
-import { formatCurrencyBr, getListingDisplayPrice, resolveListingCardImageUrls, resolvePlatformUrl } from "../../lib/listingFormat";
+import { formatCurrencyBr, getListingDisplayPrice, getPlatformColor, resolveListingCardImageUrls, resolvePlatformUrl } from "../../lib/listingFormat";
 import { useFavoritesStore, useJourneyStore, useUIStore, useZoneFavoritesStore } from "../../state";
 
 const FAVORITES_ANALYTICS_STALE_TIME = 30 * 60_000;
@@ -303,6 +303,7 @@ export function FavoritesPanel() {
       </button>
 
       <aside className={`favorites-panel ${isPanelOpen ? "favorites-panel--open" : "favorites-panel--closed"}`} aria-hidden={!isPanelOpen} data-testid="favorites-panel">
+        <div className="panel-scroll flex-1 overflow-y-auto">
         <div className="border-b border-slate-200 bg-white px-5 pt-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="min-w-0">
@@ -362,7 +363,7 @@ export function FavoritesPanel() {
 
         {activeScope === "listings" ? (
           activeTab === "saved" ? (
-          <div className="panel-scroll flex-1 space-y-3 overflow-y-auto px-5 py-4">
+          <div className="space-y-3 px-5 py-4">
             <form
               onSubmit={handleSubmitManualUrl}
               className="rounded-[20px] border border-slate-200 bg-white p-3 shadow-sm"
@@ -417,6 +418,7 @@ export function FavoritesPanel() {
                   ? `${formatCurrencyBr(favorite.listing.current_unit_price)}/m²`
                   : "m² indisponível";
                 const isCardSelected = selectedSavedListingKey === favorite.listingKey;
+                const platformColor = getPlatformColor(favorite.listing.platform);
                 return (
                   <article
                     key={favorite.listingKey}
@@ -436,7 +438,10 @@ export function FavoritesPanel() {
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-2">
-                              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-400">{favorite.listing.platform || "Plataforma"}</p>
+                              <p className="inline-flex items-center gap-1.5 rounded-full border bg-white px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ borderColor: `${platformColor}33`, color: platformColor }}>
+                                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: platformColor }} />
+                                {favorite.listing.platform || "Plataforma"}
+                              </p>
                               {rankingPosition ? (
                                 <span
                                   data-testid={`favorite-saved-rank-${favorite.listingKey}`}
@@ -472,7 +477,7 @@ export function FavoritesPanel() {
                           <div className="flex items-center gap-1.5">
                             <button
                               type="button"
-                              onClick={(event) => { event.stopPropagation(); startEditingNote(favorite.listingKey, favorite.note); }}
+                              onClick={(event) => { event.stopPropagation(); startEditingNote(favorite.listingKey, favorite.note ?? null); }}
                               title={favorite.note ? "Editar comentário" : "Adicionar comentário"}
                               className={`inline-flex h-8 w-8 items-center justify-center rounded-xl border transition ${favorite.note ? "border-amber-200 bg-amber-50 text-amber-600 hover:bg-amber-100" : "border-slate-200 bg-slate-50 text-slate-400 hover:border-slate-300 hover:text-slate-600"}`}
                             >
@@ -517,7 +522,7 @@ export function FavoritesPanel() {
             )}
           </div>
         ) : (
-          <div className="panel-scroll flex-1 overflow-y-auto px-5 py-4">
+          <div className="px-5 py-4">
             <section className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm" data-testid="favorites-metric-selector">
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -609,7 +614,7 @@ export function FavoritesPanel() {
                   <table className="w-max min-w-full border-collapse text-[11px] text-slate-700" data-testid="favorites-matrix">
                     <thead className="bg-slate-50 text-left text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">
                       <tr>
-                        <th className="sticky left-0 z-10 w-[8.4rem] min-w-[8.4rem] max-w-[8.4rem] border-b border-r border-slate-200 bg-slate-50 px-2.5 py-2">Imóvel</th>
+                        <th className="w-[8.4rem] min-w-[8.4rem] max-w-[8.4rem] border-b border-r border-slate-200 bg-slate-50 px-2.5 py-2">Imóvel</th>
                         {selectedMetrics.map((metric) => (
                           <th key={metric.id} title={getFavoriteMetricTooltip(metric.id)} className="whitespace-nowrap border-b border-slate-200 px-3 py-2">{metric.shortLabel}</th>
                         ))}
@@ -625,7 +630,7 @@ export function FavoritesPanel() {
                             onClick={() => setSelectedSavedListingKey(isRowSelected ? null : item.listingKey)}
                             className={`cursor-pointer ${isRowSelected ? "bg-pastel-violet-50" : index % 2 === 0 ? "bg-white hover:bg-slate-50" : "bg-slate-50/60 hover:bg-slate-100"}`}
                           >
-                            <td className="sticky left-0 z-[1] w-[8.4rem] min-w-[8.4rem] max-w-[8.4rem] border-r border-slate-200 bg-inherit px-2.5 py-2.5 align-top">
+                            <td className="w-[8.4rem] min-w-[8.4rem] max-w-[8.4rem] border-r border-slate-200 bg-inherit px-2.5 py-2.5 align-top">
                               <div className="w-[8.4rem] min-w-[8.4rem] max-w-[8.4rem]">
                                 <div className="flex items-start justify-between gap-2">
                                   <div className="min-w-0">
@@ -662,7 +667,7 @@ export function FavoritesPanel() {
           </div>
           )
         ) : activeTab === "saved" ? (
-          <div className="panel-scroll flex-1 space-y-3 overflow-y-auto px-5 py-4">
+          <div className="space-y-3 px-5 py-4">
             {orderedZones.length === 0 ? (
               <div className="rounded-[24px] border border-dashed border-slate-300 bg-slate-50/80 px-5 py-8 text-center">
                 <p className="text-sm font-semibold text-slate-700">
@@ -1001,7 +1006,7 @@ export function FavoritesPanel() {
             )}
           </div>
         ) : (
-          <div className="panel-scroll flex-1 overflow-y-auto px-5 py-4">
+          <div className="px-5 py-4">
             <section className="rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm" data-testid="zone-metric-selector">
               <div className="flex items-center justify-between gap-3">
                 <div>
@@ -1086,7 +1091,7 @@ export function FavoritesPanel() {
                   <table className="w-max min-w-full border-collapse text-[11px] text-slate-700">
                     <thead className="bg-slate-50 text-left text-[10px] font-bold uppercase tracking-[0.12em] text-slate-500">
                       <tr>
-                        <th className="sticky left-0 z-10 w-[8.4rem] min-w-[8.4rem] max-w-[8.4rem] border-b border-r border-slate-200 bg-slate-50 px-2.5 py-2">Zona</th>
+                        <th className="w-[8.4rem] min-w-[8.4rem] max-w-[8.4rem] border-b border-r border-slate-200 bg-slate-50 px-2.5 py-2">Zona</th>
                         {ZONE_METRIC_DEFINITIONS.filter((m) => selectedZoneMetricIds.includes(m.id)).map((metric) => (
                           <th key={metric.id} className="whitespace-nowrap border-b border-slate-200 px-3 py-2">
                             {metric.shortLabel}
@@ -1106,7 +1111,7 @@ export function FavoritesPanel() {
                             onClick={() => setSelectedZoneKey(isRowSelected ? null : entry.zoneKey)}
                             className={`cursor-pointer ${isRowSelected ? "bg-pastel-violet-50" : index % 2 === 0 ? "bg-white hover:bg-slate-50" : "bg-slate-50/60 hover:bg-slate-100"}`}
                           >
-                            <td className="sticky left-0 z-[1] w-[8.4rem] min-w-[8.4rem] max-w-[8.4rem] border-r border-slate-200 bg-inherit px-2.5 py-2.5 align-top">
+                            <td className="w-[8.4rem] min-w-[8.4rem] max-w-[8.4rem] border-r border-slate-200 bg-inherit px-2.5 py-2.5 align-top">
                               <p className="break-words whitespace-normal font-semibold leading-snug text-slate-900">{zoneName}</p>
                               <p className="mt-0.5 text-[10px] text-slate-500">{`${entry.payload.poi_points?.length ?? 0} pontos de interesse`}</p>
                             </td>
@@ -1125,6 +1130,7 @@ export function FavoritesPanel() {
             </section>
           </div>
         )}
+        </div>
       </aside>
     </div>
   );

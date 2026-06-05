@@ -2,10 +2,33 @@ import type { ListingCardRead, ListingPlatformVariantRead } from "../api/client"
 import type { ListingsPanelFilters, MapViewportBounds } from "../state/journey-store";
 
 const PLATFORM_BASE_URLS: Record<string, string> = {
+  loft: "https://loft.com.br",
   zapimoveis: "https://www.zapimoveis.com.br",
   vivareal: "https://www.vivareal.com.br",
   quintoandar: "https://www.quintoandar.com.br",
 };
+
+export const PLATFORM_COLOR_BY_KEY: Record<string, string> = {
+  loft: "#ed8e00",
+  quintoandar: "#3d3aed",
+  vivareal: "#052296",
+  zapimoveis: "#ff6a00",
+  default: "#64748b",
+};
+
+export function normalizePlatformKey(platform: string | null | undefined): string {
+  const normalized = (platform || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+  return normalized && PLATFORM_COLOR_BY_KEY[normalized] ? normalized : "default";
+}
+
+export function getPlatformColor(platform: string | null | undefined): string {
+  return PLATFORM_COLOR_BY_KEY[normalizePlatformKey(platform)] || PLATFORM_COLOR_BY_KEY.default;
+}
 
 function resolvePlatformAbsoluteUrl(url: string | null | undefined, platform: string | null | undefined): string | null {
   if (!url) return null;
