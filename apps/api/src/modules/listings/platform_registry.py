@@ -6,6 +6,7 @@ with current canonical platform names used by the API runtime.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -15,6 +16,8 @@ import yaml
 from core.config import ConfigurationError, get_settings
 from modules.listings.models import FREE_PLATFORMS
 from modules.listings.scrapers import (
+    FirecrawlVivaRealScraper,
+    FirecrawlZapImoveisScraper,
     LoftScraper,
     QuintoAndarScraper,
     ScraperBase,
@@ -71,6 +74,10 @@ class PlatformRegistry:
         "quintoandar": QuintoAndarScraper,
         "zapimoveis": ZapImoveisScraper,
         "vivareal": VivaRealScraper,
+    }
+    _FIRECRAWL_SCRAPER_MAP: dict[str, type[ScraperBase]] = {
+        "zapimoveis": FirecrawlZapImoveisScraper,
+        "vivareal": FirecrawlVivaRealScraper,
     }
 
     def __init__(self, yaml_path: Path) -> None:
@@ -184,6 +191,13 @@ class PlatformRegistry:
 
     def scraper_class_for(self, platform: str) -> type[ScraperBase]:
         canonical = self.resolve_name(platform)
+        provider = (os.getenv("SCRAPER_PROVIDER") or "firecrawl").strip().lower()
+        if provider == "firecrawl" and canonical in self._FIRECRAWL_SCRAPER_MAP:
+            return self._FIRECRAWL_SCRAPER_MAP[canonical]
+        if provider not in {"playwright", "firecrawl"}:
+            raise PlatformRegistryError(
+                "SCRAPER_PROVIDER inválido; use 'playwright' ou 'firecrawl'"
+            )
         scraper_cls = self._SCRAPER_MAP.get(canonical)
         if scraper_cls is None:
             raise PlatformRegistryError(

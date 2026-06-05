@@ -112,6 +112,10 @@ Encontrar imóvel para alugar ou comprar em São Paulo é um processo fragmentad
 
 > **Observação de progresso (2026-05-26, revisão):** refinado o fluxo para escolha explícita entre selecionar ponto e desenhar área, com zona desenhada indo direto para comparação sem job/tela de enriquecimento. Também foram planejados/aplicados detalhes expandíveis de transporte em zonas salvas e mapa na página pública de zona compartilhada. Documentos obrigatórios reabertos nesta execução: `PRD.md`, `SKILLS_README.md`, `skills/best-practices/SKILL.md` e `skills/best-practices/references/agent-principles.md`. Skill usada: `best-practices`. Nenhuma fase foi marcada como concluída sem confirmação do responsável.
 
+> **Observação de progresso (2026-06-05, experimento Firecrawl):** adicionado scraper experimental Firecrawl para VivaReal e ZapImóveis, selecionável por `SCRAPER_PROVIDER=firecrawl`, com extração via `rawHtml` dos chunks Next.js (`content.listings`) para preservar `latitude`/`longitude`; a verificação live em `scripts/verify_m5_3_scrapers_live.py --provider firecrawl` agora exige imóveis com coordenadas. Documentos obrigatórios abertos nesta execução: `PRD.md`, `SKILLS_README.md` e `skills/firecrawl/SKILL.md`. Skill usada: `firecrawl`. Nenhuma fase foi marcada como concluída sem confirmação do responsável.
+
+> **Observação de progresso (2026-06-05, Firecrawl como padrão):** Firecrawl passou a ser o provider padrão para ZapImóveis e VivaReal no `PlatformRegistry`; Playwright permanece disponível por override explícito com `SCRAPER_PROVIDER=playwright`. Documentos obrigatórios abertos nesta execução: `PRD.md`, `SKILLS_README.md` e `skills/firecrawl/SKILL.md`. Skill usada: `firecrawl`. Nenhuma fase foi marcada como concluída sem confirmação do responsável.
+
 ---
 
 ## 3. Arquitetura do Sistema
