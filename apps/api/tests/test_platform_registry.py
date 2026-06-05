@@ -12,6 +12,12 @@ from modules.listings.platform_registry import (  # noqa: E402
     PlatformRegistryError,
     normalize_platform_name,
 )
+from modules.listings.scrapers import (
+    FirecrawlVivaRealScraper,
+    FirecrawlZapImoveisScraper,
+    VivaRealScraper,
+    ZapImoveisScraper,
+)  # noqa: E402
 
 
 def test_normalize_platform_name_aliases() -> None:
@@ -48,6 +54,21 @@ def test_registry_default_free_platforms_include_vivareal() -> None:
     registry = PlatformRegistry(root / "platforms.yaml")
 
     assert registry.default_free_platforms() == ["loft", "quintoandar", "vivareal", "zapimoveis"]
+
+
+def test_registry_uses_firecrawl_by_default_for_zapimoveis_and_vivareal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = Path(__file__).resolve().parents[3]
+    registry = PlatformRegistry(root / "platforms.yaml")
+
+    monkeypatch.delenv("SCRAPER_PROVIDER", raising=False)
+    assert registry.scraper_class_for("zapimoveis") is FirecrawlZapImoveisScraper
+    assert registry.scraper_class_for("vivareal") is FirecrawlVivaRealScraper
+
+    monkeypatch.setenv("SCRAPER_PROVIDER", "playwright")
+    assert registry.scraper_class_for("zapimoveis") is ZapImoveisScraper
+    assert registry.scraper_class_for("vivareal") is VivaRealScraper
 
 
 def test_registry_rejects_unknown_platform() -> None:

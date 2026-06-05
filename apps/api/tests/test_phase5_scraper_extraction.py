@@ -10,6 +10,7 @@ either an API payload or DOM fallback rows.
 from __future__ import annotations
 
 import os
+import json
 import sys
 
 # Ensure the API source tree is on the path
@@ -22,6 +23,11 @@ from modules.listings.scrapers.quintoandar import (  # noqa: E402
     _extract_quintoandar_coordinate_map,
     _parse_quintoandar_house,
     _to_quintoandar_location_slug,
+)
+from modules.listings.scrapers.firecrawl import extract_firecrawl_listings  # noqa: E402
+from modules.listings.scrapers.loft import (  # noqa: E402
+    _build_loft_search_params,
+    _parse_loft_groups,
 )
 from modules.listings.scrapers.vivareal import (  # noqa: E402
     _extract_from_dom_rows,
@@ -258,6 +264,62 @@ class TestListingUsageInferenceFromUrl:
         assert infer_listing_usage_type_from_url("https://www.example.com/imovel/123", 2) == "residential"
 
 
+class TestLoftExtraction:
+    def test_search_params_include_neighborhood_from_scraper_label(self) -> None:
+        params = _build_loft_search_params("Rua Schilling, Vila Leopoldina, Sao Paulo, SP", "rent")
+
+        assert ("cities[]", "sao paulo, sp") in params
+        assert ("transactionType[]", "for_rent") in params
+        assert ("neighborhood[]", "vila leopoldina, sao paulo, sp") in params
+
+    def test_landscape_api_payload_yields_listings_with_coordinates(self) -> None:
+        payload = [
+            {
+                "id": "loft-1",
+                "rentalPrice": 4200,
+                "homeType": "apartment",
+                "area": 62,
+                "bedrooms": 2,
+                "restrooms": 2,
+                "parkingSpots": 1,
+                "complexFee": 650,
+                "propertyTax": 120,
+                "address": {
+                    "streetFullName": "Rua Schilling",
+                    "neighborhood": "Vila Leopoldina",
+                    "city": "Sao Paulo",
+                    "state": "SP",
+                    "lat": "-23.5209",
+                    "lng": "-46.7270",
+                    "facets": {
+                        "street": "Rua Schilling, Vila Leopoldina, Sao Paulo, SP",
+                    },
+                },
+            }
+        ]
+
+        results = _parse_loft_groups(payload, "rent")
+
+        assert results == [
+            {
+                "platform": "loft",
+                "platform_listing_id": "loft-1",
+                "url": "https://loft.com.br/imovel/apartment-rua-schilling-vila-leopoldina-sao-paulo-2-quartos-62m2/loft-1",
+                "image_url": None,
+                "lat": -23.5209,
+                "lon": -46.727,
+                "price_brl": 4200.0,
+                "area_m2": 62.0,
+                "bedrooms": 2,
+                "bathrooms": 2,
+                "parking": 1,
+                "address": "Rua Schilling, Vila Leopoldina, Sao Paulo, SP",
+                "condo_fee_brl": 650.0,
+                "iptu_brl": 120.0,
+            }
+        ]
+
+
 # ---------------------------------------------------------------------------
 # ZapImoveis
 # ---------------------------------------------------------------------------
@@ -321,6 +383,85 @@ class TestZapImoveisExtraction:
         assert len(results) == 1
         assert results[0]["lat"] == -23.522
         assert results[0]["lon"] == -46.728
+
+
+# ---------------------------------------------------------------------------
+# Firecrawl experimental provider
+# ---------------------------------------------------------------------------
+
+class TestFirecrawlExtraction:
+    def test_firecrawl_markdown_without_coordinates_is_not_valid_listing(self) -> None:
+        url = (
+            "https://www.zapimoveis.com.br/imovel/"
+            "aluguel-apartamento-bela-vista-sao-paulo-sp-63m2-id-2880001234/"
+        )
+        data = {
+            "links": [url],
+            "markdown": (
+                "![Apartamento para alugar](https://www.zapimoveis.com.br/thumb.webp)\n\n"
+                "**Apartamento para alugar com 2 quartos, 1 banheiro e 1 vaga "
+                "em Bela Vista, São Paulo**\n\n"
+                "Avenida Paulista\n\n"
+                "- **Tamanho do imóvel 63 m²**\n"
+                "- **Quantidade de banheiros 1**\n"
+                "- **Quantidade de vagas de garagem 1**\n\n"
+                "R$ 4.200/mês\n\n"
+                f"Mensagem]({url} \"Apartamento para alugar em Avenida Paulista\")"
+            ),
+        }
+
+        results = extract_firecrawl_listings(
+            platform="zapimoveis",
+            base_url="https://www.zapimoveis.com.br",
+            search_type="rent",
+            data=data,
+        )
+
+        assert results == []
+
+    def test_firecrawl_nextjs_raw_html_yields_zap_listing_with_coordinates(self) -> None:
+        url = (
+            "https://www.zapimoveis.com.br/imovel/"
+            "aluguel-apartamento-bela-vista-sao-paulo-sp-63m2-id-2880001234/"
+        )
+        next_chunk = json.dumps(
+            '5:["$","$L2f",null,{"content":{"listings":[{'
+            '"id":"2880001234",'
+            '"prices":{"rental":{"iptu":120,"value":4200,"condominium":700}},'
+            '"title":"Apartamento para alugar com 2 quartos, 1 banheiro, 1 vaga",'
+            f'"href":"{url}",'
+            '"business":"RENTAL",'
+            '"address":{"city":"São Paulo","stateAcronym":"SP",'
+            '"neighborhood":"Bela Vista","streetNumber":"1000",'
+            '"street":"Avenida Paulista",'
+            '"coordinates":{"latitude":-23.561414,"longitude":-46.655881}},'
+            '"medias":{"images":[{"url":"https://www.zapimoveis.com.br/thumb.webp"}]}'
+            '}]}}]'
+        )
+        data = {
+            "rawHtml": f"<script>self.__next_f.push([1,{next_chunk}])</script>",
+            "links": [url],
+            "markdown": "",
+        }
+
+        results = extract_firecrawl_listings(
+            platform="zapimoveis",
+            base_url="https://www.zapimoveis.com.br",
+            search_type="rent",
+            data=data,
+        )
+
+        assert len(results) == 1
+        assert results[0]["platform"] == "zapimoveis"
+        assert results[0]["platform_listing_id"] == "2880001234"
+        assert results[0]["price_brl"] == 4200.0
+        assert results[0]["area_m2"] == 63.0
+        assert results[0]["bedrooms"] == 2
+        assert results[0]["bathrooms"] == 1
+        assert results[0]["parking"] == 1
+        assert results[0]["lat"] == -23.561414
+        assert results[0]["lon"] == -46.655881
+        assert results[0]["address"] == "Avenida Paulista 1000, Bela Vista, São Paulo, SP"
 
 
 # ---------------------------------------------------------------------------

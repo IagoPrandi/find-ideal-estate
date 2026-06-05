@@ -6721,3 +6721,29 @@
 
 - Progress Tracker:
   - Nenhuma milestone do PRD foi marcada como concluída; política de confirmação explícita preservada.
+
+## 2026-06-05 - Admin liberado para ativação de planos
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/security-threat-checklist/SKILL.md`
+
+- Skill used:
+  - `skills/security-threat-checklist/SKILL.md`
+
+- Scope executed:
+  - Rotas de `/admin/billing` passaram a aceitar operador de billing com `is_superuser=true` ou `role='proprietario'`.
+  - A confirmação manual de Pix e a ativação direta de plano deixaram de bloquear usuários admin marcados apenas como `is_superuser`.
+  - A página de planos agora mostra ativação direta para admin, sem cair no fluxo de pagamento.
+  - A página de conta exibe badge de `Administrador` quando o usuário tem `is_superuser=true`.
+  - Foram adicionados testes para garantir que admin consegue ativar plano e usuário comum continua recebendo `403`.
+
+- Verification executed:
+  - `python -m pytest apps/api/tests/test_phase8_mercado_pago.py -q` -> `10 passed`, com 1 warning conhecido de `httpx`.
+  - `.venv\Scripts\python.exe -m ruff check apps/api/src/api/routes/admin_billing.py apps/api/tests/test_phase8_mercado_pago.py` -> `All checks passed`.
+  - `npx eslint src/features/billing/PlanosPage.tsx src/features/billing/ContaPage.tsx` -> passou.
+  - `npm run typecheck` -> ainda falha por erros preexistentes fora deste escopo em `src/api/client.ts`, `Step2Transport.tsx`, `Step6Analysis.test.tsx`, `src/lib/api/index.ts` e `journey-store.test.ts`.
+
+- Progress Tracker:
+  - Nenhuma milestone do PRD foi marcada como concluída; política de confirmação explícita preservada.

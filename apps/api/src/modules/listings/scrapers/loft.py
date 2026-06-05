@@ -7,11 +7,14 @@ import json
 import re
 import unicodedata
 from typing import Any
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from .base import REALISTIC_USER_AGENT, ScraperBase, ScraperError, _as_float, _as_int, _get_by_path
 
 LOFT_BASE = "https://loft.com.br"
+LOFT_LANDSCAPE_SEARCH_URL = "https://landscape-api.loft.com.br/listing/v3/search"
+LOFT_HITS_PER_PAGE = 38
 
 
 def _loft_slugify(text: str) -> str:
@@ -23,10 +26,80 @@ def _loft_slugify(text: str) -> str:
     return re.sub(r"-{2,}", "-", lowered.replace(" ", "-")).strip("-")
 
 
-def _build_loft_search_url(search_address: str, search_type: str, configured_start: list[str]) -> str:
-    if configured_start:
-        return configured_start[0].rstrip("/")
+def _loft_filter_value(text: str) -> str:
+    normalized = unicodedata.normalize("NFKD", text or "")
+    ascii_text = normalized.encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"\s+", " ", ascii_text).strip().lower()
 
+
+def _as_coordinate_float(value: Any) -> float | None:
+    if isinstance(value, (int, float)):
+        parsed = float(value)
+        return parsed if -180 <= parsed <= 180 else None
+    if isinstance(value, str):
+        try:
+            parsed = float(value.strip().replace(",", "."))
+        except ValueError:
+            return None
+        return parsed if -180 <= parsed <= 180 else None
+    return None
+
+
+def _parse_city_state(value: str) -> tuple[str, str]:
+    city = "sao paulo"
+    state = "sp"
+    match = re.search(r"^(.*?)(?:\s*-\s*([A-Za-z]{2}))?$", value.strip())
+    if match:
+        city = _loft_filter_value(match.group(1) or city) or city
+        state = _loft_filter_value(match.group(2) or state) or state
+    return city, state
+
+
+def _parse_loft_search_context(search_address: str) -> dict[str, str | None]:
+    parts = [part.strip() for part in (search_address or "").split(",") if part.strip()]
+    city = "sao paulo"
+    state = "sp"
+    neighborhood: str | None = None
+
+    if len(parts) >= 4 and re.fullmatch(r"[A-Za-z]{2}", parts[-1]):
+        city = _loft_filter_value(parts[-2]) or city
+        state = _loft_filter_value(parts[-1]) or state
+        if not re.fullmatch(r"\d+[a-zA-Z]?", parts[-3]):
+            neighborhood = _loft_filter_value(parts[-3]) or None
+    elif len(parts) >= 3:
+        city, state = _parse_city_state(parts[-1])
+        if not re.fullmatch(r"\d+[a-zA-Z]?", parts[-2]):
+            neighborhood = _loft_filter_value(parts[-2]) or None
+    elif len(parts) >= 1:
+        city, state = _parse_city_state(parts[-1])
+
+    return {
+        "city": city,
+        "state": state,
+        "neighborhood": neighborhood,
+    }
+
+
+def _build_loft_search_params(search_address: str, search_type: str, page: int = 0) -> list[tuple[str, str]]:
+    context = _parse_loft_search_context(search_address)
+    city = str(context["city"] or "sao paulo")
+    state = str(context["state"] or "sp")
+    transaction = "for_sale" if search_type == "sale" else "for_rent"
+    params = [
+        ("orderBy[]", "rankB"),
+        ("cities[]", f"{city}, {state}"),
+        ("transactionType[]", transaction),
+        ("hitsPerPage", str(LOFT_HITS_PER_PAGE)),
+        ("page", str(max(page, 0))),
+    ]
+    neighborhood = context.get("neighborhood")
+    if neighborhood:
+        params.append(("neighborhood[]", f"{neighborhood}, {city}, {state}"))
+    return params
+
+
+def _build_loft_search_url(search_address: str, search_type: str, configured_start: list[str]) -> str:
+    del configured_start
     city = "sao-paulo"
     state = "sp"
     parts = [part.strip() for part in (search_address or "").split(",") if part.strip()]
@@ -38,6 +111,10 @@ def _build_loft_search_url(search_address: str, search_type: str, configured_sta
             state = (match.group(2) or state).strip().lower() or state
     transaction = "venda" if search_type == "sale" else "aluguel"
     return f"{LOFT_BASE}/{transaction}/imoveis/{state}/{city}"
+
+
+def _build_loft_api_search_url(search_address: str, search_type: str, page: int = 0) -> str:
+    return f"{LOFT_LANDSCAPE_SEARCH_URL}?{urlencode(_build_loft_search_params(search_address, search_type, page))}"
 
 
 def _extract_next_data(html: str) -> dict[str, Any]:
@@ -115,6 +192,8 @@ def _parse_loft_groups(groups: list[dict[str, Any]], search_type: str) -> list[d
     seen: set[str] = set()
     for group in groups:
         listing = group.get("listing")
+        if not isinstance(listing, dict) and (group.get("id") is not None or group.get("objectID") is not None):
+            listing = group
         if not isinstance(listing, dict):
             continue
 
@@ -130,8 +209,8 @@ def _parse_loft_groups(groups: list[dict[str, Any]], search_type: str) -> list[d
         if price is None:
             continue
 
-        lat = _as_float(_get_by_path(listing, "location.lat") or _get_by_path(listing, "_geoloc.lat") or _get_by_path(listing, "address.lat"))
-        lon = _as_float(_get_by_path(listing, "location.lon") or _get_by_path(listing, "_geoloc.lng") or _get_by_path(listing, "address.lng"))
+        lat = _as_coordinate_float(_get_by_path(listing, "location.lat") or _get_by_path(listing, "_geoloc.lat") or _get_by_path(listing, "address.lat"))
+        lon = _as_coordinate_float(_get_by_path(listing, "location.lon") or _get_by_path(listing, "_geoloc.lng") or _get_by_path(listing, "address.lng"))
 
         parsed.append(
             {
@@ -167,6 +246,46 @@ def _fetch_loft_html(url: str) -> str:
         return response.read().decode("utf-8", errors="ignore")
 
 
+def _fetch_loft_search_page(search_address: str, search_type: str, page: int) -> dict[str, Any]:
+    url = _build_loft_api_search_url(search_address, search_type, page)
+    req = Request(
+        url,
+        headers={
+            "User-Agent": REALISTIC_USER_AGENT,
+            "Accept": "application/json",
+            "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+            "Origin": LOFT_BASE,
+            "Referer": f"{LOFT_BASE}/",
+            "X-Origin": "http://webnext-core.loft.com.br",
+        },
+    )
+    try:
+        with urlopen(req, timeout=45) as response:
+            payload = json.loads(response.read().decode("utf-8", errors="ignore"))
+    except json.JSONDecodeError as exc:
+        raise ScraperError("Loft Landscape API returned invalid JSON") from exc
+    if not isinstance(payload, dict):
+        raise ScraperError("Loft Landscape API returned unexpected payload")
+    return payload
+
+
+def _fetch_loft_listing_groups(search_address: str, search_type: str, max_pages: int) -> list[dict[str, Any]]:
+    groups: list[dict[str, Any]] = []
+    pages = max(1, max_pages)
+    for page in range(pages):
+        payload = _fetch_loft_search_page(search_address, search_type, page)
+        listings = payload.get("listings")
+        if not isinstance(listings, list):
+            raise ScraperError("Loft Landscape API payload does not include listings")
+        groups.extend(item for item in listings if isinstance(item, dict))
+
+        pagination = payload.get("pagination") if isinstance(payload.get("pagination"), dict) else {}
+        total_pages = _as_int(pagination.get("totalPages")) if pagination else None
+        if total_pages is not None and page + 1 >= total_pages:
+            break
+    return groups
+
+
 class LoftScraper(ScraperBase):
     platform = "loft"
     base_url = LOFT_BASE
@@ -180,12 +299,10 @@ class LoftScraper(ScraperBase):
 
     async def _scrape_via_http(self) -> list[dict[str, Any]]:
         self._check_robots("/venda/imoveis/" if self.search_type == "sale" else "/aluguel/imoveis/")
-        url = _build_loft_search_url(
+        groups = await asyncio.to_thread(
+            _fetch_loft_listing_groups,
             self.search_address,
             self.search_type,
-            self._configured_start_urls(),
+            int(self.platform_config.get("max_pages") or 1),
         )
-        html = await asyncio.to_thread(_fetch_loft_html, url)
-        payload = _extract_next_data(html)
-        groups = _find_listing_groups(payload)
         return _parse_loft_groups(groups, self.search_type)

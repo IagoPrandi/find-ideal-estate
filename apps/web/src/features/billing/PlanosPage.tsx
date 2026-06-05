@@ -21,6 +21,7 @@ export function PlanosPage({ onClose }: { onClose: () => void }) {
   const [activating, setActivating] = useState<string | null>(null);
 
   const isProprietario = authStatus.user?.role === "proprietario";
+  const canActivatePlanDirectly = Boolean(authStatus.user?.is_superuser || isProprietario);
 
   const { data: plans = [] } = useQuery({
     queryKey: ["billing", "plans"],
@@ -41,7 +42,7 @@ export function PlanosPage({ onClose }: { onClose: () => void }) {
       return;
     }
 
-    if (isProprietario) {
+    if (canActivatePlanDirectly) {
       if (activating) return;
       setActivating(plan.slug);
       try {
@@ -132,11 +133,11 @@ export function PlanosPage({ onClose }: { onClose: () => void }) {
 
                 <button
                   onClick={() => void handlePlanClick(plan)}
-                  disabled={isCurrent || (!isProprietario && !plan.is_paid) || activating === plan.slug}
+                  disabled={isCurrent || (!canActivatePlanDirectly && !plan.is_paid) || activating === plan.slug}
                   className={`mt-6 w-full rounded-xl py-2.5 text-sm font-semibold transition-colors ${
                     isCurrent
                       ? "cursor-default bg-green-100 text-green-700"
-                      : isProprietario
+                      : canActivatePlanDirectly
                         ? "bg-amber-500 text-white hover:bg-amber-600"
                         : !plan.is_paid
                           ? "cursor-default bg-slate-100 text-slate-400"
@@ -149,7 +150,7 @@ export function PlanosPage({ onClose }: { onClose: () => void }) {
                     ? "Plano ativo"
                     : activating === plan.slug
                       ? "Ativando..."
-                      : isProprietario
+                      : canActivatePlanDirectly
                         ? "Ativar grátis"
                         : !plan.is_paid
                           ? "Incluído"
@@ -161,9 +162,9 @@ export function PlanosPage({ onClose }: { onClose: () => void }) {
         </div>
 
         <div className="border-t border-slate-100 px-8 py-4">
-          {isProprietario ? (
+          {canActivatePlanDirectly ? (
             <p className="text-center text-xs font-medium text-amber-600">
-              Acesso proprietário ativo - troca de plano sem pagamento.
+              Acesso administrativo ativo - troca de plano sem pagamento.
             </p>
           ) : (
             <p className="text-center text-xs text-slate-400">

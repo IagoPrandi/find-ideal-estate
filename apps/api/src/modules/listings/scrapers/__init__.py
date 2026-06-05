@@ -1,10 +1,13 @@
-"""Playwright-based real estate scrapers package.
+"""Real estate scrapers package.
 
-Each scraper:
+Playwright scrapers:
 - Uses a realistic user-agent and respectful delays between page interactions.
 - Intercepts API responses via Playwright's route/response mechanisms.
 - Returns a list of raw listing dicts with standardised fields.
 - Verifies robots.txt before proceeding (raises ScraperDisallowedError if blocked).
+
+Experimental provider scrapers can use the same normalized output schema without
+opening a local browser.
 
 Shared schema output per listing:
     {
@@ -25,6 +28,7 @@ Shared schema output per listing:
 """
 
 from .base import ScraperBase, ScraperDisallowedError, ScraperError
+from .firecrawl import FirecrawlVivaRealScraper, FirecrawlZapImoveisScraper
 from .quintoandar import QuintoAndarScraper
 from .loft import LoftScraper
 from .vivareal import VivaRealScraper
@@ -35,6 +39,8 @@ __all__ = [
     "LoftScraper",
     "VivaRealScraper",
     "ZapImoveisScraper",
+    "FirecrawlVivaRealScraper",
+    "FirecrawlZapImoveisScraper",
     "ScraperBase",
     "ScraperDisallowedError",
     "ScraperError",

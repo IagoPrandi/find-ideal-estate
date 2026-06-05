@@ -9,6 +9,7 @@ import { PixModal } from "./PixModal";
 export function ContaPage({ onClose }: { onClose: () => void }) {
   const { authStatus } = useAuth();
   const isProprietario = authStatus.user?.role === "proprietario";
+  const isAdmin = Boolean(authStatus.user?.is_superuser);
   const queryClient = useQueryClient();
   const [renewPlan, setRenewPlan] = useState<PlanRead | null>(null);
 
@@ -86,9 +87,9 @@ export function ContaPage({ onClose }: { onClose: () => void }) {
           <div>
             <p className="text-sm text-slate-500">Conta</p>
             <p className="mt-0.5 font-semibold text-slate-800">{authStatus.user?.email}</p>
-            {isProprietario && (
+            {(isAdmin || isProprietario) && (
               <span className="mt-1.5 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-700">
-                ★ Proprietário
+                ★ {isAdmin ? "Administrador" : "Proprietário"}
               </span>
             )}
           </div>

@@ -14,6 +14,9 @@ if str(API_SRC) not in sys.path:
     sys.path.insert(0, str(API_SRC))
 
 from modules.listings.scrapers import (  # noqa: E402
+    FirecrawlVivaRealScraper,
+    FirecrawlZapImoveisScraper,
+    LoftScraper,
     QuintoAndarScraper,
     ScraperDisallowedError,
     ScraperError,
@@ -22,9 +25,15 @@ from modules.listings.scrapers import (  # noqa: E402
 )
 
 SCRAPERS = {
+    "loft": LoftScraper,
     "quintoandar": QuintoAndarScraper,
     "zapimoveis": ZapImoveisScraper,
     "vivareal": VivaRealScraper,
+}
+
+FIRECRAWL_SCRAPERS = {
+    "zapimoveis": FirecrawlZapImoveisScraper,
+    "vivareal": FirecrawlVivaRealScraper,
 }
 
 
@@ -91,6 +100,15 @@ def parse_args() -> argparse.Namespace:
         help="Platform scraper to validate.",
     )
     parser.add_argument(
+        "--provider",
+        choices=["playwright", "firecrawl"],
+        default="firecrawl",
+        help=(
+            "Scraper provider. Firecrawl is experimental and currently supports "
+            "vivareal and zapimoveis."
+        ),
+    )
+    parser.add_argument(
         "--address",
         default="Avenida Paulista, 1000, Sao Paulo",
         help="Search address used in scraper query.",
@@ -130,10 +148,22 @@ def parse_args() -> argparse.Namespace:
 async def run_verification() -> int:
     args = parse_args()
 
-    scraper_cls = SCRAPERS[args.platform]
+    if args.provider == "firecrawl":
+        scraper_cls = FIRECRAWL_SCRAPERS.get(args.platform)
+        if scraper_cls is None:
+            print(
+                "M5.3 FAIL: Firecrawl provider supports only "
+                "vivareal and zapimoveis."
+            )
+            return 8
+    else:
+        scraper_cls = SCRAPERS[args.platform]
     scraper = scraper_cls(search_address=args.address, search_type=args.search_type)
 
-    print(f"M5.3 live check starting: platform={args.platform} address={args.address!r}")
+    print(
+        "M5.3 live check starting: "
+        f"provider={args.provider} platform={args.platform} address={args.address!r}"
+    )
     try:
         listings = await scraper.scrape()
     except ScraperDisallowedError as exc:
@@ -147,7 +177,12 @@ async def run_verification() -> int:
         return 4
 
     count = len(listings)
-    print(f"M5.3 result_count={count}")
+    coordinate_count = sum(
+        1
+        for item in listings
+        if item.get("lat") is not None and item.get("lon") is not None
+    )
+    print(f"M5.3 result_count={count} coordinate_count={coordinate_count}")
 
     if count < args.min_results:
         print(
@@ -155,6 +190,13 @@ async def run_verification() -> int:
             f"(expected>={args.min_results}, got={count})"
         )
         return 1
+
+    if coordinate_count < args.min_results:
+        print(
+            "M5.3 FAIL: insufficient listings with coordinates "
+            f"(expected>={args.min_results}, got={coordinate_count})"
+        )
+        return 9
 
     if args.strict_template_counts:
         if not args.template_json.strip():

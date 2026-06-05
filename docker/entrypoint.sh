@@ -56,13 +56,34 @@ start_xvfb() {
 	return 1
 }
 
+run_migrations() {
+	local max_attempts="${MIGRATION_MAX_ATTEMPTS:-30}"
+	local sleep_seconds="${MIGRATION_RETRY_SECONDS:-2}"
+	local attempt=1
+
+	while true; do
+		if alembic upgrade head; then
+			return 0
+		fi
+
+		if [[ "$attempt" -ge "$max_attempts" ]]; then
+			echo "alembic upgrade head failed after ${attempt} attempts" >&2
+			return 1
+		fi
+
+		echo "alembic upgrade head failed; retrying in ${sleep_seconds}s (${attempt}/${max_attempts})" >&2
+		attempt=$((attempt + 1))
+		sleep "$sleep_seconds"
+	done
+}
+
 trap cleanup EXIT
 trap 'forward_signal TERM' TERM
 trap 'forward_signal INT' INT
 
 start_xvfb
 
-alembic upgrade head
+run_migrations
 
 "$@" &
 CHILD_PID="$!"

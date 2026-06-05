@@ -23,7 +23,7 @@ import { ListingsScrapeDiagnosticsSchema, type ListingsScrapeDiagnostics, type L
 import { useAuth } from "../../features/auth/AuthContext";
 import { useEntitlements } from "../../features/auth/useEntitlements";
 import { buildZoneFavoriteAnalyticsQueryKey } from "../../lib/favorites";
-import { applyListingsPanelFilters, filterListingsByMapViewport, formatCurrencyBr, getListingDisplayPrice, getListingSelectionKey, resolveListingCardImageUrls, resolvePlatformUrl } from "../../lib/listingFormat";
+import { applyListingsPanelFilters, filterListingsByMapViewport, formatCurrencyBr, getListingDisplayPrice, getListingSelectionKey, getPlatformColor, resolveListingCardImageUrls, resolvePlatformUrl } from "../../lib/listingFormat";
 import { useFavoritesStore, useJourneyStore, useUIStore, type ListingsPanelFilters } from "../../state";
 import { Step6Dashboard } from "./Step6Dashboard";
 
@@ -226,7 +226,9 @@ export function Step6Analysis() {
   const [debouncedPriceComparisonFilters, setDebouncedPriceComparisonFilters] = useState<ListingsPanelFilters>(listingsFilters);
   const [failedListingImageKeys, setFailedListingImageKeys] = useState<Record<string, true>>({});
   const isAllSpatialScopeAllowed = planSlug === "pro" || planSlug === "pro_max";
-  const canSelectAllSpatialScope = !isEntitlementsLoading && isAllSpatialScopeAllowed;
+  // const canSelectAllSpatialScope = !isEntitlementsLoading && isAllSpatialScopeAllowed;
+  const canSelectAllSpatialScope = true; // Temporariamente liberamos a opção de escopo completo para todos os usuários, mesmo os sem direito, para evitar confusão com o painel de filtros. O bloqueio permanece no backend, então usuários sem direito não verão listagens fora da zona mesmo que selecionem esse escopo.
+
 
   const persistedListingsJobId = listingsJobId;
 
@@ -631,7 +633,8 @@ export function Step6Analysis() {
 
   return (
     <div className="flex h-full flex-col bg-slate-50 animate-[fadeInRight_0.5s_ease-out]">
-      <div className="shrink-0 border-b border-slate-200 bg-white">
+      <div ref={listingsPanelScrollRef} className="panel-scroll flex-1 overflow-y-auto">
+        <div className="border-b border-slate-200 bg-white">
         <div className="p-5 pb-0">
           <div className="mb-4 flex items-center justify-between gap-4">
             <div>
@@ -663,7 +666,7 @@ export function Step6Analysis() {
           ) : null}
 
           {platformEntries.length > 0 ? (
-            <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm" data-testid="listings-platform-progress">
+            <div className="mb-4 overflow-hidden rounded-2xl border border-slate-200 bg-white p-4 shadow-sm" data-testid="listings-platform-progress">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">Progresso por plataforma</p>
@@ -694,14 +697,14 @@ export function Step6Analysis() {
               </div>
 
               {!isProgressCollapsed ? (
-                <div id="listings-platform-progress-body" className="mt-4 grid grid-cols-1 gap-3" data-testid="listings-platform-progress-grid">
+                <div id="listings-platform-progress-body" className="mt-4 grid max-h-[10.75rem] grid-cols-1 gap-3 overflow-y-auto pr-1" data-testid="listings-platform-progress-grid">
                   {platformEntries.map(({ platform, details }) => {
                     const meta = platformStatusMeta(details.status);
                     const duration = formatDuration(details.total_duration_ms);
                     const Icon = meta.Icon;
                     const isActivePlatform = scrapeDiagnostics?.active_platform === platform && details.status !== "completed";
                     return (
-                      <div key={platform} className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3">
+                      <div key={platform} className="min-h-[9.25rem] rounded-2xl border border-slate-200 bg-slate-50/70 p-3">
                         <div className="flex items-start justify-between gap-3">
                           <div>
                             <p className="text-sm font-semibold text-slate-800">{platformLabel(platform)}</p>
@@ -743,7 +746,7 @@ export function Step6Analysis() {
         </div>
       </div>
 
-      <div ref={listingsPanelScrollRef} className="panel-scroll flex-1 overflow-y-auto p-5">
+      <div className="p-5">
         {activeTab === "imoveis" ? (
           <div className="space-y-4 animate-[fadeIn_0.3s_ease-out]">
             <div className="rounded-xl border border-slate-200 bg-white p-4">
@@ -953,6 +956,7 @@ export function Step6Analysis() {
                 ? `${debouncedPriceComparisonFilters.spatialScope === "inside_zone" ? "Média da zona" : "Média do recorte"}: ${formatCurrencyBr(regionAveragePrice)}`
                 : "Média da região indisponível";
               const adUrl = resolvePlatformUrl(listing.url, listing.platform);
+              const platformColor = getPlatformColor(listing.platform);
               const imageCandidates = resolveListingCardImageUrls(listing);
               const imageUrl = imageCandidates.find((candidateUrl) => !failedListingImageKeys[`${cardInstanceKey}:${candidateUrl}`]) || null;
               const imageStateKey = imageUrl ? `${cardInstanceKey}:${imageUrl}` : null;
@@ -1045,11 +1049,12 @@ export function Step6Analysis() {
                     ) : null}
                     {!shouldRenderImage ? (
                       <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400">
-                        <Building2 className="h-9 w-9" />
+                        <Building2 className="h-9 w-9" style={{ color: platformColor }} />
                         <span className="mt-2 text-xs font-semibold uppercase tracking-[0.16em]">{availablePlatformsLabel(listing.platforms_available, listing.platform)}</span>
                       </div>
                     ) : null}
-                    <div className="absolute left-2 top-2 rounded bg-white/90 px-2 py-1 text-xs font-bold text-slate-700 shadow-sm backdrop-blur-sm">
+                    <div className="absolute left-2 top-2 inline-flex items-center gap-1.5 rounded border bg-white/90 px-2 py-1 text-xs font-bold shadow-sm backdrop-blur-sm" style={{ borderColor: `${platformColor}33`, color: platformColor }}>
+                      <span className="h-2 w-2 rounded-full" style={{ backgroundColor: platformColor }} />
                       {availablePlatformsLabel(listing.platforms_available, listing.platform)}
                     </div>
                   </div>
@@ -1146,10 +1151,14 @@ export function Step6Analysis() {
                               {platformVariants.map((variant) => {
                                 const variantPrice = getListingDisplayPrice(variant);
                                 const variantUrl = resolvePlatformUrl(variant.url, variant.platform);
+                                const variantColor = getPlatformColor(variant.platform);
                                 return (
                                   <div key={`${variant.platform || "platform"}:${variant.platform_listing_id || "listing"}`} className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/80 px-2.5 py-2">
                                     <div className="min-w-0">
-                                      <p className="truncate text-xs font-semibold text-slate-800">{platformLabel(variant.platform)}</p>
+                                      <p className="flex items-center gap-1.5 truncate text-xs font-semibold text-slate-800">
+                                        <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: variantColor }} />
+                                        <span className="min-w-0 truncate">{platformLabel(variant.platform)}</span>
+                                      </p>
                                       <p className="text-[11px] leading-snug text-slate-500">{formatPlatformVariantHint(variant, listing.platform)}</p>
                                     </div>
                                     <p className="text-xs font-semibold text-slate-700">{formatCurrencyBr(variantPrice)}</p>
@@ -1268,6 +1277,7 @@ export function Step6Analysis() {
           ) : null
         )}
       </div>
+    </div>
     </div>
   );
 }
