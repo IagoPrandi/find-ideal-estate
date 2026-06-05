@@ -805,19 +805,24 @@ async def _execute_locked_scrape(
         )
 
         if meets_threshold:
+            cache_after_transition = await get_cache_record(search_location_normalized)
+            expires_at = cache_after_transition.get("expires_at") if cache_after_transition else None
+            preliminary_payload: dict[str, Any] = {
+                "source": "fresh_scrape",
+                "total_count": total_scraped,
+                "platforms_completed": platforms_completed,
+                "platforms_failed": platforms_failed,
+                "zone_fingerprint": zone_fingerprint,
+            }
+            if expires_at is not None:
+                preliminary_payload["expires_at"] = expires_at.isoformat()
+
             await publish_job_event(
                 job_id,
                 "listings.preliminary.ready",
                 stage=stage,
                 message=f"{total_scraped} listings scraped and cached",
-                payload_json={
-                    "source": "fresh_scrape",
-                    "total_count": total_scraped,
-                    "platforms_completed": platforms_completed,
-                    "platforms_failed": platforms_failed,
-                    "zone_fingerprint": zone_fingerprint,
-                    "expires_at": expires_at.isoformat(),
-                },
+                payload_json=preliminary_payload,
             )
 
         await emit_stage_progress(
