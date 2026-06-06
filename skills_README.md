@@ -1,88 +1,90 @@
 # Skills Catalog
 
-Este arquivo indexa todas as skills disponíveis em `\skills`.
+Este arquivo indexa todas as skills dispon?veis em `\skills`.
 
 ## Como escolher uma skill
 
 1. Identifique o tipo de tarefa (auth, indexer, batch ops, observability, etc.).
-2. Leia a seção **When to use** (quando existir) da skill candidata.
-3. Use **apenas uma** skill como primária; use outra apenas como apoio se estiver explicitamente indicado.
+2. Leia a se??o **When to use** (quando existir) da skill candidata.
+3. Use **apenas uma** skill como prim?ria; use outra apenas como apoio se estiver explicitamente indicado.
 
-## Índice
+## ?ndice
 
-- [a2-key-aggregation](#a2-key-aggregation) — Implement/review the A2 scalable winner model using canonical playerKey per WinMode + O(1) aggregated counters & winner counts (no loops over players) for daily/monthly commit→reveal→draw→claim.
-- [automation-upkeep](#automation-upkeep) — Implement deterministic, idempotent phase automation using Chainlink-style checkUpkeep/performUpkeep for updatePhase/requestDraw/openDay/closeDay, with safe retries and manual fallback.
-- [best-practices](#best-practices) — Orientações completas de boas práticas para desenvolvimento de projetos Web2 + Web3 híbridos: arquitetura, código, contratos, testes, observabilidade, deploy e governança.
-- [checkout-batch-flow](#checkout-batch-flow) — Implement/review one-transaction checkout() batching (feed → commit → buyRelics → applyRelics → monthly action) with deterministic validation, canonical ordering, and exact payment reconciliation (refund extra).
-- [cloudflare-deploy](#cloudflare-deploy) — Deploy applications and infrastructure to Cloudflare using Workers, Pages, and related platform services (KV, D1, R2, Durable Objects, Queues, etc.).
-- [develop-frontend](#develop-frontend) — Review, debug and elevate AI-generated web frontends: layout stability, responsiveness, accessibility, visual consistency (tokens), UI states, and baseline performance/SEO.
-- [develop-web-game](#develop-web-game) — Build games in small steps and validate every change. Treat each iteration as: implement → act → pause → observe → adjust.
-- [indexer-reorg-idempotent](#indexer-reorg-idempotent) — Enforce reorg-aware, idempotent indexing with stable event identity keys, replay safety, and clear optimistic vs confirmed consistency tiers. Use when touching DB writes or replay logic.
-- [linear](#linear) — Manage issues, projects & team workflows in Linear via the Linear MCP server. Use when the user wants to read, create, or update tickets in Linear.
-- [pdf](#pdf) — Read, create, or review PDF files using `reportlab`, `pdfplumber`, and `pypdf`. Prefer visual checks by rendering pages with Poppler.
-- [playwright](#playwright) — Drive a real browser from the terminal using `playwright-cli`. Prefer the bundled wrapper script so the CLI works even when it is not globally installed. Treat this skill as CLI-first automation. Do not pivot to `@playwright/test` unless the user explicitly asks for test files.
-- [playwright-interactive](#playwright-interactive) — Persistent browser and Electron interaction through `js_repl` for fast iterative UI debugging. Keep Playwright handles alive across iterations for functional and visual QA.
-- [ponder-indexer-events](#ponder-indexer-events) — Maintain Ponder event coverage + Postgres projections for the game. Use when adding/modifying on-chain events, handler logic, schema migrations, or API alignment.
-- [release-config-management](#release-config-management) — Standardize release & configuration management across chains/environments: deployments/<chainId>.json, env/runtime secrets, ABI/schema versioning, idempotent migrations, and reproducible scripts. Use when touching deploy scripts, env vars, DB migrations, ABI/events, or production setup.
-- [render-deploy](#render-deploy) — Deploy applications to Render by analyzing codebases, generating render.yaml Blueprints, and creating services via MCP tools.
-- [security-threat-checklist](#security-threat-checklist) — Apply threat modeling and security checklists (Web2, Web3, frontend, infra) to any PR or task that changes auth, contracts, secrets, APIs, payments, upgradeability, or admin operations.
-- [upgradeability-governance](#upgradeability-governance) — Enforce safe upgrade patterns (ERC-7201 namespaced storage, initializer discipline, authorizeUpgrade governance, and upgrade tests). Use when touching proxy/upgradeable contracts, storage layout, admin roles, or deploy scripts.
-- [vercel-deploy](#vercel-deploy) — Deploy applications and websites to Vercel. Always deploys as preview unless production is explicitly requested. Handles CLI auth and fallback deploy script.
-- [web2-wallet-auth](#web2-wallet-auth) — Implement or review Web2 wallet-based auth (SIWE/EIP-712) with nonce+expiry+anti-replay, ERC-1271 support, rate limiting, and safe logging. Use when touching login/session/authz endpoints or any signature verification off-chain.
+- [a2-key-aggregation](#a2-key-aggregation) ? Implement/review the A2 scalable winner model using canonical playerKey per WinMode + O(1) aggregated counters & winner counts (no loops over players) for daily/monthly commit?reveal?draw?claim.
+- [automation-upkeep](#automation-upkeep) ? Implement deterministic, idempotent phase automation using Chainlink-style checkUpkeep/performUpkeep for updatePhase/requestDraw/openDay/closeDay, with safe retries and manual fallback.
+- [best-practices](#best-practices) ? Orienta??es completas de boas pr?ticas para desenvolvimento de projetos Web2 + Web3 h?bridos: arquitetura, c?digo, contratos, testes, observabilidade, deploy e governan?a.
+- [checkout-batch-flow](#checkout-batch-flow) ? Implement/review one-transaction checkout() batching (feed ? commit ? buyRelics ? applyRelics ? monthly action) with deterministic validation, canonical ordering, and exact payment reconciliation (refund extra).
+- [cloudflare-deploy](#cloudflare-deploy) ? Deploy applications and infrastructure to Cloudflare using Workers, Pages, and related platform services (KV, D1, R2, Durable Objects, Queues, etc.).
+- [develop-frontend](#develop-frontend) ? Review, debug and elevate AI-generated web frontends: layout stability, responsiveness, accessibility, visual consistency (tokens), UI states, and baseline performance/SEO.
+- [develop-web-game](#develop-web-game) ? Build games in small steps and validate every change. Treat each iteration as: implement ? act ? pause ? observe ? adjust.
+- [geo-content](#geo-content) ? Gera e revisa materiais p?blicos da estrat?gia GEO e AI Visibility Engine do BetterPlace (p?ginas de bairro, comparativos, relat?rios, posts de comunidade, dados, metodologia, CTAs). Garante estrutura obrigat?ria, tom de voz, termos proibidos e CTAs rastre?veis.
+- [indexer-reorg-idempotent](#indexer-reorg-idempotent) ? Enforce reorg-aware, idempotent indexing with stable event identity keys, replay safety, and clear optimistic vs confirmed consistency tiers. Use when touching DB writes or replay logic.
+- [linear](#linear) ? Manage issues, projects & team workflows in Linear via the Linear MCP server. Use when the user wants to read, create, or update tickets in Linear.
+- [mercado-pago](#mercado-pago) ? Integra e opera pagamentos Mercado Pago no projeto, cobrindo MCP oficial, checkout, webhook, reconciliacao, credenciais MERCADO_PAGO_* e troubleshooting de billing.
+- [pdf](#pdf) ? Read, create, or review PDF files using `reportlab`, `pdfplumber`, and `pypdf`. Prefer visual checks by rendering pages with Poppler.
+- [playwright](#playwright) ? Drive a real browser from the terminal using `playwright-cli`. Prefer the bundled wrapper script so the CLI works even when it is not globally installed. Treat this skill as CLI-first automation. Do not pivot to `@playwright/test` unless the user explicitly asks for test files.
+- [playwright-interactive](#playwright-interactive) ? Persistent browser and Electron interaction through `js_repl` for fast iterative UI debugging. Keep Playwright handles alive across iterations for functional and visual QA.
+- [ponder-indexer-events](#ponder-indexer-events) ? Maintain Ponder event coverage + Postgres projections for the game. Use when adding/modifying on-chain events, handler logic, schema migrations, or API alignment.
+- [release-config-management](#release-config-management) ? Standardize release & configuration management across chains/environments: deployments/<chainId>.json, env/runtime secrets, ABI/schema versioning, idempotent migrations, and reproducible scripts. Use when touching deploy scripts, env vars, DB migrations, ABI/events, or production setup.
+- [render-deploy](#render-deploy) ? Deploy applications to Render by analyzing codebases, generating render.yaml Blueprints, and creating services via MCP tools.
+- [security-threat-checklist](#security-threat-checklist) ? Apply threat modeling and security checklists (Web2, Web3, frontend, infra) to any PR or task that changes auth, contracts, secrets, APIs, payments, upgradeability, or admin operations.
+- [upgradeability-governance](#upgradeability-governance) ? Enforce safe upgrade patterns (ERC-7201 namespaced storage, initializer discipline, authorizeUpgrade governance, and upgrade tests). Use when touching proxy/upgradeable contracts, storage layout, admin roles, or deploy scripts.
+- [vercel-deploy](#vercel-deploy) ? Deploy applications and websites to Vercel. Always deploys as preview unless production is explicitly requested. Handles CLI auth and fallback deploy script.
+- [web2-wallet-auth](#web2-wallet-auth) ? Implement or review Web2 wallet-based auth (SIWE/EIP-712) with nonce+expiry+anti-replay, ERC-1271 support, rate limiting, and safe logging. Use when touching login/session/authz endpoints or any signature verification off-chain.
 
 ## a2-key-aggregation
 
-**Título:** A2 Key Aggregation (O(1) Winners)
+**T?tulo:** A2 Key Aggregation (O(1) Winners)
 
-**Descrição:** Implement/review the A2 scalable winner model using canonical playerKey per WinMode + O(1) aggregated counters & winner counts (no loops over players) for daily/monthly commit→reveal→draw→claim.
+**Descri??o:** Implement/review the A2 scalable winner model using canonical playerKey per WinMode + O(1) aggregated counters & winner counts (no loops over players) for daily/monthly commit?reveal?draw?claim.
 
 **Arquivo:** `skills/a2-key-aggregation/SKILL.md`
 
 **Quando usar (gatilhos):**
 - Touching **reveal**, **draw/VRF callback**, **claim**, **win modes**, or anything that might reintroduce loops over players.
-- Adding new win conditions, “order ignored” variants, or changing how pot splits/winner counts are computed.
+- Adding new win conditions, ?order ignored? variants, or changing how pot splits/winner counts are computed.
 
 ## automation-upkeep
 
-**Título:** Automation Upkeep (Deterministic + Idempotent)
+**T?tulo:** Automation Upkeep (Deterministic + Idempotent)
 
-**Descrição:** Implement deterministic, idempotent phase automation using Chainlink-style checkUpkeep/performUpkeep for updatePhase/requestDraw/openDay/closeDay, with safe retries and manual fallback.
+**Descri??o:** Implement deterministic, idempotent phase automation using Chainlink-style checkUpkeep/performUpkeep for updatePhase/requestDraw/openDay/closeDay, with safe retries and manual fallback.
 
 **Arquivo:** `skills/automation-upkeep/SKILL.md`
 
 **Quando usar (gatilhos):**
 - Adding/adjusting automated phase transitions, VRF request triggers, or scheduled open/close logic.
-- Any time you touch `checkUpkeep`, `performUpkeep`, or “keeper/cron” responsibilities.
+- Any time you touch `checkUpkeep`, `performUpkeep`, or ?keeper/cron? responsibilities.
 
 ## best-practices
 
-**Título:** Best Practices — Web2 + Web3 Híbrido
+**T?tulo:** Best Practices ? Web2 + Web3 H?brido
 
-**Descrição:** Orientações completas de boas práticas para desenvolvimento de projetos Web2 + Web3 híbridos. Cobre arquitetura, qualidade de código, segurança, testes, observabilidade, deploy, governança e compliance. Inclui checklists de DoD, anti-padrões e regras de atuação do agente.
+**Descri??o:** Orienta??es completas de boas pr?ticas para desenvolvimento de projetos Web2 + Web3 h?bridos. Cobre arquitetura, qualidade de c?digo, seguran?a, testes, observabilidade, deploy, governan?a e compliance. Inclui checklists de DoD, anti-padr?es e regras de atua??o do agente.
 
 **Arquivo:** `skills/best-practices/SKILL.md`
 
-**Subagentes disponíveis:**
-- `agents/code-reviewer` — revisão de código (qualidade, legibilidade, dependências)
-- `agents/architect` — arquitetura híbrida, fronteiras de confiança, ADRs
-- `agents/contract-auditor` — auditoria de contratos Solidity
-- `agents/test-strategist` — estratégia de testes, fuzz, invariants
-- `agents/deploy-reviewer` — CI/CD, checklist de deploy, rollback
-- `agents/security-checker` — segredos, logs, licenças, papéis administrativos
+**Subagentes dispon?veis:**
+- `agents/code-reviewer` ? revis?o de c?digo (qualidade, legibilidade, depend?ncias)
+- `agents/architect` ? arquitetura h?brida, fronteiras de confian?a, ADRs
+- `agents/contract-auditor` ? auditoria de contratos Solidity
+- `agents/test-strategist` ? estrat?gia de testes, fuzz, invariants
+- `agents/deploy-reviewer` ? CI/CD, checklist de deploy, rollback
+- `agents/security-checker` ? segredos, logs, licen?as, pap?is administrativos
 
 **Quando usar (gatilhos):**
-- Escrever, revisar ou refatorar código (backend, frontend, contratos Solidity).
-- Projetar ou avaliar arquitetura de sistema híbrido Web2 + Web3.
-- Implementar ou revisar segurança, autenticação, autorização.
-- Definir estratégia de testes, observabilidade ou deploy.
+- Escrever, revisar ou refatorar c?digo (backend, frontend, contratos Solidity).
+- Projetar ou avaliar arquitetura de sistema h?brido Web2 + Web3.
+- Implementar ou revisar seguran?a, autentica??o, autoriza??o.
+- Definir estrat?gia de testes, observabilidade ou deploy.
 - Trabalhar com smart contracts, indexadores (Ponder, The Graph) ou APIs.
-- Usuário mencionar: "boas práticas", "code review", "arquitetura", "contrato inteligente", "indexer", "deploy", "testes", "auditoria", "DoD".
+- Usu?rio mencionar: "boas pr?ticas", "code review", "arquitetura", "contrato inteligente", "indexer", "deploy", "testes", "auditoria", "DoD".
 
 ## checkout-batch-flow
 
-**Título:** Checkout Batch Flow (1 Tx, Canonical Order)
+**T?tulo:** Checkout Batch Flow (1 Tx, Canonical Order)
 
-**Descrição:** Implement/review one-transaction checkout() batching (feed → commit → buyRelics → applyRelics → monthly action) with deterministic validation, canonical ordering, and exact payment reconciliation (refund extra).
+**Descri??o:** Implement/review one-transaction checkout() batching (feed ? commit ? buyRelics ? applyRelics ? monthly action) with deterministic validation, canonical ordering, and exact payment reconciliation (refund extra).
 
 **Arquivo:** `skills/checkout-batch-flow/SKILL.md`
 
@@ -92,9 +94,9 @@ Este arquivo indexa todas as skills disponíveis em `\skills`.
 
 ## cloudflare-deploy
 
-**Título:** Cloudflare Deploy (Workers, Pages & Platform)
+**T?tulo:** Cloudflare Deploy (Workers, Pages & Platform)
 
-**Descrição:** Deploy applications and infrastructure to Cloudflare using Workers, Pages, and related platform services (KV, D1, R2, Durable Objects, Queues, etc.). Use when deploying, hosting, or publishing a project on Cloudflare.
+**Descri??o:** Deploy applications and infrastructure to Cloudflare using Workers, Pages, and related platform services (KV, D1, R2, Durable Objects, Queues, etc.). Use when deploying, hosting, or publishing a project on Cloudflare.
 
 **Arquivo:** `skills/cloudflare-deploy/SKILL.md`
 
@@ -106,32 +108,32 @@ Este arquivo indexa todas as skills disponíveis em `\skills`.
 
 ## develop-frontend
 
-**Título:** Develop Frontend (Qualidade de UI para código gerado por IA)
+**T?tulo:** Develop Frontend (Qualidade de UI para c?digo gerado por IA)
 
-**Descrição:** Revisar, depurar e elevar a qualidade de frontends (web) gerados por IA, garantindo layout estável (sem overflow), responsividade, acessibilidade, consistência visual via tokens, estados de UI completos e baseline de performance/SEO.
+**Descri??o:** Revisar, depurar e elevar a qualidade de frontends (web) gerados por IA, garantindo layout est?vel (sem overflow), responsividade, acessibilidade, consist?ncia visual via tokens, estados de UI completos e baseline de performance/SEO.
 
 **Arquivo:** `skills/develop-frontend/SKILL.md`
 
 **Quando usar (gatilhos):**
-- Quando receber UI/landing/dashboard gerada por IA e precisar torná-la consistente e pronta para produção.
-- Quando houver bugs de layout/spacing/alinhamento, responsividade, contraste/a11y, ou inconsistência entre componentes.
-- Antes de “fechar” um design system (tokens) e padronizar estados (hover/focus/disabled/loading/empty/error).
+- Quando receber UI/landing/dashboard gerada por IA e precisar torn?-la consistente e pronta para produ??o.
+- Quando houver bugs de layout/spacing/alinhamento, responsividade, contraste/a11y, ou inconsist?ncia entre componentes.
+- Antes de ?fechar? um design system (tokens) e padronizar estados (hover/focus/disabled/loading/empty/error).
 
 ## develop-web-game
 
-**Título:** Develop Web Game
+**T?tulo:** Develop Web Game
 
-**Descrição:** Build games in small steps and validate every change. Treat each iteration as: implement → act → pause → observe → adjust.
+**Descri??o:** Build games in small steps and validate every change. Treat each iteration as: implement ? act ? pause ? observe ? adjust.
 
 **Arquivo:** `skills/develop-web-game/SKILL.md`
 
-**Quando usar:** consulte a SKILL.md (não há seção explícita de *When to use*).
+**Quando usar:** consulte a SKILL.md (n?o h? se??o expl?cita de *When to use*).
 
 ## indexer-reorg-idempotent
 
-**Título:** Indexer Reorg + Idempotency
+**T?tulo:** Indexer Reorg + Idempotency
 
-**Descrição:** Enforce reorg-aware, idempotent indexing with stable event identity keys, replay safety, and clear optimistic vs confirmed consistency tiers. Use when touching DB writes or replay logic.
+**Descri??o:** Enforce reorg-aware, idempotent indexing with stable event identity keys, replay safety, and clear optimistic vs confirmed consistency tiers. Use when touching DB writes or replay logic.
 
 **Arquivo:** `skills/indexer-reorg-idempotent/SKILL.md`
 
@@ -141,9 +143,9 @@ Este arquivo indexa todas as skills disponíveis em `\skills`.
 
 ## linear
 
-**Título:** Linear (Issue & Project Management)
+**T?tulo:** Linear (Issue & Project Management)
 
-**Descrição:** Manage issues, projects & team workflows in Linear via the Linear MCP server. Use when the user wants to read, create, or update tickets in Linear.
+**Descri??o:** Manage issues, projects & team workflows in Linear via the Linear MCP server. Use when the user wants to read, create, or update tickets in Linear.
 
 **Arquivo:** `skills/linear/SKILL.md`
 
@@ -152,11 +154,27 @@ Este arquivo indexa todas as skills disponíveis em `\skills`.
 - Sprint planning, workload balancing, or documentation audits in Linear.
 - Setting up or troubleshooting the Linear MCP connection.
 
+
+## mercado-pago
+
+**T?tulo:** Mercado Pago
+
+**Descri??o:** Integra e opera pagamentos Mercado Pago neste projeto. Cobre uso do MCP oficial, checkout hospedado, Pix, webhook, valida??o de `x-signature`, reconciliacao por `external_reference`, credenciais `MERCADO_PAGO_*` e troubleshooting de pagamentos pendentes/expirados/n?o reconciliados.
+
+**Arquivo:** `skills/mercado-pago/SKILL.md`
+
+**Quando usar (gatilhos):**
+- Conectar ou orientar uso do MCP oficial do Mercado Pago.
+- Implementar ou ajustar checkout, Pix, webhook ou polling/reconciliacao.
+- Corrigir billing envolvendo `external_reference`, `external_payment_id` ou ativacao de plano.
+- Revisar `.env`, `config.py`, testes ou UI relacionados ao Mercado Pago.
+- Investigar pagamentos aprovados que nao refletiram no estado local.
+
 ## pdf
 
-**Título:** PDF (Read, Generate & Validate)
+**T?tulo:** PDF (Read, Generate & Validate)
 
-**Descrição:** Use when tasks involve reading, creating, or reviewing PDF files where rendering and layout matter. Prefer visual checks by rendering pages (Poppler) and use Python tools such as `reportlab`, `pdfplumber`, and `pypdf` for generation and extraction.
+**Descri??o:** Use when tasks involve reading, creating, or reviewing PDF files where rendering and layout matter. Prefer visual checks by rendering pages (Poppler) and use Python tools such as `reportlab`, `pdfplumber`, and `pypdf` for generation and extraction.
 
 **Arquivo:** `skills/pdf/SKILL.md`
 
@@ -167,19 +185,19 @@ Este arquivo indexa todas as skills disponíveis em `\skills`.
 
 ## playwright
 
-**Título:** Playwright CLI Skill
+**T?tulo:** Playwright CLI Skill
 
-**Descrição:** Drive a real browser from the terminal using `playwright-cli`. Prefer the bundled wrapper script so the CLI works even when it is not globally installed. Treat this skill as CLI-first automation. Do not pivot to `@playwright/test` unless the user explicitly asks for test files.
+**Descri??o:** Drive a real browser from the terminal using `playwright-cli`. Prefer the bundled wrapper script so the CLI works even when it is not globally installed. Treat this skill as CLI-first automation. Do not pivot to `@playwright/test` unless the user explicitly asks for test files.
 
 **Arquivo:** `skills/playwright/SKILL.md`
 
-**Quando usar:** consulte a SKILL.md (não há seção explícita de *When to use*).
+**Quando usar:** consulte a SKILL.md (n?o h? se??o expl?cita de *When to use*).
 
 ## playwright-interactive
 
-**Título:** Playwright Interactive (Persistent Browser via js_repl)
+**T?tulo:** Playwright Interactive (Persistent Browser via js_repl)
 
-**Descrição:** Persistent browser and Electron interaction through `js_repl` for fast iterative UI debugging. Keep Playwright handles alive across iterations and run functional plus visual QA without restarting the toolchain.
+**Descri??o:** Persistent browser and Electron interaction through `js_repl` for fast iterative UI debugging. Keep Playwright handles alive across iterations and run functional plus visual QA without restarting the toolchain.
 
 **Arquivo:** `skills/playwright-interactive/SKILL.md`
 
@@ -190,9 +208,9 @@ Este arquivo indexa todas as skills disponíveis em `\skills`.
 
 ## ponder-indexer-events
 
-**Título:** Ponder Indexer Events (Coverage + Projections)
+**T?tulo:** Ponder Indexer Events (Coverage + Projections)
 
-**Descrição:** Maintain Ponder event coverage + Postgres projections for the game. Use when adding/modifying on-chain events, handler logic, schema migrations, or API alignment.
+**Descri??o:** Maintain Ponder event coverage + Postgres projections for the game. Use when adding/modifying on-chain events, handler logic, schema migrations, or API alignment.
 
 **Arquivo:** `skills/ponder-indexer-events/SKILL.md`
 
@@ -202,9 +220,9 @@ Este arquivo indexa todas as skills disponíveis em `\skills`.
 
 ## release-config-management
 
-**Título:** Release & Config Management (Multi-chain + Multi-env)
+**T?tulo:** Release & Config Management (Multi-chain + Multi-env)
 
-**Descrição:** Standardize release & configuration management across chains/environments: deployments/<chainId>.json, env/runtime secrets, ABI/schema versioning, idempotent migrations, and reproducible scripts. Use when touching deploy scripts, env vars, DB migrations, ABI/events, or production setup.
+**Descri??o:** Standardize release & configuration management across chains/environments: deployments/<chainId>.json, env/runtime secrets, ABI/schema versioning, idempotent migrations, and reproducible scripts. Use when touching deploy scripts, env vars, DB migrations, ABI/events, or production setup.
 
 **Arquivo:** `skills/release-config-management/SKILL.md`
 
@@ -218,9 +236,9 @@ Este arquivo indexa todas as skills disponíveis em `\skills`.
 
 ## render-deploy
 
-**Título:** Render Deploy (Git-backed & Blueprint)
+**T?tulo:** Render Deploy (Git-backed & Blueprint)
 
-**Descrição:** Deploy applications to Render by analyzing codebases, generating render.yaml Blueprints, and creating services via MCP tools. Use when the user wants to deploy, host, or publish their application on Render's cloud platform.
+**Descri??o:** Deploy applications to Render by analyzing codebases, generating render.yaml Blueprints, and creating services via MCP tools. Use when the user wants to deploy, host, or publish their application on Render's cloud platform.
 
 **Arquivo:** `skills/render-deploy/SKILL.md`
 
@@ -231,9 +249,9 @@ Este arquivo indexa todas as skills disponíveis em `\skills`.
 
 ## security-threat-checklist
 
-**Título:** Security Threat Checklist (DoD Requirement)
+**T?tulo:** Security Threat Checklist (DoD Requirement)
 
-**Descrição:** Apply threat modeling and security checklists (Web2, Web3, frontend, infra) to any PR or task that changes auth, contracts, secrets, APIs, payments, upgradeability, or admin operations. Returns blockers, recommendations by severity, and required scans status.
+**Descri??o:** Apply threat modeling and security checklists (Web2, Web3, frontend, infra) to any PR or task that changes auth, contracts, secrets, APIs, payments, upgradeability, or admin operations. Returns blockers, recommendations by severity, and required scans status.
 
 **Arquivo:** `skills/security-threat-checklist/SKILL.md`
 
@@ -251,9 +269,9 @@ Este arquivo indexa todas as skills disponíveis em `\skills`.
 
 ## upgradeability-governance
 
-**Título:** Upgradeability + Governance (ERC-7201)
+**T?tulo:** Upgradeability + Governance (ERC-7201)
 
-**Descrição:** Enforce safe upgrade patterns (ERC-7201 namespaced storage, initializer discipline, authorizeUpgrade governance, and upgrade tests). Use when touching proxy/upgradeable contracts, storage layout, admin roles, or deploy scripts.
+**Descri??o:** Enforce safe upgrade patterns (ERC-7201 namespaced storage, initializer discipline, authorizeUpgrade governance, and upgrade tests). Use when touching proxy/upgradeable contracts, storage layout, admin roles, or deploy scripts.
 
 **Arquivo:** `skills/upgradeability-governance/SKILL.md`
 
@@ -267,9 +285,9 @@ Este arquivo indexa todas as skills disponíveis em `\skills`.
 
 ## vercel-deploy
 
-**Título:** Vercel Deploy (Preview & Production)
+**T?tulo:** Vercel Deploy (Preview & Production)
 
-**Descrição:** Deploy applications and websites to Vercel. Always deploy as preview unless the user explicitly asks for production. Handles CLI auth, fallback deploy script, and returns the preview URL.
+**Descri??o:** Deploy applications and websites to Vercel. Always deploy as preview unless the user explicitly asks for production. Handles CLI auth, fallback deploy script, and returns the preview URL.
 
 **Arquivo:** `skills/vercel-deploy/SKILL.md`
 
@@ -279,12 +297,29 @@ Este arquivo indexa todas as skills disponíveis em `\skills`.
 
 ## web2-wallet-auth
 
-**Título:** Web2 Wallet Auth (SIWE/EIP-712 + ERC-1271)
+**T?tulo:** Web2 Wallet Auth (SIWE/EIP-712 + ERC-1271)
 
-**Descrição:** Implement or review Web2 wallet-based auth (SIWE/EIP-712) with nonce+expiry+anti-replay, ERC-1271 support, rate limiting, and safe logging. Use when touching login/session/authz endpoints or any signature verification off-chain.
+**Descri??o:** Implement or review Web2 wallet-based auth (SIWE/EIP-712) with nonce+expiry+anti-replay, ERC-1271 support, rate limiting, and safe logging. Use when touching login/session/authz endpoints or any signature verification off-chain.
 
 **Arquivo:** `skills/web2-wallet-auth/SKILL.md`
 
 **Quando usar (gatilhos):**
 - Any change to: login routes, session issuance, signature verification, nonce storage, auth middleware, or endpoints that accept wallet identities.
 - Any addition of privileged Web2 roles (admin/ops/keeper) or routes that accept IDs from the client.
+
+## geo-content
+
+**T?tulo:** GEO Content ? BetterPlace AI Visibility Engine
+
+**Descri??o:** Gera e revisa materiais p?blicos da estrat?gia GEO e AI Visibility Engine do BetterPlace. Garante estrutura obrigat?ria, tom de voz, termos proibidos e CTAs rastre?veis conforme `PRD_MKT_GEO.md` e `docs/geo/content-guidelines.md`.
+
+**Arquivo:** `skills/geo-content/SKILL.md`
+
+**Quando usar (gatilhos):**
+- Criar ou revisar p?gina de bairro (`/bairros/{slug}`).
+- Criar ou revisar comparativo (`/comparar/{a}-vs-{b}`).
+- Criar ou revisar relat?rio recorrente (`/relatorios/{ano-mes}`).
+- Criar ou revisar post para a comunidade pr?pria (r/OndeMorarBrasil ou similar).
+- Criar bloco de texto para a p?gina de dados (`/dados`) ou metodologia.
+- Gerar ou ajustar variante de CTA para qualquer material p?blico do BetterPlace.
+- Qualquer tarefa dos milestones M3, M4, M5, M6, M8 do PRD GEO.

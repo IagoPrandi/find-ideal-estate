@@ -1,0 +1,4 @@
+interface:
+  display_name: "Mercado Pago"
+  short_description: "Integracao e operacao Mercado Pago"
+  default_prompt: "Use $mercado-pago para integrar ou operar pagamentos Mercado Pago neste projeto."
