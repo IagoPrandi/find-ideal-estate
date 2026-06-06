@@ -22,8 +22,8 @@ def upgrade() -> None:
                 WHEN 'anonymous' THEN NULL
                 WHEN 'free' THEN 0.00
                 WHEN 'basico' THEN 12.99
-                WHEN 'pro' THEN 90.99
-                WHEN 'pro_max' THEN 312.99
+                WHEN 'pro' THEN 30.99
+                WHEN 'pro_max' THEN 149.90
                 ELSE price_brl
             END,
             monthly_credits = CASE slug
@@ -164,7 +164,7 @@ def downgrade() -> None:
         UPDATE plans
         SET
             price_brl = CASE slug
-                WHEN 'pro_max' THEN 312.99
+                WHEN 'pro_max' THEN 149.90
                 ELSE price_brl
             END,
             monthly_credits = CASE slug

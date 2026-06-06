@@ -170,7 +170,7 @@ def test_pix_checkout_passes_authenticated_user_to_service(monkeypatch):
             qr_code_payload=None,
             qr_code_image_url=None,
             ticket_url="https://www.mercadopago.com.br/payments/teste",
-            amount_brl="21.99",
+            amount_brl="12.99",
             expires_at=datetime.now(tz=timezone.utc),
             status="pending",
         )
@@ -197,7 +197,7 @@ def _account_plan_payload(slug: str = "pro") -> AccountPlanRead:
         id=uuid4(),
         slug=slug,
         name="Pro",
-        price_brl=Decimal("90.99"),
+        price_brl=Decimal("30.99"),
         monthly_credits=4000,
         is_paid=True,
         display_order=3,
@@ -315,7 +315,7 @@ def test_checkout_preference_omits_payer_in_test_for_non_testuser_email(monkeypa
 
     response = asyncio.run(
         create_checkout_preference(
-            amount=Decimal("21.99"),
+            amount=Decimal("12.99"),
             title="Assinatura Básico",
             description="Assinatura Básico - Find Ideal Estate",
             payer_email="ana@example.com",
@@ -348,7 +348,7 @@ def test_checkout_preference_keeps_payer_in_test_for_testuser_email(monkeypatch)
 
     asyncio.run(
         create_checkout_preference(
-            amount=Decimal("21.99"),
+            amount=Decimal("12.99"),
             title="Assinatura Básico",
             description="Assinatura Básico - Find Ideal Estate",
             payer_email="test_user_br@testuser.com",
@@ -401,7 +401,7 @@ def test_get_payment_status_reconciles_mercado_pago_payment_by_reference(monkeyp
         "payment_provider": "mercado_pago",
         "payment_method": "mercado_pago_checkout",
         "payment_type": "plan_activation",
-        "amount_brl": Decimal("21.99"),
+        "amount_brl": Decimal("12.99"),
         "status": "pending",
         "external_reference": str(payment_id),
         "external_payment_id": None,

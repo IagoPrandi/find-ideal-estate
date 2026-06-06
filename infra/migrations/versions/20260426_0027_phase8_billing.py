@@ -192,8 +192,8 @@ def upgrade() -> None:
             ('anonymous', 'Anônimo',        NULL,    300, false, 0),
             ('free',      'Free',           0.00,    350, false, 1),
             ('basico',    'Básico',        12.99,    800, true,  2),
-            ('pro',       'Pro',           90.99,   4000, true,  3),
-            ('pro_max',   'Pro Max',      312.99,  20000, true,  4)
+            ('pro',       'Pro',           30.99,   4000, true,  3),
+            ('pro_max',   'Pro Max',      149.90,  20000, true,  4)
         ON CONFLICT (slug) DO NOTHING
     """)
 

@@ -6825,3 +6825,31 @@
 
 - Progress Tracker:
   - Nenhuma milestone do PRD foi marcada como concluída; política de confirmação explícita preservada.
+
+## 2026-06-05 - Ajuste de preços dos planos pagos
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/release-config-management/SKILL.md`
+
+- Skill used:
+  - `skills/release-config-management/SKILL.md`
+
+- Scope executed:
+  - Preços pagos atualizados para Básico `R$ 12,99`, Pro `R$ 30,99` e Pro Max `R$ 149,90`.
+  - Seeds e migrações históricas de planos foram alinhados para ambientes novos.
+  - Criada a migração `20260605_0041_update_paid_plan_prices.py` para atualizar bancos já migrados.
+  - `PRD.md` foi atualizado nas tabelas canônicas, exemplo de checkout Pix e decisões de monetização.
+  - Fixtures de testes de Pix/planos foram alinhados aos novos valores.
+
+- Verification executed:
+  - `python -m pytest apps/api/tests/test_phase8_mercado_pago.py -q` -> `10 passed`, com 1 warning conhecido de `httpx`.
+  - `npm.cmd --prefix apps/web run test:run -- src/components/panels/Step6Analysis.test.tsx -t "opens the login modal"` -> `1 passed`, `21 skipped`.
+  - `.venv\Scripts\python.exe -m ruff check infra/migrations/versions/20260605_0041_update_paid_plan_prices.py` -> `All checks passed`.
+  - `git diff --check` -> sem erros; apenas avisos de conversão LF/CRLF.
+  - `python -m ruff ...` no Python global não rodou porque `ruff` não está instalado nesse interpretador.
+  - `.venv\Scripts\python.exe -m ruff check ...` nos arquivos de migração antigos ainda reporta problemas preexistentes de formatação/linhas longas fora do escopo desta alteração.
+
+- Progress Tracker:
+  - Nenhuma milestone do PRD foi marcada como concluída; política de confirmação explícita preservada.

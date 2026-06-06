@@ -57,7 +57,7 @@ function mockProAccountPlan() {
       id: "plan-pro",
       slug: "pro",
       name: "Pro",
-      price_brl: 90.99,
+      price_brl: 30.99,
       monthly_credits: 4000,
       is_paid: true,
       display_order: 3,
