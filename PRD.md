@@ -2044,7 +2044,7 @@ Total:
 |---|---:|---:|---:|---:|---:|---|---|---|
 | Anônimo | — | 300 sessão | 0 | 0 | 7 dias sessão | travada | default | não |
 | Free | R$ 0 | 350 | 5 | 2 | 7 dias | travada | default | não |
-| Básico | R$ 21,99 | 800 | 20 | 4 | 30 dias | limitada | 4 | não |
+| Básico | R$ 12,99 | 800 | 20 | 4 | 30 dias | limitada | 4 | não |
 | Pro | R$ 90,99 | 4000 | 100 | 20 | 30 dias | liberada | sem limite | não |
 | Pro Max | R$ 312,99 | 20000 | 100 | 20 | 30 dias | liberada | sem limite | não |
 
@@ -2068,7 +2068,7 @@ Total:
 
 ### Plano Básico
 
-- R$ 21,99/mês;
+- R$ 12,99/mês;
 - 800 créditos;
 - 20 imóveis salvos;
 - 4 zonas salvas;
@@ -3063,7 +3063,7 @@ Não reabrir sem análise de impacto documentada.
 | Etapas monetizáveis | **4 × 20 créditos** | Scraping sob demanda indisponível em todos os planos |
 | Créditos anônimos | **300** | Menor liberdade que o Free |
 | Migração anônimo → Free | **Free recebe 350; não soma saldo anônimo** | Evita arbitragem |
-| Plano Básico | **R$ 21,99 / 800 créditos** | Entrada acessível |
+| Plano Básico | **R$ 12,99 / 800 créditos** | Entrada acessível |
 | Plano Pro | **R$ 90,99 / 4000 créditos** | Usuário intenso |
 | Plano Pro Max | **R$ 312,99 / 20000 créditos** | Franquia superior ao Pro; sem scraping sob demanda |
 | Refresh do plano Pro | **Não incluso** | Evita custo oculto |

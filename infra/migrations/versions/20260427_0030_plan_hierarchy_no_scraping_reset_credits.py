@@ -21,7 +21,7 @@ def upgrade() -> None:
             price_brl = CASE slug
                 WHEN 'anonymous' THEN NULL
                 WHEN 'free' THEN 0.00
-                WHEN 'basico' THEN 21.99
+                WHEN 'basico' THEN 12.99
                 WHEN 'pro' THEN 90.99
                 WHEN 'pro_max' THEN 312.99
                 ELSE price_brl
