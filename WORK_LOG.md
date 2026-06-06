@@ -6722,6 +6722,42 @@
 - Progress Tracker:
   - Nenhuma milestone do PRD foi marcada como concluída; política de confirmação explícita preservada.
 
+## 2026-06-05 - Deploy do backend em produção com Firecrawl
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/release-config-management/SKILL.md`
+
+- Skill used:
+  - `skills/release-config-management/SKILL.md`
+
+- Scope executed:
+  - Backend em produção na AWS atualizado do commit `7bc1084cdd3c14862ad1eacb4d8818d364a24b99` para `c74f56eb270c2881e755831f3b866ce74b98924e`.
+  - Arquivos de backend, contracts, migrations, Docker e compose foram enviados para `/opt/app` via archive Git, preservando `.env` e dados locais da EC2.
+  - Variáveis Firecrawl foram sincronizadas para `/opt/app/.env` a partir do `.env` local sem imprimir valores; `SCRAPER_PROVIDER` ficou explicitamente como `firecrawl`.
+  - Backup do `.env` remoto criado em `/opt/app/.env.backup.20260606004136.firecrawl`.
+  - Imagens `api`, `worker`, `worker-scrape-browser` e `worker-prewarm` foram reconstruídas.
+  - Workers foram pausados durante o rollout; API foi recriada primeiro para aplicar migrations e depois os workers foram recriados.
+  - A migration `20260605_0041_update_paid_plan_prices.py` foi aplicada em produção.
+  - Deploy do frontend/Vercel não foi executado.
+
+- Verification executed:
+  - Testes focados locais: `python -m pytest apps/api/tests/test_platform_registry.py apps/api/tests/test_phase5_scraper_extraction.py apps/api/tests/test_phase8_mercado_pago.py -q --color=no` -> `47 passed`, com 1 warning conhecido de `httpx`.
+  - `git diff --check` -> sem erros.
+  - Health local no EC2: `{"status":"ok","db":"ok","redis":"ok"}`.
+  - Health público: `https://api.betterplace.com.br/health` -> `{"status":"ok","db":"ok","redis":"ok"}`.
+  - Containers em produção: `api` healthy; `redis`, `worker`, `worker-prewarm` e `worker-scrape-browser` up.
+  - Alembic em produção: `20260605_0041 (head)`.
+  - Registry em produção: `available=loft,quintoandar,vivareal,zapimoveis`; `default_free=loft,quintoandar,vivareal,zapimoveis`.
+  - Provider em produção: `SCRAPER_PROVIDER=firecrawl`; `FIRECRAWL_API_KEY=set`.
+  - Scrapers em produção: `vivareal=FirecrawlVivaRealScraper`, `zapimoveis=FirecrawlZapImoveisScraper`, `loft=LoftScraper`, `quintoandar=QuintoAndarScraper`.
+  - Preços no RDS: `basico=12.99`, `pro=30.99`, `pro_max=149.90`.
+  - Logs recentes de `api`, `worker`, `worker-scrape-browser` e `worker-prewarm` sem `error/exception/traceback/failed/fatal`.
+
+- Progress Tracker:
+  - Nenhuma milestone do PRD foi marcada como concluída; política de confirmação explícita preservada.
+
 ## 2026-06-05 - Admin liberado para ativação de planos
 
 - Required docs opened:
