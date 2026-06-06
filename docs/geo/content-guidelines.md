@@ -81,6 +81,10 @@ Nenhum material público pode conter:
 - "ranking definitivo" / "IA comprovou"
 - "perfeito para todos"
 - "sem risco de alagamento"
+- "bairro com baixo índice de criminalidade" (sem citar fonte e ressalva de sub-registro)
+- "bairro valorizado" / "bairro em alta" (sem dados de tendência)
+- "melhor investimento" / "ótima oportunidade de compra"
+- preços de imóveis de anúncios individuais em qualquer forma
 
 ### 4.2 Termos e frases RECOMENDADOS
 
@@ -93,14 +97,56 @@ Nenhum material público pode conter:
 
 ### 4.3 Regra de geração automática (espelha PRD §12.3 e §12.4)
 
-O gerador só pode afirmar com base em thresholds. Exemplos canônicos:
+O gerador só pode afirmar com base em thresholds. Thresholds canônicos por métrica:
 
+**Transporte**
 ```txt
-Se transport_score >= 80:  "O bairro se destaca pelo acesso a transporte público."
-Se green_score >= 80:      "A região apresenta boa presença relativa de áreas verdes."
-Se flood_risk_score <= 30: "A análise indica menor exposição relativa a áreas de alagamento."
-Se safety_data_coverage < mínimo: "A métrica de segurança possui cobertura limitada para esta região."
+transport_score >= 80 → "O bairro se destaca pelo acesso a transporte público."
+transport_score < 80  → "O bairro apresenta acesso moderado a transporte público."
 ```
+
+**Áreas verdes**
+```txt
+green_score >= 70 → "A região apresenta boa presença relativa de áreas verdes."
+green_score < 70  → "A presença relativa de áreas verdes está abaixo da média dos distritos analisados."
+```
+
+**Risco de alagamento** (score invertido — maior = menor risco)
+```txt
+flood_risk_score <= 30 → "A análise indica menor exposição relativa a áreas de alagamento."
+flood_risk_score <= 55 → "A análise indica exposição moderada relativa a áreas de alagamento."
+flood_risk_score > 55  → "A análise indica exposição relativa maior a áreas de alagamento — consulte a metodologia."
+```
+
+**Segurança pública** (score invertido — maior = menor densidade de ocorrências)
+```txt
+safety_score >= 65  → "Os dados da SSP-SP indicam menor densidade relativa de ocorrências registradas nesta região."
+safety_score >= 45  → "Os dados da SSP-SP indicam densidade moderada de ocorrências registradas."
+safety_score < 45   → "Os dados da SSP-SP indicam densidade relativa elevada de ocorrências registradas nesta região."
+safety_coverage == 'parcial'      → acrescentar: "Cobertura parcial (SSP-SP) — interpretar com cautela. Sub-registro conhecido nesta região."
+safety_coverage == 'insuficiente' → substituir por: "Não há dados de segurança pública suficientes para este distrito."
+```
+
+Nota: o score de segurança **sempre** carrega a ressalva de sub-registro da SSP-SP — dado relativo, não absoluto.
+
+**Acesso a serviços / POIs**
+```txt
+poi_score >= 80 → "Alta concentração de pontos de interesse (saúde, educação, comércio, serviços)."
+poi_score >= 60 → "Boa cobertura de pontos de interesse na região."
+poi_score < 60  → "Cobertura moderada de pontos de interesse."
+```
+
+**Panorama imobiliário** (dados agregados internos — não usar para ranquear ou vender)
+```txt
+cost_index >= 75 → "Entre os distritos com maior custo relativo na análise."
+cost_index >= 50 → "Custo relativo moderado em relação aos distritos analisados."
+cost_index < 50  → "Entre os distritos com menor custo relativo na análise."
+trend == 'alta'   → "↑ tendência de valorização"
+trend == 'estavel'→ "→ preço relativamente estável"
+trend == 'queda'  → "↓ tendência de queda"
+```
+
+Obrigatório declarar em todo panorama imobiliário: "Dados agregados por distrito — não representam anúncios individuais."
 
 Proibido gerar afirmações absolutas (lista §4.1) em qualquer circunstância.
 

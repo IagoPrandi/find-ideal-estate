@@ -389,15 +389,55 @@ def compute_scores(conn: sa.Connection, city_code: str, dry_run: bool) -> None:
     scores = _normalize_scores(raw, invert=True)  # 100 = least flood risk
     _upsert_scores(conn, city_code, "flood_risk", raw, scores, dry_run, now)
 
-    # ---- Safety (higher robbery density = MORE dangerous = lower score → invert) ----
+    # ---- Safety (spatial join: SSP point-hull neighborhoods → PMSP districts) ----
+    # SSP neighborhoods use their own neighborhood_code keys. We find SSP neighborhoods
+    # whose geometry intersects each PMSP district purely by geospatial overlap
+    # (no name or city_code string matching). Weighted average of robbery_density_per_km2
+    # by intersection area. SSP neighborhoods from any city that spatially overlap with
+    # a PMSP district boundary contribute to that district's score.
     rows = conn.execute(
         sa.text(
-            "SELECT neighborhood_code, robbery_density_per_km2 "
-            "FROM public_safety_neighborhood_metrics WHERE city_code = :cc"
+            """
+            WITH pmsp AS (
+                SELECT neighborhood_code, geometry
+                FROM neighborhood_boundaries
+                WHERE city_code = :cc
+            ),
+            sp_union AS (
+                SELECT ST_Union(geometry) AS boundary
+                FROM neighborhood_boundaries
+                WHERE city_code = :cc
+            ),
+            ssp_in_sp AS (
+                SELECT ssp.neighborhood_code,
+                       ssp.geometry,
+                       psm.robbery_density_per_km2
+                FROM neighborhood_boundaries ssp
+                JOIN public_safety_neighborhood_metrics psm
+                    ON psm.neighborhood_code = ssp.neighborhood_code
+                JOIN sp_union
+                    ON ST_Intersects(ssp.geometry, sp_union.boundary)
+            )
+            SELECT
+                pmsp.neighborhood_code,
+                COALESCE(
+                    SUM(
+                        ssp.robbery_density_per_km2
+                        * ST_Area(ST_Intersection(pmsp.geometry, ssp.geometry))
+                    ) / NULLIF(
+                        SUM(ST_Area(ST_Intersection(pmsp.geometry, ssp.geometry))), 0
+                    ),
+                    0
+                ) AS weighted_robbery_density
+            FROM pmsp
+            LEFT JOIN ssp_in_sp ssp
+                ON ST_Intersects(pmsp.geometry, ssp.geometry)
+            GROUP BY pmsp.neighborhood_code
+            """
         ),
         {"cc": city_code},
     ).fetchall()
-    raw = {r[0]: r[1] or 0 for r in rows}
+    raw = {r[0]: float(r[1]) for r in rows}
     scores = _normalize_scores(raw, invert=True)  # 100 = safest
     _upsert_scores(conn, city_code, "safety", raw, scores, dry_run, now)
 
@@ -501,11 +541,14 @@ def compute_coverage(conn: sa.Connection, city_code: str, dry_run: bool) -> None
             {"cc": city_code},
         ).scalars().all()
     )
+    # Safety coverage: use the already-computed score (raw_value > 0 means the spatial
+    # join found SSP data overlapping this district). Always marked 'partial' due to
+    # structural SSP sub-registro — never 'complete'.
     safety_codes = set(
         conn.execute(
             sa.text(
-                "SELECT neighborhood_code FROM public_safety_neighborhood_metrics "
-                "WHERE city_code = :cc"
+                "SELECT neighborhood_code FROM neighborhood_metric_scores "
+                "WHERE city_code = :cc AND metric_name = 'safety' AND raw_value > 0"
             ),
             {"cc": city_code},
         ).scalars().all()

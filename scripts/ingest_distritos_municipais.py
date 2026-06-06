@@ -34,6 +34,7 @@ Requirements:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import logging
 import os
 import sys
@@ -106,6 +107,8 @@ def build_rows(gdf: gpd.GeoDataFrame, city_code: str) -> list[dict]:
         area_km2_raw = r.get("qt_area_quilometro")
         area_km2 = float(area_km2_raw) if area_km2_raw is not None else None
 
+        geom_wkt = shapely_wkt.dumps(geom, rounding_precision=8)
+        row_hash = hashlib.sha256(f"{cd}|{nm}|{geom_wkt}".encode()).hexdigest()[:32]
         rows.append(
             {
                 "neighborhood_code": cd,
@@ -120,7 +123,9 @@ def build_rows(gdf: gpd.GeoDataFrame, city_code: str) -> list[dict]:
                 "region_5_code": region_code,
                 "region_5_name": region_name,
                 "gpkg_identifier": gpkg_id,
-                "geometry_wkt": shapely_wkt.dumps(geom, rounding_precision=8),
+                "source_dataset_type": "gpkg_pmsp_v2",
+                "source_dataset_hash": row_hash,
+                "geometry_wkt": geom_wkt,
             }
         )
     return rows
@@ -141,6 +146,8 @@ _UPSERT_SQL = sa.text(
         region_5_code,
         region_5_name,
         gpkg_identifier,
+        source_dataset_type,
+        source_dataset_hash,
         geometry
     ) VALUES (
         :neighborhood_code,
@@ -155,7 +162,9 @@ _UPSERT_SQL = sa.text(
         :region_5_code,
         :region_5_name,
         :gpkg_identifier,
-        ST_GeomFromText(:geometry_wkt, 4326)
+        :source_dataset_type,
+        :source_dataset_hash,
+        ST_Multi(ST_CollectionExtract(ST_MakeValid(ST_GeomFromText(:geometry_wkt, 4326)), 3))
     )
     ON CONFLICT (neighborhood_code) DO UPDATE SET
         city_code                 = EXCLUDED.city_code,
@@ -169,6 +178,8 @@ _UPSERT_SQL = sa.text(
         region_5_code             = EXCLUDED.region_5_code,
         region_5_name             = EXCLUDED.region_5_name,
         gpkg_identifier           = EXCLUDED.gpkg_identifier,
+        source_dataset_type       = EXCLUDED.source_dataset_type,
+        source_dataset_hash       = EXCLUDED.source_dataset_hash,
         geometry                  = EXCLUDED.geometry
     """
 )

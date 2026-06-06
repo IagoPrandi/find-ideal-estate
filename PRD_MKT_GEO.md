@@ -74,7 +74,11 @@ O MVP não deve depender de:
 - Product Hunt;
 - Hacker News;
 - backlinks obtidos manualmente;
-- scraping novo de preço imobiliário.
+- scraping novo de preço imobiliário de fontes externas.
+
+Permitido no MVP: exibição simplificada de dados imobiliários **já existentes** na base
+interna BetterPlace, agregados por distrito e sem exposição de anúncios individuais
+(implementado em M3 como `realEstateMetrics` no modelo de dados público).
 
 Essas frentes podem ser úteis depois, mas não devem bloquear o produto.
 
@@ -789,14 +793,44 @@ neighborhood_green_area_metrics
 neighborhood_flood_risk_metrics
 neighborhood_transport_metrics
 neighborhood_poi_metrics
-neighborhood_metric_scores
-neighborhood_metric_coverage
+neighborhood_metric_scores           ← scores 0–100 por métrica e distrito
+neighborhood_metric_coverage         ← flags de cobertura (completa/parcial/insuficiente)
 urban_metrics_by_district            ← view materializada (superfície de leitura)
-public_safety_neighborhood_metrics
+public_safety_neighborhood_metrics   ← density robberies/km² SSP-SP (sempre 'parcial' por sub-registro)
 content_neighborhood_pages
 content_comparison_pages
 report_snapshots
 geo_visibility_prompt_runs
+```
+
+#### 11.2.3 Modelo de dados público — interface `Bairro` (camada Astro)
+
+Campos da interface TypeScript que alimenta as páginas SSG:
+
+```txt
+slug, nome, distrito, resumo, perfil, dataAtualizacao
+
+# Scores geoespaciais (0–100)
+transportScore        ← weighted transit density/km² → min-max
+greenScore            ← % vegetação significativa → min-max
+floodRiskScore        ← % mancha inundação → min-max invertido (100 = menor risco)
+safetyScore           ← robbery density/km² SSP-SP → min-max invertido (100 = menor densidade)
+poiScore              ← bus stop density/km² proxy → min-max
+
+# Cobertura
+safetyDataCoverage    ← 'completa' | 'parcial' | 'insuficiente'
+lacunas[]             ← métricas com limitação declarada explicitamente
+
+# Panorama imobiliário (dados internos BetterPlace — não scraping)
+realEstateMetrics:
+  pricePerM2Sale      ← preço médio/m² venda (R$), agregado por distrito
+  pricePerM2Rent      ← preço médio/m² aluguel (R$/mês), agregado
+  costIndex           ← índice relativo 0–100 entre os distritos analisados
+  trend               ← 'alta' | 'estavel' | 'queda'
+  dataAt              ← data de referência (YYYY-MM-DD)
+
+# Conteúdo editorial
+pontosFortes[], pontosAtencao[], bairrosSimilares[]
 ```
 
 ---
@@ -857,20 +891,41 @@ output:
 
 ### 12.3 Regras de copy
 
-Exemplo:
+Thresholds canônicos (referência autoritativa em `docs/geo/content-guidelines.md` §4.3):
 
 ```txt
-Se transport_score >= 80:
-  "O bairro se destaca pelo acesso a transporte público."
+# Transporte
+transport_score >= 80  → "O bairro se destaca pelo acesso a transporte público."
+transport_score < 80   → "O bairro apresenta acesso moderado a transporte público."
 
-Se green_score >= 80:
-  "A região apresenta boa presença relativa de áreas verdes."
+# Áreas verdes
+green_score >= 70      → "A região apresenta boa presença relativa de áreas verdes."
+green_score < 70       → "A presença relativa de áreas verdes está abaixo da média."
 
-Se flood_risk_score <= 30:
-  "A análise indica menor exposição relativa a áreas de alagamento."
+# Risco de alagamento (score invertido)
+flood_risk_score <= 30 → "A análise indica menor exposição relativa a áreas de alagamento."
+flood_risk_score <= 55 → "A análise indica exposição moderada relativa a áreas de alagamento."
+flood_risk_score > 55  → "A análise indica exposição relativa maior a áreas de alagamento."
 
-Se safety_data_coverage < mínimo:
-  "A métrica de segurança possui cobertura limitada para esta região."
+# Segurança pública (score invertido — 100 = menor densidade de ocorrências SSP-SP)
+safety_score >= 65     → "Os dados da SSP-SP indicam menor densidade relativa de ocorrências."
+safety_score >= 45     → "Os dados da SSP-SP indicam densidade moderada de ocorrências."
+safety_score < 45      → "Os dados da SSP-SP indicam densidade relativa elevada de ocorrências."
+safety_coverage == 'parcial'      → acrescentar nota de sub-registro e cobertura parcial
+safety_coverage == 'insuficiente' → substituir por aviso de dados insuficientes
+
+# Acesso a serviços / POIs
+poi_score >= 80 → "Alta concentração de pontos de interesse."
+poi_score >= 60 → "Boa cobertura de pontos de interesse."
+poi_score < 60  → "Cobertura moderada de pontos de interesse."
+
+# Panorama imobiliário (dados internos BetterPlace — não scraping)
+cost_index >= 75 → "Entre os distritos com maior custo relativo na análise."
+cost_index >= 50 → "Custo relativo moderado em relação aos distritos analisados."
+cost_index < 50  → "Entre os distritos com menor custo relativo na análise."
+# Nota obrigatória em todo panorama imobiliário:
+# "Dados agregados por distrito — não representam anúncios individuais."
+# "Dados agregados por distrito podem não refletir variações internas entre sub-bairros."
 ```
 
 ### 12.4 Proibição
@@ -1228,34 +1283,34 @@ Criar comparativos de alta intenção, sem gerar páginas doorway.
 
 ### Tarefas
 
-- [ ] Criar modelo de dados para comparação.
-- [ ] Criar lista inicial de comparativos permitidos.
-- [ ] Criar regra de elegibilidade.
-- [ ] Criar template de comparação.
-- [ ] Criar tabela automática.
-- [ ] Criar resposta direta.
-- [ ] Criar recomendação por perfil.
-- [ ] Criar FAQ comparativa.
-- [ ] Criar CTA intermediário para comparação personalizada.
-- [ ] Criar CTA final para abrir a aplicação.
-- [ ] Criar tracking de clique por comparativo.
-- [ ] Criar JSON-LD `Article`.
-- [ ] Criar JSON-LD `FAQPage`.
-- [ ] Criar rotina para sugerir novos comparativos.
-- [ ] Criar bloqueio contra geração cartesiana.
-- [ ] Publicar primeira leva de comparativos.
+- [x] Criar modelo de dados para comparação.
+- [x] Criar lista inicial de comparativos permitidos.
+- [x] Criar regra de elegibilidade.
+- [x] Criar template de comparação.
+- [x] Criar tabela automática.
+- [x] Criar resposta direta.
+- [x] Criar recomendação por perfil.
+- [x] Criar FAQ comparativa.
+- [x] Criar CTA intermediário para comparação personalizada.
+- [x] Criar CTA final para abrir a aplicação.
+- [x] Criar tracking de clique por comparativo.
+- [x] Criar JSON-LD `Article`.
+- [x] Criar JSON-LD `FAQPage`.
+- [x] Criar rotina para sugerir novos comparativos.
+- [x] Criar bloqueio contra geração cartesiana.
+- [x] Publicar primeira leva de comparativos.
 
 ### Critérios de aprovação
 
-- [ ] Pelo menos 10 comparativos publicados.
-- [ ] Nenhum comparativo foi gerado automaticamente sem aprovação de demanda.
-- [ ] Cada comparativo tem conclusão própria.
-- [ ] Cada comparativo tem tabela.
-- [ ] Cada comparativo tem recomendação por perfil.
-- [ ] Cada comparativo tem CTA para comparação personalizada na aplicação.
-- [ ] Cada CTA é rastreável.
-- [ ] Todas as páginas aparecem no sitemap.
-- [ ] O sistema impede geração massiva de pares irrelevantes.
+- [x] Pelo menos 10 comparativos publicados.
+- [x] Nenhum comparativo foi gerado automaticamente sem aprovação de demanda.
+- [x] Cada comparativo tem conclusão própria.
+- [x] Cada comparativo tem tabela.
+- [x] Cada comparativo tem recomendação por perfil.
+- [x] Cada comparativo tem CTA para comparação personalizada na aplicação.
+- [x] Cada CTA é rastreável.
+- [x] Todas as páginas aparecem no sitemap.
+- [x] O sistema impede geração massiva de pares irrelevantes.
 
 ---
 

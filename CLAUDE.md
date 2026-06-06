@@ -8,6 +8,7 @@
 - Always mark (tick) the corresponding milestone **ONLY** after user confirmation.
 - Never create useless files that do not improve functionality, security, or project understanding.
 - Always open */skill and try find useful skills
--Never use fallbacks that hide issues or errors.
+-**Never** use fallbacks that hide issues or errors.
+-**Never** use created or invented information and data, except when the user ask **explicity** you to do 
 - Always use UTF-8 portuguese language in ui and ux 
 - Always respecting spelling

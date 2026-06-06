@@ -90,12 +90,13 @@ python scripts/aggregate_geo_metrics.py --city-code SAO_PAULO
 
 Intersecta cada polígono de distrito contra as camadas GeoSampa brutas:
 
-| Métrica          | Camada GeoSampa                         | Operação espacial               |
-|------------------|-----------------------------------------|---------------------------------|
-| Áreas verdes     | `geosampa_vegetacao_significativa`      | `ST_Intersection` → área (m²)  |
-| Risco de inundação | `geosampa_mancha_inundacao`           | `ST_Intersection` → área (m²)  |
-| Transporte       | estações metro/trem, paradas, terminais, corredores | `ST_Contains` / `ST_Intersects` |
-| Acesso a POIs    | proxy via densidade de paradas de ônibus | `ST_Contains`                 |
+| Métrica          | Camada GeoSampa / Fonte                 | Operação espacial               | Score (0–100) |
+|------------------|-----------------------------------------|---------------------------------|---------------|
+| Áreas verdes     | `geosampa_vegetacao_significativa`      | `ST_Intersection` → % da área do distrito | Min-max direto |
+| Risco de inundação | `geosampa_mancha_inundacao`           | `ST_Intersection` → % da área do distrito | Min-max **invertido** (100 = menor risco) |
+| Transporte       | Estações metrô/trem (×3), terminais (×2), corredores (×2), paradas (×1) | `ST_Contains` / `ST_Intersects` → densidade ponderada por km² | Min-max direto |
+| Acesso a POIs    | Proxy: densidade de paradas de ônibus por km² | `ST_Contains` → densidade/km² | Min-max direto (OSM real: M5) |
+| Segurança pública | `public_safety_neighborhood_metrics.robbery_density_per_km2` (SSP-SP) via `neighborhood_boundaries` (SSP point hulls) | **Join espacial geométrico:** para cada distrito PMSP, encontra os bairros SSP cujo polígono intersecta o polígono do distrito (`ST_Intersects`); calcula média ponderada da `robbery_density_per_km2` pelo tamanho da área de interseção (`ST_Area(ST_Intersection(...))`). Nenhuma filtragem por nome ou city_code — apenas geometria. | Min-max **invertido** (100 = menor densidade) · cobertura sempre `parcial` por sub-registro inerente |
 
 ### 3.3 Passo 3 — validação
 
@@ -131,7 +132,29 @@ Os 96 distritos se distribuem pelas 5 macrorregiões da PMSP:
 
 ---
 
-## 5. Limitações declaradas
+## 5. Métricas imobiliárias (pendente)
+
+A tabela `property_price_rollups` armazena preços medianos por `zone_fingerprint`
+(zonas definidas por usuários em polígonos livres, não por distritos). Não existe hoje
+um mapeamento `zone_fingerprint → district_code` que permita agregar preço por distrito
+de forma geoespacialmente válida.
+
+**Decisão (2026-06-06):** o campo `realEstateMetrics` em `bairros.ts` permanece `undefined`
+até que um pipeline de agregação com recorte por polígono distrital seja implementado.
+Qualquer dado imobiliário exibido deve ser rastreável a uma operação espacial real no banco.
+Declara-se como lacuna em cada página de bairro.
+
+### 5.1 Previsão
+
+| Item | Milestone |
+|---|---|
+| Agregação `property_price_rollups` por polígono distrital (ST_Within / ST_Intersects) | M10 |
+| Validação de sample_count mínimo por distrito | M10 |
+| Exposição de `pricePerM2Sale`, `pricePerM2Rent`, `costIndex`, `trend` | M10 |
+
+---
+
+## 6. Limitações declaradas
 
 - **Granularidade:** o recorte é por **distrito municipal**, não por bairro popular ou
   subprefeitura. Algumas regiões menores como Consolação (2,7 km²) terão poucos dados
@@ -141,15 +164,18 @@ Os 96 distritos se distribuem pelas 5 macrorregiões da PMSP:
 - **CRS:** os dados GeoSampa brutos armazenados no PostGIS estão em EPSG:4326.
   A conversão de área é feita em EPSG:3857 (projeção de Mercator) via `ST_Transform`
   no momento da agregação — não no polígono armazenado.
+- **Segurança pública:** sub-registro é uma limitação inerente dos dados SSP-SP.
+  O score reflete densidade relativa de ocorrências **registradas**, não ocorrências reais.
+  A cobertura é sempre marcada como `parcial` por esta razão estrutural.
 
 ---
 
-## 6. Próximas fontes (M5+)
+## 7. Próximas fontes (M5+)
 
 | Fonte | Dado | Milestone |
 |-------|------|-----------|
 | GeoSampa — Subprefeituras | Recorte administrativo alternativo | M5 |
 | IBGE — Setores censitários | Densidade demográfica | M5 |
 | OSM (Overpass API) | POIs reais (farmácias, mercados, escolas) | M5 |
-| SSP-SP | Crime (atualização periódica, já parcial) | M2 (existente) |
-| Preço imobiliário agregado | m² médio por distrito | M10 |
+| SSP-SP | Crime (atualização periódica, já parcial em M2) | Contínuo |
+| Preço imobiliário — fonte externa | m² médio por distrito com pipeline independente | M10 |
