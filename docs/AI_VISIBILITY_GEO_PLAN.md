@@ -53,11 +53,11 @@ invisível para os exatos motores-alvo**.
 | "~4.600 páginas /comparar é ativo" | C(96,2)=4.560, maioria com ~zero demanda → *doorway pages* | **Passivo de SEO**; gerar só com porta de demanda |
 
 **Dois alertas adicionais:**
-- O boundary de bairro hoje é **fecho convexo de pontos da SSP** (`ssp_point_hull_v1`), não
-  limite oficial. Publicar como autoritativo = "fallback que esconde problema" (proibido no
-  CLAUDE.md). **Trocar por polígonos oficiais** (GeoSampa distritos/subprefeituras) antes de publicar.
+- ~~O boundary de bairro hoje é fecho convexo de pontos da SSP (`ssp_point_hull_v1`).~~
+  **Resolvido (M2):** os limites agora são os 96 polígonos oficiais da PMSP, importados de
+  `data/geo/raw/geoportal_distrito_municipal_v2.gpkg`. Ver `docs/geo/fontes-geograficas.md`.
 - O app se chama **"BetterPlace"** no `index.html`, não "Find Ideal Estate". **Definir 1 nome
-  canônico** — entidade ambígua mata o objetivo de virar entidade reconhecida.
+  canônico** — entidade ambígua mata o objetivo de virar entidade reconhecida. (**Resolvido em M0.**)
 
 ---
 
@@ -98,12 +98,19 @@ separado do app interativo, consumindo uma **API de leitura pública** (views ma
 - `llms.txt` na raiz (custo baixo; sem expectativa de impacto direto).
 
 ### 4.2 Backing de dados por bairro
-- **Trocar boundaries** do convex-hull pelos **polígonos oficiais** (GeoSampa distritos/
-  subprefeituras) — já há PostGIS + `ogr2ogr` no stack (PRD §6).
-- **Agregar por distrito, em batch (sem jornada do usuário):** verde (`vegetacao`),
-  alagamento (`mancha_inundacao`), POIs e acesso a transporte (GTFS/metrô/trem) **já são
-  datasets city-wide** → join espacial direto nas views materializadas.
-- **Crime:** reusar `public_safety_neighborhood_metrics`, mas religado aos polígonos oficiais.
+
+**Boundaries oficiais — resolvido (M2).**  
+A camada base é `data/geo/raw/geoportal_distrito_municipal_v2.gpkg` (PMSP/GeoSampa),
+layer `distrito_municipal_v2` — **96 distritos municipais de São Paulo**, polígonos
+oficiais em EPSG:31983, ingeridos em `neighborhood_boundaries` (EPSG:4326) via
+`scripts/ingest_distritos_municipais.py`. Cada distrito = uma zona de análise.
+Detalhes: `docs/geo/fontes-geograficas.md`.
+
+- **Agregar por distrito, em batch (sem jornada do usuário):** verde (`geosampa_vegetacao_significativa`),
+  alagamento (`geosampa_mancha_inundacao`), POIs e acesso a transporte (GTFS/metrô/trem)
+  → `ST_Intersection` / `ST_Contains` contra os polígonos do GeoPackage.
+  Pipeline: `scripts/aggregate_geo_metrics.py`.
+- **Crime:** `public_safety_neighborhood_metrics`, religado aos polígonos oficiais do GeoPackage.
 - **Acesso por isócrona:** métrica em batch (ex.: paradas/área e % alcançável em 30 min de
   hubs fixos) via Valhalla/OTP — job novo, porém limitado a um conjunto fixo de referências.
 - **Preço:** **fora do MVP de conteúdo.** Cobertura por bairro exige job de scraping novo

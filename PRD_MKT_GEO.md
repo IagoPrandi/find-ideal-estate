@@ -765,16 +765,34 @@ Rotas:
 
 ### 11.2 Camada de dados
 
-Tabelas/views sugeridas:
+#### 11.2.1 Camada geográfica base (zonas de análise)
+
+A unidade de análise do BetterPlace é o **distrito municipal oficial de São Paulo**.
+
+**Fonte:** `data/geo/raw/geoportal_distrito_municipal_v2.gpkg`  
+**Origem:** PMSP / GeoSampa — layer `distrito_municipal_v2`  
+**CRS original:** EPSG:31983 (SIRGAS 2000 / UTM zone 23S, projetado em metros)  
+**CRS no banco:** EPSG:4326 (reprojetado na ingestão)  
+**Total:** 96 distritos municipais, cada um = uma zona de análise  
+**Ingestão:** `scripts/ingest_distritos_municipais.py` → tabela `neighborhood_boundaries`  
+**Referência completa:** `docs/geo/fontes-geograficas.md`
+
+Todos os recortes espaciais (áreas verdes, zonas de alagamento, infraestrutura de
+transporte, POIs) são feitos via `ST_Intersection` / `ST_Contains` contra esses
+96 polígonos. Não há uso de fecho convexo ou boundary aproximado em produção.
+
+#### 11.2.2 Tabelas e views
 
 ```txt
-geo_districts
-urban_metrics_by_district
-safety_metrics_by_district
-green_area_metrics_by_district
-flood_risk_metrics_by_district
-transport_access_metrics_by_district
-poi_access_metrics_by_district
+neighborhood_boundaries              ← 96 distritos do GeoPackage (canonical zones)
+neighborhood_green_area_metrics
+neighborhood_flood_risk_metrics
+neighborhood_transport_metrics
+neighborhood_poi_metrics
+neighborhood_metric_scores
+neighborhood_metric_coverage
+urban_metrics_by_district            ← view materializada (superfície de leitura)
+public_safety_neighborhood_metrics
 content_neighborhood_pages
 content_comparison_pages
 report_snapshots
@@ -785,21 +803,23 @@ geo_visibility_prompt_runs
 
 ### 11.3 Pipeline automatizado
 
-Rotinas:
+Rotinas (ordem de execução obrigatória):
 
 ```txt
-1. Importar/atualizar dados públicos
-2. Validar geometria e cobertura
-3. Agregar métricas por distrito/bairro
-4. Gerar score normalizado
-5. Gerar textos baseados em templates
-6. Gerar páginas /bairros
-7. Gerar comparativos aprovados
-8. Gerar sitemap
-9. Gerar dataset aberto
-10. Gerar relatório periódico
-11. Rodar testes de indexabilidade
-12. Rodar prompts de medição GEO
+0. alembic upgrade head                              ← migrations 0042 + 0043
+1. ingest_distritos_municipais.py                    ← GeoPackage → neighborhood_boundaries
+2. Importar/atualizar camadas GeoSampa brutas
+3. aggregate_geo_metrics.py                          ← recorta e agrega por distrito
+4. validate_geo_data.py                              ← valida slugs, geometrias, cobertura
+5. Gerar score normalizado (incluso no passo 3)
+6. Gerar textos baseados em templates
+7. Gerar páginas /bairros
+8. Gerar comparativos aprovados
+9. Gerar sitemap
+10. Gerar dataset aberto
+11. Gerar relatório periódico
+12. Rodar testes de indexabilidade
+13. Rodar prompts de medição GEO
 ```
 
 ---
@@ -1113,32 +1133,43 @@ Criar uma superfície pública que bots, buscadores e agentes de IA consigam ler
 
 Construir uma base de dados confiável por bairro/distrito para sustentar as páginas.
 
+### Fonte geográfica canônica
+
+**Arquivo:** `data/geo/raw/geoportal_distrito_municipal_v2.gpkg`  
+**Layer:** `distrito_municipal_v2` — 96 distritos municipais oficiais de São Paulo (PMSP)  
+**CRS fonte:** EPSG:31983 → reprojetado para EPSG:4326 na ingestão  
+**Ingestão:** `scripts/ingest_distritos_municipais.py` → `neighborhood_boundaries`  
+**Referência:** `docs/geo/fontes-geograficas.md`
+
+Cada distrito = uma zona de análise. Todos os recortes geoespaciais (verde, alagamento,
+transporte, POI) são feitos contra esses polígonos via PostGIS.
+
 ### Tarefas
 
-- [x] Importar polígonos oficiais.
+- [x] Importar polígonos oficiais — `geoportal_distrito_municipal_v2.gpkg` (96 distritos PMSP).
 - [x] Remover dependência de fecho convexo como boundary público.
-- [x] Criar tabela de regiões canônicas.
-- [x] Normalizar nomes e slugs.
+- [x] Criar tabela de regiões canônicas — `neighborhood_boundaries` + migration 0043.
+- [x] Normalizar nomes e slugs — `ingest_distritos_municipais.py` + `populate_slugs()`.
 - [x] Agregar dados de segurança por região oficial.
-- [x] Agregar dados de áreas verdes.
-- [x] Agregar dados de alagamento.
-- [x] Agregar dados de POIs.
-- [x] Agregar dados de transporte.
-- [x] Criar score normalizado por métrica.
-- [x] Criar campo de cobertura por métrica.
-- [x] Criar flag de dados insuficientes.
-- [x] Criar view materializada `urban_metrics_by_district`.
-- [x] Criar script de validação.
-- [x] Criar documentação da metodologia.
+- [x] Agregar dados de áreas verdes — `ST_Intersection` com `geosampa_vegetacao_significativa`.
+- [x] Agregar dados de alagamento — `ST_Intersection` com `geosampa_mancha_inundacao`.
+- [x] Agregar dados de POIs — proxy via densidade de paradas de ônibus.
+- [x] Agregar dados de transporte — metro, trem, ônibus, terminais, corredores.
+- [x] Criar score normalizado por métrica — min-max 0–100 (`compute_scores()`).
+- [x] Criar campo de cobertura por métrica — `neighborhood_metric_coverage`.
+- [x] Criar flag de dados insuficientes — `is_publishable` na view (≥ 4 métricas).
+- [x] Criar view materializada `urban_metrics_by_district` — migration 0042.
+- [x] Criar script de validação — `scripts/validate_geo_data.py`.
+- [x] Criar documentação da metodologia — `docs/geo/fontes-geograficas.md`.
 
 ### Critérios de aprovação
 
-- [x] Todas as regiões publicáveis usam boundary oficial.
-- [x] Cada região tem slug único.
-- [x] Cada métrica tem fonte documentada.
-- [x] Cada métrica tem data de atualização.
-- [x] Cada métrica tem score ou indicador comparável.
-- [x] Regiões com dados insuficientes são bloqueadas ou marcadas.
+- [x] Todas as regiões publicáveis usam boundary oficial — `geoportal_distrito_municipal_v2.gpkg`.
+- [x] Cada região tem slug único — gerado de `nm_distrito_municipal`.
+- [x] Cada métrica tem fonte documentada — `docs/geo/fontes-geograficas.md` §3.2.
+- [x] Cada métrica tem data de atualização — coluna `data_at` em cada tabela de métrica.
+- [x] Cada métrica tem score ou indicador comparável — `neighborhood_metric_scores`.
+- [x] Regiões com dados insuficientes são bloqueadas ou marcadas — flag `is_publishable`.
 - [x] Existe uma página `/metodologia` explicando os dados.
 - [x] Nenhum dado de preço imobiliário é necessário no MVP.
 
@@ -1152,23 +1183,23 @@ Gerar páginas úteis, únicas e indexáveis para bairros/distritos com dados su
 
 ### Tarefas
 
-- [ ] Criar template de página de bairro.
-- [ ] Criar gerador de título.
-- [ ] Criar gerador de meta description.
-- [ ] Criar gerador de resumo.
-- [ ] Criar blocos automáticos por métrica.
-- [ ] Criar bloco de pontos fortes.
-- [ ] Criar bloco de pontos de atenção.
-- [ ] Criar bloco de bairros similares.
-- [ ] Criar FAQ por bairro.
-- [ ] Criar CTA contextual para app.
-- [ ] Criar CTA final para app.
-- [ ] Criar tracking de clique por página de bairro.
-- [ ] Criar JSON-LD `Place`.
-- [ ] Criar JSON-LD `FAQPage`.
-- [ ] Criar validação de unicidade textual.
-- [ ] Criar validação de lacunas.
-- [ ] Publicar primeira leva de páginas.
+- [x] Criar template de página de bairro.
+- [x] Criar gerador de título.
+- [x] Criar gerador de meta description.
+- [x] Criar gerador de resumo.
+- [x] Criar blocos automáticos por métrica.
+- [x] Criar bloco de pontos fortes.
+- [x] Criar bloco de pontos de atenção.
+- [x] Criar bloco de bairros similares.
+- [x] Criar FAQ por bairro.
+- [x] Criar CTA contextual para app.
+- [x] Criar CTA final para app.
+- [x] Criar tracking de clique por página de bairro.
+- [x] Criar JSON-LD `Place`.
+- [x] Criar JSON-LD `FAQPage`.
+- [x] Criar validação de unicidade textual.
+- [x] Criar validação de lacunas.
+- [x] Publicar primeira leva de páginas.
 
 ### Escopo inicial
 
@@ -1176,16 +1207,16 @@ Publicar entre 10 e 20 páginas.
 
 ### Critérios de aprovação
 
-- [ ] Pelo menos 10 páginas reais publicadas.
-- [ ] Cada página tem dados próprios.
-- [ ] Cada página tem resumo único.
-- [ ] Cada página tem data de atualização.
-- [ ] Cada página tem metodologia linkada.
-- [ ] Cada página tem CTA contextual ou final para a aplicação.
-- [ ] Cada CTA é rastreável.
-- [ ] Nenhuma página usa afirmações absolutas indevidas.
-- [ ] Nenhuma página é gerada sem dados suficientes.
-- [ ] Todas as páginas aparecem no sitemap.
+- [x] Pelo menos 10 páginas reais publicadas.
+- [x] Cada página tem dados próprios.
+- [x] Cada página tem resumo único.
+- [x] Cada página tem data de atualização.
+- [x] Cada página tem metodologia linkada.
+- [x] Cada página tem CTA contextual ou final para a aplicação.
+- [x] Cada CTA é rastreável.
+- [x] Nenhuma página usa afirmações absolutas indevidas.
+- [x] Nenhuma página é gerada sem dados suficientes.
+- [x] Todas as páginas aparecem no sitemap.
 
 ---
 

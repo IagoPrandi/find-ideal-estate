@@ -236,11 +236,15 @@ mesmo quando o analytics de eventos não estiver disponível).
 
 Publicar `/bairros/{slug}` somente se a região:
 
-- tiver **polígono oficial** (boundary oficial, não fecho convexo);
-- tiver pelo menos **4 grupos de métricas** disponíveis;
+- tiver **polígono oficial** — boundary proveniente de
+  `data/geo/raw/geoportal_distrito_municipal_v2.gpkg` (96 distritos municipais PMSP),
+  ingerido em `neighborhood_boundaries` via `scripts/ingest_distritos_municipais.py`.
+  Boundary aproximado ou fecho convexo é proibido em qualquer material público;
+- tiver pelo menos **4 grupos de métricas** disponíveis (`is_publishable = TRUE` na view
+  `urban_metrics_by_district`);
 - tiver **resumo textual único** (passar no piso de unicidade);
 - tiver **data de atualização**;
-- tiver **metodologia** linkada;
+- tiver **metodologia** linkada (`docs/geo/fontes-geograficas.md`);
 - **não** for publicada com dados insuficientes sem declarar as lacunas.
 
 ### 9.2 Comparativo (espelha PRD §13.3)

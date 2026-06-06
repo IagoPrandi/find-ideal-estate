@@ -1,6 +1,12 @@
 """
 Aggregate GEO content layer metrics from GeoSampa and public safety data.
 
+Pré-requisito:
+  Execute scripts/ingest_distritos_municipais.py antes desta pipeline para garantir
+  que neighborhood_boundaries contenha os 96 distritos municipais oficiais de SP
+  importados de geoportal_distrito_municipal_v2.gpkg (EPSG:31983 → EPSG:4326).
+  Cada distrito = uma zona de análise (neighborhood_code = cd_distrito_municipal).
+
 Pipeline (idempotent — safe to re-run):
   1. Populate slugs in neighborhood_boundaries
   2. Aggregate green area  → neighborhood_green_area_metrics
@@ -12,6 +18,7 @@ Pipeline (idempotent — safe to re-run):
   8. Refresh materialized view urban_metrics_by_district
 
 Usage:
+  python scripts/ingest_distritos_municipais.py --gpkg geoportal_distrito_municipal_v2.gpkg
   python scripts/aggregate_geo_metrics.py [--city-code SAO_PAULO] [--dry-run]
 
 Requirements:

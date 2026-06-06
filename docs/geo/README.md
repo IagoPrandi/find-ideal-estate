@@ -7,6 +7,9 @@ Artefatos da estratégia pública de conteúdo do BetterPlace (PRD: `../../PRD_M
 - **[content-guidelines.md](content-guidelines.md)** — fonte única de verdade editorial
   (marca, posicionamento, tom, termos, CTAs, destinos de conversão, tracking, critérios de
   publicação). Entregável central do **M0**.
+- **[fontes-geograficas.md](fontes-geograficas.md)** — camada geográfica base: 96 distritos
+  municipais oficiais de São Paulo (`geoportal_distrito_municipal_v2.gpkg`), pipeline de
+  ingestão e recorte espacial. Entregável central do **M2**.
 - **[bairros-prioritarios.md](bairros-prioritarios.md)** — lista inicial de bairros (17).
 - **[comparativos-prioritarios.md](comparativos-prioritarios.md)** — lista inicial de pares (10).
 - **templates/**
