@@ -1,11 +1,27 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Loader2, LogIn, LogOut, CreditCard, User, ShieldCheck } from "lucide-react";
+import {
+  BarChart3,
+  Building2,
+  CheckCircle2,
+  CreditCard,
+  Loader2,
+  LogIn,
+  LogOut,
+  Map,
+  Navigation,
+  Shield,
+  ShieldCheck,
+  Sparkles,
+  User,
+  X,
+} from "lucide-react";
 import { useAuth } from "./AuthContext";
 import { PlanosPage } from "../billing/PlanosPage";
 import { ContaPage } from "../billing/ContaPage";
 
 const GOOGLE_CLIENT_ID = String(import.meta.env.VITE_GOOGLE_CLIENT_ID || "").trim();
 const GOOGLE_SCRIPT_ID = "google-identity-services";
+const AUTH_ONBOARDING_DELAY_MS = 650;
 
 type GoogleCredentialResponse = {
   credential?: string;
@@ -96,6 +112,40 @@ function GoogleIcon() {
   );
 }
 
+const onboardingHighlights = [
+  {
+    title: "Jornada guiada no mapa",
+    description: "Escolha um ponto de referência e veja zonas por tempo de transporte público, a pé ou de carro.",
+    icon: Navigation,
+    accent: "bg-pastel-violet-50 text-pastel-violet-700",
+  },
+  {
+    title: "Imóveis reais, sem ruído",
+    description: "Anúncios do QuintoAndar, ZapImóveis e VivaReal agregados e sem duplicatas.",
+    icon: Building2,
+    accent: "bg-sky-50 text-sky-700",
+  },
+  {
+    title: "Zonas enriquecidas",
+    description: "Segurança, áreas verdes, risco de alagamento e pontos de interesse em cada região.",
+    icon: Shield,
+    accent: "bg-emerald-50 text-emerald-700",
+  },
+  {
+    title: "Dashboard de preços",
+    description: "Histórico, distribuição por faixa e heatmap de segurança pública da zona.",
+    icon: BarChart3,
+    accent: "bg-amber-50 text-amber-700",
+  },
+];
+
+const loginBenefits = [
+  "Salvar imóveis e zonas favoritas",
+  "Personalizar tempo e raio de busca",
+  "Gerar zonas com raio acima de 500 m",
+  "Retomar e compartilhar sua jornada",
+];
+
 export function AuthAccessCard() {
   const {
     authStatus,
@@ -113,6 +163,8 @@ export function AuthAccessCard() {
   const [showPlanos, setShowPlanos] = useState(false);
   const [showConta, setShowConta] = useState(false);
   const googleButtonRef = useRef<HTMLDivElement | null>(null);
+  const autoOpenedGuestModalRef = useRef(false);
+  const latestAuthStatusRef = useRef(authStatus);
 
   const expiryLabel = useMemo(() => formatExpiry(authStatus.session_expires_at), [authStatus.session_expires_at]);
   const userName = authStatus.user?.display_name?.trim() || authStatus.user?.email?.split("@")[0] || "Conta";
@@ -125,6 +177,50 @@ export function AuthAccessCard() {
     setGoogleNotice(null);
     closeAuthModal();
   };
+
+  useEffect(() => {
+    latestAuthStatusRef.current = authStatus;
+  }, [authStatus]);
+
+  useEffect(() => {
+    if (isLoading || authStatus.is_authenticated || autoOpenedGuestModalRef.current) {
+      return;
+    }
+    autoOpenedGuestModalRef.current = true;
+    const timerId = window.setTimeout(() => {
+      if (!latestAuthStatusRef.current.is_authenticated) {
+        openAuthModal();
+      }
+    }, AUTH_ONBOARDING_DELAY_MS);
+
+    return () => window.clearTimeout(timerId);
+  }, [authStatus.is_authenticated, isLoading, openAuthModal]);
+
+  useEffect(() => {
+    if (authStatus.is_authenticated && isAuthModalOpen) {
+      closeAuthModal();
+    }
+  }, [authStatus.is_authenticated, closeAuthModal, isAuthModalOpen]);
+
+  useEffect(() => {
+    if (!isAuthModalOpen) {
+      return;
+    }
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        if (isSubmitting) {
+          return;
+        }
+        clearError();
+        setGoogleNotice(null);
+        closeAuthModal();
+      }
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [clearError, closeAuthModal, isAuthModalOpen, isSubmitting]);
 
   useEffect(() => {
     if (!isAuthModalOpen || authStatus.is_authenticated || !GOOGLE_CLIENT_ID || !googleButtonRef.current) {
@@ -274,54 +370,125 @@ export function AuthAccessCard() {
       {showPlanos && <PlanosPage onClose={() => setShowPlanos(false)} />}
       {showConta && <ContaPage onClose={() => setShowConta(false)} />}
 
-      {isAuthModalOpen ? (
-        <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-950/35 px-4 py-8 backdrop-blur-sm">
-          <div className="w-full max-w-sm overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
-            <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
-              <div className="min-w-0">
-                <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Conta</p>
-                <h2 className="mt-2 text-lg font-semibold tracking-tight text-slate-900">Entrar para salvar a jornada</h2>
-                <p className="mt-1 text-sm leading-relaxed text-slate-500">
-                  Acesse sua conta para continuar de onde parou.
-                </p>
-              </div>
-              <button type="button" className="rounded-full border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-500 transition hover:border-slate-300 hover:text-slate-700" onClick={closeModal}>
-                Fechar
-              </button>
-            </div>
+      {isAuthModalOpen && !authStatus.is_authenticated ? (
+        <div className="fixed inset-0 z-[80] flex items-stretch justify-end bg-slate-950/20 backdrop-blur-[2px]" role="dialog" aria-modal="true" aria-labelledby="auth-onboarding-title">
+          <button
+            type="button"
+            aria-label="Fechar janela e explorar sem login"
+            className="hidden flex-1 cursor-default bg-white/10 backdrop-blur-md lg:block"
+            onClick={closeModal}
+          />
+          <div className="relative flex h-full w-full max-w-[44rem] flex-col overflow-y-auto border-l border-white/80 bg-white px-5 py-4 shadow-2xl sm:px-8 lg:px-10">
+            <button
+              type="button"
+              aria-label="Fechar janela de entrada"
+              className="absolute right-5 top-4 inline-flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white/95 text-slate-500 shadow-sm transition hover:border-slate-300 hover:text-slate-800"
+              onClick={closeModal}
+            >
+              <X className="h-4 w-4" />
+            </button>
 
-            <div className="grid gap-4 px-6 py-6">
-              {GOOGLE_CLIENT_ID ? (
-                <div className="flex min-h-11 justify-center" ref={googleButtonRef} />
-              ) : (
+            <div className="flex min-h-full flex-col justify-between gap-5">
+              <div>
+                <div className="flex items-center gap-3 pr-12">
+                  <span className="inline-flex h-10 w-10 items-center justify-center rounded-2xl bg-pastel-violet-50 text-pastel-violet-700">
+                    <Map className="h-5 w-5" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="text-lg font-extrabold leading-tight tracking-tight text-slate-950">BetterPlace</p>
+                    <p className="text-xs font-semibold text-slate-400">Tenha certeza onde morar</p>
+                  </div>
+                </div>
+
+                <div className="mt-6 max-w-[36rem]">
+                  <p className="text-[11px] font-extrabold uppercase tracking-[0.28em] text-slate-400">Bem-vindo</p>
+                  <h2 id="auth-onboarding-title" className="mt-2 text-3xl font-extrabold leading-tight tracking-tight text-slate-950">
+                    Escolha pela vizinhança, não só pelo anúncio.
+                  </h2>
+                  <p className="mt-3 text-base leading-relaxed text-slate-500">
+                    Uma jornada guiada que cruza transporte, segurança, área verde e preço para revelar onde vale a pena morar.
+                  </p>
+                </div>
+
+                <div className="mt-6 grid gap-4 sm:grid-cols-2">
+                  {onboardingHighlights.map((item) => {
+                    const Icon = item.icon;
+                    return (
+                      <div key={item.title} className="flex min-w-0 gap-3">
+                        <span className={`inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl ${item.accent}`}>
+                          <Icon className="h-5 w-5" />
+                        </span>
+                        <div className="min-w-0">
+                          <h3 className="text-sm font-extrabold leading-snug text-slate-900">{item.title}</h3>
+                          <p className="mt-1 text-xs leading-relaxed text-slate-500">{item.description}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-5 rounded-[1.35rem] border border-pastel-violet-200 bg-pastel-violet-50/80 p-4 shadow-inner shadow-white/60">
+                  <div className="flex items-center gap-2 text-pastel-violet-700">
+                    <Sparkles className="h-4 w-4" />
+                    <p className="text-xs font-extrabold uppercase tracking-[0.16em]">Entre para aproveitar mais</p>
+                  </div>
+                  <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
+                    {loginBenefits.map((benefit) => (
+                      <div key={benefit} className="flex min-w-0 items-start gap-2.5">
+                        <span className="mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white text-pastel-violet-600 shadow-sm">
+                          <CheckCircle2 className="h-3.5 w-3.5" />
+                        </span>
+                        <span className="min-w-0 text-sm font-semibold leading-snug text-slate-600">{benefit}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="sticky bottom-0 -mx-5 grid gap-3 border-t border-slate-100 bg-white/95 px-5 pb-4 pt-4 backdrop-blur sm:-mx-8 sm:grid-cols-[minmax(0,1fr)_auto] sm:px-8 lg:-mx-10 lg:px-10">
+                <div className="min-w-0">
+                  {GOOGLE_CLIENT_ID ? (
+                    <div className="flex min-h-12 w-full items-center justify-center rounded-2xl border border-pastel-violet-200 bg-white px-3 py-1 shadow-sm" ref={googleButtonRef} />
+                  ) : (
+                    <button
+                      type="button"
+                      className="inline-flex min-h-12 w-full items-center justify-center gap-3 rounded-2xl border border-pastel-violet-500 bg-pastel-violet-500 px-5 py-3 text-sm font-extrabold text-white shadow-lg shadow-pastel-violet-200 transition hover:bg-pastel-violet-600"
+                      onClick={handleGoogleLogin}
+                    >
+                      <GoogleIcon />
+                      <span>Continuar com Google</span>
+                    </button>
+                  )}
+                </div>
+
                 <button
                   type="button"
-                  className="inline-flex items-center justify-center gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:border-pastel-violet-200 hover:text-slate-900"
-                  onClick={handleGoogleLogin}
+                  className="inline-flex min-h-12 items-center justify-center rounded-2xl border border-slate-200 bg-white px-5 py-3 text-sm font-extrabold text-slate-700 shadow-sm transition hover:border-pastel-violet-200 hover:bg-pastel-violet-50 hover:text-pastel-violet-700"
+                  onClick={closeModal}
                 >
-                  <GoogleIcon />
-                  <span>Continuar com Google</span>
+                  Explorar sem login
                 </button>
-              )}
 
-              {googleNotice ? (
-                <p className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-700" role="alert">
-                  {googleNotice}
-                </p>
-              ) : null}
+                {googleNotice ? (
+                  <p className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-700 sm:col-span-2" role="alert">
+                    {googleNotice}
+                  </p>
+                ) : null}
 
-              {errorMessage ? (
-                <p className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700" role="alert">
-                  {errorMessage}
-                </p>
-              ) : null}
-            </div>
+                {errorMessage ? (
+                  <p className="rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 sm:col-span-2" role="alert">
+                    {errorMessage}
+                  </p>
+                ) : null}
 
-            {authStatus.is_authenticated ? (
-              <div className="border-t border-slate-200 bg-slate-50 px-6 py-4 text-xs text-slate-500">
-                Sessão atual de {userName}{expiryLabel ? ` · expira em ${expiryLabel}` : ""}.
+                {authStatus.is_authenticated ? (
+                  <p className="text-xs text-slate-500 sm:col-span-2">
+                    Sessão atual de {userName}
+                    {expiryLabel ? ` · expira em ${expiryLabel}` : ""}.
+                  </p>
+                ) : null}
               </div>
-            ) : null}
+            </div>
           </div>
         </div>
       ) : null}

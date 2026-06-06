@@ -6747,3 +6747,109 @@
 
 - Progress Tracker:
   - Nenhuma milestone do PRD foi marcada como concluída; política de confirmação explícita preservada.
+
+## 2026-06-05 - Onboarding flutuante para usuário anônimo
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/develop-frontend/SKILL.md`
+  - `skills/playwright/SKILL.md`
+  - `skills/playwright-interactive/SKILL.md`
+  - `C:/Users/iagoo/.codex/plugins/cache/openai-curated/vercel/e2d08a2e/skills/agent-browser-verify/SKILL.md`
+
+- Skill used:
+  - `skills/develop-frontend/SKILL.md`
+  - Apoio de verificação visual com Playwright local porque `agent-browser` não estava disponível no ambiente.
+
+- Scope executed:
+  - `AuthAccessCard` agora abre automaticamente uma janela de onboarding para visitante não autenticado.
+  - A janela foi redesenhada com conteúdo semelhante à referência: marca, mensagem de boas-vindas, benefícios da jornada, vantagens de login, CTA de Google e opção `Explorar sem login`.
+  - O modal mantém fechamento por botão, Escape e opção de explorar sem login; após fechar, o usuário ainda pode abrir pelo botão de login.
+  - O rodapé do modal fica fixo dentro da janela para manter os CTAs visíveis em desktop e mobile.
+  - `FindIdealApp` continua renderizando `AuthAccessCard` mesmo quando o mapa está em erro de configuração, para não bloquear a autenticação/onboarding.
+  - Removido escape desnecessário em `escapeHtml` para limpar erro de lint no arquivo tocado.
+
+- Verification executed:
+  - `npm run test:run -- src/features/auth/AuthAccessCard.test.tsx` -> `4 passed`.
+  - `npx eslint src/features/auth/AuthAccessCard.tsx src/features/auth/AuthAccessCard.test.tsx src/features/app/FindIdealApp.tsx` -> sem erros; permanecem 3 warnings preexistentes de `react-hooks/exhaustive-deps` em `FindIdealApp.tsx`.
+  - Verificação visual Playwright em `1365x768` e `390x844` contra `http://127.0.0.1:5177`, com `/auth/me` mockado como anônimo: modal renderiza, CTAs visíveis, sem overflow horizontal, fechamento por `Explorar sem login` e reabertura pelo botão `Entrar na conta`, sem console errors/page errors.
+  - `npm run typecheck` -> ainda falha por erros preexistentes fora deste escopo em `src/api/client.ts`, `Step2Transport.tsx`, `Step6Analysis.test.tsx`, `src/lib/api/index.ts` e `journey-store.test.ts`.
+
+- Progress Tracker:
+  - Nenhuma milestone do PRD foi marcada como concluída; política de confirmação explícita preservada.
+
+## 2026-06-05 - Onboarding condicionado à ausência de sessão
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/develop-frontend/SKILL.md`
+
+- Skill used:
+  - `skills/develop-frontend/SKILL.md`
+
+- Scope executed:
+  - `AuthAccessCard` agora desmonta/fecha o onboarding quando `authStatus.is_authenticated=true`.
+  - A renderização do onboarding ficou explicitamente condicionada a `isAuthModalOpen && !authStatus.is_authenticated`.
+  - Adicionado teste para garantir que sessão autenticada exibe controles de conta e não exibe a janela de boas-vindas.
+
+- Verification executed:
+  - `npm run test:run -- src/features/auth/AuthAccessCard.test.tsx` -> `5 passed`.
+  - `npx eslint src/features/auth/AuthAccessCard.tsx src/features/auth/AuthAccessCard.test.tsx` -> passou sem erros.
+  - Playwright contra `http://127.0.0.1:5177` com `/auth/me` mockado como autenticado -> `hasDialog=false`, `hasOnboardingText=false`, `hasAccountButton=true`, sem erros de console.
+
+- Progress Tracker:
+  - Nenhuma milestone do PRD foi marcada como concluída; política de confirmação explícita preservada.
+
+## 2026-06-05 - Delay antes do onboarding anônimo
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/develop-frontend/SKILL.md`
+
+- Skill used:
+  - `skills/develop-frontend/SKILL.md`
+
+- Scope executed:
+  - Adicionado delay curto antes da abertura automática do onboarding em `AuthAccessCard`.
+  - A abertura automática agora é cancelável e revalida o estado de autenticação mais recente antes de chamar `openAuthModal`.
+  - O objetivo é dar tempo para resolução de sessão/login automático antes de decidir se a janela deve aparecer.
+  - Teste de visitante atualizado para garantir que o onboarding não aparece imediatamente após `/auth/me`, apenas depois do delay.
+
+- Verification executed:
+  - `npm run test:run -- src/features/auth/AuthAccessCard.test.tsx` -> `5 passed`.
+  - `npx eslint src/features/auth/AuthAccessCard.tsx src/features/auth/AuthAccessCard.test.tsx` -> passou sem erros.
+  - Playwright contra `http://127.0.0.1:5177`: anônimo antes do delay -> `hasDialog=false`; anônimo após delay -> `hasDialog=true`; autenticado antes e após delay -> `hasDialog=false`, `hasAccountButton=true`; sem erros de console.
+
+- Progress Tracker:
+  - Nenhuma milestone do PRD foi marcada como concluída; política de confirmação explícita preservada.
+
+## 2026-06-05 - Ajuste de preços dos planos pagos
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md`
+  - `skills/release-config-management/SKILL.md`
+
+- Skill used:
+  - `skills/release-config-management/SKILL.md`
+
+- Scope executed:
+  - Preços pagos atualizados para Básico `R$ 12,99`, Pro `R$ 30,99` e Pro Max `R$ 149,90`.
+  - Seeds e migrações históricas de planos foram alinhados para ambientes novos.
+  - Criada a migração `20260605_0041_update_paid_plan_prices.py` para atualizar bancos já migrados.
+  - `PRD.md` foi atualizado nas tabelas canônicas, exemplo de checkout Pix e decisões de monetização.
+  - Fixtures de testes de Pix/planos foram alinhados aos novos valores.
+
+- Verification executed:
+  - `python -m pytest apps/api/tests/test_phase8_mercado_pago.py -q` -> `10 passed`, com 1 warning conhecido de `httpx`.
+  - `npm.cmd --prefix apps/web run test:run -- src/components/panels/Step6Analysis.test.tsx -t "opens the login modal"` -> `1 passed`, `21 skipped`.
+  - `.venv\Scripts\python.exe -m ruff check infra/migrations/versions/20260605_0041_update_paid_plan_prices.py` -> `All checks passed`.
+  - `git diff --check` -> sem erros; apenas avisos de conversão LF/CRLF.
+  - `python -m ruff ...` no Python global não rodou porque `ruff` não está instalado nesse interpretador.
+  - `.venv\Scripts\python.exe -m ruff check ...` nos arquivos de migração antigos ainda reporta problemas preexistentes de formatação/linhas longas fora do escopo desta alteração.
+
+- Progress Tracker:
+  - Nenhuma milestone do PRD foi marcada como concluída; política de confirmação explícita preservada.

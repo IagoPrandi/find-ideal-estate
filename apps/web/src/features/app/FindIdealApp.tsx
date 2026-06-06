@@ -845,7 +845,7 @@ const escapeHtml = (value: string) =>
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;")
+    .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
 const parseBusList = (rawValue: unknown) => {
@@ -3017,8 +3017,9 @@ export function FindIdealApp() {
 
   if (mapError) {
     return (
-      <main className="flex h-screen w-full items-center justify-center bg-slate-900 text-red-400">
+      <main className="relative flex h-screen w-full items-center justify-center bg-slate-900 text-red-400">
         <p className="text-sm">{mapError}</p>
+        <AuthAccessCard />
       </main>
     );
   }

@@ -7,7 +7,7 @@
 
 > **Mudanças v2.3 (2026-04-26):** monetização migrada de "créditos avulsos" para **freemium + assinatura mensal por plano** (Anônimo, Free, Básico, Pro, Pro Max). Custo padronizado em 5 etapas monetizáveis × 20 créditos = 100 créditos por jornada completa. Stripe Billing (Subscriptions) substitui Payment Intent. Plano Pro inclui endereços de imóveis salvos na fila do prewarm noturno (mesmo run da atualização da base). Plano Pro Max ganha fila dedicada de refresh com cadência e franquia próprias. Adicionadas tabelas `plans`, `plan_entitlements`, `subscriptions`, `subscription_events`, `pro_max_refresh_targets`. Fase 8 reescopada e Fase 9 (Pro Max) adicionada ao roadmap.
 
-> **Mudanças v2.4 (2026-04-26):** mantém o modelo de monetização por **freemium + planos mensais + créditos por ciclo + entitlements**, mas altera a prioridade de implementação de cobrança. A ativação inicial dos planos pagos passa a ser feita por **Pix com QR Code / Pix Copia e Cola**. **Stripe não foi removido**: Stripe Billing permanece no roadmap como evolução futura para automação de assinatura, portal do cliente, retries, proration e cobrança recorrente. A Fase 8 foi reescopada para **Auth + planos + ativação por Pix**. Fase 10 adicionada para **Stripe Billing e automação de recorrência**. Tabelas `subscriptions` e `subscription_events` substituídas por `plan_activations`. Adicionadas `payments` e `pix_payment_data`. Preço do Pro Max corrigido para R$ 312,99.
+> **Mudanças v2.4 (2026-04-26):** mantém o modelo de monetização por **freemium + planos mensais + créditos por ciclo + entitlements**, mas altera a prioridade de implementação de cobrança. A ativação inicial dos planos pagos passa a ser feita por **Pix com QR Code / Pix Copia e Cola**. **Stripe não foi removido**: Stripe Billing permanece no roadmap como evolução futura para automação de assinatura, portal do cliente, retries, proration e cobrança recorrente. A Fase 8 foi reescopada para **Auth + planos + ativação por Pix**. Fase 10 adicionada para **Stripe Billing e automação de recorrência**. Tabelas `subscriptions` e `subscription_events` substituídas por `plan_activations`. Adicionadas `payments` e `pix_payment_data`. Preços pagos atuais: Básico R$ 12,99, Pro R$ 30,99 e Pro Max R$ 149,90.
 
 ---
 
@@ -850,9 +850,9 @@ plans (
 |---|---|---:|---:|---|
 | anonymous | Anônimo | NULL | 300 | false |
 | free | Free cadastrado | 0 | 350 | false |
-| basico | Básico | 21.99 | 800 | true |
-| pro | Pro | 90.99 | 4000 | true |
-| pro_max | Pro Max | 312.99 | 20000 | true |
+| basico | Básico | 12.99 | 800 | true |
+| pro | Pro | 30.99 | 4000 | true |
+| pro_max | Pro Max | 149.90 | 20000 | true |
 
 ### `plan_entitlements`
 
@@ -1564,7 +1564,7 @@ Saída:
 {
   "payment_id": "uuid",
   "plan_slug": "basico",
-  "amount_brl": 21.99,
+  "amount_brl": 12.99,
   "status": "pending",
   "expires_at": "2026-04-26T23:59:00-03:00",
   "qr_code_payload": "...",
@@ -2044,9 +2044,9 @@ Total:
 |---|---:|---:|---:|---:|---:|---|---|---|
 | Anônimo | — | 300 sessão | 0 | 0 | 7 dias sessão | travada | default | não |
 | Free | R$ 0 | 350 | 5 | 2 | 7 dias | travada | default | não |
-| Básico | R$ 21,99 | 800 | 20 | 4 | 30 dias | limitada | 4 | não |
-| Pro | R$ 90,99 | 4000 | 100 | 20 | 30 dias | liberada | sem limite | não |
-| Pro Max | R$ 312,99 | 20000 | 100 | 20 | 30 dias | liberada | sem limite | não |
+| Básico | R$ 12,99 | 800 | 20 | 4 | 30 dias | limitada | 4 | não |
+| Pro | R$ 30,99 | 4000 | 100 | 20 | 30 dias | liberada | sem limite | não |
+| Pro Max | R$ 149,90 | 20000 | 100 | 20 | 30 dias | liberada | sem limite | não |
 
 ### Plano Anônimo
 
@@ -2068,7 +2068,7 @@ Total:
 
 ### Plano Básico
 
-- R$ 21,99/mês;
+- R$ 12,99/mês;
 - 800 créditos;
 - 20 imóveis salvos;
 - 4 zonas salvas;
@@ -2079,7 +2079,7 @@ Total:
 
 ### Plano Pro
 
-- R$ 90,99/mês;
+- R$ 30,99/mês;
 - 4000 créditos;
 - 100 imóveis salvos;
 - 20 zonas salvas;
@@ -2090,7 +2090,7 @@ Total:
 
 ### Plano Pro Max
 
-- R$ 312,99/mês;
+- R$ 149,90/mês;
 - 20000 créditos;
 - herda Pro;
 - sem atualização automática.
@@ -3063,9 +3063,9 @@ Não reabrir sem análise de impacto documentada.
 | Etapas monetizáveis | **4 × 20 créditos** | Scraping sob demanda indisponível em todos os planos |
 | Créditos anônimos | **300** | Menor liberdade que o Free |
 | Migração anônimo → Free | **Free recebe 350; não soma saldo anônimo** | Evita arbitragem |
-| Plano Básico | **R$ 21,99 / 800 créditos** | Entrada acessível |
-| Plano Pro | **R$ 90,99 / 4000 créditos** | Usuário intenso |
-| Plano Pro Max | **R$ 312,99 / 20000 créditos** | Franquia superior ao Pro; sem scraping sob demanda |
+| Plano Básico | **R$ 12,99 / 800 créditos** | Entrada acessível |
+| Plano Pro | **R$ 30,99 / 4000 créditos** | Usuário intenso |
+| Plano Pro Max | **R$ 149,90 / 20000 créditos** | Franquia superior ao Pro; sem scraping sob demanda |
 | Refresh do plano Pro | **Não incluso** | Evita custo oculto |
 | Refresh do plano Pro Max | **Não incluso** | Nenhum plano libera scraping/refresh sob demanda |
 | Modelo de pagamento | **`payments` genérico** | Suporta Pix agora e Stripe depois |

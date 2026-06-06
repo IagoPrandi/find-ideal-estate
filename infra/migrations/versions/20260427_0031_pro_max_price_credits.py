@@ -100,8 +100,8 @@ def _set_pro_max_plan(price_brl: str, monthly_credits: int, reason: str) -> None
 
 
 def upgrade() -> None:
-    _set_pro_max_plan("312.99", 20000, "pro_max_price_credits_correction_20260427")
+    _set_pro_max_plan("149.90", 20000, "pro_max_price_credits_correction_20260427")
 
 
 def downgrade() -> None:
-    _set_pro_max_plan("312.99", 20000, "pro_max_price_credits_correction_rollback_20260427")
+    _set_pro_max_plan("149.90", 20000, "pro_max_price_credits_correction_rollback_20260427")
