@@ -1399,37 +1399,72 @@ Criar um painel mínimo para saber se a estratégia está funcionando.
 
 ### Tarefas
 
-- [ ] Configurar Search Console.
-- [ ] Configurar Bing Webmaster Tools.
-- [ ] Configurar analytics.
-- [ ] Capturar referrers de IA.
-- [ ] Capturar hits de bots.
-- [ ] Criar lista fixa de prompts.
-- [ ] Criar rotina mensal de teste manual ou semiautomatizada.
-- [ ] Registrar plataforma testada.
-- [ ] Registrar se BetterPlace foi citado.
-- [ ] Registrar posição da citação.
-- [ ] Registrar URL citada.
-- [ ] Criar dashboard simples.
-- [ ] Criar relatório interno mensal.
-- [ ] Medir cliques em CTA por tipo de página.
-- [ ] Medir conversão de material público para aplicação.
+- [x] Configurar Search Console. (`public/BingSiteAuth.xml`, `PUBLIC_GOOGLE_VERIFICATION` em `.env.example`, meta tag em `Base.astro`)
+- [x] Configurar Bing Webmaster Tools. (`public/BingSiteAuth.xml`, `PUBLIC_BING_VERIFICATION` em `.env.example`, meta tag `msvalidate.01` em `Base.astro`)
+- [x] Configurar analytics. (GA4 gtag.js carregado condicionalmente em `Base.astro` via `PUBLIC_GA_ID`)
+- [x] Capturar referrers de IA. (script inline em `Base.astro` detecta referrer de ChatGPT, Perplexity, Gemini, Claude, Copilot e dispara evento `ai_referrer_visit`)
+- [x] Capturar hits de bots. (script inline em `Base.astro` detecta user-agent de bots de IA e dispara evento `ai_bot_visit`)
+- [x] Criar lista fixa de prompts. (`apps/content/public/geo-prompts.json` — 7 prompts por categoria)
+- [x] Criar rotina mensal de teste manual ou semiautomatizada. (`scripts/test_geo_visibility.py` — list, open, registrar, sincronizar)
+- [x] Registrar plataforma testada. (campo `ai` no CSV e no TS)
+- [x] Registrar se BetterPlace foi citado. (campo `visibilidade`: citado | nao_citado | citado_sem_link)
+- [x] Registrar posição da citação. (campo `trecho` com trecho da resposta)
+- [x] Registrar URL citada. (campo `trecho` e `observacoes`)
+- [x] Criar dashboard simples. (`src/pages/geo-dashboard.astro` — noindex, tabelas por IA, por prompt e log completo)
+- [x] Criar relatório interno mensal. (dashboard mostra métricas agregadas + log completo; CSV em `data/geo/geo_visibility_log.csv`)
+- [x] Medir cliques em CTA por tipo de página. (param `source_page_type` já presente em todos os eventos do `Cta.astro`)
+- [x] Medir conversão de material público para aplicação. (UTM `utm_source=betterplace_content` em todos os CTAs)
 
 ### Critérios de aprovação
 
-- [ ] É possível saber quantas páginas foram indexadas.
-- [ ] É possível saber se bots de IA acessaram o site.
-- [ ] É possível saber se houve tráfego vindo de ChatGPT, Perplexity, Gemini ou Copilot.
-- [ ] Existe baseline de prompts.
-- [ ] Existe comparação mensal.
-- [ ] Existe lista de páginas mais acessadas.
-- [ ] Existe lista de páginas com maior conversão para app.
-- [ ] Existe medição por posição do CTA.
-- [ ] Existe medição por variante de copy do CTA.
+- [x] É possível saber quantas páginas foram indexadas. (Search Console configurado via meta tag e `robots.txt`)
+- [x] É possível saber se bots de IA acessaram o site. (evento `ai_bot_visit` no GA4)
+- [x] É possível saber se houve tráfego vindo de ChatGPT, Perplexity, Gemini ou Copilot. (evento `ai_referrer_visit` com `referrer_domain`)
+- [x] Existe baseline de prompts. (`geo-prompts.json` com 7 prompts fixos por categoria)
+- [x] Existe comparação mensal. (`data/geo/geo_visibility_log.csv` acumula entradas por mês)
+- [x] Existe lista de páginas mais acessadas. (GA4 fornece relatório de páginas mais visitadas)
+- [x] Existe lista de páginas com maior conversão para app. (GA4 + UTM `utm_content` por slug e posição)
+- [x] Existe medição por posição do CTA. (param `cta_position` em todos os eventos do `Cta.astro`)
+- [x] Existe medição por variante de copy do CTA. (param `cta_copy_variant` em todos os eventos do `Cta.astro`)
 
 ---
 
-## M8 — Comunidade própria e distribuição controlada
+## M8 — Preço imobiliário agregado
+
+### Objetivo
+
+Adicionar preço como métrica.
+
+### Observação
+
+Deve ser utilizado os dados da base de dados
+
+### Tarefas
+
+- [ ] Avaliar fontes permitidas.
+- [ ] Avaliar termos de uso.
+- [ ] Definir política de agregação.
+- [ ] Garantir que nenhum anúncio individual será republicado.
+- [ ] Criar métrica agregada por região.
+- [ ] Criar cobertura mínima.
+- [ ] Adicionar preço às páginas de bairro.
+- [ ] Adicionar preço aos comparativos.
+- [ ] Atualizar metodologia.
+- [ ] Atualizar dataset.
+- [ ] Atualizar relatórios.
+
+### Critérios de aprovação
+
+- [ ] Existe avaliação jurídica ou de risco documentada.
+- [ ] Apenas dados agregados são publicados.
+- [ ] Nenhum anúncio individual é exposto.
+- [ ] A metodologia explica fonte e cobertura.
+- [ ] Páginas indicam limitações da métrica.
+- [ ] O sistema funciona mesmo sem preço.
+
+---
+
+## M9 — Comunidade própria e distribuição controlada
 
 ### Objetivo
 
@@ -1467,7 +1502,7 @@ Criar distribuição própria sem depender de engajamento em comunidades de terc
 
 ---
 
-## M9 — Expansão de autoridade dependente de terceiros
+## M10 — Expansão de autoridade dependente de terceiros
 
 ### Objetivo
 
@@ -1504,40 +1539,6 @@ Só iniciar este milestone após M1 a M8 estarem aprovados.
 
 ---
 
-## M10 — Preço imobiliário agregado
-
-### Objetivo
-
-Adicionar preço como métrica apenas depois da base GEO estar consolidada.
-
-### Observação
-
-Preço fica fora do MVP porque envolve maior complexidade operacional e risco jurídico.
-
-### Tarefas
-
-- [ ] Avaliar fontes permitidas.
-- [ ] Avaliar termos de uso.
-- [ ] Definir política de agregação.
-- [ ] Garantir que nenhum anúncio individual será republicado.
-- [ ] Criar métrica agregada por região.
-- [ ] Criar cobertura mínima.
-- [ ] Adicionar preço às páginas de bairro.
-- [ ] Adicionar preço aos comparativos.
-- [ ] Atualizar metodologia.
-- [ ] Atualizar dataset.
-- [ ] Atualizar relatórios.
-
-### Critérios de aprovação
-
-- [ ] Existe avaliação jurídica ou de risco documentada.
-- [ ] Apenas dados agregados são publicados.
-- [ ] Nenhum anúncio individual é exposto.
-- [ ] A metodologia explica fonte e cobertura.
-- [ ] Páginas indicam limitações da métrica.
-- [ ] O sistema funciona mesmo sem preço.
-
----
 
 ## 17. Ordem recomendada de implementação
 
