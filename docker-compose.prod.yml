@@ -80,4 +80,15 @@ services:
     ports: !reset []
 
   ui:
-    profiles: ["local-ui"]
+    profiles: !reset []
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: docker/ui.prod.Dockerfile
+      args:
+        VITE_API_BASE: ${VITE_API_BASE}
+        VITE_MAPTILER_API_KEY: ${VITE_MAPTILER_API_KEY:-${MAPTILER_API_KEY}}
+    ports:
+      - "127.0.0.1:80:80"
+    volumes: []
+    command: []

@@ -181,12 +181,27 @@ services:
     environment:
       - VITE_API_BASE=http://localhost:8000
       - VITE_MAPTILER_API_KEY=${VITE_MAPTILER_API_KEY:-${MAPTILER_API_KEY:-local-dev-key}}
+      - CONTENT_URL=http://content:4321
     ports:
       - "5173:5173"
     volumes:
       - ./apps/web:/web
       - /web/node_modules
+    depends_on:
+      - content
     command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
+
+  content:
+    build:
+      context: .
+      dockerfile: docker/content.Dockerfile
+    working_dir: /content
+    ports:
+      - "4321:4321"
+    volumes:
+      - ./apps/content:/content
+      - /content/node_modules
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "4321"]
 
 networks:
   default:
