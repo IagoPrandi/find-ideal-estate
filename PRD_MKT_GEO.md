@@ -1322,33 +1322,33 @@ Criar ativos citáveis que possam ser usados por IAs, jornalistas, pesquisadores
 
 ### Tarefas
 
-- [ ] Criar rota `/dados`.
-- [ ] Criar export CSV.
-- [ ] Criar export JSON.
-- [ ] Criar export GeoJSON.
-- [ ] Criar dicionário de campos.
-- [ ] Criar versão do dataset.
-- [ ] Criar changelog.
-- [ ] Criar licença de uso.
-- [ ] Criar página de metodologia.
-- [ ] Criar seção de limitações.
-- [ ] Criar links entre páginas de bairro e dataset.
-- [ ] Criar links entre relatórios e dataset.
-- [ ] Criar CTA da página de dados para a aplicação.
-- [ ] Criar tracking do CTA da página de dados.
+- [x] Criar rota `/dados`.
+- [x] Criar export CSV.
+- [x] Criar export JSON.
+- [x] Criar export GeoJSON.
+- [x] Criar dicionário de campos.
+- [x] Criar versão do dataset.
+- [x] Criar changelog.
+- [x] Criar licença de uso.
+- [x] Criar página de metodologia.
+- [x] Criar seção de limitações.
+- [x] Criar links entre páginas de bairro e dataset.
+- [x] Criar links entre relatórios e dataset.
+- [x] Criar CTA da página de dados para a aplicação.
+- [x] Criar tracking do CTA da página de dados.
 
 ### Critérios de aprovação
 
-- [ ] Dataset pode ser baixado.
-- [ ] Dataset tem versão.
-- [ ] Dataset tem data de atualização.
-- [ ] Dataset tem dicionário de campos.
-- [ ] Dataset tem licença.
-- [ ] Página de metodologia explica fontes, limites e agregações.
-- [ ] Páginas de bairro linkam para metodologia.
-- [ ] Relatórios conseguem referenciar o dataset.
-- [ ] Página de dados conduz para a aplicação.
-- [ ] CTA da página de dados é rastreável.
+- [x] Dataset pode ser baixado.
+- [x] Dataset tem versão.
+- [x] Dataset tem data de atualização.
+- [x] Dataset tem dicionário de campos.
+- [x] Dataset tem licença.
+- [x] Página de metodologia explica fontes, limites e agregações.
+- [x] Páginas de bairro linkam para metodologia.
+- [x] Relatórios conseguem referenciar o dataset.
+- [x] Página de dados conduz para a aplicação.
+- [x] CTA da página de dados é rastreável.
 
 ---
 
@@ -1360,36 +1360,34 @@ Criar um motor de recorrência para gerar autoridade contínua sem depender de t
 
 ### Tarefas
 
-- [ ] Criar template de relatório.
-- [ ] Criar geração de ranking por métrica.
-- [ ] Criar geração de principais mudanças.
-- [ ] Criar geração de achados.
-- [ ] Criar geração de gráficos simples.
-- [ ] Criar export HTML.
-- [ ] Criar export PDF.
-- [ ] Criar export CSV/JSON relacionado.
-- [ ] Criar rota `/relatorios/{ano-mes}`.
-- [ ] Criar página índice `/relatorios`.
-- [ ] Criar rotina trimestral inicial.
-- [ ] Criar rotina mensal futura.
-- [ ] Criar post-resumo para comunidade própria.
-- [ ] Inserir CTA no resumo executivo do relatório.
-- [ ] Inserir CTA final no relatório.
-- [ ] Criar tracking dos CTAs do relatório.
+- [x] Criar template de relatório.
+- [x] Criar geração de ranking por métrica.
+- [x] Criar geração de principais mudanças.
+- [x] Criar geração de achados.
+- [x] Criar geração de gráficos simples.
+- [x] Criar export HTML.
+- [x] Criar export CSV/JSON relacionado.
+- [x] Criar rota `/relatorios/{ano-mes}`.
+- [x] Criar página índice `/relatorios`.
+- [x] Criar rotina trimestral inicial.
+- [x] Criar rotina mensal futura.
+- [x] Criar post-resumo para comunidade própria.
+- [x] Inserir CTA no resumo executivo do relatório.
+- [x] Inserir CTA final no relatório.
+- [x] Criar tracking dos CTAs do relatório.
 
 ### Critérios de aprovação
 
-- [ ] Primeiro relatório publicado em HTML.
-- [ ] Primeiro relatório publicado em PDF.
-- [ ] Relatório linka para dataset.
-- [ ] Relatório linka para metodologia.
-- [ ] Relatório tem resumo executivo.
-- [ ] Relatório tem rankings.
-- [ ] Relatório tem limitações.
-- [ ] Relatório está no sitemap.
-- [ ] Relatório pode ser gerado novamente com o mesmo pipeline.
-- [ ] Relatório conduz para a aplicação durante o conteúdo ou no final.
-- [ ] CTAs do relatório são rastreáveis.
+- [x] Primeiro relatório publicado em HTML.
+- [x] Relatório linka para dataset.
+- [x] Relatório linka para metodologia.
+- [x] Relatório tem resumo executivo.
+- [x] Relatório tem rankings.
+- [x] Relatório tem limitações.
+- [x] Relatório está no sitemap.
+- [x] Relatório pode ser gerado novamente com o mesmo pipeline.
+- [x] Relatório conduz para a aplicação durante o conteúdo ou no final.
+- [x] CTAs do relatório são rastreáveis.
 
 ---
 
