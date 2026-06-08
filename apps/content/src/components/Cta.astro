@@ -9,7 +9,7 @@ export interface Props {
   variante?: string;
 }
 
-const APP_BASE = 'https://www.betterplace.com.br';
+const APP_BASE = 'https://app.betterplace.com.br';
 
 const copias: Record<CtaTipo, string> = {
   bairro: 'Quer saber se esta região combina com sua rotina? Abra o BetterPlace e compare bairros, trajetos e preferências.',
@@ -40,7 +40,7 @@ const evento = eventos[tipo];
 const medium = tiposMedium[tipo];
 const ctaContent = `${slug}__${posicao}__${variante}`;
 
-const url = new URL('/app', APP_BASE);
+const url = new URL('/', APP_BASE);
 url.searchParams.set('utm_source', 'betterplace_content');
 url.searchParams.set('utm_medium', medium);
 url.searchParams.set('utm_campaign', 'geo_mvp');
