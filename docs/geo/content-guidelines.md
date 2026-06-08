@@ -177,7 +177,6 @@ As estruturas obrigatórias abaixo resumem o PRD §8 e são detalhadas nos templ
 /relatorios
 /relatorios/{ano-mes}
 /metodologia
-/sobre
 ```
 
 ---

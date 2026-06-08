@@ -763,7 +763,6 @@ Rotas:
  /relatorios
  /relatorios/{ano-mes}
  /metodologia
- /sobre
 ```
 
 ---
@@ -1921,3 +1920,21 @@ Tarefas adicionais ao M0:
 - [ ] A skill adiciona rastreamento nos CTAs.
 - [ ] A skill foi testada com pelo menos um exemplo de cada tipo.
 - [ ] Qualquer pessoa do projeto consegue usar a skill sem ler o PRD completo.
+
+---
+
+## 23. Progress Tracker
+
+| Milestone | Status | Data de conclusão | Observações |
+|-----------|--------|-------------------|-------------|
+| M0 — Marca e fundação editorial | ✅ Concluído | — | Definições de marca, tom, termos proibidos e estrutura editorial. |
+| M1 — Site SSR/SSG indexável | ✅ Concluído | — | Astro SSG, sitemap, robots.txt, canonical, JSON-LD base. |
+| M2 — Base de dados geográfica | ✅ Concluído | — | GeoPackage ingerido, PostGIS, tabelas de métricas por bairro. |
+| M3 — Páginas de bairro | ✅ Concluído | — | `/bairros/[slug]` com métricas normalizadas, JSON-LD, CTAs. |
+| M4 — Comparativos automatizados | ✅ Concluído | — | `/comparar/[slug]` com tabela comparativa, FAQPage, CTAs. |
+| M5 — Dataset aberto | ✅ Concluído | — | `/dados` com CSV, JSON, GeoJSON; `/metodologia` documentada. |
+| M6 — Relatório recorrente | ✅ Concluído | — | `/relatorios/2026-06` com rankings, achados, downloads. |
+| M7 — Medição GEO | ✅ Concluído | 2026-06-06 | GA4 (anonymize_ip), ai_bot_visit, ai_referrer_visit, geo-prompts.json, geo-dashboard, test_geo_visibility.py, meta tags Google/Bing, BingSiteAuth.xml. |
+| M8 — Preço imobiliário agregado | ✅ Concluído | 2026-06-07 | Pipeline `aggregate_real_estate.py` (PostGIS join, MIN_SAMPLE=5, SAMPLE_CAP=8); 41 distritos com dados; `/imoveis/sp`, `/imoveis/sp/sao-paulo/[slug]`, `/imoveis/sp/sao-paulo/[slug]/lista`; panorama imobiliário em bairros, comparativos e relatórios; CC BY 4.0. |
+| M9 — Comunidade própria | ⬜ Pendente | — | Subreddit próprio; distribuição controlada. |
+| M10 — Expansão de autoridade | ⬜ Pendente | — | Press kit, pitch, listas externas. Só após M1–M9. |
