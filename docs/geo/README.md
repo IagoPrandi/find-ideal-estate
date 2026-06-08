@@ -16,7 +16,7 @@ Artefatos da estratégia pública de conteúdo do BetterPlace (PRD: `../../PRD_M
   - [template-bairro.md](templates/template-bairro.md) — página `/bairros/{slug}` (M3) — inclui segurança pública e panorama imobiliário
   - [template-comparativo.md](templates/template-comparativo.md) — `/comparar/{a}-vs-{b}` (M4)
   - [template-relatorio.md](templates/template-relatorio.md) — `/relatorios/{ano-mes}` (M6)
-  - [template-post-comunidade.md](templates/template-post-comunidade.md) — comunidade própria (M8)
+  - [template-post-comunidade.md](templates/template-post-comunidade.md) — comunidade própria (M9)
 - **[AI_VISIBILITY_GEO_PLAN.md](../AI_VISIBILITY_GEO_PLAN.md)** — plano técnico-estratégico (contexto).
 
 ## Métricas por página de bairro (M3 — estado atual)
@@ -28,7 +28,7 @@ Artefatos da estratégia pública de conteúdo do BetterPlace (PRD: `../../PRD_M
 | Risco de alagamento | 0–100 ↓ | GeoSampa `mancha_inundacao` | completa |
 | Segurança pública | 0–100 ↓ | SSP-SP via **join espacial geométrico** sobre `neighborhood_boundaries` (ponto-hull SSP) — nenhuma filtragem por nome/city_code | parcial (sub-registro estrutural) |
 | Acesso a serviços | 0–100 | Proxy: densidade de paradas de ônibus (OSM M5) | completa (proxy) |
-| Panorama imobiliário | — | `property_price_rollups` não mapeável por distrito sem pipeline geoespacial | **pendente (M10)** |
+| Panorama imobiliário | — | base imobiliária interna exige pipeline geoespacial e agregação estado/cidade/bairro/lista | **pendente (M8)** |
 
 ## Regra de integridade de dados (OBRIGATÓRIA)
 
@@ -41,7 +41,8 @@ real no banco de dados PostGIS.**
 - Nunca inserir valores estimados ou inventados em `bairros.ts` ou nas tabelas de score.
 - Se um dado não existir no banco, declarar como lacuna (`lacunas[]` em `Bairro`).
 - O campo `realEstateMetrics` só pode ser preenchido quando houver pipeline geoespacial
-  que mapeie `property_price_rollups` por polígono distrital (previsto M10).
+  e/ou chaves canônicas validadas que agreguem a base imobiliária interna por estado,
+  cidade, bairro e lista (previsto M8).
 - O pipeline de segurança usa join espacial puro: `ST_Intersects(pmsp.geometry, ssp.geometry)`
   sem qualquer filtro de nome ou `city_code` dos bairros SSP.
 

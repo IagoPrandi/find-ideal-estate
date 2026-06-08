@@ -105,7 +105,8 @@ python scripts/validate_geo_data.py --city-code SAO_PAULO
 ```
 
 Verifica slugs únicos, geometrias válidas, view materializada populada, cobertura de
-métricas e ausência de dados de preço imobiliário (restrição do MVP).
+métricas e ausência de métricas imobiliárias na superfície urbana pública do MVP. A base
+imobiliária interna pode existir e será usada no M8.
 
 ### 3.4 Migrations necessárias (Alembic)
 
@@ -132,25 +133,37 @@ Os 96 distritos se distribuem pelas 5 macrorregiões da PMSP:
 
 ---
 
-## 5. Métricas imobiliárias (pendente)
+## 5. Métricas imobiliárias (pendente — M8)
 
-A tabela `property_price_rollups` armazena preços medianos por `zone_fingerprint`
-(zonas definidas por usuários em polígonos livres, não por distritos). Não existe hoje
-um mapeamento `zone_fingerprint → district_code` que permita agregar preço por distrito
-de forma geoespacialmente válida.
+A base imobiliária interna do BetterPlace deve ser a fonte obrigatória das métricas
+imobiliárias públicas do M8. Não deve haver dependência de novo scraping, fonte externa
+ou preenchimento manual.
 
-**Decisão (2026-06-06):** o campo `realEstateMetrics` em `bairros.ts` permanece `undefined`
-até que um pipeline de agregação com recorte por polígono distrital seja implementado.
-Qualquer dado imobiliário exibido deve ser rastreável a uma operação espacial real no banco.
-Declara-se como lacuna em cada página de bairro.
+**Decisão (2026-06-07):** o campo `realEstateMetrics` em `bairros.ts` permanece `undefined`
+até que um pipeline de agregação reproduzível use a base imobiliária interna por estado,
+cidade, bairro e lista, com recorte geoespacial e/ou chaves canônicas de localização
+validadas. Qualquer dado imobiliário exibido deve ser rastreável ao banco interno.
+Declara-se como lacuna quando cobertura, geocodificação, área, encargos ou histórico de
+preço forem insuficientes.
+
+Métricas mínimas esperadas no M8:
+
+- aluguel/m²;
+- preço total mensal/m², considerando aluguel e encargos conhecidos;
+- preço de venda/m²;
+- quartis de aluguel (`q1`, mediana, `q3`);
+- quartis de venda (`q1`, mediana, `q3`);
+- variação de preço calculada sobre o mesmo conjunto de imóveis entre períodos;
+- amostra pequena de imóveis elegíveis com campos mínimos e link interno;
+- `sample_count`, data de referência e limitações por agregação.
 
 ### 5.1 Previsão
 
 | Item | Milestone |
 |---|---|
-| Agregação `property_price_rollups` por polígono distrital (ST_Within / ST_Intersects) | M10 |
-| Validação de sample_count mínimo por distrito | M10 |
-| Exposição de `pricePerM2Sale`, `pricePerM2Rent`, `costIndex`, `trend` | M10 |
+| Agregação da base imobiliária interna por estado, cidade, bairro e lista | M8 |
+| Validação de `sample_count` mínimo por nível de agregação | M8 |
+| Exposição de aluguel/m², custo total/m², venda/m², quartis e variação comparável | M8 |
 
 ---
 
@@ -178,4 +191,4 @@ Declara-se como lacuna em cada página de bairro.
 | IBGE — Setores censitários | Densidade demográfica | M5 |
 | OSM (Overpass API) | POIs reais (farmácias, mercados, escolas) | M5 |
 | SSP-SP | Crime (atualização periódica, já parcial em M2) | Contínuo |
-| Preço imobiliário — fonte externa | m² médio por distrito com pipeline independente | M10 |
+| Preço imobiliário — base interna BetterPlace | agregações estado/cidade/bairro/lista com métricas e amostra controlada | M8 |

@@ -95,7 +95,8 @@ DICIONARIO = [
 NOTAS_GERAIS = [
     "Scores normalizados por min-max em relação ao conjunto de distritos analisados. Não comparáveis com outras cidades sem renormalização.",
     "flood_risk_score e safety_score são invertidos: valor maior = menor exposição/ocorrência relativa.",
-    "Dados de preço imobiliário não incluídos nesta versão.",
+    "Dados de preço imobiliário não incluídos nesta versão urbana; "
+    "camada imobiliária agregada prevista para M8 com base interna BetterPlace.",
     "Geometrias dos polígonos oficiais exportadas da tabela neighborhood_boundaries (GeoSampa / PMSP — EPSG:4326).",
 ]
 

@@ -190,7 +190,7 @@ Para cada material gerado, entregar:
    — bairro      → M3
    — comparativo → M4
    — relatorio   → M6
-   — post        → M8
+   — post        → M9
    — dados       → M5
 ```
 
@@ -236,7 +236,7 @@ Publicar somente se:
 | `/geo-content bairro` | Etapa 6 — gerar páginas `/bairros` |
 | `/geo-content comparativo` | Etapa 7 — gerar comparativos aprovados |
 | `/geo-content relatorio` | Etapa 10 — gerar relatório periódico |
-| `/geo-content post` | Fluxo editorial da comunidade própria (M8) |
+| `/geo-content post` | Fluxo editorial da comunidade própria (M9) |
 | `/geo-content dados` | Etapa 9 — gerar dataset e página `/dados` |
 
 ---

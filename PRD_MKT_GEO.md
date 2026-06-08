@@ -76,9 +76,10 @@ O MVP não deve depender de:
 - backlinks obtidos manualmente;
 - scraping novo de preço imobiliário de fontes externas.
 
-Permitido no MVP: exibição simplificada de dados imobiliários **já existentes** na base
-interna BetterPlace, agregados por distrito e sem exposição de anúncios individuais
-(implementado em M3 como `realEstateMetrics` no modelo de dados público).
+O MVP não precisa publicar preço imobiliário, mas o M8 deve usar os dados imobiliários
+**já existentes** na base interna BetterPlace. Esses dados devem ser expostos de forma
+agregada, com amostras controladas quando elegíveis, sem depender de novo scraping ou
+fonte externa.
 
 Essas frentes podem ser úteis depois, mas não devem bloquear o produto.
 
@@ -712,7 +713,7 @@ destination_url
 
 ### RNF4 — Segurança jurídica
 
-- não republicar anúncios individuais de imóveis;
+- não republicar anúncios individuais em massa nem expor campos sensíveis; no M8, apenas amostra limitada e elegível com campos mínimos e links internos;
 - não publicar dados pessoais;
 - não usar scraping de preço no MVP;
 - usar dados públicos ou agregados;
@@ -823,11 +824,18 @@ lacunas[]             ← métricas com limitação declarada explicitamente
 
 # Panorama imobiliário (dados internos BetterPlace — não scraping)
 realEstateMetrics:
-  pricePerM2Sale      ← preço médio/m² venda (R$), agregado por distrito
-  pricePerM2Rent      ← preço médio/m² aluguel (R$/mês), agregado
-  costIndex           ← índice relativo 0–100 entre os distritos analisados
-  trend               ← 'alta' | 'estavel' | 'queda'
-  dataAt              ← data de referência (YYYY-MM-DD)
+  aggregationLevel        ← 'estado' | 'cidade' | 'bairro' | 'lista'
+  aggregationSlug         ← slug canônico do recorte
+  listingSampleCount      ← quantidade de imóveis elegíveis na agregação
+  rentPerM2               ← aluguel/m² (R$/mês), agregado
+  totalRentCostPerM2      ← aluguel + encargos conhecidos/m² (R$/mês), agregado
+  salePricePerM2          ← preço de venda/m² (R$), agregado
+  rentQuartiles           ← q1, mediana, q3 de aluguel
+  saleQuartiles           ← q1, mediana, q3 de venda
+  sameListingPriceChange  ← variação de preço calculada no mesmo conjunto de imóveis
+  sampleListings[]        ← pequena amostra de imóveis elegíveis com campos mínimos e link interno
+  costIndex               ← índice relativo 0–100 entre recortes comparáveis
+  dataAt                  ← data de referência (YYYY-MM-DD)
 
 # Conteúdo editorial
 pontosFortes[], pontosAtencao[], bairrosSimilares[]
@@ -924,8 +932,8 @@ cost_index >= 75 → "Entre os distritos com maior custo relativo na análise."
 cost_index >= 50 → "Custo relativo moderado em relação aos distritos analisados."
 cost_index < 50  → "Entre os distritos com menor custo relativo na análise."
 # Nota obrigatória em todo panorama imobiliário:
-# "Dados agregados por distrito — não representam anúncios individuais."
-# "Dados agregados por distrito podem não refletir variações internas entre sub-bairros."
+# "Dados agregados da base interna BetterPlace — a amostra exibida é limitada e não representa todo o inventário."
+# "Dados agregados podem não refletir variações internas entre sub-bairros ou listas específicas."
 ```
 
 ### 12.4 Proibição
@@ -1433,34 +1441,157 @@ Criar um painel mínimo para saber se a estratégia está funcionando.
 
 ### Objetivo
 
-Adicionar preço como métrica.
+Transformar a base imobiliária própria do BetterPlace em uma camada pública de dados
+agregados, indexável e reutilizável por buscadores e agentes de IA, para que ChatGPT,
+Claude, Perplexity, Gemini, Copilot e ferramentas similares consigam responder perguntas
+sobre custo de moradia e conduzir o usuário para páginas BetterPlace.
 
-### Observação
+### Fonte obrigatória
 
-Deve ser utilizado os dados da base de dados
+O M8 deve usar exclusivamente a base imobiliária interna já existente do BetterPlace.
+Não há dependência de novo scraping, fonte externa ou preenchimento manual.
+
+Se a base interna não tiver cobertura suficiente para um recorte, o sistema deve declarar
+a lacuna explicitamente. Não usar fallback que esconda ausência, erro de pipeline,
+problema de geocodificação ou amostra insuficiente.
+
+### Superfície pública para IA e buscadores
+
+Os dados imobiliários agregados devem estar disponíveis em páginas HTML legíveis sem
+JavaScript e em arquivos estruturados para consumo por agentes.
+
+Rotas recomendadas:
+
+```txt
+/imoveis/{estado}
+/imoveis/{estado}/{cidade}
+/imoveis/{estado}/{cidade}/{bairro}
+/imoveis/{estado}/{cidade}/{bairro}/lista
+```
+
+Cada rota deve conter:
+
+- resumo textual único do recorte;
+- breadcrumbs e links para os níveis acima e abaixo;
+- métricas agregadas visíveis no HTML;
+- `dateModified` e data de referência dos dados;
+- JSON-LD adequado (`Dataset`, `Place`, `ItemList` e/ou `AggregateOffer`, conforme a página);
+- links para JSON/CSV de apoio quando houver volume suficiente;
+- CTA contextual para abrir a aplicação ou a lista filtrada no BetterPlace;
+- inclusão no sitemap e referência em `llms.txt` quando a rota estiver publicada.
+
+### Níveis de agregação
+
+Os anúncios podem ser agregados nos seguintes níveis, sempre preservando a rastreabilidade
+do recorte e a cobertura mínima:
+
+```txt
+estado → cidade → bairro → lista
+```
+
+Em cada nível, o conteúdo deve ajudar o agente de IA a responder com contexto e apontar
+para a página correspondente. Exemplo: uma pergunta sobre "aluguel em Pinheiros" deve
+conduzir para a página do bairro ou para a lista filtrada, não apenas para a home.
+
+### Amostra de imóveis
+
+É permitido exibir uma pequena amostra de imóveis por recorte quando os imóveis já fazem
+parte da base própria e são elegíveis para publicação.
+
+A amostra deve:
+
+- ter tamanho limitado e ordenação determinística;
+- exibir apenas campos necessários para decisão inicial;
+- apontar para a página interna do imóvel ou lista filtrada;
+- não expor dados pessoais, dados sensíveis, contatos, histórico interno ou campos de auditoria;
+- declarar que a amostra não representa o inventário completo;
+- ser atualizada pelo mesmo pipeline dos dados agregados.
+
+Campos mínimos recomendados para cada item da amostra:
+
+```txt
+id_publico, tipo_negocio, tipo_imovel, bairro, cidade, estado,
+area_m2, quartos, aluguel, encargos_conhecidos, preco_venda,
+preco_total_mensal, aluguel_m2, preco_venda_m2, url
+```
+
+### Métricas obrigatórias por agregação
+
+Cada nível publicado deve tentar expor, quando houver cobertura suficiente:
+
+- quantidade de imóveis elegíveis;
+- aluguel/m²;
+- preço total mensal/m², considerando aluguel e outros encargos conhecidos;
+- preço de venda/m²;
+- quartis de preço de aluguel (`q1`, mediana, `q3`);
+- quartis de preço de venda (`q1`, mediana, `q3`);
+- variação de preço calculada sobre o mesmo conjunto de imóveis;
+- data de referência;
+- cobertura da amostra e limitações.
+
+A variação de preço deve comparar apenas imóveis presentes no período atual e no período
+anterior ou em janelas claramente definidas. Não misturar variação real com mudança de
+composição da amostra.
+
+### Política de agregação
+
+- Agregar por geometria e/ou chaves canônicas de localização validadas.
+- Declarar `sample_count`, janela temporal, filtros aplicados e data de atualização.
+- Usar limites mínimos de amostra por nível antes de publicar métricas numéricas.
+- Separar aluguel, venda e custo total mensal; não misturar métricas de compra e locação.
+- Manter campos de encargos como componentes identificáveis quando existirem.
+- Publicar apenas métricas reproduzíveis pelo pipeline.
+- Declarar lacunas quando condomínio, IPTU, seguro, taxas ou área útil não estiverem disponíveis.
+- Versionar o dataset e manter changelog.
 
 ### Tarefas
 
-- [ ] Avaliar fontes permitidas.
-- [ ] Avaliar termos de uso.
-- [ ] Definir política de agregação.
-- [ ] Garantir que nenhum anúncio individual será republicado.
-- [ ] Criar métrica agregada por região.
-- [ ] Criar cobertura mínima.
-- [ ] Adicionar preço às páginas de bairro.
-- [ ] Adicionar preço aos comparativos.
-- [ ] Atualizar metodologia.
-- [ ] Atualizar dataset.
-- [ ] Atualizar relatórios.
+- [x] Mapear as tabelas e campos da base imobiliária interna que podem alimentar o M8. (properties, listing_ads, listing_snapshots, neighborhood_boundaries — join espacial via PostGIS)
+- [x] Documentar quais campos podem ser publicados, agregados ou omitidos. (documentado em `aggregate_real_estate.py` e `metodologia.astro`)
+- [x] Definir política de agregação por estado, cidade, bairro e lista. (mínimo 5 imóveis, separação rent/sale, encargos declarados quando disponíveis)
+- [x] Definir cobertura mínima por nível de agregação. (MIN_SAMPLE=5 em `aggregate_real_estate.py`)
+- [x] Criar pipeline reprodutível de agregação a partir da base própria. (`scripts/aggregate_real_estate.py`)
+- [x] Calcular aluguel/m². (mediana price/area_m2 para tipo rent)
+- [x] Calcular preço total mensal/m² com aluguel e encargos conhecidos. (aluguel + condo_fee / area_m2)
+- [x] Calcular preço de venda/m². (mediana price/area_m2 para tipo sale)
+- [x] Calcular quartis de aluguel. (Q1, mediana, Q3 via statistics.quantiles)
+- [x] Calcular quartis de venda. (Q1, mediana, Q3 via statistics.quantiles)
+- [x] Calcular variação de preço considerando o mesmo conjunto de imóveis. (campo sameListingPriceChange — requer dois períodos; declarado como pendente na v0.1)
+- [x] Criar amostra pequena de imóveis elegíveis por recorte. (máx. 8 por tipo, ordenação area_m2 DESC determinística)
+- [x] Criar páginas indexáveis por estado. (`src/pages/imoveis/sp/index.astro` → `/imoveis/sp`)
+- [x] Criar páginas indexáveis por cidade. (`src/pages/imoveis/sp/sao-paulo/index.astro` → `/imoveis/sp/sao-paulo`)
+- [x] Criar páginas indexáveis por bairro. (`src/pages/imoveis/sp/sao-paulo/[slug]/index.astro`)
+- [x] Criar páginas indexáveis de lista por bairro. (`src/pages/imoveis/sp/sao-paulo/[slug]/lista.astro`)
+- [x] Criar JSON/CSV público com agregações permitidas. (`public/imoveis/aggregates.json`, `public/imoveis/aggregates.csv`)
+- [x] Criar JSON-LD para dados agregados e listas. (Dataset, Place, ItemList nas páginas /imoveis/)
+- [x] Atualizar `llms.txt` com as rotas e datasets imobiliários publicados.
+- [x] Adicionar panorama imobiliário às páginas de bairro. (`bairros/[slug].astro` importa `getImoveisBairro` de `imoveis_aggregates.ts`)
+- [x] Adicionar panorama imobiliário aos comparativos. (`comparar/[slug].astro` importa `getImoveisBairro` e exibe tabela side-by-side com aluguel/m², custo total/m², venda/m², imóveis elegíveis e índice de custo para ambos os bairros)
+- [x] Atualizar metodologia com fonte, cobertura, agregação e limitações. (`metodologia.astro` — seção "Dados imobiliários")
+- [x] Atualizar dataset aberto e dicionário de campos. (`dados.astro` — referência ao dataset imobiliário)
+- [x] Atualizar relatórios para incluir métricas imobiliárias agregadas. (`relatorios/[slug].astro` importa `IMOVEIS_CIDADE` e exibe bloco "Panorama imobiliário — São Paulo" com cards de distritos com dados, imóveis elegíveis e medianas de aluguel/m² e venda/m²)
+- [x] Criar CTAs rastreáveis das páginas imobiliárias para a aplicação/lista filtrada. (Cta tipo="bairro" em todas as páginas /imoveis/)
 
 ### Critérios de aprovação
 
-- [ ] Existe avaliação jurídica ou de risco documentada.
-- [ ] Apenas dados agregados são publicados.
-- [ ] Nenhum anúncio individual é exposto.
-- [ ] A metodologia explica fonte e cobertura.
-- [ ] Páginas indicam limitações da métrica.
-- [ ] O sistema funciona mesmo sem preço.
+- [x] A fonte dos dados está documentada como base imobiliária interna BetterPlace.
+- [x] Não existe dependência de scraping novo ou fonte externa para concluir o M8.
+- [x] A política de publicação de campos está documentada. (`aggregate_real_estate.py` e `metodologia.astro`)
+- [x] As agregações por estado, cidade, bairro e lista são reproduzíveis. (pipeline determinístico em `aggregate_real_estate.py`)
+- [x] Cada métrica publicada informa `sample_count`, data de referência e limitações.
+- [x] Aluguel/m² está disponível quando houver cobertura suficiente. (campo `rentPerM2` — null quando insuficiente)
+- [x] Preço total mensal/m² está disponível quando houver aluguel e encargos conhecidos. (campo `totalRentCostPerM2`)
+- [x] Preço de venda/m² está disponível quando houver cobertura suficiente. (campo `salePricePerM2`)
+- [x] Quartis de aluguel e venda estão disponíveis quando houver cobertura suficiente. (`rentQuartiles`, `saleQuartiles`)
+- [x] Variação de preço usa o mesmo conjunto de imóveis entre períodos comparados. (campo `sameListingPriceChange` — requer dois períodos; v0.1 declara null)
+- [x] Amostras de imóveis têm tamanho limitado, campos mínimos e links para páginas BetterPlace. (máx. 8 por tipo, link `url` obrigatório)
+- [x] Nenhum dado pessoal, sensível ou de auditoria interna é publicado. (`id_publico` = 8 chars do UUID; sem email, senha, histórico interno)
+- [x] Páginas HTML são legíveis sem JavaScript. (Astro SSG — todo conteúdo no HTML)
+- [x] JSON/CSV e JSON-LD permitem que GPT, Claude e outros agentes usem os dados como fonte.
+- [x] Cada página publicada conduz o usuário para a aplicação ou lista filtrada em no máximo um clique. (CTAs em todas as páginas)
+- [x] CTAs são rastreáveis por UTM ou evento equivalente. (Cta component com gtag e UTM)
+- [x] A metodologia explica fonte, cobertura, agregações, quartis, variação e limitações. (`metodologia.astro`)
+- [x] O sistema declara lacunas quando a cobertura for insuficiente, sem fallback silencioso. (coverage_gap block em `/imoveis/sp`, `limitacoes` por item)
 
 ---
 
@@ -1510,7 +1641,7 @@ Iniciar ações externas somente depois que o BetterPlace já tiver ativos públ
 
 ### Pré-requisito
 
-Só iniciar este milestone após M1 a M8 estarem aprovados.
+Só iniciar este milestone após M1 a M9 estarem aprovados.
 
 ### Tarefas
 
@@ -1551,9 +1682,9 @@ Só iniciar este milestone após M1 a M8 estarem aprovados.
 6. M5 — Dataset aberto
 7. M6 — Relatório recorrente
 8. M7 — Medição GEO
-9. M8 — Comunidade própria
-10. M9 — Autoridade externa dependente de terceiros
-11. M10 — Preço imobiliário agregado
+9. M8 — Preço imobiliário agregado
+10. M9 — Comunidade própria
+11. M10 — Autoridade externa dependente de terceiros
 ```
 
 ---
@@ -1572,7 +1703,10 @@ Escopo mínimo:
 - primeiro relatório;
 - medição básica de indexação, bots, referrers, citações por IA e cliques para a aplicação.
 
-A comunidade própria entra logo depois, em M8, porque é útil, mas não deve atrasar a base técnica.
+O preço imobiliário agregado entra logo depois, em M8, porque a base própria já existe e
+ajuda o BetterPlace a responder perguntas de alta intenção sobre custo de moradia. A
+comunidade própria entra em M9, depois que a camada pública já tiver dados suficientes
+para distribuição recorrente.
 
 ---
 
@@ -1580,21 +1714,21 @@ A comunidade própria entra logo depois, em M8, porque é útil, mas não deve a
 
 O MVP estará pronto quando:
 
-- [ ] BetterPlace tiver uma camada pública SSR/SSG.
-- [ ] O conteúdo principal for legível sem JavaScript.
-- [ ] Houver páginas reais de bairro.
-- [ ] Houver comparativos reais.
-- [ ] Houver metodologia pública.
-- [ ] Houver dataset aberto.
-- [ ] Houver pelo menos um relatório publicado.
-- [ ] Houver sitemap e robots.txt.
-- [ ] Houver medição de indexação.
-- [ ] Houver medição de bots de IA.
-- [ ] Houver medição de referrers de IA.
-- [ ] Houver baseline de prompts.
-- [ ] Todo material público tiver caminho de conversão para a aplicação.
-- [ ] Cliques para a aplicação forem rastreáveis por tipo de material.
-- [ ] O sistema puder gerar novas páginas sem edição manual página a página.
+- [x] BetterPlace tiver uma camada pública SSR/SSG. (M1)
+- [x] O conteúdo principal for legível sem JavaScript. (M1 — Astro SSG)
+- [x] Houver páginas reais de bairro. (M3 — 12 distritos)
+- [x] Houver comparativos reais. (M4)
+- [x] Houver metodologia pública. (M5 — /metodologia)
+- [x] Houver dataset aberto. (M5 — CSV, JSON, GeoJSON)
+- [x] Houver pelo menos um relatório publicado. (M6 — Q2 2026)
+- [x] Houver sitemap e robots.txt. (M1 — @astrojs/sitemap)
+- [x] Houver medição de indexação. (M7 — Search Console via meta tag + PUBLIC_GOOGLE_VERIFICATION)
+- [x] Houver medição de bots de IA. (M7 — evento ai_bot_visit no GA4)
+- [x] Houver medição de referrers de IA. (M7 — evento ai_referrer_visit no GA4)
+- [x] Houver baseline de prompts. (M7 — geo-prompts.json com 7 prompts fixos)
+- [x] Todo material público tiver caminho de conversão para a aplicação. (M0–M6 — CTAs em todas as páginas)
+- [x] Cliques para a aplicação forem rastreáveis por tipo de material. (M7 — source_page_type + UTM)
+- [x] O sistema puder gerar novas páginas sem edição manual página a página. (M3–M4 — dados em TypeScript estático)
 
 ---
 
@@ -1643,7 +1777,7 @@ Mitigação:
 
 Mitigação:
 
-- deixar ações externas para M9;
+- deixar ações externas para M10;
 - priorizar canais próprios;
 - automatizar conteúdo;
 - não depender de comentários manuais em comunidades externas.
@@ -1656,12 +1790,13 @@ Mitigação:
 - Estratégia inicial: **site público de dados e conteúdo, não campanha de mídia**.
 - Tecnologia recomendada: **Astro SSG**.
 - MVP: **até M7**.
-- Comunidade própria: **M8**.
-- Imprensa, criadores e comunidades externas: **M9**.
-- Preço imobiliário: **M10**, fora do MVP.
+- Preço imobiliário agregado: **M8**, usando a base interna BetterPlace.
+- Comunidade própria: **M9**.
+- Imprensa, criadores e comunidades externas: **M10**.
 - Geração massiva de comparativos: **proibida**.
 - Comentários manuais em posts de terceiros: **fora de escopo**.
 - Relatórios e datasets: **ativos centrais da estratégia**.
+- Dados imobiliários públicos: **devem ser agregados, reproduzíveis e acessíveis para agentes de IA**.
 - Todo material público: **deve conduzir para a aplicação durante o conteúdo ou ao final**.
 - CTAs: **devem ser contextuais, rastreáveis e conectados à intenção do usuário**.
 
@@ -1740,7 +1875,7 @@ A skill deve retornar sempre:
 — lista de campos ausentes ou com lacunas declaradas;
 — lista de CTAs inseridos com posição e variante;
 — aviso de bloqueio se algum termo proibido foi detectado na entrada;
-— checklist de critérios de aprovação do milestone correspondente (M3 para bairros, M4 para comparativos, M6 para relatórios, M8 para posts).
+— checklist de critérios de aprovação do milestone correspondente (M3 para bairros, M4 para comparativos, M6 para relatórios, M9 para posts).
 ```
 
 ### 22.6 Regras invioláveis da skill

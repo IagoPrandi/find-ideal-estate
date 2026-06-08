@@ -2,7 +2,7 @@
 
 **Canal:** comunidade própria no Reddit — `r/OndeMorarBrasil` (nome sugerido, PRD §8.5)
 **Base:** `PRD_MKT_GEO.md` §8.5 · regras em `../content-guidelines.md`
-**Uso:** publicação editorial própria (M8). Valor informativo primeiro; CTA discreto no final.
+**Uso:** publicação editorial própria (M9). Valor informativo primeiro; CTA discreto no final.
 
 > O que **não** fazer: caçar posts de terceiros para comentar, responder em massa,
 > autopromoção agressiva, postar links sem contexto, simular engajamento.

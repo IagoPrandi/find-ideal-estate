@@ -84,7 +84,7 @@ Nenhum material público pode conter:
 - "bairro com baixo índice de criminalidade" (sem citar fonte e ressalva de sub-registro)
 - "bairro valorizado" / "bairro em alta" (sem dados de tendência)
 - "melhor investimento" / "ótima oportunidade de compra"
-- preços de imóveis de anúncios individuais em qualquer forma
+- preços de imóveis fora da política do M8: sem agregação, sem elegibilidade, sem amostra limitada ou com dados sensíveis
 
 ### 4.2 Termos e frases RECOMENDADOS
 
@@ -136,17 +136,21 @@ poi_score >= 60 → "Boa cobertura de pontos de interesse na região."
 poi_score < 60  → "Cobertura moderada de pontos de interesse."
 ```
 
-**Panorama imobiliário** (dados agregados internos — não usar para ranquear ou vender)
+**Panorama imobiliário** (dados agregados internos — orientar decisão e levar à página)
 ```txt
 cost_index >= 75 → "Entre os distritos com maior custo relativo na análise."
 cost_index >= 50 → "Custo relativo moderado em relação aos distritos analisados."
 cost_index < 50  → "Entre os distritos com menor custo relativo na análise."
-trend == 'alta'   → "↑ tendência de valorização"
-trend == 'estavel'→ "→ preço relativamente estável"
-trend == 'queda'  → "↓ tendência de queda"
+same_listing_price_change > 0 → "Variação positiva no mesmo conjunto de imóveis analisado."
+same_listing_price_change = 0 → "Sem variação relevante no mesmo conjunto de imóveis analisado."
+same_listing_price_change < 0 → "Variação negativa no mesmo conjunto de imóveis analisado."
 ```
 
-Obrigatório declarar em todo panorama imobiliário: "Dados agregados por distrito — não representam anúncios individuais."
+Obrigatório declarar em todo panorama imobiliário: "Dados agregados da base interna BetterPlace — a amostra exibida é limitada e não representa todo o inventário."
+
+Quando houver amostra de imóveis, exibir apenas campos mínimos de decisão e link interno
+para a página do imóvel ou lista filtrada. Nunca expor dados pessoais, contatos, campos de
+auditoria, histórico interno ou qualquer informação sensível.
 
 Proibido gerar afirmações absolutas (lista §4.1) em qualquer circunstância.
 
@@ -322,7 +326,7 @@ Cada página precisa ter dados próprios, resumo próprio e intenção clara. On
 
 **Nenhuma.** Todo o M0 é executável por uma pessoa, com artefatos documentais. As frentes
 que dependem de terceiros (imprensa, criadores, Wikipedia/Wikidata, Product Hunt, Hacker
-News, comunidades externas) ficam para M9, conforme PRD §4 e §16.
+News, comunidades externas) ficam para M10, conforme PRD §4 e §16.
 
 ---
 

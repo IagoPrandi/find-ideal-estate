@@ -7,7 +7,7 @@ Checks:
   3. Scores — all publishable neighborhoods have scores for >= 4 metrics
   4. Coverage — coverage flags are consistent with score presence
   5. View — urban_metrics_by_district is populated and reasonably fresh
-  6. No price data — confirms preço imobiliário is absent (MVP constraint)
+  6. No public real-estate metrics — confirms the urban MVP view does not expose M8 fields yet
 
 Exit code 0 = all checks passed.
 Exit code 1 = one or more checks failed (details logged).
@@ -182,17 +182,26 @@ def run_checks(conn: sa.Connection, city_code: str) -> list[bool]:
         log.info("[%s] View freshness: no refreshed_at found", WARN)
 
     # ------------------------------------------------------------------
-    # 6. No price data (MVP constraint)
+    # 6. No public real-estate metrics in the urban MVP view.
+    # The internal real-estate database may exist; this check only guards the public GEO surface.
     # ------------------------------------------------------------------
-    price_tables = conn.execute(
+    public_price_columns = conn.execute(
         sa.text(
-            "SELECT COUNT(*) FROM information_schema.tables "
+            "SELECT COUNT(*) FROM information_schema.columns "
             "WHERE table_schema = 'public' "
-            "AND table_name LIKE '%price%' OR table_name LIKE '%preco%'"
+            "AND table_name = 'urban_metrics_by_district' "
+            "AND (column_name LIKE '%price%' "
+            "OR column_name LIKE '%preco%' "
+            "OR column_name LIKE '%rent%' "
+            "OR column_name LIKE '%aluguel%' "
+            "OR column_name LIKE '%sale%' "
+            "OR column_name LIKE '%venda%')"
         ),
     ).scalar()
-    results.append(check("MVP constraint: no price tables", price_tables == 0,
-                         f"{price_tables} price-related tables found"))
+    results.append(check("Urban MVP surface: no public real-estate metrics",
+                         public_price_columns == 0,
+                         f"{public_price_columns} real-estate columns found in "
+                         "urban_metrics_by_district"))
 
     return results
 

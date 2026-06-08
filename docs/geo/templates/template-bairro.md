@@ -22,10 +22,17 @@ metricas_normalizadas:
   poi_score              # 0–100, maior = mais serviços
 safety_data_coverage     # 'completa' | 'parcial' | 'insuficiente'
 real_estate_metrics:
-  pricePerM2Sale         # R$/m² — venda (agregado, não anúncio individual)
-  pricePerM2Rent         # R$/m²·mês — aluguel (agregado)
-  costIndex              # 0–100 (relativo entre distritos)
-  trend                  # 'alta' | 'estavel' | 'queda'
+  aggregationLevel       # 'estado' | 'cidade' | 'bairro' | 'lista'
+  aggregationSlug        # slug canônico do recorte
+  listingSampleCount     # quantidade de imóveis elegíveis
+  rentPerM2              # aluguel/m²
+  totalRentCostPerM2     # aluguel + encargos conhecidos/m²
+  salePricePerM2         # preço de venda/m²
+  rentQuartiles          # q1, mediana, q3
+  saleQuartiles          # q1, mediana, q3
+  sameListingPriceChange # variação usando o mesmo conjunto de imóveis
+  sampleListings[]       # amostra limitada com campos mínimos e link interno
+  costIndex              # 0–100 (relativo entre recortes comparáveis)
   dataAt                 # YYYY-MM-DD
 pontos_fortes[]
 pontos_atencao[]
@@ -46,7 +53,7 @@ data_atualizacao
 8. **Risco de alagamento**
 9. **Segurança pública** (com score, fonte SSP-SP e ressalva de sub-registro)
 10. **Acesso a serviços / POIs**
-11. **Panorama imobiliário** (preço/m² venda, aluguel, índice de custo relativo, tendência — com nota obrigatória de dados agregados)
+11. **Panorama imobiliário** (aluguel/m², custo total mensal/m², venda/m², quartis, variação comparável e amostra limitada — com nota obrigatória de dados agregados)
 12. **Pontos fortes**
 13. **Pontos de atenção**
 14. **Lacunas declaradas** (bloco visual se houver dados ausentes/parciais)
@@ -104,18 +111,23 @@ Score de risco e segurança: menor valor = maior exposição/ocorrência relativ
 {{bloco_servicos}}
 
 ## Panorama imobiliário
-> Dados agregados por distrito — não representam anúncios individuais. Fonte: BetterPlace. Atualizado em {{real_estate_dataAt}}.
+> Dados agregados da base interna BetterPlace — a amostra exibida é limitada e não representa todo o inventário. Atualizado em {{real_estate_dataAt}}.
 
 | Indicador | Valor |
 |---|---|
-| Preço médio/m² — venda | R$ {{pricePerM2Sale}} |
-| Preço médio/m² — aluguel | R$ {{pricePerM2Rent}}/m²·mês |
+| Imóveis elegíveis na agregação | {{listingSampleCount}} |
+| Aluguel/m² | R$ {{rentPerM2}}/m²·mês |
+| Custo total mensal/m² | R$ {{totalRentCostPerM2}}/m²·mês |
+| Preço de venda/m² | R$ {{salePricePerM2}} |
+| Quartis de aluguel | Q1 {{rentQuartiles.q1}} · mediana {{rentQuartiles.median}} · Q3 {{rentQuartiles.q3}} |
+| Quartis de venda | Q1 {{saleQuartiles.q1}} · mediana {{saleQuartiles.median}} · Q3 {{saleQuartiles.q3}} |
+| Variação no mesmo conjunto de imóveis | {{sameListingPriceChange}} |
 | Custo relativo (0–100) | {{costIndex}}/100 |
-| Tendência recente | {{trend}} |
 
 {{bloco_custo_relativo}}
+{{amostra_imoveis_limitada}}
 <!-- "Para análise detalhada de imóveis disponíveis neste distrito, acesse a aplicação." -->
-<!-- Limitação obrigatória: dados agregados por distrito podem não refletir variações internas entre sub-bairros. -->
+<!-- Limitação obrigatória: dados agregados podem não refletir variações internas entre sub-bairros, listas específicas ou imóveis sem área/encargos completos. -->
 
 ## Pontos fortes
 {{lista_pontos_fortes}}
