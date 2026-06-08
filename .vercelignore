@@ -2,6 +2,10 @@
 !apps
 !apps/web
 !apps/web/**
+!apps/content
+!apps/content/**
+
+# artefatos/local-only — app web
 apps/web/.vercel
 apps/web/.vercel/**
 apps/web/dist
@@ -10,3 +14,11 @@ apps/web/node_modules
 apps/web/node_modules/**
 apps/web/coverage
 apps/web/coverage/**
+
+# artefatos/local-only — app content
+apps/content/.vercel
+apps/content/.vercel/**
+apps/content/dist
+apps/content/dist/**
+apps/content/node_modules
+apps/content/node_modules/**
