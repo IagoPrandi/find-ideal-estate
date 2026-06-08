@@ -1,0 +1,285 @@
+---
+import type { GetStaticPaths } from 'astro';
+import Base from '../../../../../layouts/Base.astro';
+import Cta from '../../../../../components/Cta.astro';
+import { IMOVEIS_AGGREGATES, getImoveisBairro } from '../../../../../data/imoveis_aggregates';
+import { BAIRROS } from '../../../../../data/bairros';
+
+export const getStaticPaths: GetStaticPaths = () =>
+  IMOVEIS_AGGREGATES.map((d) => ({ params: { slug: d.slug }, props: { imovelData: d } }));
+
+const { imovelData } = Astro.props;
+const m = imovelData.metrics;
+
+const bairro = BAIRROS.find((b) => b.slug === imovelData.slug);
+const nome = imovelData.nome;
+
+const formatBRL = (v?: number | null) =>
+  v == null ? 'Dados insuficientes' : `R$ ${v.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+
+const formatM2Mes = (v?: number | null) =>
+  v == null ? 'Dados insuficientes' : `R$ ${v.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}/m²·mês`;
+
+const formatM2 = (v?: number | null) =>
+  v == null ? 'Dados insuficientes' : `R$ ${v.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}/m²`;
+
+const formatQuartis = (q?: { q1: number; median: number; q3: number } | null) =>
+  q == null
+    ? 'Dados insuficientes'
+    : `Q1: ${formatBRL(q.q1)} · Mediana: ${formatBRL(q.median)} · Q3: ${formatBRL(q.q3)}`;
+
+const costTxt =
+  m.costIndex >= 75
+    ? 'Entre os distritos com maior custo relativo na análise.'
+    : m.costIndex >= 50
+    ? 'Custo relativo moderado entre os distritos analisados.'
+    : 'Entre os distritos com menor custo relativo na análise.';
+
+const jsonLd = [
+  {
+    '@context': 'https://schema.org',
+    '@type': 'Place',
+    name: `${nome} — Imóveis`,
+    address: {
+      '@type': 'PostalAddress',
+      addressLocality: 'São Paulo',
+      addressRegion: 'SP',
+      addressCountry: 'BR',
+    },
+    url: `https://www.betterplace.com.br/imoveis/sp/sao-paulo/${imovelData.slug}`,
+  },
+  ...(m.sampleListings?.length
+    ? [{
+        '@context': 'https://schema.org',
+        '@type': 'ItemList',
+        name: `Imóveis disponíveis em ${nome} (amostra BetterPlace)`,
+        description: `Amostra limitada de imóveis elegíveis em ${nome}. Não representa o inventário completo.`,
+        numberOfItems: m.listingSampleCount,
+        url: `https://www.betterplace.com.br/imoveis/sp/sao-paulo/${imovelData.slug}/lista`,
+      }]
+    : []),
+];
+---
+
+<Base
+  title={`Imóveis em ${nome} — Aluguel e Venda · BetterPlace`}
+  description={`Dados imobiliários agregados de ${nome}: aluguel/m², preço de venda/m², quartis de preço e amostra da base interna BetterPlace.`}
+  canonical={`/imoveis/sp/sao-paulo/${imovelData.slug}`}
+  dateModified={m.dataAt}
+  jsonLd={jsonLd}
+>
+  <p class="meta">
+    <a href="/imoveis/sp">← Imóveis em São Paulo</a>
+  </p>
+
+  <span class="tag">Imóveis · {nome} · São Paulo</span>
+  <h1>Imóveis em {nome}</h1>
+  <p class="lead">
+    Dados imobiliários agregados para o distrito de {nome}. Fonte: base interna BetterPlace.
+    A amostra exibida é limitada e não representa o inventário completo.
+  </p>
+  <p class="meta">
+    {m.listingSampleCount.toLocaleString('pt-BR')} imóveis elegíveis ·
+    Atualizado em {m.dataAt} ·
+    <a href={`/imoveis/sp/sao-paulo/${imovelData.slug}/lista`}>Ver amostra</a> ·
+    <a href="/metodologia">Metodologia</a>
+  </p>
+
+  <hr class="divider" />
+
+  <h2>Métricas agregadas</h2>
+
+  <div class="metrics-grid">
+    <div class="metric-card">
+      <span class="metric-card__label">Imóveis elegíveis</span>
+      <span class="metric-card__value">{m.listingSampleCount.toLocaleString('pt-BR')}</span>
+    </div>
+    <div class="metric-card">
+      <span class="metric-card__label">Aluguel/m²</span>
+      <span class="metric-card__value">{formatM2Mes(m.rentPerM2)}</span>
+    </div>
+    <div class="metric-card">
+      <span class="metric-card__label">Custo total mensal/m²</span>
+      <span class="metric-card__value">{formatM2Mes(m.totalRentCostPerM2)}</span>
+      {m.totalRentCostPerM2 && <span class="metric-card__note">Aluguel + encargos conhecidos</span>}
+    </div>
+    <div class="metric-card">
+      <span class="metric-card__label">Preço de venda/m²</span>
+      <span class="metric-card__value">{formatM2(m.salePricePerM2)}</span>
+    </div>
+    <div class="metric-card metric-card--wide">
+      <span class="metric-card__label">Quartis de aluguel</span>
+      <span class="metric-card__value metric-card__value--small">{formatQuartis(m.rentQuartiles)}</span>
+    </div>
+    <div class="metric-card metric-card--wide">
+      <span class="metric-card__label">Quartis de venda</span>
+      <span class="metric-card__value metric-card__value--small">{formatQuartis(m.saleQuartiles)}</span>
+    </div>
+    <div class="metric-card">
+      <span class="metric-card__label">Custo relativo (0–100)</span>
+      <span class="metric-card__value">{m.costIndex}/100</span>
+    </div>
+  </div>
+
+  <p class="meta">
+    {costTxt} Custo relativo calculado entre os distritos com dados disponíveis — não representa custo absoluto da cidade.
+  </p>
+
+  <Cta tipo="bairro" posicao="mid" slug={imovelData.slug} />
+
+  <hr class="divider" />
+
+  <h2>Limitações desta agregação</h2>
+  <ul>
+    <li>Dados agregados podem não refletir variações internas entre sub-bairros.</li>
+    <li>Imóveis sem área cadastrada foram excluídos do cálculo por m².</li>
+    <li>Condomínio e IPTU incluídos apenas quando disponíveis — ausência declarada por item.</li>
+    <li>A amostra abaixo é limitada a 8 imóveis por tipo e não representa o inventário completo.</li>
+    <li>Variação de preço entre períodos não disponível nesta versão.</li>
+    <li>
+      Metodologia completa: <a href="/metodologia">betterplace.com.br/metodologia</a>
+    </li>
+  </ul>
+
+  {m.sampleListings && m.sampleListings.length > 0 && (
+    <>
+      <hr class="divider" />
+      <h2>
+        Amostra de imóveis — {nome}
+        <a href={`/imoveis/sp/sao-paulo/${imovelData.slug}/lista`} class="ver-mais">ver lista completa →</a>
+      </h2>
+      <p class="meta">
+        Imóveis elegíveis da base interna BetterPlace. Ordenação por área (maior primeiro).
+        Não representa o inventário completo.
+      </p>
+
+      <div class="sample-list">
+        {m.sampleListings.map((s) => (
+          <div class="sample-item">
+            <div class="sample-item__header">
+              <span class="sample-badge sample-badge--{s.tipoNegocio}">
+                {s.tipoNegocio === 'aluguel' ? 'Aluguel' : 'Venda'}
+              </span>
+              <span class="sample-item__tipo">{s.tipoImovel}</span>
+            </div>
+            <div class="sample-item__body">
+              {s.areaM2 != null && <span>{s.areaM2} m²</span>}
+              {s.quartos != null && <span>{s.quartos} quarto{s.quartos !== 1 ? 's' : ''}</span>}
+              {s.aluguel != null && (
+                <span>Aluguel: <strong>{formatBRL(s.aluguel)}</strong></span>
+              )}
+              {s.condominio != null && (
+                <span>Condomínio: {formatBRL(s.condominio)}</span>
+              )}
+              {s.precoTotalMensal != null && (
+                <span>Total mensal: <strong>{formatBRL(s.precoTotalMensal)}</strong></span>
+              )}
+              {s.aluguelM2 != null && (
+                <span>{formatM2Mes(s.aluguelM2)}</span>
+              )}
+              {s.precoVenda != null && (
+                <span>Venda: <strong>{formatBRL(s.precoVenda)}</strong></span>
+              )}
+              {s.precoVendaM2 != null && (
+                <span>{formatM2(s.precoVendaM2)}</span>
+              )}
+            </div>
+            <a href={s.url} class="sample-item__link" target="_blank" rel="noopener">
+              Ver imóvel →
+            </a>
+          </div>
+        ))}
+      </div>
+    </>
+  )}
+
+  <hr class="divider" />
+
+  {bairro && (
+    <p class="meta">
+      Dados de qualidade urbana para {nome}:
+      transporte ({bairro.transportScore}/100), áreas verdes ({bairro.greenScore}/100),
+      segurança ({bairro.safetyScore}/100) ·
+      <a href={`/bairros/${bairro.slug}`}>Ver página do bairro →</a>
+    </p>
+  )}
+
+  <p class="meta">
+    <a href="/imoveis/sp">← Todos os distritos</a> ·
+    <a href="/imoveis/aggregates.json">Download JSON</a> ·
+    <a href="/imoveis/aggregates.csv">Download CSV</a>
+  </p>
+
+  <Cta tipo="bairro" posicao="end" slug={imovelData.slug} />
+</Base>
+
+<style>
+  .metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(175px, 1fr));
+    gap: 0.75rem;
+    margin: 1rem 0 1.25rem;
+  }
+  .metric-card {
+    background: var(--color-surface, #f8fafc);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+  .metric-card--wide { grid-column: span 2; }
+  .metric-card__label { font-size: 0.78rem; color: var(--color-muted); }
+  .metric-card__value { font-size: 1.05rem; font-weight: 700; }
+  .metric-card__value--small { font-size: 0.88rem; }
+  .metric-card__note { font-size: 0.72rem; color: var(--color-muted); }
+
+  .ver-mais {
+    font-size: 0.82rem;
+    font-weight: 400;
+    margin-left: 0.75rem;
+  }
+
+  .sample-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin: 0.75rem 0;
+  }
+  .sample-item {
+    border: 1px solid var(--color-border);
+    border-radius: 7px;
+    padding: 0.75rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    font-size: 0.9rem;
+  }
+  .sample-item__header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .sample-item__tipo { color: var(--color-muted); font-size: 0.82rem; }
+  .sample-item__body {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 1.25rem;
+    font-size: 0.88rem;
+  }
+  .sample-item__link {
+    font-size: 0.82rem;
+    color: var(--color-accent);
+    text-decoration: none;
+  }
+  .sample-item__link:hover { text-decoration: underline; }
+  .sample-badge {
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+  }
+  .sample-badge--aluguel { background: #eff6ff; color: #1d4ed8; }
+  .sample-badge--venda { background: #f0fdf4; color: #15803d; }
+</style>

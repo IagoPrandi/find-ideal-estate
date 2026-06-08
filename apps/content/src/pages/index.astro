@@ -1,0 +1,71 @@
+---
+import Base from '../layouts/Base.astro';
+import Cta from '../components/Cta.astro';
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'WebSite',
+  name: 'BetterPlace',
+  url: 'https://www.betterplace.com.br',
+  description:
+    'BetterPlace ajuda pessoas a escolher onde morar usando dados de bairro, mobilidade, segurança, áreas verdes e riscos urbanos.',
+};
+---
+
+<Base
+  title="BetterPlace — Dados de bairro para decidir onde morar em São Paulo"
+  description="Compare bairros de São Paulo por transporte, segurança, áreas verdes e riscos urbanos. Dados públicos agregados com metodologia transparente."
+  jsonLd={jsonLd}
+>
+  <span class="tag">São Paulo · MVP</span>
+  <h1>Dados de bairro para decidir onde morar</h1>
+  <p class="lead">
+    BetterPlace ajuda pessoas a escolher onde morar usando dados públicos de bairro, mobilidade,
+    segurança, áreas verdes e riscos urbanos em São Paulo.
+  </p>
+
+  <Cta tipo="geral" posicao="hero" slug="home" />
+
+  <hr class="divider" />
+
+  <h2>O que você encontra aqui</h2>
+
+  <div class="card-grid">
+    <div class="card">
+      <p class="card__title"><a href="/bairros">Páginas de bairro</a></p>
+      <p class="card__body">Dados de transporte, segurança, áreas verdes e riscos urbanos por bairro.</p>
+    </div>
+    <div class="card">
+      <p class="card__title"><a href="/comparar">Comparativos</a></p>
+      <p class="card__body">Análise lado a lado entre bairros com recomendação por perfil de moradia.</p>
+    </div>
+    <div class="card">
+      <p class="card__title"><a href="/relatorios">Relatórios</a></p>
+      <p class="card__body">Relatórios periódicos de qualidade urbana em São Paulo com rankings e achados.</p>
+    </div>
+    <div class="card">
+      <p class="card__title"><a href="/dados">Dataset aberto</a></p>
+      <p class="card__body">Dados agregados por distrito disponíveis em CSV, JSON e GeoJSON.</p>
+    </div>
+  </div>
+
+  <hr class="divider" />
+
+  <h2>Bairros em destaque</h2>
+  <ul>
+    <li><a href="/bairros/vila-mariana">Vila Mariana</a> — transporte, áreas verdes e qualidade urbana</li>
+    <li><a href="/bairros/pinheiros">Pinheiros</a> — transporte, segurança, áreas verdes e qualidade urbana</li>
+  </ul>
+
+  <h2>Comparativos em destaque</h2>
+  <ul>
+    <li><a href="/comparar/pinheiros-vs-vila-mariana">Pinheiros vs Vila Mariana</a></li>
+  </ul>
+
+  <hr class="divider" />
+
+  <p class="meta">
+    Dados públicos agregados por distrito. <a href="/metodologia">Metodologia completa</a>.
+    Limitações declaradas em cada página.
+  </p>
+</Base>

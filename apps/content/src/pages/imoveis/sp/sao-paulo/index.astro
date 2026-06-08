@@ -1,0 +1,20 @@
+---
+import Base from '../../../../layouts/Base.astro';
+import { IMOVEIS_CIDADE } from '../../../../data/imoveis_aggregates';
+
+const c = IMOVEIS_CIDADE;
+---
+
+<Base
+  title="Imóveis em São Paulo — Dados por distrito · BetterPlace"
+  description="Panorama imobiliário da cidade de São Paulo por distrito: aluguel/m², preço de venda/m² e quartis."
+  canonical="/imoveis/sp/sao-paulo"
+  dateModified={c?.dataAtualizacao ?? '2026-06-07'}
+>
+  <script>
+    window.location.replace('/imoveis/sp');
+  </script>
+  <p>
+    Redirecionando para <a href="/imoveis/sp">panorama imobiliário de São Paulo</a>…
+  </p>
+</Base>

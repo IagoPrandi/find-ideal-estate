@@ -1,0 +1,136 @@
+---
+import Base from '../layouts/Base.astro';
+import Cta from '../components/Cta.astro';
+
+const dateModified = '2026-06-07';
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'Article',
+  headline: 'Metodologia — BetterPlace',
+  description: 'Como o BetterPlace calcula e agrega dados de qualidade urbana por distrito em São Paulo.',
+  dateModified,
+  author: { '@type': 'Organization', name: 'BetterPlace' },
+};
+---
+
+<Base
+  title="Metodologia — Como calculamos os dados de bairro · BetterPlace"
+  description="Entenda como o BetterPlace agrega dados públicos de transporte, segurança, áreas verdes e riscos urbanos por distrito em São Paulo."
+  dateModified={dateModified}
+  jsonLd={jsonLd}
+  ogType="article"
+>
+  <span class="tag">Metodologia · v0.1</span>
+  <h1>Como calculamos os dados de bairro</h1>
+  <p class="lead">
+    Esta página descreve as fontes, o processo de agregação e as limitações dos dados
+    publicados pelo BetterPlace. Transparência sobre limitações é parte do produto.
+  </p>
+
+  <h2>Princípio geral</h2>
+  <p>
+    Todos os dados são públicos, agregados por distrito oficial (IBGE/PMSP) e atualizados
+    periodicamente. Nenhum dado individual ou pessoal é processado. As afirmações do BetterPlace
+    são sempre relativas — comparativas entre distritos — nunca absolutas.
+  </p>
+
+  <h2>Unidade geográfica</h2>
+  <p>
+    A unidade básica é o <strong>distrito oficial</strong> de São Paulo, conforme divisão
+    IBGE/PMSP. Alguns bairros populares (ex.: Pompeia, Aclimação) são parte de um distrito
+    maior — isso é declarado em cada página.
+  </p>
+
+  <h2>Métricas e fontes</h2>
+
+  <h3>Transporte público</h3>
+  <p>
+    Score calculado com base na cobertura de linhas de ônibus (SPTrans), metrô (Metrô SP) e
+    CPTM, ponderada pela frequência e distância média às paradas. Fonte: feeds GTFS oficiais.
+  </p>
+
+  <h3>Áreas verdes</h3>
+  <p>
+    Percentual de área verde por distrito, combinando dados do OpenStreetMap e SVMA
+    (Secretaria do Verde e Meio Ambiente). Inclui parques, praças e áreas de vegetação
+    mapeadas. Não inclui vegetação em lotes privados.
+  </p>
+
+  <h3>Risco de alagamento</h3>
+  <p>
+    Score baseado no histórico de pontos de alagamento registrados pela CGE/CPRM e na
+    extensão de áreas em zona de risco. Score menor indica menor exposição relativa —
+    não significa ausência de risco.
+  </p>
+
+  <h3>Segurança</h3>
+  <p>
+    Calculada a partir de boletins de ocorrência (SSP-SP) por categoria de crime, normalizada
+    por população estimada. Cobertura parcial: algumas categorias têm sub-registro.
+    Lacunas são declaradas nas páginas com cobertura insuficiente.
+  </p>
+
+  <h3>Acesso a POIs</h3>
+  <p>
+    Score de acessibilidade a pontos de interesse (saúde, educação, comércio, serviços)
+    calculado com dados do OpenStreetMap, ponderado por categoria e distância caminhável.
+  </p>
+
+  <h2>Normalização</h2>
+  <p>
+    Cada métrica é normalizada de 0 a 100 em relação aos distritos de São Paulo com dados
+    disponíveis. O score 50 representa a mediana da distribuição.
+  </p>
+
+  <h2>Dados imobiliários</h2>
+  <p>
+    A camada imobiliária agrega dados da base interna BetterPlace por distrito.
+    Fonte obrigatória: base própria de anúncios coletados via pipeline interno.
+    Sem scraping novo ou fonte externa.
+  </p>
+
+  <h3>Métricas imobiliárias</h3>
+  <ul>
+    <li><strong>Aluguel/m²:</strong> mediana do preço de aluguel por metro quadrado para imóveis ativos com área declarada.</li>
+    <li><strong>Custo total mensal/m²:</strong> aluguel + encargos conhecidos (condomínio). IPTU não incluído por indisponibilidade frequente.</li>
+    <li><strong>Preço de venda/m²:</strong> mediana do preço de venda por metro quadrado para imóveis ativos com área declarada.</li>
+    <li><strong>Quartis de preço:</strong> Q1, mediana e Q3 calculados sobre o conjunto de imóveis elegíveis por tipo (aluguel ou venda).</li>
+    <li><strong>Custo relativo (0–100):</strong> índice calculado entre os distritos com dados disponíveis. 100 = maior custo relativo no conjunto analisado.</li>
+  </ul>
+
+  <h3>Política de agregação imobiliária</h3>
+  <ul>
+    <li>Mínimo de 5 imóveis ativos com área declarada por tipo por distrito para publicar métrica numérica.</li>
+    <li>Aluguel e venda são tratados separadamente — nenhuma métrica mistura os dois tipos.</li>
+    <li>Variação de preço calculada somente sobre o mesmo conjunto de imóveis em dois períodos — não mistura variação de composição com variação real.</li>
+    <li>Amostra limitada a 8 imóveis por distrito por tipo; ordenação determinística (maior área primeiro).</li>
+    <li>Ausência de encargos (condomínio, IPTU, área) declarada por item — sem omissão silenciosa.</li>
+    <li>Lacunas de cobertura declaradas explicitamente nas páginas de distrito.</li>
+  </ul>
+
+  <h3>Limitações dos dados imobiliários</h3>
+  <ul>
+    <li>Dados representam imóveis ativos na base interna — não refletem todo o mercado.</li>
+    <li>Dados agregados podem não refletir variações internas entre sub-bairros de um mesmo distrito.</li>
+    <li>Condomínio e IPTU ausentes em parte dos registros — custo total pode estar subestimado.</li>
+    <li>Não há histórico de preços por imóvel nesta versão — variação mensal limitada.</li>
+    <li>Imóveis sem área cadastrada excluídos do cálculo por m².</li>
+  </ul>
+
+  <h2>Limitações gerais</h2>
+  <ul>
+    <li>Cobertura de segurança é parcial — sub-registro em algumas categorias.</li>
+    <li>OSM tem variação de cobertura — áreas centrais tendem a ser mais completas.</li>
+    <li>A data de atualização varia por métrica — sempre declarada nas páginas.</li>
+    <li>Comparações inter-cidades não estão disponíveis no MVP.</li>
+  </ul>
+
+  <h2>Versionamento</h2>
+  <p>
+    O dataset é versionado. Cada atualização mantém o histórico em
+    <a href="/dados">changelog do dataset</a>.
+  </p>
+
+  <Cta tipo="geral" posicao="end" slug="metodologia" />
+</Base>

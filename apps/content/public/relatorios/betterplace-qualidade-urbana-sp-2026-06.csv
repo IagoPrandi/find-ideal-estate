@@ -1,0 +1,26 @@
+relatorio_slug,relatorio_periodo,metrica,posicao,slug,nome,score
+2026-06,2026-Q2,transport_score,1,vila-mariana,Vila Mariana,44.2
+2026-06,2026-Q2,transport_score,2,liberdade,Liberdade,38.9
+2026-06,2026-Q2,transport_score,3,itaim-bibi,Itaim Bibi,32.9
+2026-06,2026-Q2,transport_score,4,pinheiros,Pinheiros,32.0
+2026-06,2026-Q2,transport_score,5,santana,Santana,31.4
+2026-06,2026-Q2,green_score,1,consolacao,Consolação,82.5
+2026-06,2026-Q2,green_score,2,butanta,Butantã,77.7
+2026-06,2026-Q2,green_score,3,moema,Moema,73.8
+2026-06,2026-Q2,green_score,4,pinheiros,Pinheiros,68.1
+2026-06,2026-Q2,green_score,5,perdizes,Perdizes,54.7
+2026-06,2026-Q2,flood_risk_score,1,vila-mariana,Vila Mariana,100.0
+2026-06,2026-Q2,flood_risk_score,1,pinheiros,Pinheiros,100.0
+2026-06,2026-Q2,flood_risk_score,1,itaim-bibi,Itaim Bibi,100.0
+2026-06,2026-Q2,flood_risk_score,1,moema,Moema,100.0
+2026-06,2026-Q2,flood_risk_score,1,bela-vista,Bela Vista,100.0
+2026-06,2026-Q2,safety_score,1,santana,Santana,94.2
+2026-06,2026-Q2,safety_score,2,mooca,Mooca,90.6
+2026-06,2026-Q2,safety_score,3,vila-mariana,Vila Mariana,89.9
+2026-06,2026-Q2,safety_score,4,tatuape,Tatuapé,89.3
+2026-06,2026-Q2,safety_score,4,butanta,Butantã,89.3
+2026-06,2026-Q2,poi_score,1,vila-mariana,Vila Mariana,45.1
+2026-06,2026-Q2,poi_score,2,liberdade,Liberdade,42.0
+2026-06,2026-Q2,poi_score,3,itaim-bibi,Itaim Bibi,35.0
+2026-06,2026-Q2,poi_score,4,santana,Santana,34.2
+2026-06,2026-Q2,poi_score,5,tatuape,Tatuapé,32.9

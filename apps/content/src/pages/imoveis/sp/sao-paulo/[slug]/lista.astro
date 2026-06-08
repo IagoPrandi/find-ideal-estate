@@ -1,0 +1,169 @@
+---
+import type { GetStaticPaths } from 'astro';
+import Base from '../../../../../layouts/Base.astro';
+import Cta from '../../../../../components/Cta.astro';
+import { IMOVEIS_AGGREGATES } from '../../../../../data/imoveis_aggregates';
+
+export const getStaticPaths: GetStaticPaths = () =>
+  IMOVEIS_AGGREGATES.filter((d) => (d.metrics.sampleListings?.length ?? 0) > 0).map((d) => ({
+    params: { slug: d.slug },
+    props: { imovelData: d },
+  }));
+
+const { imovelData } = Astro.props;
+const m = imovelData.metrics;
+const nome = imovelData.nome;
+const sample = m.sampleListings ?? [];
+
+const alugueis = sample.filter((s) => s.tipoNegocio === 'aluguel');
+const vendas = sample.filter((s) => s.tipoNegocio === 'venda');
+
+const formatBRL = (v?: number | null) =>
+  v == null ? '—' : `R$ ${v.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+
+const formatM2Mes = (v?: number | null) =>
+  v == null ? '—' : `${formatBRL(v)}/m²·mês`;
+
+const formatM2 = (v?: number | null) =>
+  v == null ? '—' : `${formatBRL(v)}/m²`;
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'ItemList',
+  name: `Amostra de imóveis em ${nome} — BetterPlace`,
+  description: `Amostra limitada de imóveis elegíveis em ${nome} da base interna BetterPlace. Não representa o inventário completo.`,
+  numberOfItems: m.listingSampleCount,
+  url: `https://www.betterplace.com.br/imoveis/sp/sao-paulo/${imovelData.slug}/lista`,
+};
+---
+
+<Base
+  title={`Imóveis para alugar e vender em ${nome} · BetterPlace`}
+  description={`Amostra de imóveis elegíveis em ${nome}: área, quartos, aluguel/m² e preço de venda. Fonte: base interna BetterPlace.`}
+  canonical={`/imoveis/sp/sao-paulo/${imovelData.slug}/lista`}
+  dateModified={m.dataAt}
+  jsonLd={jsonLd}
+>
+  <p class="meta">
+    <a href={`/imoveis/sp/sao-paulo/${imovelData.slug}`}>← Métricas de {nome}</a>
+  </p>
+
+  <span class="tag">Lista · {nome} · São Paulo</span>
+  <h1>Imóveis elegíveis em {nome}</h1>
+  <p class="lead">
+    Amostra limitada da base interna BetterPlace para o distrito de {nome}. Ordenação por área (maior primeiro).
+    Esta amostra não representa o inventário completo — use a aplicação para busca personalizada.
+  </p>
+
+  <p class="meta">
+    {m.listingSampleCount.toLocaleString('pt-BR')} imóveis elegíveis identificados ·
+    {sample.length} exibidos nesta amostra ·
+    Atualizado em {m.dataAt}
+  </p>
+
+  <Cta tipo="bairro" posicao="mid" slug={imovelData.slug} />
+
+  <hr class="divider" />
+
+  {alugueis.length > 0 && (
+    <>
+      <h2>Para alugar</h2>
+      <div class="listing-table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Tipo</th>
+              <th>Área (m²)</th>
+              <th>Quartos</th>
+              <th>Aluguel</th>
+              <th>Condomínio</th>
+              <th>Total mensal</th>
+              <th>Aluguel/m²</th>
+              <th>Link</th>
+            </tr>
+          </thead>
+          <tbody>
+            {alugueis.map((s) => (
+              <tr>
+                <td>{s.tipoImovel}</td>
+                <td>{s.areaM2 ?? '—'}</td>
+                <td>{s.quartos ?? '—'}</td>
+                <td>{formatBRL(s.aluguel)}</td>
+                <td>{s.condominio != null ? formatBRL(s.condominio) : 'Não informado'}</td>
+                <td>{formatBRL(s.precoTotalMensal)}</td>
+                <td>{formatM2Mes(s.aluguelM2)}</td>
+                <td>
+                  <a href={s.url} target="_blank" rel="noopener" class="listing-link">Ver →</a>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  )}
+
+  {vendas.length > 0 && (
+    <>
+      <h2>Para comprar</h2>
+      <div class="listing-table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Tipo</th>
+              <th>Área (m²)</th>
+              <th>Quartos</th>
+              <th>Preço de venda</th>
+              <th>Venda/m²</th>
+              <th>Link</th>
+            </tr>
+          </thead>
+          <tbody>
+            {vendas.map((s) => (
+              <tr>
+                <td>{s.tipoImovel}</td>
+                <td>{s.areaM2 ?? '—'}</td>
+                <td>{s.quartos ?? '—'}</td>
+                <td>{formatBRL(s.precoVenda)}</td>
+                <td>{formatM2(s.precoVendaM2)}</td>
+                <td>
+                  <a href={s.url} target="_blank" rel="noopener" class="listing-link">Ver →</a>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  )}
+
+  <hr class="divider" />
+
+  <h2>Limitações</h2>
+  <ul>
+    <li>Esta amostra é limitada a {sample.length} imóveis e não representa o inventário completo do distrito.</li>
+    <li>Imóveis sem área cadastrada foram excluídos do cálculo por m².</li>
+    <li>Condomínio ausente em alguns itens — custo total pode estar subestimado.</li>
+    <li>IPTU não contabilizado nesta versão.</li>
+    <li>Dados de preços individuais podem estar desatualizados em relação ao mercado atual.</li>
+  </ul>
+
+  <p class="meta">
+    Metodologia: <a href="/metodologia">como os dados são calculados</a> ·
+    <a href={`/imoveis/sp/sao-paulo/${imovelData.slug}`}>Ver métricas agregadas</a> ·
+    <a href="/imoveis/sp">Todos os distritos</a>
+  </p>
+
+  <Cta tipo="bairro" posicao="end" slug={imovelData.slug} />
+</Base>
+
+<style>
+  .listing-table-wrap {
+    overflow-x: auto;
+    margin: 0.75rem 0 1.5rem;
+  }
+  .listing-link {
+    font-weight: 600;
+    font-size: 0.88rem;
+  }
+</style>

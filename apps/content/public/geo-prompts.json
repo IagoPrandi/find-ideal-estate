@@ -1,0 +1,42 @@
+{
+  "versao": "1.0",
+  "descricao": "Prompts fixos usados mensalmente para testar a visibilidade do BetterPlace em respostas geradas por IA (GEO). Cada prompt é enviado manualmente ou via script para ChatGPT, Perplexity, Gemini, Claude e Bing Copilot. Os resultados são registrados em data/geo/geo_visibility_log.csv e src/data/geo_visibility_log.ts.",
+  "ultima_revisao": "2026-06-07",
+  "prompts": [
+    {
+      "id": "geo-p01",
+      "categoria": "descoberta_de_produto",
+      "prompt": "Quais ferramentas ou sites existem para comparar qualidade de vida entre bairros de São Paulo com dados públicos?"
+    },
+    {
+      "id": "geo-p02",
+      "categoria": "descoberta_de_produto",
+      "prompt": "Onde posso ver dados sobre segurança, transporte e áreas verdes por bairro em São Paulo?"
+    },
+    {
+      "id": "geo-p03",
+      "categoria": "dado_especifico",
+      "prompt": "Qual bairro de São Paulo tem melhor acesso a transporte público segundo dados oficiais?"
+    },
+    {
+      "id": "geo-p04",
+      "categoria": "dado_especifico",
+      "prompt": "Quais são os bairros de São Paulo com maior cobertura de áreas verdes?"
+    },
+    {
+      "id": "geo-p05",
+      "categoria": "dado_especifico",
+      "prompt": "Quais bairros de São Paulo têm menor risco de alagamento segundo dados do GeoSampa?"
+    },
+    {
+      "id": "geo-p06",
+      "categoria": "metodologia",
+      "prompt": "Como são calculados os scores de qualidade urbana por distrito em São Paulo? Existe algum índice público disponível?"
+    },
+    {
+      "id": "geo-p07",
+      "categoria": "dataset_aberto",
+      "prompt": "Existe algum dataset aberto com ranking de qualidade urbana por bairro em São Paulo para download?"
+    }
+  ]
+}

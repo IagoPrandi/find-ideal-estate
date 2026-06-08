@@ -1,0 +1,90 @@
+{
+  "versao": "0.1",
+  "data_atualizacao": "2026-06-06",
+  "descricao": "Dicionário de campos do dataset BetterPlace de Qualidade Urbana — São Paulo",
+  "campos": [
+    {
+      "campo": "dataset_version",
+      "tipo": "string",
+      "descricao": "Versão do dataset no formato semver simplificado (ex.: 0.1)",
+      "exemplo": "0.1"
+    },
+    {
+      "campo": "data_atualizacao",
+      "tipo": "string (YYYY-MM-DD)",
+      "descricao": "Data de referência dos dados do pipeline de agregação",
+      "exemplo": "2026-06-06"
+    },
+    {
+      "campo": "cidade",
+      "tipo": "string",
+      "descricao": "Município de referência",
+      "exemplo": "São Paulo"
+    },
+    {
+      "campo": "slug",
+      "tipo": "string",
+      "descricao": "Identificador único do distrito em formato URL-friendly (kebab-case, sem acentos)",
+      "exemplo": "vila-mariana"
+    },
+    {
+      "campo": "nome",
+      "tipo": "string",
+      "descricao": "Nome do bairro ou referência popular, conforme uso comum",
+      "exemplo": "Vila Mariana"
+    },
+    {
+      "campo": "distrito",
+      "tipo": "string",
+      "descricao": "Nome oficial do distrito municipal (IBGE/PMSP). Pode diferir do nome popular.",
+      "exemplo": "Vila Mariana"
+    },
+    {
+      "campo": "transport_score",
+      "tipo": "number (0–100)",
+      "descricao": "Score de acesso a transporte público. Calculado a partir da densidade ponderada de linhas de metrô, CPTM, ônibus SPTrans/EMTU e terminais dentro do distrito. Normalizado por min-max entre os distritos analisados. 100 = máxima cobertura relativa.",
+      "fonte": "GTFS SPTrans, Metrô SP, CPTM — via GeoSampa",
+      "exemplo": 44.2
+    },
+    {
+      "campo": "green_score",
+      "tipo": "number (0–100)",
+      "descricao": "Score de presença de áreas verdes. Percentual de vegetação significativa por área do distrito, via ST_Intersection com camada geosampa_vegetacao_significativa. Normalizado por min-max. 100 = máxima cobertura vegetal relativa.",
+      "fonte": "GeoSampa — vegetacao_significativa",
+      "exemplo": 25.4
+    },
+    {
+      "campo": "flood_risk_score",
+      "tipo": "number (0–100, invertido)",
+      "descricao": "Score de risco de alagamento — invertido. 100 = menor exposição relativa a manchas de inundação. Calculado como percentual da área do distrito coberta por mancha de inundação, invertido e normalizado. Menor score indica maior exposição relativa.",
+      "fonte": "GeoSampa — mancha_inundacao",
+      "exemplo": 100.0
+    },
+    {
+      "campo": "safety_score",
+      "tipo": "number (0–100, invertido)",
+      "descricao": "Score de segurança pública — invertido. 100 = menor densidade relativa de ocorrências registradas SSP-SP. Calculado a partir da densidade de boletins de ocorrência (roubos) por km² do distrito, invertido e normalizado. Sujeito a sub-registro estrutural.",
+      "fonte": "SSP-SP — boletins de ocorrência, join espacial por distrito",
+      "exemplo": 89.9
+    },
+    {
+      "campo": "safety_data_coverage",
+      "tipo": "enum: completa | parcial | insuficiente",
+      "descricao": "Nível de cobertura dos dados de segurança para o distrito. 'parcial' indica sub-registro estrutural conhecido — interpretar com cautela. 'insuficiente' indica dado não disponível para análise.",
+      "exemplo": "parcial"
+    },
+    {
+      "campo": "poi_score",
+      "tipo": "number (0–100)",
+      "descricao": "Score de acesso a pontos de interesse (POI). Proxy calculado via densidade de paradas de ônibus por km² do distrito, normalizado por min-max. 100 = máxima densidade relativa.",
+      "fonte": "GeoSampa — pontos de parada de ônibus SPTrans",
+      "exemplo": 45.1
+    }
+  ],
+  "notas_gerais": [
+    "Todos os scores são normalizados em relação ao conjunto de distritos analisados (min-max). Não são comparáveis com datasets de outras cidades sem renormalização.",
+    "flood_risk_score e safety_score são invertidos: valor maior = menor exposição/ocorrência relativa.",
+    "Os dados não incluem preço imobiliário nesta versão urbana — camada imobiliária agregada prevista para M8 com base interna BetterPlace.",
+    "Geometrias dos polígonos oficiais estão disponíveis via scripts/export_open_dataset.py contra o banco PostGIS. Fonte: GeoSampa / PMSP — geoportal_distrito_municipal_v2.gpkg (EPSG:4326)."
+  ]
+}

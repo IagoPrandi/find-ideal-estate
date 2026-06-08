@@ -1,0 +1,207 @@
+{
+  "type": "FeatureCollection",
+  "metadata": {
+    "versao": "0.1",
+    "data_atualizacao": "2026-06-06",
+    "cidade": "São Paulo",
+    "unidade": "distrito_oficial",
+    "licenca": "CC BY 4.0 — https://creativecommons.org/licenses/by/4.0/",
+    "fonte": "BetterPlace — https://www.betterplace.com.br",
+    "metodologia": "https://www.betterplace.com.br/metodologia",
+    "nota_geometria": "Geometrias dos polígonos oficiais disponíveis via scripts/export_open_dataset.py contra o banco PostGIS. Fonte primária: GeoSampa / PMSP (geoportal_distrito_municipal_v2.gpkg, EPSG:4326)."
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": null,
+      "properties": {
+        "slug": "vila-mariana",
+        "nome": "Vila Mariana",
+        "distrito": "Vila Mariana",
+        "transport_score": 44.2,
+        "green_score": 25.4,
+        "flood_risk_score": 100.0,
+        "safety_score": 89.9,
+        "safety_data_coverage": "parcial",
+        "poi_score": 45.1,
+        "data_atualizacao": "2026-06-06"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": null,
+      "properties": {
+        "slug": "pinheiros",
+        "nome": "Pinheiros",
+        "distrito": "Pinheiros",
+        "transport_score": 32.0,
+        "green_score": 68.1,
+        "flood_risk_score": 100.0,
+        "safety_score": 81.9,
+        "safety_data_coverage": "parcial",
+        "poi_score": 31.9,
+        "data_atualizacao": "2026-06-06"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": null,
+      "properties": {
+        "slug": "itaim-bibi",
+        "nome": "Itaim Bibi",
+        "distrito": "Itaim Bibi",
+        "transport_score": 32.9,
+        "green_score": 34.5,
+        "flood_risk_score": 100.0,
+        "safety_score": 84.9,
+        "safety_data_coverage": "parcial",
+        "poi_score": 35.0,
+        "data_atualizacao": "2026-06-06"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": null,
+      "properties": {
+        "slug": "moema",
+        "nome": "Moema",
+        "distrito": "Moema",
+        "transport_score": 21.5,
+        "green_score": 73.8,
+        "flood_risk_score": 100.0,
+        "safety_score": 88.1,
+        "safety_data_coverage": "parcial",
+        "poi_score": 22.5,
+        "data_atualizacao": "2026-06-06"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": null,
+      "properties": {
+        "slug": "bela-vista",
+        "nome": "Bela Vista",
+        "distrito": "Bela Vista",
+        "transport_score": 28.9,
+        "green_score": 21.5,
+        "flood_risk_score": 100.0,
+        "safety_score": 69.0,
+        "safety_data_coverage": "parcial",
+        "poi_score": 28.6,
+        "data_atualizacao": "2026-06-06"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": null,
+      "properties": {
+        "slug": "consolacao",
+        "nome": "Consolação",
+        "distrito": "Consolação",
+        "transport_score": 30.2,
+        "green_score": 82.5,
+        "flood_risk_score": 100.0,
+        "safety_score": 60.2,
+        "safety_data_coverage": "parcial",
+        "poi_score": 29.1,
+        "data_atualizacao": "2026-06-06"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": null,
+      "properties": {
+        "slug": "liberdade",
+        "nome": "Liberdade",
+        "distrito": "Liberdade",
+        "transport_score": 38.9,
+        "green_score": 21.6,
+        "flood_risk_score": 99.7,
+        "safety_score": 80.8,
+        "safety_data_coverage": "parcial",
+        "poi_score": 42.0,
+        "data_atualizacao": "2026-06-06"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": null,
+      "properties": {
+        "slug": "tatuape",
+        "nome": "Tatuapé",
+        "distrito": "Tatuapé",
+        "transport_score": 30.2,
+        "green_score": 15.4,
+        "flood_risk_score": 100.0,
+        "safety_score": 89.3,
+        "safety_data_coverage": "parcial",
+        "poi_score": 32.9,
+        "data_atualizacao": "2026-06-06"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": null,
+      "properties": {
+        "slug": "mooca",
+        "nome": "Mooca",
+        "distrito": "Mooca",
+        "transport_score": 29.3,
+        "green_score": 12.4,
+        "flood_risk_score": 99.9,
+        "safety_score": 90.6,
+        "safety_data_coverage": "parcial",
+        "poi_score": 32.5,
+        "data_atualizacao": "2026-06-06"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": null,
+      "properties": {
+        "slug": "santana",
+        "nome": "Santana",
+        "distrito": "Santana",
+        "transport_score": 31.4,
+        "green_score": 39.8,
+        "flood_risk_score": 100.0,
+        "safety_score": 94.2,
+        "safety_data_coverage": "parcial",
+        "poi_score": 34.2,
+        "data_atualizacao": "2026-06-06"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": null,
+      "properties": {
+        "slug": "perdizes",
+        "nome": "Perdizes",
+        "distrito": "Perdizes",
+        "transport_score": 30.2,
+        "green_score": 54.7,
+        "flood_risk_score": 100.0,
+        "safety_score": 78.6,
+        "safety_data_coverage": "parcial",
+        "poi_score": 32.1,
+        "data_atualizacao": "2026-06-06"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": null,
+      "properties": {
+        "slug": "butanta",
+        "nome": "Butantã",
+        "distrito": "Butantã",
+        "transport_score": 20.7,
+        "green_score": 77.7,
+        "flood_risk_score": 100.0,
+        "safety_score": 89.3,
+        "safety_data_coverage": "parcial",
+        "poi_score": 22.7,
+        "data_atualizacao": "2026-06-06"
+      }
+    }
+  ]
+}
