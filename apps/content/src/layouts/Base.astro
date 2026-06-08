@@ -1,0 +1,313 @@
+---
+export interface Props {
+  title: string;
+  description: string;
+  canonical?: string;
+  dateModified?: string;
+  jsonLd?: Record<string, unknown> | Record<string, unknown>[];
+  ogType?: 'website' | 'article';
+  noindex?: boolean;
+}
+
+const APP_URL = 'https://www.betterplace.com.br';
+const SITE_URL = Astro.site?.toString().replace(/\/$/, '') ?? '';
+
+const GA_ID = import.meta.env.PUBLIC_GA_ID ?? '';
+const GOOGLE_VERIFICATION = import.meta.env.PUBLIC_GOOGLE_VERIFICATION ?? '';
+const BING_VERIFICATION = import.meta.env.PUBLIC_BING_VERIFICATION ?? '';
+
+const {
+  title,
+  description,
+  canonical = Astro.url.pathname,
+  dateModified,
+  jsonLd,
+  ogType = 'website',
+  noindex = false,
+} = Astro.props;
+
+const canonicalURL = `${SITE_URL}${canonical}`;
+
+const orgJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'Organization',
+  name: 'BetterPlace',
+  url: APP_URL,
+  description:
+    'BetterPlace ajuda pessoas a escolher onde morar usando dados de bairro, mobilidade, segurança, áreas verdes e riscos urbanos.',
+};
+
+const jsonLdItems = [
+  orgJsonLd,
+  ...(Array.isArray(jsonLd) ? jsonLd : jsonLd ? [jsonLd] : []),
+];
+---
+
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="canonical" href={canonicalURL} />
+    {dateModified && <meta name="date" content={dateModified} />}
+
+    <!-- Open Graph -->
+    <meta property="og:type" content={ogType} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonicalURL} />
+    <meta property="og:site_name" content="BetterPlace" />
+    <meta property="og:locale" content="pt_BR" />
+
+    {noindex && <meta name="robots" content="noindex" />}
+
+    <!-- Verificação de ferramentas para webmasters -->
+    {GOOGLE_VERIFICATION && <meta name="google-site-verification" content={GOOGLE_VERIFICATION} />}
+    {BING_VERIFICATION && <meta name="msvalidate.01" content={BING_VERIFICATION} />}
+
+    <!-- Google Analytics 4 -->
+    {GA_ID && (
+      <>
+        <script async src={`https://www.googletagmanager.com/gtag/js?id=${GA_ID}`}></script>
+        <script define:vars={{ GA_ID }}>
+          window.dataLayer = window.dataLayer || [];
+          function gtag(){dataLayer.push(arguments);}
+          gtag('js', new Date());
+          gtag('config', GA_ID, { anonymize_ip: true });
+        </script>
+      </>
+    )}
+
+    <!-- Rastreamento de referrers de IA e bots de IA -->
+    <script>
+      (function () {
+        var AI_REFERRERS = [
+          'chatgpt.com', 'chat.openai.com',
+          'perplexity.ai',
+          'gemini.google.com', 'bard.google.com',
+          'copilot.microsoft.com', 'bing.com/chat',
+          'claude.ai',
+        ];
+        var AI_BOT_PATTERNS = [
+          'GPTBot', 'ChatGPT', 'PerplexityBot', 'Claude-Web',
+          'anthropic-ai', 'cohere-ai', 'Applebot-Extended',
+          'Googlebot-Extended', 'CCBot',
+        ];
+
+        function fire(eventName, params) {
+          if (typeof window.gtag === 'function') {
+            window.gtag('event', eventName, params);
+          }
+        }
+
+        var ref = document.referrer || '';
+        var isAiReferrer = AI_REFERRERS.some(function (domain) {
+          return ref.indexOf(domain) !== -1;
+        });
+
+        if (isAiReferrer) {
+          fire('ai_referrer_visit', {
+            referrer_domain: new URL(ref).hostname,
+            page_path: window.location.pathname,
+          });
+        }
+
+        var ua = navigator.userAgent || '';
+        var isAiBot = AI_BOT_PATTERNS.some(function (pat) {
+          return ua.indexOf(pat) !== -1;
+        });
+
+        if (isAiBot) {
+          fire('ai_bot_visit', {
+            user_agent: ua.slice(0, 150),
+            page_path: window.location.pathname,
+          });
+        }
+      })();
+    </script>
+
+    <!-- JSON-LD -->
+    {jsonLdItems.map((item) => (
+      <script type="application/ld+json" set:html={JSON.stringify(item)} />
+    ))}
+
+    <style>
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      :root {
+        --color-bg: #ffffff;
+        --color-text: #1a1a2e;
+        --color-muted: #5f6b7a;
+        --color-accent: #2563eb;
+        --color-accent-light: #eff6ff;
+        --color-border: #e2e8f0;
+        --color-cta-bg: #1e3a5f;
+        --color-cta-text: #ffffff;
+        --max-width: 760px;
+        --space-xs: 0.5rem;
+        --space-sm: 1rem;
+        --space-md: 1.5rem;
+        --space-lg: 2.5rem;
+        --space-xl: 4rem;
+      }
+      body {
+        font-family: system-ui, -apple-system, sans-serif;
+        background: var(--color-bg);
+        color: var(--color-text);
+        line-height: 1.65;
+        font-size: 1rem;
+      }
+      a { color: var(--color-accent); text-decoration: none; }
+      a:hover { text-decoration: underline; }
+
+      .site-header {
+        border-bottom: 1px solid var(--color-border);
+        padding: var(--space-sm) var(--space-md);
+      }
+      .site-header__inner {
+        max-width: var(--max-width);
+        margin: 0 auto;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--space-sm);
+        flex-wrap: wrap;
+      }
+      .site-logo {
+        font-weight: 700;
+        font-size: 1.1rem;
+        color: var(--color-text);
+        text-decoration: none;
+      }
+      .site-nav { display: flex; gap: var(--space-md); flex-wrap: wrap; font-size: 0.9rem; }
+
+      main {
+        max-width: var(--max-width);
+        margin: 0 auto;
+        padding: var(--space-lg) var(--space-md);
+      }
+
+      h1 { font-size: 1.8rem; line-height: 1.25; margin-bottom: var(--space-sm); }
+      h2 { font-size: 1.25rem; margin-top: var(--space-lg); margin-bottom: var(--space-xs); }
+      h3 { font-size: 1.05rem; margin-top: var(--space-md); margin-bottom: var(--space-xs); }
+      p { margin-bottom: var(--space-sm); }
+      ul, ol { margin-left: var(--space-md); margin-bottom: var(--space-sm); }
+      li { margin-bottom: 0.25rem; }
+
+      .lead {
+        font-size: 1.1rem;
+        color: var(--color-muted);
+        margin-bottom: var(--space-md);
+      }
+      .tag {
+        display: inline-block;
+        background: var(--color-accent-light);
+        color: var(--color-accent);
+        font-size: 0.75rem;
+        font-weight: 600;
+        padding: 0.15rem 0.6rem;
+        border-radius: 999px;
+        margin-bottom: var(--space-sm);
+      }
+      .meta {
+        font-size: 0.82rem;
+        color: var(--color-muted);
+        margin-top: var(--space-xs);
+      }
+      .divider {
+        border: none;
+        border-top: 1px solid var(--color-border);
+        margin: var(--space-lg) 0;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: var(--space-md);
+        font-size: 0.9rem;
+      }
+      th, td {
+        text-align: left;
+        padding: 0.5rem 0.75rem;
+        border-bottom: 1px solid var(--color-border);
+      }
+      th { font-weight: 600; background: var(--color-accent-light); }
+
+      .score-bar {
+        display: flex;
+        align-items: center;
+        gap: var(--space-xs);
+        margin-bottom: 0.4rem;
+      }
+      .score-bar__label { min-width: 140px; font-size: 0.85rem; }
+      .score-bar__track {
+        flex: 1;
+        height: 8px;
+        background: var(--color-border);
+        border-radius: 4px;
+        overflow: hidden;
+      }
+      .score-bar__fill {
+        height: 100%;
+        background: var(--color-accent);
+        border-radius: 4px;
+      }
+      .score-bar__value { font-size: 0.82rem; color: var(--color-muted); min-width: 32px; }
+
+      .card-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        gap: var(--space-sm);
+        margin-bottom: var(--space-md);
+      }
+      .card {
+        border: 1px solid var(--color-border);
+        border-radius: 8px;
+        padding: var(--space-sm);
+      }
+      .card__title { font-weight: 600; margin-bottom: 0.25rem; }
+      .card__body { font-size: 0.88rem; color: var(--color-muted); }
+
+      .site-footer {
+        border-top: 1px solid var(--color-border);
+        padding: var(--space-md);
+        text-align: center;
+        font-size: 0.82rem;
+        color: var(--color-muted);
+        margin-top: var(--space-xl);
+      }
+    </style>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="site-header__inner">
+        <a href="/" class="site-logo">BetterPlace</a>
+        <nav class="site-nav" aria-label="Navegação principal">
+          <a href="/bairros">Bairros</a>
+          <a href="/comparar">Comparar</a>
+          <a href="/relatorios">Relatórios</a>
+          <a href="/dados">Dados</a>
+          <a href="/metodologia">Metodologia</a>
+        </nav>
+      </div>
+    </header>
+
+    <main>
+      {dateModified && (
+        <p class="meta" style="margin-bottom:var(--space-md)">
+          Atualizado em <time datetime={dateModified}>{new Date(dateModified + 'T12:00:00').toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })}</time>
+        </p>
+      )}
+      <slot />
+    </main>
+
+    <footer class="site-footer">
+      <p>
+        © {new Date().getFullYear()} BetterPlace · Dados públicos agregados por bairro ·
+        <a href="/metodologia">Metodologia</a> ·
+        <a href="/dados">Dataset aberto</a>
+      </p>
+    </footer>
+  </body>
+</html>

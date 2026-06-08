@@ -1,0 +1,108 @@
+---
+export type CtaTipo = 'bairro' | 'comparativo' | 'relatorio' | 'dataset' | 'geral';
+export type CtaPosicao = 'inline' | 'mid' | 'end' | 'hero';
+
+export interface Props {
+  tipo: CtaTipo;
+  posicao: CtaPosicao;
+  slug?: string;
+  variante?: string;
+}
+
+const APP_BASE = 'https://app.betterplace.com.br';
+
+const copias: Record<CtaTipo, string> = {
+  bairro: 'Quer saber se esta região combina com sua rotina? Abra o BetterPlace e compare bairros, trajetos e preferências.',
+  comparativo: 'A melhor escolha depende do seu trajeto, orçamento e prioridades. Use o BetterPlace para fazer uma comparação personalizada entre bairros.',
+  relatorio: 'Os dados mostram tendências gerais por região. Para transformar a análise em uma decisão prática de moradia, use o BetterPlace e encontre áreas compatíveis com sua rotina.',
+  dataset: 'Estes dados ajudam a entender a cidade em nível agregado. Para aplicar os indicadores à sua busca de moradia, acesse a aplicação BetterPlace.',
+  geral: 'Compare bairros, trajetos e preferências de moradia com dados públicos no BetterPlace.',
+};
+
+const eventos: Record<CtaTipo, string> = {
+  bairro: 'cta_neighborhood_app_click',
+  comparativo: 'cta_compare_click',
+  relatorio: 'cta_report_app_click',
+  dataset: 'cta_dataset_app_click',
+  geral: 'cta_app_click',
+};
+
+const tiposMedium: Record<CtaTipo, string> = {
+  bairro: 'neighborhood',
+  comparativo: 'comparison',
+  relatorio: 'report',
+  dataset: 'dataset',
+  geral: 'general',
+};
+
+const { tipo, posicao, slug = 'home', variante = 'a' } = Astro.props;
+const evento = eventos[tipo];
+const medium = tiposMedium[tipo];
+const ctaContent = `${slug}__${posicao}__${variante}`;
+
+const url = new URL('/', APP_BASE);
+url.searchParams.set('utm_source', 'betterplace_content');
+url.searchParams.set('utm_medium', medium);
+url.searchParams.set('utm_campaign', 'geo_mvp');
+url.searchParams.set('utm_content', ctaContent);
+
+const href = url.toString();
+---
+
+<aside
+  class="cta-block"
+  data-event={evento}
+  data-slug={slug}
+  data-position={posicao}
+  data-medium={medium}
+  data-variant={variante}
+>
+  <p class="cta-block__text">{copias[tipo]}</p>
+  <a href={href} class="cta-block__btn">Abrir BetterPlace →</a>
+</aside>
+
+<style>
+  .cta-block {
+    background: var(--color-cta-bg);
+    color: var(--color-cta-text);
+    border-radius: 10px;
+    padding: 1.25rem 1.5rem;
+    margin: 2rem 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  .cta-block__text {
+    margin: 0;
+    font-size: 0.97rem;
+    line-height: 1.55;
+  }
+  .cta-block__btn {
+    display: inline-block;
+    background: #ffffff;
+    color: var(--color-cta-bg);
+    font-weight: 700;
+    padding: 0.55rem 1.25rem;
+    border-radius: 6px;
+    font-size: 0.9rem;
+    text-decoration: none;
+    align-self: flex-start;
+    transition: opacity 0.15s;
+  }
+  .cta-block__btn:hover { opacity: 0.88; text-decoration: none; }
+</style>
+
+<script>
+  document.querySelectorAll<HTMLElement>('.cta-block').forEach((el) => {
+    el.querySelector('a')?.addEventListener('click', () => {
+      if (typeof (window as any).gtag !== 'undefined') {
+        (window as any).gtag('event', el.dataset.event, {
+          source_page_type: el.dataset.medium,
+          source_slug: el.dataset.slug,
+          cta_position: el.dataset.position,
+          cta_copy_variant: el.dataset.variant,
+        });
+      }
+    });
+  });
+</script>

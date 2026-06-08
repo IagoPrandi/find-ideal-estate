@@ -1,0 +1,28 @@
+---
+import Base from '../../layouts/Base.astro';
+import { COMPARATIVOS } from '../../data/comparativos';
+---
+
+<Base
+  title="Comparar bairros de São Paulo · BetterPlace"
+  description="Compare bairros de São Paulo por transporte, segurança, áreas verdes e riscos urbanos com análise por perfil de moradia."
+>
+  <h1>Comparar bairros</h1>
+  <p class="lead">
+    Análise lado a lado entre bairros com tabela comparativa e recomendação por perfil.
+    Comparativos são gerados apenas quando há demanda real e dados suficientes.
+  </p>
+
+  <ul>
+    {COMPARATIVOS.map((c) => (
+      <li>
+        <a href={`/comparar/${c.slug}`}>{c.bairroA} vs {c.bairroB}</a>
+      </li>
+    ))}
+  </ul>
+
+  <p class="meta" style="margin-top:2rem">
+    <a href="/metodologia">Metodologia</a> ·
+    <a href="/bairros">Ver todos os bairros</a>
+  </p>
+</Base>

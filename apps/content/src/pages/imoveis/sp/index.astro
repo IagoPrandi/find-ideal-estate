@@ -1,0 +1,206 @@
+---
+import Base from '../../../layouts/Base.astro';
+import Cta from '../../../components/Cta.astro';
+import { IMOVEIS_AGGREGATES, IMOVEIS_CIDADE, hasImoveisData } from '../../../data/imoveis_aggregates';
+import { BAIRROS } from '../../../data/bairros';
+
+const temDados = hasImoveisData();
+const c = IMOVEIS_CIDADE;
+const dateModified = c?.dataAtualizacao ?? '2026-06-07';
+
+const formatBRL = (v: number | null | undefined) =>
+  v == null ? null : `R$ ${v.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
+
+const jsonLd = [
+  {
+    '@context': 'https://schema.org',
+    '@type': 'Place',
+    name: 'São Paulo — Panorama Imobiliário',
+    address: {
+      '@type': 'PostalAddress',
+      addressRegion: 'SP',
+      addressCountry: 'BR',
+    },
+    url: 'https://www.betterplace.com.br/imoveis/sp',
+  },
+  ...(temDados && c
+    ? [{
+        '@context': 'https://schema.org',
+        '@type': 'Dataset',
+        name: 'BetterPlace — Dados Imobiliários Agregados por Distrito (São Paulo)',
+        description: 'Métricas imobiliárias agregadas por distrito: aluguel/m², preço de venda/m², quartis e custo total mensal. Fonte: base interna BetterPlace.',
+        url: 'https://www.betterplace.com.br/imoveis/sp',
+        license: 'https://creativecommons.org/licenses/by/4.0/',
+        dateModified,
+        distribution: [
+          {
+            '@type': 'DataDownload',
+            encodingFormat: 'application/json',
+            contentUrl: 'https://www.betterplace.com.br/imoveis/aggregates.json',
+          },
+          {
+            '@type': 'DataDownload',
+            encodingFormat: 'text/csv',
+            contentUrl: 'https://www.betterplace.com.br/imoveis/aggregates.csv',
+          },
+        ],
+      }]
+    : []),
+];
+---
+
+<Base
+  title="Imóveis em São Paulo — Dados agregados por bairro · BetterPlace"
+  description="Panorama imobiliário de São Paulo por distrito: aluguel/m², preço de venda/m², quartis e amostra de imóveis da base interna BetterPlace."
+  dateModified={dateModified}
+  jsonLd={jsonLd}
+>
+  <p class="meta"><a href="/">← BetterPlace</a></p>
+  <span class="tag">Imóveis · São Paulo · SP</span>
+  <h1>Imóveis em São Paulo — panorama por bairro</h1>
+  <p class="lead">
+    Dados imobiliários agregados por distrito oficial de São Paulo, extraídos da base interna
+    BetterPlace. Aluguel/m², preço de venda/m², quartis e amostra de imóveis elegíveis por recorte.
+  </p>
+
+  {!temDados ? (
+    <div class="coverage-gap">
+      <strong>Dados imobiliários em processamento.</strong>
+      <p>
+        A camada imobiliária agrega dados da base interna BetterPlace via
+        <code>scripts/aggregate_real_estate.py</code>. Execute o pipeline para popular os dados.
+        Os dados de qualidade urbana já estão disponíveis nas <a href="/bairros">páginas de bairro</a>.
+      </p>
+    </div>
+  ) : (
+    <>
+      {c && (
+        <div class="stats-row">
+          <div class="stat-card">
+            <span class="stat-value">{c.totalBairros}</span>
+            <span class="stat-label">Distritos com dados</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value">{c.totalImoveisElegiveis.toLocaleString('pt-BR')}</span>
+            <span class="stat-label">Imóveis elegíveis</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value">{formatBRL(c.medianaAluguelM2) ?? 'N/D'}<small>/m²·mês</small></span>
+            <span class="stat-label">Mediana aluguel/m²</span>
+          </div>
+          <div class="stat-card">
+            <span class="stat-value">{formatBRL(c.medianaVendaM2) ?? 'N/D'}<small>/m²</small></span>
+            <span class="stat-label">Mediana venda/m²</span>
+          </div>
+        </div>
+      )}
+
+      <p class="meta">
+        Fonte: base imobiliária interna BetterPlace ·
+        Atualizado em {dateModified} ·
+        <a href="/imoveis/aggregates.json">JSON</a> ·
+        <a href="/imoveis/aggregates.csv">CSV</a> ·
+        <a href="/metodologia">Metodologia</a>
+      </p>
+
+      <hr class="divider" />
+
+      <h2>Por distrito — São Paulo</h2>
+      <p class="meta">Clique em um distrito para ver métricas detalhadas e amostra de imóveis.</p>
+
+      <div class="district-grid">
+        {IMOVEIS_AGGREGATES.map((d) => {
+          const bairro = BAIRROS.find((b) => b.slug === d.slug);
+          return (
+            <a href={`/imoveis/sp/sao-paulo/${d.slug}`} class="district-card">
+              <span class="district-card__nome">{d.nome}</span>
+              <span class="district-card__meta">
+                {d.metrics.rentPerM2
+                  ? `Aluguel: ${formatBRL(d.metrics.rentPerM2)}/m²`
+                  : 'Aluguel: dados insuficientes'}
+              </span>
+              <span class="district-card__meta">
+                {d.metrics.salePricePerM2
+                  ? `Venda: ${formatBRL(d.metrics.salePricePerM2)}/m²`
+                  : 'Venda: dados insuficientes'}
+              </span>
+              <span class="district-card__count">
+                {d.metrics.listingSampleCount.toLocaleString('pt-BR')} imóveis elegíveis
+              </span>
+            </a>
+          );
+        })}
+      </div>
+    </>
+  )}
+
+  <hr class="divider" />
+
+  <h2>Dados de qualidade urbana</h2>
+  <p>
+    Além do panorama imobiliário, cada distrito tem dados de transporte, segurança,
+    áreas verdes, risco de alagamento e acesso a serviços.
+    <a href="/bairros">Ver todos os bairros →</a>
+  </p>
+
+  <Cta tipo="geral" posicao="end" slug="imoveis-sp" />
+</Base>
+
+<style>
+  .coverage-gap {
+    background: var(--color-accent-light);
+    border-left: 4px solid var(--color-accent);
+    padding: 1rem 1.25rem;
+    border-radius: 6px;
+    margin: 1.5rem 0;
+    font-size: 0.95rem;
+  }
+  .coverage-gap p { margin: 0.5rem 0 0; }
+
+  .stats-row {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin: 1.25rem 0;
+  }
+  .stat-card {
+    flex: 1;
+    min-width: 130px;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+  .stat-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--color-accent);
+  }
+  .stat-value small { font-size: 0.7em; font-weight: 400; }
+  .stat-label { font-size: 0.78rem; color: var(--color-muted); margin-top: 0.2rem; }
+
+  .district-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 0.75rem;
+    margin: 1rem 0;
+  }
+  .district-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+    text-decoration: none;
+    color: var(--color-text);
+    transition: border-color 0.15s;
+  }
+  .district-card:hover { border-color: var(--color-accent); text-decoration: none; }
+  .district-card__nome { font-weight: 600; font-size: 0.95rem; color: var(--color-accent); }
+  .district-card__meta { font-size: 0.82rem; color: var(--color-muted); }
+  .district-card__count { font-size: 0.75rem; color: var(--color-muted); margin-top: 0.2rem; }
+</style>

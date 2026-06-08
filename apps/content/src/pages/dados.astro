@@ -1,0 +1,295 @@
+---
+import Base from '../layouts/Base.astro';
+import Cta from '../components/Cta.astro';
+
+const dateModified = '2026-06-06';
+const DATASET_VERSION = '0.1';
+const BASE_PATH = '/dados';
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'Dataset',
+  name: 'BetterPlace — Dataset de Qualidade Urbana por Distrito (São Paulo)',
+  description:
+    'Dados agregados de qualidade urbana para bairros e distritos de São Paulo: transporte, segurança, áreas verdes, risco de alagamento e acesso a serviços.',
+  url: 'https://www.betterplace.com.br/dados',
+  license: 'https://creativecommons.org/licenses/by/4.0/',
+  creator: { '@type': 'Organization', name: 'BetterPlace' },
+  dateModified,
+  version: DATASET_VERSION,
+  distribution: [
+    {
+      '@type': 'DataDownload',
+      encodingFormat: 'text/csv',
+      contentUrl: `https://www.betterplace.com.br/dados/betterplace-qualidade-urbana-sp-v${DATASET_VERSION}.csv`,
+    },
+    {
+      '@type': 'DataDownload',
+      encodingFormat: 'application/json',
+      contentUrl: `https://www.betterplace.com.br/dados/betterplace-qualidade-urbana-sp-v${DATASET_VERSION}.json`,
+    },
+    {
+      '@type': 'DataDownload',
+      encodingFormat: 'application/geo+json',
+      contentUrl: `https://www.betterplace.com.br/dados/betterplace-qualidade-urbana-sp-v${DATASET_VERSION}.geojson`,
+    },
+  ],
+};
+
+const campos = [
+  { campo: 'slug', tipo: 'string', descricao: 'Identificador único do distrito (kebab-case, sem acentos)' },
+  { campo: 'nome', tipo: 'string', descricao: 'Nome do bairro ou referência popular' },
+  { campo: 'distrito', tipo: 'string', descricao: 'Nome oficial do distrito municipal (IBGE/PMSP)' },
+  { campo: 'transport_score', tipo: 'number 0–100', descricao: 'Acesso a transporte público — densidade ponderada metrô, CPTM, ônibus, terminais' },
+  { campo: 'green_score', tipo: 'number 0–100', descricao: 'Presença de áreas verdes — % vegetação significativa por área do distrito' },
+  { campo: 'flood_risk_score', tipo: 'number 0–100 ↓', descricao: 'Risco de alagamento (invertido) — 100 = menor exposição relativa' },
+  { campo: 'safety_score', tipo: 'number 0–100 ↓', descricao: 'Segurança pública (invertido) — 100 = menor densidade de ocorrências SSP-SP' },
+  { campo: 'safety_data_coverage', tipo: 'completa | parcial | insuficiente', descricao: 'Nível de cobertura dos dados de segurança — "parcial" indica sub-registro estrutural' },
+  { campo: 'poi_score', tipo: 'number 0–100', descricao: 'Acesso a pontos de interesse — proxy via densidade de paradas de ônibus/km²' },
+  { campo: 'data_atualizacao', tipo: 'string YYYY-MM-DD', descricao: 'Data de referência dos dados do pipeline de agregação' },
+];
+---
+
+<Base
+  title="Dataset aberto de qualidade urbana — São Paulo · BetterPlace"
+  description="Dados públicos agregados por distrito: transporte, segurança, áreas verdes, risco de alagamento e acesso a serviços em São Paulo. Disponível em CSV, JSON e GeoJSON."
+  dateModified={dateModified}
+  jsonLd={jsonLd}
+>
+  <span class="tag">Dataset · v{DATASET_VERSION} · {dateModified}</span>
+  <h1>Dataset aberto de qualidade urbana</h1>
+  <p class="lead">
+    O BetterPlace publica dados agregados de qualidade urbana para apoiar decisões de moradia,
+    pesquisa e análise jornalística. Os dados são agregados por distrito oficial, sem exposição
+    de dados pessoais.
+  </p>
+
+  <h2>Cobertura atual</h2>
+  <ul>
+    <li><strong>Cidade:</strong> São Paulo</li>
+    <li><strong>Unidade:</strong> distrito oficial (IBGE/PMSP)</li>
+    <li><strong>Distritos publicados:</strong> 12 de 96</li>
+    <li><strong>Versão:</strong> {DATASET_VERSION}</li>
+    <li><strong>Atualização:</strong> {dateModified}</li>
+    <li><strong>Pipeline:</strong> dados reais do pipeline GeoSampa + SSP-SP</li>
+  </ul>
+
+  <h2>Métricas disponíveis</h2>
+  <table>
+    <thead>
+      <tr><th>Métrica</th><th>Fonte</th><th>Cobertura</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>Acesso a transporte público</td><td>GTFS SPTrans / Metrô SP / CPTM</td><td>Alta</td></tr>
+      <tr><td>Áreas verdes</td><td>GeoSampa — vegetação significativa</td><td>Alta</td></tr>
+      <tr><td>Risco de alagamento</td><td>GeoSampa — mancha de inundação</td><td>Alta</td></tr>
+      <tr><td>Segurança (ocorrências SSP-SP)</td><td>SSP-SP — boletins de ocorrência</td><td>Parcial</td></tr>
+      <tr><td>Acesso a POIs</td><td>GeoSampa — paradas de ônibus (proxy)</td><td>Alta</td></tr>
+    </tbody>
+  </table>
+
+  <Cta tipo="dataset" posicao="mid" slug="dados" />
+
+  <h2>Download do dataset</h2>
+  <p>
+    Arquivos da versão {DATASET_VERSION}, gerados em {dateModified} a partir do pipeline GeoSampa.
+    Atribuição obrigatória: <strong>BetterPlace — betterplace.com.br</strong>.
+  </p>
+  <ul class="download-list">
+    <li>
+      <a
+        href={`${BASE_PATH}/betterplace-qualidade-urbana-sp-v${DATASET_VERSION}.csv`}
+        download
+        data-event="dataset_download"
+        data-format="csv"
+      >
+        CSV — betterplace-qualidade-urbana-sp-v{DATASET_VERSION}.csv
+      </a>
+      <span class="meta"> · tabela por distrito com todos os indicadores</span>
+    </li>
+    <li>
+      <a
+        href={`${BASE_PATH}/betterplace-qualidade-urbana-sp-v${DATASET_VERSION}.json`}
+        download
+        data-event="dataset_download"
+        data-format="json"
+      >
+        JSON — betterplace-qualidade-urbana-sp-v{DATASET_VERSION}.json
+      </a>
+      <span class="meta"> · estrutura por distrito com metadados e scores</span>
+    </li>
+    <li>
+      <a
+        href={`${BASE_PATH}/betterplace-qualidade-urbana-sp-v${DATASET_VERSION}.geojson`}
+        download
+        data-event="dataset_download"
+        data-format="geojson"
+      >
+        GeoJSON — betterplace-qualidade-urbana-sp-v{DATASET_VERSION}.geojson
+      </a>
+      <span class="meta"> · propriedades dos distritos (geometrias via pipeline PostGIS)</span>
+    </li>
+    <li>
+      <a
+        href={`${BASE_PATH}/dicionario-campos.json`}
+        download
+        data-event="dataset_download"
+        data-format="dicionario"
+      >
+        Dicionário de campos — dicionario-campos.json
+      </a>
+      <span class="meta"> · descrição detalhada de cada coluna</span>
+    </li>
+    <li>
+      <a
+        href={`${BASE_PATH}/changelog.json`}
+        download
+        data-event="dataset_download"
+        data-format="changelog"
+      >
+        Changelog — changelog.json
+      </a>
+      <span class="meta"> · histórico de versões do dataset</span>
+    </li>
+  </ul>
+
+  <h2>Dicionário de campos</h2>
+  <table>
+    <thead>
+      <tr><th>Campo</th><th>Tipo</th><th>Descrição</th></tr>
+    </thead>
+    <tbody>
+      {campos.map((c) => (
+        <tr>
+          <td><code>{c.campo}</code></td>
+          <td class="meta">{c.tipo}</td>
+          <td>{c.descricao}</td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+  <p class="meta">
+    Arquivo completo: <a href={`${BASE_PATH}/dicionario-campos.json`}>dicionario-campos.json</a>.
+    Scores são normalizados por min-max em relação ao conjunto de distritos analisados (não comparáveis com outras cidades sem renormalização).
+  </p>
+
+  <h2>Licença</h2>
+  <p>
+    Este dataset é publicado sob <a href="https://creativecommons.org/licenses/by/4.0/" rel="noopener">CC BY 4.0</a>.
+    Você pode usar, distribuir e adaptar os dados desde que atribua a fonte ao BetterPlace
+    (<strong>betterplace.com.br</strong>).
+  </p>
+
+  <hr class="divider" />
+
+  <h2>Dataset imobiliário — dados agregados por distrito</h2>
+  <p>
+    A camada imobiliária agrega dados da base interna BetterPlace por distrito de São Paulo.
+    Disponível após execução do pipeline <code>scripts/aggregate_real_estate.py</code>.
+  </p>
+  <ul>
+    <li>
+      <a href="/imoveis/aggregates.json" download data-event="dataset_download" data-format="imoveis-json">
+        betterplace-imoveis-sp-aggregates.json
+      </a>
+      <span class="meta"> · métricas imobiliárias agregadas por distrito</span>
+    </li>
+    <li>
+      <a href="/imoveis/aggregates.csv" download data-event="dataset_download" data-format="imoveis-csv">
+        betterplace-imoveis-sp-aggregates.csv
+      </a>
+      <span class="meta"> · formato tabular com aluguel/m², venda/m² e quartis por distrito</span>
+    </li>
+  </ul>
+  <p class="meta">
+    Campos: slug, nome, cidade, estado, total_elegiveis, aluguel_mediana_m2,
+    custo_total_mediana_m2, venda_mediana_m2, quartis de aluguel e venda, custo_index, data_referencia.
+    Licença: CC BY 4.0. Fonte: base imobiliária interna BetterPlace.
+  </p>
+
+  <h2>Limitações</h2>
+  <ul>
+    <li>Dados de segurança têm cobertura parcial — sub-registro estrutural SSP-SP declarado por distrito.</li>
+    <li>Geometrias dos polígonos oficiais disponíveis via <code>scripts/export_open_dataset.py</code> contra o banco PostGIS.</li>
+    <li>Cobertura restrita a 12 dos 96 distritos municipais de SP — expansão prevista.</li>
+    <li>Comparações inter-cidades não estão disponíveis nesta versão.</li>
+    <li>Geometrias seguem divisão por distrito oficial — alguns bairros populares pertencem a distritos mais amplos.</li>
+    <li>Dados imobiliários representam imóveis ativos na base interna — não refletem todo o mercado.</li>
+  </ul>
+
+  <p class="meta">
+    Metodologia completa: <a href="/metodologia">como os dados são calculados</a>.
+  </p>
+
+  <h2>Changelog</h2>
+  <div class="changelog-block">
+    <strong>v0.1 — 2026-06-06 — Lançamento</strong>
+    <ul>
+      <li>12 distritos municipais com dados reais do pipeline GeoSampa.</li>
+      <li>5 métricas: transporte, áreas verdes, alagamento, segurança, POIs.</li>
+      <li>Scores normalizados 0–100 (min-max) entre os distritos analisados.</li>
+      <li>Formatos: CSV, JSON, GeoJSON, dicionário de campos.</li>
+      <li>Licença: CC BY 4.0.</li>
+    </ul>
+  </div>
+  <p class="meta">
+    Arquivo completo: <a href={`${BASE_PATH}/changelog.json`}>changelog.json</a>.
+  </p>
+
+  <Cta tipo="dataset" posicao="end" slug="dados" />
+</Base>
+
+<style>
+  .download-list {
+    list-style: none;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    margin: 1rem 0 1.5rem;
+  }
+  .download-list li {
+    padding: 0.6rem 0.9rem;
+    background: var(--color-surface, #f8fafc);
+    border: 1px solid var(--color-border, #e2e8f0);
+    border-radius: 6px;
+    font-size: 0.92rem;
+  }
+  .download-list a {
+    font-weight: 600;
+  }
+
+  .changelog-block {
+    background: var(--color-surface, #f8fafc);
+    border-left: 4px solid var(--color-accent, #2563eb);
+    padding: 0.75rem 1rem;
+    border-radius: 4px;
+    margin: 0.75rem 0 0.5rem;
+    font-size: 0.92rem;
+  }
+  .changelog-block ul {
+    margin: 0.4rem 0 0;
+    padding-left: 1.25rem;
+  }
+
+  code {
+    background: var(--color-surface, #f1f5f9);
+    padding: 0.1em 0.35em;
+    border-radius: 3px;
+    font-size: 0.88em;
+  }
+</style>
+
+<script>
+  document.querySelectorAll<HTMLAnchorElement>('[data-event="dataset_download"]').forEach((el) => {
+    el.addEventListener('click', () => {
+      if (typeof (window as any).gtag !== 'undefined') {
+        (window as any).gtag('event', 'dataset_download', {
+          source_page_type: 'dataset',
+          source_slug: 'dados',
+          dataset_format: el.dataset.format,
+        });
+      }
+    });
+  });
+</script>

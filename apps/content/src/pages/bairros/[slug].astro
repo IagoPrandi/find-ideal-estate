@@ -1,0 +1,344 @@
+---
+import type { GetStaticPaths } from 'astro';
+import Base from '../../layouts/Base.astro';
+import Cta from '../../components/Cta.astro';
+import { BAIRROS } from '../../data/bairros';
+import { getImoveisBairro } from '../../data/imoveis_aggregates';
+
+export const getStaticPaths: GetStaticPaths = () =>
+  BAIRROS.map((b) => ({ params: { slug: b.slug }, props: { bairro: b } }));
+
+const { bairro } = Astro.props;
+const imoveisData = getImoveisBairro(bairro.slug);
+
+const jsonLd = [
+  {
+    '@context': 'https://schema.org',
+    '@type': 'Place',
+    name: bairro.nome,
+    description: bairro.resumo,
+    address: {
+      '@type': 'PostalAddress',
+      addressLocality: 'São Paulo',
+      addressRegion: 'SP',
+      addressCountry: 'BR',
+    },
+    url: `https://www.betterplace.com.br/bairros/${bairro.slug}`,
+  },
+  {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: [
+      {
+        '@type': 'Question',
+        name: `${bairro.nome} tem bom transporte público?`,
+        acceptedAnswer: {
+          '@type': 'Answer',
+          text:
+            bairro.transportScore >= 80
+              ? `${bairro.nome} se destaca pelo acesso a transporte público, com score ${bairro.transportScore}/100 (metodologia BetterPlace).`
+              : `${bairro.nome} apresenta acesso moderado a transporte público, com score ${bairro.transportScore}/100 (metodologia BetterPlace).`,
+        },
+      },
+      {
+        '@type': 'Question',
+        name: `${bairro.nome} tem risco de alagamento?`,
+        acceptedAnswer: {
+          '@type': 'Answer',
+          text:
+            bairro.floodRiskScore <= 30
+              ? `A análise indica menor exposição relativa a áreas de alagamento em ${bairro.nome} (score de risco ${bairro.floodRiskScore}/100 — menor é melhor).`
+              : `${bairro.nome} apresenta exposição relativa a alagamentos (score de risco ${bairro.floodRiskScore}/100 — menor é melhor). Consulte a metodologia para detalhes.`,
+        },
+      },
+      {
+        '@type': 'Question',
+        name: `Como é a segurança pública em ${bairro.nome}?`,
+        acceptedAnswer: {
+          '@type': 'Answer',
+          text: `Score de segurança de ${bairro.nome}: ${bairro.safetyScore}/100, baseado em densidade de ocorrências registradas na SSP-SP (maior score = menor densidade relativa entre os distritos analisados). ${bairro.safetyDataCoverage === 'parcial' ? 'Cobertura parcial — interpretar com cautela.' : 'Sub-registro é uma limitação inerente dos dados oficiais.'}`,
+        },
+      },
+    ],
+  },
+];
+
+const title = `${bairro.nome}: dados de transporte, segurança, áreas verdes e qualidade urbana`;
+const description = bairro.resumo.slice(0, 155) + (bairro.resumo.length > 155 ? '…' : '');
+
+const floodBg = bairro.floodRiskScore > 50 ? '#dc2626' : '#2563eb';
+const floodStyle = `width:${bairro.floodRiskScore}%;background:${floodBg}`;
+const safetyBg = bairro.safetyScore >= 60 ? '#2563eb' : bairro.safetyScore >= 40 ? '#d97706' : '#dc2626';
+const safetyStyle = `width:${bairro.safetyScore}%;background:${safetyBg}`;
+const transportStyle = `width:${bairro.transportScore}%`;
+const greenStyle = `width:${bairro.greenScore}%`;
+const poiStyle = `width:${bairro.poiScore}%`;
+
+const transportTxt = bairro.transportScore >= 80
+  ? `${bairro.nome} se destaca pelo acesso a transporte público. Score: ${bairro.transportScore}/100.`
+  : `${bairro.nome} apresenta acesso moderado a transporte público. Score: ${bairro.transportScore}/100.`;
+
+const greenTxt = bairro.greenScore >= 70
+  ? 'A região apresenta boa presença relativa de áreas verdes.'
+  : 'A presença relativa de áreas verdes está abaixo da média dos distritos analisados.';
+
+const floodTxt = bairro.floodRiskScore <= 30
+  ? 'A análise indica menor exposição relativa a áreas de alagamento.'
+  : bairro.floodRiskScore <= 55
+  ? 'A análise indica exposição moderada relativa a áreas de alagamento.'
+  : 'A análise indica exposição relativa maior a áreas de alagamento — consulte a metodologia.';
+
+const poiTxt = bairro.poiScore >= 80
+  ? 'Alta concentração de pontos de interesse (saúde, educação, comércio, serviços).'
+  : bairro.poiScore >= 60
+  ? 'Boa cobertura de pontos de interesse na região.'
+  : 'Cobertura moderada de pontos de interesse.';
+
+const safetyScoreTxt = bairro.safetyScore >= 65
+  ? `Os dados da SSP-SP indicam menor densidade relativa de ocorrências registradas nesta região. Score: ${bairro.safetyScore}/100.`
+  : bairro.safetyScore >= 45
+  ? `Os dados da SSP-SP indicam densidade moderada de ocorrências registradas. Score: ${bairro.safetyScore}/100.`
+  : `Os dados da SSP-SP indicam densidade relativa elevada de ocorrências registradas nesta região. Score: ${bairro.safetyScore}/100.`;
+
+const safetyCoverageTxt = bairro.safetyDataCoverage === 'insuficiente'
+  ? 'Cobertura insuficiente — dado não disponível para este distrito.'
+  : bairro.safetyDataCoverage === 'parcial'
+  ? 'Cobertura parcial (SSP-SP) — interpretar com cautela. Sub-registro conhecido nesta região.'
+  : 'Fonte: SSP-SP, dados agregados por categoria e distrito. Sub-registro é uma limitação inerente.';
+
+const faqTransportTxt = bairro.transportScore >= 80
+  ? `${bairro.nome} se destaca pelo acesso a transporte público, com score ${bairro.transportScore}/100 na metodologia BetterPlace.`
+  : `${bairro.nome} apresenta acesso moderado a transporte público, com score ${bairro.transportScore}/100.`;
+
+const faqFloodTxt = bairro.floodRiskScore <= 30
+  ? `A análise indica menor exposição relativa a áreas de alagamento (score de risco ${bairro.floodRiskScore}/100 — menor é melhor). Isso não significa ausência de risco.`
+  : `${bairro.nome} apresenta exposição relativa a alagamentos (score de risco ${bairro.floodRiskScore}/100). Consulte a metodologia para detalhes.`;
+
+const faqSafetyTxt = bairro.safetyDataCoverage === 'insuficiente'
+  ? `Não há dados de segurança pública suficientes para ${bairro.nome} neste momento.`
+  : `O score de segurança de ${bairro.nome} é ${bairro.safetyScore}/100, baseado em densidade de ocorrências registradas na SSP-SP (maior score = menor densidade relativa). ${bairro.safetyDataCoverage === 'parcial' ? 'Cobertura parcial — interpretar com cautela.' : 'Sub-registro é uma limitação inerente dos dados de criminalidade.'}`;
+
+function slugToNome(s: string): string {
+  return s.split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+}
+---
+
+<Base
+  title={title}
+  description={description}
+  canonical={`/bairros/${bairro.slug}`}
+  dateModified={bairro.dataAtualizacao}
+  jsonLd={jsonLd}
+  ogType="article"
+>
+  <p class="meta"><a href="/bairros">← Todos os bairros</a></p>
+
+  <span class="tag">Bairro · São Paulo</span>
+  <h1>{bairro.nome}: dados de transporte, segurança, áreas verdes e qualidade urbana</h1>
+  <p class="lead">{bairro.resumo}</p>
+
+  <p class="meta">Distrito oficial: {bairro.distrito} · Atualizado em {bairro.dataAtualizacao}</p>
+
+  <hr class="divider" />
+
+  <h2>Adequação por perfil</h2>
+  <p>{bairro.perfil}</p>
+
+  <h2>Indicadores principais</h2>
+
+  <div class="score-bar">
+    <span class="score-bar__label">Transporte público</span>
+    <div class="score-bar__track">
+      <div class="score-bar__fill" style={transportStyle}></div>
+    </div>
+    <span class="score-bar__value">{bairro.transportScore}/100</span>
+  </div>
+  <div class="score-bar">
+    <span class="score-bar__label">Áreas verdes</span>
+    <div class="score-bar__track">
+      <div class="score-bar__fill" style={greenStyle}></div>
+    </div>
+    <span class="score-bar__value">{bairro.greenScore}/100</span>
+  </div>
+  <div class="score-bar">
+    <span class="score-bar__label">Acesso a serviços</span>
+    <div class="score-bar__track">
+      <div class="score-bar__fill" style={poiStyle}></div>
+    </div>
+    <span class="score-bar__value">{bairro.poiScore}/100</span>
+  </div>
+  <div class="score-bar">
+    <span class="score-bar__label">Risco de alagamento</span>
+    <div class="score-bar__track">
+      <div class="score-bar__fill" style={floodStyle}></div>
+    </div>
+    <span class="score-bar__value">{bairro.floodRiskScore}/100 ↓</span>
+  </div>
+  <div class="score-bar">
+    <span class="score-bar__label">Segurança pública</span>
+    <div class="score-bar__track">
+      <div class="score-bar__fill" style={safetyStyle}></div>
+    </div>
+    <span class="score-bar__value">{bairro.safetyScore}/100</span>
+  </div>
+
+  <p class="meta">
+    Risco de alagamento e segurança: menor valor = maior exposição/ocorrência relativa.
+    Segurança baseada em densidade de ocorrências SSP-SP — dado relativo entre distritos.
+    <a href="/metodologia">Como é calculado</a>.
+  </p>
+
+  <Cta tipo="bairro" posicao="mid" slug={bairro.slug} />
+
+  <h2>Transporte</h2>
+  <p>{transportTxt}</p>
+
+  <h2>Áreas verdes</h2>
+  <p>{greenTxt} Score: {bairro.greenScore}/100.</p>
+
+  <h2>Risco de alagamento</h2>
+  <p>{floodTxt} Score de risco: {bairro.floodRiskScore}/100 (menor é melhor).</p>
+
+  <h2>Segurança pública</h2>
+  <p>{safetyScoreTxt}</p>
+  <p class="meta">{safetyCoverageTxt}</p>
+
+  <h2>Acesso a serviços</h2>
+  <p>{poiTxt} Score: {bairro.poiScore}/100.</p>
+
+  {imoveisData && (() => {
+    const re = imoveisData.metrics;
+    const costTxt = re.costIndex >= 75 ? 'Entre os distritos com maior custo relativo na análise.' : re.costIndex >= 50 ? 'Custo relativo moderado em relação aos distritos analisados.' : 'Entre os distritos com menor custo relativo na análise.';
+    const formatCurrency = (value?: number) => value == null ? 'Dados insuficientes' : `R$ ${value.toLocaleString('pt-BR')}`;
+    const formatMonthlyPerM2 = (value?: number) => value == null ? 'Dados insuficientes' : `${formatCurrency(value)}/m²·mês`;
+    const formatPercent = (value?: number) => value == null ? 'Dados insuficientes' : `${value.toLocaleString('pt-BR')}%`;
+    const formatQuartiles = (quartiles?: { q1: number; median: number; q3: number }) =>
+      quartiles ? `Q1 ${formatCurrency(quartiles.q1)} · mediana ${formatCurrency(quartiles.median)} · Q3 ${formatCurrency(quartiles.q3)}` : 'Dados insuficientes';
+    return (
+      <>
+        <h2>Panorama imobiliário</h2>
+        <p class="meta">Dados agregados da base interna BetterPlace — a amostra exibida é limitada e não representa todo o inventário. Atualizado em {re.dataAt}.</p>
+        <div class="re-grid">
+          <div class="re-card">
+            <span class="re-card__label">Imóveis elegíveis</span>
+            <span class="re-card__value">{re.listingSampleCount.toLocaleString('pt-BR')}</span>
+          </div>
+          <div class="re-card">
+            <span class="re-card__label">Aluguel/m²</span>
+            <span class="re-card__value">{formatMonthlyPerM2(re.rentPerM2)}</span>
+          </div>
+          <div class="re-card">
+            <span class="re-card__label">Custo total mensal/m²</span>
+            <span class="re-card__value">{formatMonthlyPerM2(re.totalRentCostPerM2)}</span>
+          </div>
+          <div class="re-card">
+            <span class="re-card__label">Preço de venda/m²</span>
+            <span class="re-card__value">{formatCurrency(re.salePricePerM2)}</span>
+          </div>
+          <div class="re-card">
+            <span class="re-card__label">Quartis de aluguel</span>
+            <span class="re-card__value">{formatQuartiles(re.rentQuartiles)}</span>
+          </div>
+          <div class="re-card">
+            <span class="re-card__label">Quartis de venda</span>
+            <span class="re-card__value">{formatQuartiles(re.saleQuartiles)}</span>
+          </div>
+          <div class="re-card">
+            <span class="re-card__label">Variação comparável</span>
+            <span class="re-card__value">{formatPercent(re.sameListingPriceChange)}</span>
+          </div>
+          <div class="re-card">
+            <span class="re-card__label">Custo relativo (0–100)</span>
+            <span class="re-card__value">{re.costIndex}/100</span>
+          </div>
+        </div>
+        <p>
+          {costTxt}{' '}
+          <a href={`/imoveis/sp/sao-paulo/${bairro.slug}`}>Ver dados imobiliários completos →</a>
+        </p>
+        <p class="meta">Limitação: dados agregados podem não refletir variações internas entre sub-bairros, listas específicas ou imóveis sem área/encargos completos. Consulte a <a href="/metodologia">metodologia</a>.</p>
+      </>
+    );
+  })()}
+
+  <hr class="divider" />
+
+  <h2>Pontos fortes</h2>
+  <ul>
+    {bairro.pontosFortes.map((p) => <li>{p}</li>)}
+  </ul>
+
+  <h2>Pontos de atenção</h2>
+  <ul>
+    {bairro.pontosAtencao.map((p) => <li>{p}</li>)}
+  </ul>
+
+  <h2>Comparações sugeridas</h2>
+  <ul>
+    {bairro.bairrosSimilares.map((s) => (
+      <li><a href={`/bairros/${s}`}>{slugToNome(s)}</a></li>
+    ))}
+  </ul>
+
+  {bairro.lacunas && bairro.lacunas.length > 0 && (
+    <div class="lacunas-block">
+      <strong>Lacunas de dados declaradas:</strong>
+      <ul>
+        {bairro.lacunas.map((l) => <li>{l}</li>)}
+      </ul>
+    </div>
+  )}
+
+  <hr class="divider" />
+
+  <h2>Perguntas frequentes</h2>
+
+  <h3>{bairro.nome} tem bom transporte público?</h3>
+  <p>{faqTransportTxt}</p>
+
+  <h3>{bairro.nome} tem risco de alagamento?</h3>
+  <p>{faqFloodTxt}</p>
+
+  <h3>Como é a segurança pública em {bairro.nome}?</h3>
+  <p>{faqSafetyTxt}</p>
+
+  <hr class="divider" />
+
+  <p class="meta">
+    Metodologia: <a href="/metodologia">como os dados são calculados</a> ·
+    Atualizado em {bairro.dataAtualizacao} ·
+    <a href="/dados">Dataset aberto</a>
+  </p>
+
+  <Cta tipo="bairro" posicao="end" slug={bairro.slug} />
+</Base>
+
+<style>
+  .lacunas-block {
+    background: #fff8e1;
+    border-left: 4px solid #f59e0b;
+    padding: 0.75rem 1rem;
+    border-radius: 4px;
+    margin: 1.5rem 0;
+    font-size: 0.9rem;
+  }
+  .lacunas-block ul { margin: 0.4rem 0 0; padding-left: 1.25rem; }
+
+  .re-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 0.75rem;
+    margin: 1rem 0 1.25rem;
+  }
+  .re-card {
+    background: var(--color-surface, #f8fafc);
+    border: 1px solid var(--color-border, #e2e8f0);
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+  .re-card__label { font-size: 0.78rem; color: var(--color-muted, #64748b); }
+  .re-card__value { font-size: 1.05rem; font-weight: 700; color: var(--color-text, #1e293b); }
+</style>

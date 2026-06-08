@@ -1,0 +1,232 @@
+---
+import Base from '../layouts/Base.astro';
+import { GEO_VISIBILITY_LOG } from '../data/geo_visibility_log';
+import type { GeoVisibilityEntry } from '../data/geo_visibility_log';
+
+const logs: GeoVisibilityEntry[] = GEO_VISIBILITY_LOG;
+
+const totalEntradas = logs.length;
+const citadas = logs.filter((e) => e.visibilidade !== 'nao_citado').length;
+const taxaCitacao = totalEntradas > 0 ? Math.round((citadas / totalEntradas) * 100) : 0;
+
+const porAi = logs.reduce<Record<string, { citado: number; total: number }>>((acc, e) => {
+  if (!acc[e.ai]) acc[e.ai] = { citado: 0, total: 0 };
+  acc[e.ai].total++;
+  if (e.visibilidade !== 'nao_citado') acc[e.ai].citado++;
+  return acc;
+}, {});
+
+const porPrompt = logs.reduce<Record<string, { citado: number; total: number }>>((acc, e) => {
+  if (!acc[e.promptId]) acc[e.promptId] = { citado: 0, total: 0 };
+  acc[e.promptId].total++;
+  if (e.visibilidade !== 'nao_citado') acc[e.promptId].citado++;
+  return acc;
+}, {});
+---
+
+<Base
+  title="GEO Dashboard · BetterPlace (interno)"
+  description="Painel interno de visibilidade do BetterPlace em respostas de IA — não indexado."
+  noindex={true}
+>
+
+  <span class="tag">Interno · GEO Visibility</span>
+  <h1>GEO Dashboard</h1>
+  <p class="lead">
+    Rastreamento mensal de visibilidade do BetterPlace em respostas geradas por IA (ChatGPT, Perplexity, Gemini, Claude, Bing Copilot).
+    Atualizado via <code>scripts/test_geo_visibility.py</code>.
+  </p>
+
+  <div class="stats-row">
+    <div class="stat-card">
+      <span class="stat-value">{totalEntradas}</span>
+      <span class="stat-label">Entradas registradas</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-value">{citadas}</span>
+      <span class="stat-label">Citações (com ou sem link)</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-value">{taxaCitacao}%</span>
+      <span class="stat-label">Taxa de citação</span>
+    </div>
+  </div>
+
+  <hr class="divider" />
+
+  {totalEntradas === 0 ? (
+    <div class="empty-state">
+      <p>
+        Nenhuma entrada registrada ainda. Execute o script mensal para registrar os resultados:
+      </p>
+      <pre><code>python scripts/test_geo_visibility.py --mes 2026-06</code></pre>
+      <p>
+        Os prompts de teste estão em <a href="/geo-prompts.json">geo-prompts.json</a>.
+      </p>
+    </div>
+  ) : (
+    <>
+      <h2>Por plataforma de IA</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Plataforma</th>
+            <th>Citações</th>
+            <th>Testadas</th>
+            <th>Taxa</th>
+          </tr>
+        </thead>
+        <tbody>
+          {Object.entries(porAi).map(([ai, data]) => (
+            <tr>
+              <td>{ai}</td>
+              <td>{data.citado}</td>
+              <td>{data.total}</td>
+              <td>{Math.round((data.citado / data.total) * 100)}%</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <h2>Por prompt</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Prompt ID</th>
+            <th>Citações</th>
+            <th>Testadas</th>
+            <th>Taxa</th>
+          </tr>
+        </thead>
+        <tbody>
+          {Object.entries(porPrompt).map(([promptId, data]) => (
+            <tr>
+              <td>{promptId}</td>
+              <td>{data.citado}</td>
+              <td>{data.total}</td>
+              <td>{Math.round((data.citado / data.total) * 100)}%</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      <h2>Log completo</h2>
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Data</th>
+              <th>Prompt</th>
+              <th>IA</th>
+              <th>Visibilidade</th>
+              <th>Trecho</th>
+              <th>Observações</th>
+            </tr>
+          </thead>
+          <tbody>
+            {logs.map((entry) => (
+              <tr>
+                <td>{entry.data}</td>
+                <td>{entry.promptId}</td>
+                <td>{entry.ai}</td>
+                <td>
+                  <span class={`badge badge--${entry.visibilidade}`}>
+                    {entry.visibilidade === 'citado' ? 'Citado' :
+                     entry.visibilidade === 'citado_sem_link' ? 'Citado sem link' : 'Não citado'}
+                  </span>
+                </td>
+                <td class="cell-trecho">{entry.trecho || '—'}</td>
+                <td>{entry.observacoes || '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
+  )}
+
+  <hr class="divider" />
+
+  <p class="meta">
+    Prompts de teste: <a href="/geo-prompts.json">geo-prompts.json</a> ·
+    Log CSV: <code>data/geo/geo_visibility_log.csv</code> ·
+    Script: <code>scripts/test_geo_visibility.py</code>
+  </p>
+</Base>
+
+<style>
+  .stats-row {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin: 1.5rem 0;
+  }
+  .stat-card {
+    flex: 1;
+    min-width: 120px;
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+  }
+  .stat-value {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--color-accent);
+  }
+  .stat-label {
+    font-size: 0.82rem;
+    color: var(--color-muted);
+    margin-top: 0.25rem;
+  }
+
+  .empty-state {
+    background: var(--color-accent-light);
+    border-radius: 8px;
+    padding: 1.5rem;
+    font-size: 0.95rem;
+  }
+  .empty-state pre {
+    background: #1e293b;
+    color: #e2e8f0;
+    padding: 0.75rem 1rem;
+    border-radius: 5px;
+    font-size: 0.85rem;
+    margin: 0.75rem 0;
+    overflow-x: auto;
+  }
+
+  .table-scroll {
+    overflow-x: auto;
+  }
+  .cell-trecho {
+    max-width: 280px;
+    font-size: 0.82rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .badge {
+    display: inline-block;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.15rem 0.55rem;
+    border-radius: 999px;
+  }
+  .badge--citado {
+    background: #dcfce7;
+    color: #166534;
+  }
+  .badge--citado_sem_link {
+    background: #fef9c3;
+    color: #854d0e;
+  }
+  .badge--nao_citado {
+    background: #fee2e2;
+    color: #991b1b;
+  }
+</style>

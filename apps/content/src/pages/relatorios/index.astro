@@ -1,0 +1,93 @@
+---
+import Base from '../../layouts/Base.astro';
+import Cta from '../../components/Cta.astro';
+import { RELATORIOS } from '../../data/relatorios';
+
+const dateModified = '2026-06-07';
+---
+
+<Base
+  title="Relatórios de qualidade urbana — São Paulo · BetterPlace"
+  description="Relatórios trimestrais de qualidade urbana em São Paulo com rankings por métrica, principais mudanças e achados. Dados públicos com metodologia transparente."
+  dateModified={dateModified}
+>
+  <h1>Relatórios de qualidade urbana</h1>
+  <p class="lead">
+    Relatórios trimestrais com rankings, principais mudanças e achados sobre qualidade urbana em
+    São Paulo. Metodologia transparente, dados públicos agregados por distrito oficial.
+  </p>
+
+  <h2>Edições publicadas</h2>
+
+  {RELATORIOS.length === 0 ? (
+    <p class="meta">Nenhum relatório publicado ainda.</p>
+  ) : (
+    <ul class="relatorio-list">
+      {RELATORIOS.map((r) => (
+        <li class="relatorio-item">
+          <a href={`/relatorios/${r.slug}`} class="relatorio-link">
+            <span class="relatorio-periodo">{r.periodo}</span>
+            <span class="relatorio-titulo">{r.titulo}</span>
+            <span class="relatorio-meta">
+              Publicado em {r.dataPublicacao} ·
+              {r.totalDistritosAnalisados} distritos analisados
+            </span>
+          </a>
+        </li>
+      ))}
+    </ul>
+  )}
+
+  <p class="meta">
+    Periodicidade inicial: trimestral.
+    Fontes e metodologia: <a href="/metodologia">como os dados são calculados</a>.
+    Dados brutos: <a href="/dados">dataset aberto</a>.
+  </p>
+
+  <Cta tipo="relatorio" posicao="end" slug="relatorios" />
+</Base>
+
+<style>
+  .relatorio-list {
+    list-style: none;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    margin: 1rem 0 1.5rem;
+  }
+  .relatorio-item {
+    border: 1px solid var(--color-border, #e2e8f0);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .relatorio-link {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 1rem 1.25rem;
+    text-decoration: none;
+    color: inherit;
+    transition: background 0.15s;
+  }
+  .relatorio-link:hover {
+    background: var(--color-surface, #f8fafc);
+    text-decoration: none;
+  }
+  .relatorio-periodo {
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    color: var(--color-accent, #2563eb);
+    letter-spacing: 0.04em;
+  }
+  .relatorio-titulo {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--color-text, #1e293b);
+  }
+  .relatorio-meta {
+    font-size: 0.82rem;
+    color: var(--color-muted, #64748b);
+  }
+</style>

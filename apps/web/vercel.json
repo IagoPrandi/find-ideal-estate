@@ -1,5 +1,27 @@
 {
   "rewrites": [
+    { "source": "/_astro/:path*", "destination": "https://SEU-CONTENT.vercel.app/_astro/:path*" },
+
+    { "source": "/bairros", "destination": "https://SEU-CONTENT.vercel.app/bairros" },
+    { "source": "/bairros/:path*", "destination": "https://SEU-CONTENT.vercel.app/bairros/:path*" },
+
+    { "source": "/comparar", "destination": "https://SEU-CONTENT.vercel.app/comparar" },
+    { "source": "/comparar/:path*", "destination": "https://SEU-CONTENT.vercel.app/comparar/:path*" },
+
+    { "source": "/dados", "destination": "https://SEU-CONTENT.vercel.app/dados" },
+    { "source": "/dados/:path*", "destination": "https://SEU-CONTENT.vercel.app/dados/:path*" },
+
+    { "source": "/relatorios", "destination": "https://SEU-CONTENT.vercel.app/relatorios" },
+    { "source": "/relatorios/:path*", "destination": "https://SEU-CONTENT.vercel.app/relatorios/:path*" },
+
+    { "source": "/imoveis/:path*", "destination": "https://SEU-CONTENT.vercel.app/imoveis/:path*" },
+    { "source": "/metodologia", "destination": "https://SEU-CONTENT.vercel.app/metodologia" },
+
+    { "source": "/robots.txt", "destination": "https://SEU-CONTENT.vercel.app/robots.txt" },
+    { "source": "/llms.txt", "destination": "https://SEU-CONTENT.vercel.app/llms.txt" },
+    { "source": "/sitemap-index.xml", "destination": "https://SEU-CONTENT.vercel.app/sitemap-index.xml" },
+    { "source": "/sitemap-0.xml", "destination": "https://SEU-CONTENT.vercel.app/sitemap-0.xml" },
+
     { "source": "/(.*)", "destination": "/index.html" }
   ]
 }

@@ -1,0 +1,29 @@
+---
+import Base from '../../layouts/Base.astro';
+import { BAIRROS } from '../../data/bairros';
+---
+
+<Base
+  title="Bairros de São Paulo — Dados de moradia · BetterPlace"
+  description="Explore dados públicos de transporte, segurança, áreas verdes e riscos urbanos por bairro em São Paulo."
+>
+  <h1>Bairros de São Paulo</h1>
+  <p class="lead">
+    Dados públicos de transporte, segurança, áreas verdes e riscos urbanos por bairro.
+    A análise considera dados oficiais agregados por distrito.
+  </p>
+
+  <ul>
+    {BAIRROS.map((b) => (
+      <li>
+        <a href={`/bairros/${b.slug}`}>{b.nome}</a>
+        <span class="meta"> — {b.resumo.slice(0, 90)}…</span>
+      </li>
+    ))}
+  </ul>
+
+  <p class="meta" style="margin-top:2rem">
+    <a href="/metodologia">Como os dados são calculados</a> ·
+    <a href="/dados">Baixar dataset</a>
+  </p>
+</Base>

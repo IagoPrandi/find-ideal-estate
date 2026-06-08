@@ -1,0 +1,25 @@
+{
+  "dataset": "BetterPlace — Qualidade Urbana por Distrito (São Paulo)",
+  "changelog": [
+    {
+      "versao": "0.1",
+      "data": "2026-06-06",
+      "tipo": "lançamento",
+      "descricao": "Primeira versão pública do dataset.",
+      "mudancas": [
+        "12 distritos municipais de São Paulo com dados reais do pipeline GeoSampa.",
+        "5 métricas: transport_score, green_score, flood_risk_score, safety_score, poi_score.",
+        "Scores normalizados 0–100 (min-max) em relação ao conjunto de distritos analisados.",
+        "Cobertura de segurança: dados SSP-SP com cobertura declarada por distrito.",
+        "Formatos: CSV, JSON, GeoJSON (geometrias via pipeline PostGIS).",
+        "Licença: CC BY 4.0."
+      ],
+      "limitacoes_conhecidas": [
+        "Dados de preço imobiliário não incluídos nesta versão urbana; camada imobiliária agregada prevista para M8 com base interna BetterPlace.",
+        "safety_data_coverage 'parcial' para todos os distritos desta versão — sub-registro SSP-SP.",
+        "GeoJSON com geometry: null — polígonos completos disponíveis via export_open_dataset.py.",
+        "Cobertura restrita a 12 dos 96 distritos municipais de SP — expansão prevista para versões futuras."
+      ]
+    }
+  ]
+}

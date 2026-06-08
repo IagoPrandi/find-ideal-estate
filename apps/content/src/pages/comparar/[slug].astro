@@ -1,0 +1,210 @@
+---
+import type { GetStaticPaths } from 'astro';
+import Base from '../../layouts/Base.astro';
+import Cta from '../../components/Cta.astro';
+import { COMPARATIVOS } from '../../data/comparativos';
+import { getImoveisBairro } from '../../data/imoveis_aggregates';
+
+export const getStaticPaths: GetStaticPaths = () =>
+  COMPARATIVOS.map((c) => ({ params: { slug: c.slug }, props: { comp: c } }));
+
+const { comp } = Astro.props;
+
+const imoveisA = getImoveisBairro(comp.slugA);
+const imoveisB = getImoveisBairro(comp.slugB);
+const temImoveis = imoveisA != null || imoveisB != null;
+
+function fmtMoeda(v: number | null | undefined): string {
+  if (v == null) return '—';
+  return `R$ ${v.toFixed(2).replace('.', ',')}`;
+}
+function fmtNum(v: number | null | undefined): string {
+  if (v == null) return '—';
+  return v.toLocaleString('pt-BR');
+}
+
+const jsonLd = [
+  {
+    '@context': 'https://schema.org',
+    '@type': 'Article',
+    headline: comp.titulo,
+    description: comp.respostaDireta.slice(0, 155),
+    dateModified: comp.dataAtualizacao,
+    author: { '@type': 'Organization', name: 'BetterPlace' },
+    url: `https://www.betterplace.com.br/comparar/${comp.slug}`,
+  },
+  {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: [
+      {
+        '@type': 'Question',
+        name: `${comp.bairroA} ou ${comp.bairroB}: qual é melhor para morar?`,
+        acceptedAnswer: { '@type': 'Answer', text: comp.respostaDireta },
+      },
+      {
+        '@type': 'Question',
+        name: `Qual tem melhor transporte: ${comp.bairroA} ou ${comp.bairroB}?`,
+        acceptedAnswer: {
+          '@type': 'Answer',
+          text: `Melhor transporte: ${comp.melhorTransporte}. A análise considera dados de cobertura de linhas de ônibus, metrô e CPTM. Metodologia: betterplace.com.br/metodologia.`,
+        },
+      },
+    ],
+  },
+];
+---
+
+<Base
+  title={comp.titulo}
+  description={comp.respostaDireta.slice(0, 155) + '…'}
+  canonical={`/comparar/${comp.slug}`}
+  dateModified={comp.dataAtualizacao}
+  jsonLd={jsonLd}
+  ogType="article"
+>
+  <p class="meta"><a href="/comparar">← Todos os comparativos</a></p>
+
+  <span class="tag">Comparativo · São Paulo</span>
+  <h1>{comp.titulo}</h1>
+
+  <p class="lead">{comp.respostaDireta}</p>
+
+  <Cta tipo="comparativo" posicao="inline" slug={comp.slug} />
+
+  <hr class="divider" />
+
+  <h2>Tabela comparativa</h2>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Dimensão</th>
+        <th>{comp.bairroA}</th>
+        <th>{comp.bairroB}</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>Melhor transporte</td>
+        <td colspan="2">{comp.melhorTransporte}</td>
+      </tr>
+      <tr>
+        <td>Mais áreas verdes</td>
+        <td colspan="2">{comp.melhorAreas}</td>
+      </tr>
+      <tr>
+        <td>Mais serviços</td>
+        <td colspan="2">{comp.melhorServicos}</td>
+      </tr>
+      <tr>
+        <td>Menor risco de alagamento</td>
+        <td colspan="2">{comp.melhorFlood}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Recomendação por perfil</h2>
+  <table>
+    <thead>
+      <tr><th>Perfil</th><th>Bairro recomendado</th></tr>
+    </thead>
+    <tbody>
+      {comp.recomendacaoPerfil.map((r) => (
+        <tr>
+          <td>{r.perfil}</td>
+          <td><strong>{r.recomendado}</strong></td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+
+  <h2>Pontos de atenção</h2>
+  <ul>
+    {comp.pontosAtencao.map((p) => <li>{p}</li>)}
+  </ul>
+
+  {temImoveis && (
+    <>
+      <hr class="divider" />
+      <h2>Panorama imobiliário</h2>
+      <p class="meta">
+        Base interna BetterPlace · mínimo 5 anúncios ativos por distrito ·{' '}
+        <a href="/metodologia#dados-imobiliarios">Metodologia</a>
+      </p>
+      <table>
+        <thead>
+          <tr>
+            <th>Métrica</th>
+            <th>{comp.bairroA}</th>
+            <th>{comp.bairroB}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Imóveis elegíveis</td>
+            <td>{fmtNum(imoveisA?.metrics.listingSampleCount)}</td>
+            <td>{fmtNum(imoveisB?.metrics.listingSampleCount)}</td>
+          </tr>
+          <tr>
+            <td>Aluguel mediana/m²</td>
+            <td>{fmtMoeda(imoveisA?.metrics.rentPerM2)}</td>
+            <td>{fmtMoeda(imoveisB?.metrics.rentPerM2)}</td>
+          </tr>
+          <tr>
+            <td>Custo total mediana/m²</td>
+            <td>{fmtMoeda(imoveisA?.metrics.totalRentCostPerM2)}</td>
+            <td>{fmtMoeda(imoveisB?.metrics.totalRentCostPerM2)}</td>
+          </tr>
+          <tr>
+            <td>Venda mediana/m²</td>
+            <td>{fmtMoeda(imoveisA?.metrics.salePricePerM2)}</td>
+            <td>{fmtMoeda(imoveisB?.metrics.salePricePerM2)}</td>
+          </tr>
+          <tr>
+            <td>Índice de custo</td>
+            <td>{imoveisA != null ? `${imoveisA.metrics.costIndex}/100` : '—'}</td>
+            <td>{imoveisB != null ? `${imoveisB.metrics.costIndex}/100` : '—'}</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="meta">
+        {imoveisA != null && (
+          <a href={`/imoveis/sp/sao-paulo/${comp.slugA}`}>Dados completos: {comp.bairroA} →</a>
+        )}
+        {imoveisA != null && imoveisB != null && ' · '}
+        {imoveisB != null && (
+          <a href={`/imoveis/sp/sao-paulo/${comp.slugB}`}>Dados completos: {comp.bairroB} →</a>
+        )}
+      </p>
+    </>
+  )}
+
+  <hr class="divider" />
+
+  <h2>Perguntas frequentes</h2>
+
+  <h3>{comp.bairroA} ou {comp.bairroB}: qual é melhor para morar?</h3>
+  <p>{comp.respostaDireta}</p>
+
+  <h3>Qual tem melhor transporte: {comp.bairroA} ou {comp.bairroB}?</h3>
+  <p>
+    {comp.melhorTransporte}. A análise considera cobertura de linhas de ônibus, metrô e CPTM.
+    <a href="/metodologia">Veja a metodologia completa</a>.
+  </p>
+
+  <hr class="divider" />
+
+  <p class="meta">
+    Ver cada bairro individualmente:
+    <a href={`/bairros/${comp.slugA}`}>{comp.bairroA}</a> ·
+    <a href={`/bairros/${comp.slugB}`}>{comp.bairroB}</a>
+  </p>
+  <p class="meta">
+    Atualizado em {comp.dataAtualizacao} ·
+    <a href="/metodologia">Metodologia</a> ·
+    <a href="/dados">Dataset aberto</a>
+  </p>
+
+  <Cta tipo="comparativo" posicao="end" slug={comp.slug} />
+</Base>

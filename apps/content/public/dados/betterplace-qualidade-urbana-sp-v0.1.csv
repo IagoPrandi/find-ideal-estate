@@ -1,0 +1,13 @@
+dataset_version,data_atualizacao,cidade,slug,nome,distrito,transport_score,green_score,flood_risk_score,safety_score,safety_data_coverage,poi_score
+0.1,2026-06-06,São Paulo,vila-mariana,Vila Mariana,Vila Mariana,44.2,25.4,100.0,89.9,parcial,45.1
+0.1,2026-06-06,São Paulo,pinheiros,Pinheiros,Pinheiros,32.0,68.1,100.0,81.9,parcial,31.9
+0.1,2026-06-06,São Paulo,itaim-bibi,Itaim Bibi,Itaim Bibi,32.9,34.5,100.0,84.9,parcial,35.0
+0.1,2026-06-06,São Paulo,moema,Moema,Moema,21.5,73.8,100.0,88.1,parcial,22.5
+0.1,2026-06-06,São Paulo,bela-vista,Bela Vista,Bela Vista,28.9,21.5,100.0,69.0,parcial,28.6
+0.1,2026-06-06,São Paulo,consolacao,Consolação,Consolação,30.2,82.5,100.0,60.2,parcial,29.1
+0.1,2026-06-06,São Paulo,liberdade,Liberdade,Liberdade,38.9,21.6,99.7,80.8,parcial,42.0
+0.1,2026-06-06,São Paulo,tatuape,Tatuapé,Tatuapé,30.2,15.4,100.0,89.3,parcial,32.9
+0.1,2026-06-06,São Paulo,mooca,Mooca,Mooca,29.3,12.4,99.9,90.6,parcial,32.5
+0.1,2026-06-06,São Paulo,santana,Santana,Santana,31.4,39.8,100.0,94.2,parcial,34.2
+0.1,2026-06-06,São Paulo,perdizes,Perdizes,Perdizes,30.2,54.7,100.0,78.6,parcial,32.1
+0.1,2026-06-06,São Paulo,butanta,Butantã,Butantã,20.7,77.7,100.0,89.3,parcial,22.7
