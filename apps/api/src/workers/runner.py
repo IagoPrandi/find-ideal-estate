@@ -36,12 +36,37 @@ def parse_queue_names(raw_value: str | None) -> list[str]:
     return names
 
 
+def _env_queue_concurrency(queue_name: str, default: int) -> int:
+    env_key = f"WORKER_CONCURRENCY_{queue_name.upper()}"
+    raw_value = os.getenv(env_key) or os.getenv("WORKER_CONCURRENCY_DEFAULT")
+    if raw_value is None:
+        return default
+    try:
+        parsed = int(raw_value)
+    except ValueError as exc:
+        raise ValueError(f"{env_key} must be an integer") from exc
+    return max(1, parsed)
+
+
 def resolve_worker_plan(queue_names: Iterable[str]) -> list[tuple[str, int]]:
-    return [(queue_name, QUEUE_CONCURRENCY[queue_name]) for queue_name in queue_names]
+    return [
+        (queue_name, _env_queue_concurrency(queue_name, QUEUE_CONCURRENCY[queue_name]))
+        for queue_name in queue_names
+    ]
+
 
 
 def should_init_runtime_on_start() -> bool:
     return os.getenv("WORKER_INIT_RUNTIME_ON_START", "1").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def should_combine_worker_queues() -> bool:
+    return os.getenv("WORKER_COMBINED_QUEUES", "0").strip().lower() in {
         "1",
         "true",
         "yes",
@@ -75,6 +100,10 @@ def init_worker_runtime() -> AppContainer:
     container.redis_client.override(get_redis())
     set_container(container)
     return container
+
+
+async def init_worker_runtime_async() -> AppContainer:
+    return init_worker_runtime()
 
 
 def start_worker_runtime_loop() -> None:
@@ -147,6 +176,12 @@ def start_workers(
     broker = configure_broker(broker_kind, redis_url)
     _load_handlers()
 
+    if should_combine_worker_queues():
+        worker_threads = _env_queue_concurrency("combined", 1)
+        worker = Worker(broker, queues=set(queue_names), worker_threads=worker_threads)
+        worker.start()
+        return broker, [worker]
+
     workers: list[Worker] = []
     for queue_name, worker_threads in resolve_worker_plan(queue_names):
         worker = Worker(broker, queues={queue_name}, worker_threads=worker_threads)
@@ -196,8 +231,8 @@ def main() -> None:
 
     container: AppContainer | None = None
     if should_init_runtime_on_start():
-        container = init_worker_runtime()
         start_worker_runtime_loop()
+        container = run_worker_coroutine(init_worker_runtime_async())
     queue_names = parse_queue_names(args.queues)
     _, workers = start_workers(
         broker_kind=args.broker,

@@ -2,19 +2,30 @@ from __future__ import annotations
 
 from zoneinfo import ZoneInfo
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from contracts import JobType
 from core.config import get_settings
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from core.db import get_engine
 from core.redis import get_redis
 from modules.jobs.events import publish_job_event
-from modules.jobs.service import create_internal_job, update_job_execution_state
+from modules.jobs.service import (
+    create_internal_job,
+    enqueue_job,
+    get_job,
+    update_job_execution_state,
+)
 from sqlalchemy import text
 from workers.middleware import JobHeartbeatMiddleware
 
 WATCHDOG_INTERVAL_SECONDS = 60
 WATCHDOG_STALE_SECONDS = 120
+WATCHDOG_STALE_PENDING_SECONDS = 300
 WATCHDOG_TIMEZONE = ZoneInfo("UTC")
+RECOVERABLE_PENDING_JOB_TYPES = (
+    JobType.TRANSPORT_SEARCH.value,
+    JobType.ZONE_GENERATION.value,
+    JobType.ZONE_ENRICHMENT.value,
+)
 
 _scheduler: AsyncIOScheduler | None = None
 
@@ -95,6 +106,56 @@ async def sweep_stale_running_jobs() -> None:
         )
 
 
+async def reenqueue_stale_pending_jobs() -> None:
+    """Recover active DB jobs whose broker message was lost during restarts."""
+    engine = get_engine()
+    redis = get_redis()
+
+    async with engine.connect() as conn:
+        result = await conn.execute(
+            text(
+                """
+                SELECT id, job_type
+                FROM jobs
+                WHERE state IN ('pending', 'retrying')
+                  AND job_type = ANY(CAST(:job_types AS text[]))
+                  AND created_at < now() - (:stale_seconds * interval '1 second')
+                ORDER BY created_at ASC
+                LIMIT 1
+                """
+            ),
+            {
+                "job_types": list(RECOVERABLE_PENDING_JOB_TYPES),
+                "stale_seconds": WATCHDOG_STALE_PENDING_SECONDS,
+            },
+        )
+        rows = result.mappings().all()
+
+    for row in rows:
+        job_id = row["id"]
+        recovery_key = f"job_reenqueue:{job_id}"
+        if not await redis.set(recovery_key, "1", ex=WATCHDOG_STALE_PENDING_SECONDS, nx=True):
+            continue
+
+        job = await get_job(job_id)
+        job_state = (
+            job.state.value
+            if job is not None and hasattr(job.state, "value")
+            else (job.state if job is not None else None)
+        )
+        if job is None or job_state not in {"pending", "retrying"}:
+            continue
+
+        await enqueue_job(job)
+        await publish_job_event(
+            job_id,
+            "job.reenqueued",
+            stage="watchdog",
+            message="Watchdog re-enqueued stale pending job",
+            payload_json={"job_type": row["job_type"]},
+        )
+
+
 async def enqueue_nightly_listings_prewarm() -> None:
     settings = get_settings()
     await create_internal_job(
@@ -119,6 +180,13 @@ def start_watchdog() -> None:
     scheduler = AsyncIOScheduler(timezone=WATCHDOG_TIMEZONE)
     scheduler.add_job(
         sweep_stale_running_jobs,
+        "interval",
+        seconds=WATCHDOG_INTERVAL_SECONDS,
+        max_instances=1,
+        coalesce=True,
+    )
+    scheduler.add_job(
+        reenqueue_stale_pending_jobs,
         "interval",
         seconds=WATCHDOG_INTERVAL_SECONDS,
         max_instances=1,

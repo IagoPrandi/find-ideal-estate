@@ -36,6 +36,9 @@ services:
       MAPTILER_API_KEY: ${MAPTILER_API_KEY:-${VITE_MAPTILER_API_KEY:-local-dev-key}}
       VALHALLA_URL: ${VALHALLA_URL:-http://host.docker.internal:8002}
       OTP_URL: ${OTP_URL:-http://otp:8080}
+      WORKER_QUEUES: ${WORKER_QUEUES:-transport,zones,enrichment,scrape_http,deduplication,reports}
+      WORKER_CONCURRENCY_DEFAULT: ${WORKER_CONCURRENCY_DEFAULT:-1}
+      WORKER_COMBINED_QUEUES: "1"
     volumes: []
 
   worker-scrape-browser:
@@ -52,6 +55,9 @@ services:
       MAPTILER_API_KEY: ${MAPTILER_API_KEY:-${VITE_MAPTILER_API_KEY:-local-dev-key}}
       VALHALLA_URL: ${VALHALLA_URL:-http://host.docker.internal:8002}
       OTP_URL: ${OTP_URL:-http://otp:8080}
+      WORKER_QUEUES: scrape_browser
+      WORKER_INIT_RUNTIME_ON_START: "0"
+      WORKER_CONCURRENCY_DEFAULT: ${WORKER_CONCURRENCY_SCRAPE_BROWSER:-1}
     volumes: []
 
   worker-prewarm:
@@ -68,6 +74,9 @@ services:
       MAPTILER_API_KEY: ${MAPTILER_API_KEY:-${VITE_MAPTILER_API_KEY:-local-dev-key}}
       VALHALLA_URL: ${VALHALLA_URL:-http://host.docker.internal:8002}
       OTP_URL: ${OTP_URL:-http://otp:8080}
+      WORKER_QUEUES: prewarm
+      WORKER_INIT_RUNTIME_ON_START: "0"
+      WORKER_CONCURRENCY_DEFAULT: ${WORKER_CONCURRENCY_PREWARM:-1}
     volumes: []
 
   postgres:

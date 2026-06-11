@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import Any
 from uuid import UUID
 
@@ -93,7 +92,7 @@ async def dispatch_enrichment_subjobs(
     *,
     journey_id: UUID | None = None,
 ) -> dict[str, Any]:
-    """Start enabled enrichment subjobs concurrently for one zone."""
+    """Run enabled enrichment steps for one zone."""
     engine = get_engine()
     async with engine.begin() as conn:
         await conn.execute(
@@ -107,23 +106,19 @@ async def dispatch_enrichment_subjobs(
             {"zone_id": zone_id},
         )
 
-    tasks: dict[str, asyncio.Future] = {}
+    green: dict[str, Any] = {}
+    flood: dict[str, Any] = {}
+    safety: dict[str, Any] = {}
+    pois: dict[str, Any] = {}
+
     if enrichments.get("green", True):
-        tasks["green"] = asyncio.create_task(enrich_zone_green(zone_id))
+        green = await enrich_zone_green(zone_id)
     if enrichments.get("flood", True):
-        tasks["flood"] = asyncio.create_task(enrich_zone_flood(zone_id))
+        flood = await enrich_zone_flood(zone_id)
     if enrichments.get("safety", True):
-        tasks["safety"] = asyncio.create_task(enrich_zone_safety(zone_id))
+        safety = await enrich_zone_safety(zone_id)
     if enrichments.get("pois", True):
-        tasks["pois"] = asyncio.create_task(enrich_zone_pois(zone_id, journey_id=journey_id))
-
-    if tasks:
-        await asyncio.gather(*tasks.values())
-
-    green = tasks["green"].result() if "green" in tasks else {}
-    flood = tasks["flood"].result() if "flood" in tasks else {}
-    safety = tasks["safety"].result() if "safety" in tasks else {}
-    pois = tasks["pois"].result() if "pois" in tasks else {}
+        pois = await enrich_zone_pois(zone_id, journey_id=journey_id)
 
     async with engine.begin() as conn:
         await conn.execute(
@@ -162,7 +157,10 @@ def _zone_requires_enrichment(
     return any(category not in poi_counts for category in REQUIRED_POI_CATEGORIES)
 
 
-async def _load_remaining_zones(job_id: UUID, enrichments: dict[str, bool]) -> list[tuple[UUID, UUID | None, UUID | None]]:
+async def _load_remaining_zones(
+    job_id: UUID,
+    enrichments: dict[str, bool],
+) -> list[tuple[UUID, UUID | None, UUID | None]]:
     engine = get_engine()
     async with engine.begin() as conn:
         zones_result = await conn.execute(
