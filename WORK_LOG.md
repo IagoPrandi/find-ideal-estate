@@ -1,5 +1,9 @@
 # Work Log
 
+- 2026-06-10/11 (diagnostico login Google origin_mismatch): `PRD_MKT_GEO.md` foi aberto antes da verificacao, conforme AGENTS.md. Tentativa de abrir `./skill` feita; o diretorio nao existe neste workspace. Skill usada: `skills/security-threat-checklist/SKILL.md`, por envolver login/OAuth, cookies e CORS. Diagnostico: o login Google em `https://app.betterplace.com.br` falha com `Erro 400: origin_mismatch`, porque o OAuth Client `555968695074-5t0o21925m6pg8s130cal8nb9fp81nf6.apps.googleusercontent.com` precisa ter `https://app.betterplace.com.br` em Authorized JavaScript origins no Google Cloud. Corrigido tambem um problema secundario de CORS na API: Nginx da EC2 deixou de retornar `Access-Control-Allow-Origin: https://www.betterplace.com.br` fixo e passou a refletir apenas origens permitidas (`https://betterplace.com.br`, `https://www.betterplace.com.br`, `https://app.betterplace.com.br` e previews Vercel). Validacao: preflight `OPTIONS /auth/google` com Origin `https://app.betterplace.com.br` retornou `204` e `Access-Control-Allow-Origin: https://app.betterplace.com.br`; preflight com `https://www.betterplace.com.br` retornou `204` e origem correta; origem externa `https://evil.example.com` nao recebeu `Access-Control-Allow-Origin`; `/health` retornou `{"status":"ok","db":"ok","redis":"ok"}`. `apps/api/src/main.py` tambem foi ajustado localmente para incluir `https://app.betterplace.com.br` na allowlist FastAPI. Nenhuma milestone foi marcada como concluida, pois nao houve confirmacao explicita do responsavel.
+
+- 2026-06-10/11 (verificacao paginas GEO/SEO em producao): `PRD_MKT_GEO.md` foi aberto antes da verificacao, conforme AGENTS.md. Tentativa de abrir `./skill` feita; o diretorio nao existe neste workspace. Skill usada: `skills/geo-content/SKILL.md`, por envolver superficie publica GEO/SEO. Verificacao HTTP em producao confirmou `200 OK` para `https://betterplace.com.br/`, `/bairros`, `/bairros/vila-mariana`, `/bairros/pinheiros`, `/comparar`, `/comparar/pinheiros-vs-vila-mariana`, `/relatorios`, `/relatorios/2026-06`, `/dados`, `/metodologia`, `/geo-dashboard`, `/imoveis/sp`, `/imoveis/sp/sao-paulo`, `/imoveis/sp/sao-paulo/bela-vista`, `/imoveis/sp/sao-paulo/bela-vista/lista`, `/robots.txt`, `/llms.txt`, `/sitemap-index.xml`, `/sitemap-0.xml`, datasets JSON/CSV de `/dados`, JSON de relatorio e `/BingSiteAuth.xml`. Verificacao em `www.betterplace.com.br` tambem retornou `200 OK` para rotas representativas. Conteudo validado por marcadores nas paginas de bairro, comparativo, relatorio e dados; `llms.txt` respondeu corretamente com titulo `# BetterPlace` e lista de paginas indexaveis. Nenhuma milestone foi marcada como concluida, pois nao houve confirmacao explicita do responsavel.
+
 - 2026-06-08 (deploy producao web rewrites content): `PRD_MKT_GEO.md` foi aberto antes da execucao, conforme AGENTS.md. Tentativa de abrir `./skill` feita; o diretorio nao existe neste workspace. Skills consultadas: `skills/vercel-deploy/SKILL.md` e Vercel `vercel-cli`. Diagnostico confirmado: `https://betterplace-content.vercel.app/bairros` retornava `200 OK`, mas `https://www.betterplace.com.br/bairros` seguia em `502 DNS_HOSTNAME_RESOLVE_FAILED`, indicando producao web ainda sem o rewrite corrigido. CLI Vercel inicialmente nao estava no PATH, mas `npx vercel` funcionou; escopo explicitado para `iagooliveira2478-6571s-projects`. Projeto `find-ideal-estate` foi linkado, e deploy de producao realizado com sucesso para `dpl_HbTZJ8oipzYrs2yv2vcFpTFPcsPL`, aliasado para `https://www.betterplace.com.br` e `https://betterplace.com.br`. Durante o deploy, foi criada `.vercelignore` para limitar o upload a `apps/web` e evitar enviar `node_modules`, `dist` e `.vercel`; `.gitignore` passou a ignorar `.vercel`. Validacao pos-deploy: `curl.exe -I https://www.betterplace.com.br/bairros` retornou `200 OK`; `curl.exe -I https://www.betterplace.com.br/BingSiteAuth.xml` retornou `200 OK` com `Content-Type: application/xml`; `curl.exe -I https://www.betterplace.com.br/sitemap-index.xml` retornou `200 OK`; `vercel inspect` mostrou status `Ready` e target `production`. Observacoes: `vercel build --prod` local falhou por `spawn cmd.exe ENOENT`, entao o deploy remoto da Vercel foi usado; build remoto passou, mantendo avisos conhecidos de chunk grande/import dinamico misto e reportando vulnerabilidades npm audit preexistentes. Nenhuma milestone foi marcada como concluida, pois nao houve confirmacao explicita do responsavel.
 - 2026-06-08 (hotfix rewrite content em producao): `PRD_MKT_GEO.md` foi aberto antes da execucao, conforme AGENTS.md. Tentativa de abrir `./skill` feita; o diretorio nao existe neste workspace. Diagnostico: `www.betterplace.com.br/bairros` retornava `502 DNS_HOSTNAME_RESOLVE_FAILED` porque `apps/web/vercel.json` apontava os rewrites para `https://betterplace-content..vercel.app` com dois pontos antes de `vercel`, hostname inexistente. Correcao: todos os destinos foram ajustados para `https://betterplace-content.vercel.app`, e `/BingSiteAuth.xml` tambem foi encaminhado para o projeto content. Validacao: `Resolve-DnsName betterplace-content.vercel.app` retornou IPs Vercel; `curl.exe -I https://betterplace-content.vercel.app/bairros` retornou `200 OK`; `npm.cmd --prefix apps/web run build` passou com os avisos conhecidos de chunk grande/import dinamico misto; `apps/web/vercel.json` foi validado via `ConvertFrom-Json`; `rg` confirmou ausencia de `betterplace-content..vercel.app` e `SEU-CONTENT` no arquivo. Nenhuma milestone foi marcada como concluida, pois nao houve confirmacao explicita do responsavel.
 - 2026-06-08 (diagnostico deploy content Bing verification): `PRD_MKT_GEO.md` foi aberto antes da analise, conforme AGENTS.md. Tentativa de abrir `./skill` feita; o diretorio nao existe neste workspace. Skills consultadas: `skills/vercel-deploy/SKILL.md` e skill Vercel `env-vars`. Diagnostico: o deploy de `apps/content` falhou em `/BingSiteAuth.xml` porque `PUBLIC_BING_VERIFICATION` nao esta definida no ambiente de build da Vercel; o bloqueio e intencional para evitar publicar XML com placeholder ou omitir a verificacao real. Acao recomendada: configurar `PUBLIC_BING_VERIFICATION` no projeto Vercel do content para Production e, se usar previews, Preview, usando o codigo real do Bing Webmaster Tools. Nenhuma milestone foi marcada como concluida, pois nao houve confirmacao explicita do responsavel.
@@ -6726,6 +6730,132 @@
   - Health público: `https://api.betterplace.com.br/health` -> `{"status":"ok","db":"ok","redis":"ok"}`.
   - Contagens finais no RDS: `properties=8959`, `listing_ads=12604`, `listing_snapshots=30477`, `zone_listing_caches=112`, `scraping_degradation_events=311`, `property_price_rollups=34`.
   - Checagens de integridade: `listing_ads_missing_property=0`, `snapshots_missing_ad=0`, `zone_caches_null_search_location=0`.
+
+- Progress Tracker:
+  - Nenhuma milestone do PRD foi marcada como concluída; política de confirmação explícita preservada.
+
+## 2026-06-10 - Correção dos domínios Vercel em produção
+
+- Required docs opened:
+  - `PRD.md`
+  - `SKILLS_README.md` não encontrado no workspace.
+  - Skill Vercel CLI aberto em `C:\Users\iagoo\.codex\plugins\cache\openai-curated\vercel\c6ea566d\skills\vercel-cli\SKILL.md`.
+
+- Skill used:
+  - Vercel CLI.
+
+- Scope executed:
+  - Não houve deploy de código.
+  - Corrigido o mapeamento de produção no Vercel:
+    - `betterplace.com.br` -> projeto `betterplace-content`.
+    - `www.betterplace.com.br` -> projeto `betterplace-content`.
+    - `app.betterplace.com.br` -> projeto `find-ideal-estate`.
+  - Removida a associação antiga de `www.betterplace.com.br` no projeto `find-ideal-estate` via API de projetos do Vercel.
+  - Criado DNS explícito `www CNAME cname.vercel-dns.com` para evitar resolução pelo wildcard antigo que retornava IP sem resposta local.
+
+- Verification executed:
+  - `vercel inspect https://www.betterplace.com.br --scope iagooliveira2478-6571s-projects` -> deployment `betterplace-content-p5oamem9l...`, status `Ready`.
+  - API Vercel de domínios por projeto -> `find-ideal-estate`: `app.betterplace.com.br`, `find-ideal-estate.vercel.app`; `betterplace-content`: `www.betterplace.com.br`, `betterplace.com.br`, `betterplace-content.vercel.app`.
+  - `curl -I https://betterplace.com.br/` -> `200 OK`.
+  - `curl -I https://www.betterplace.com.br/` -> `200 OK` após `ipconfig /flushdns`.
+  - `curl -I https://app.betterplace.com.br/` -> `200 OK`.
+  - `curl https://api.betterplace.com.br/health` -> `{"status":"ok","db":"ok","redis":"ok"}`.
+
+- Progress Tracker:
+  - Nenhuma milestone do PRD foi marcada como concluída; política de confirmação explícita preservada.
+
+## 2026-06-10/11 - Verificação Vercel dos domínios BetterPlace
+
+- Required docs opened:
+  - `PRD.md`
+  - Observação: `SKILLS_README.md` não existe no working tree atual.
+
+- Skill/tool used:
+  - Vercel CLI local `54.9.1`.
+  - Vercel MCP foi consultado, mas retornou `403 Forbidden` para o escopo `iagooliveira2478-6571s-projects`; a verificação seguiu pela CLI local autenticada.
+
+- Scope executed:
+  - Projeto raiz linkado confirmado em `.vercel/project.json`: `find-ideal-estate` (`prj_9ZQ1AMba2ggsg5E01rZ8Vxh59bv9`).
+  - `vercel project ls` mostrou `find-ideal-estate` com URL de produção `https://www.betterplace.com.br`.
+  - `vercel inspect https://www.betterplace.com.br` resolveu para o deployment Ready `find-ideal-estate-nm8foi36a-iagooliveira2478-6571s-projects.vercel.app`.
+  - Aliases do deployment `find-ideal-estate`: `www.betterplace.com.br`, `betterplace.com.br`, `find-ideal-estate.vercel.app` e aliases internos.
+  - Projeto `betterplace-content` está Ready, mas sem domínio customizado; responde em `https://betterplace-content.vercel.app`.
+  - `app.betterplace.com.br` retornou `404 DEPLOYMENT_NOT_FOUND`.
+  - `vercel domains inspect betterplace.com.br` retornou `403 Forbidden`, apesar de `vercel domains ls` listar `betterplace.com.br` no escopo.
+
+- Verification executed:
+  - `https://betterplace.com.br/` -> `307` para `https://www.betterplace.com.br/`.
+  - `https://www.betterplace.com.br/` -> timeout em chamadas diretas.
+  - `https://find-ideal-estate.vercel.app/` -> `200 OK`.
+  - URL única do deployment `find-ideal-estate-nm8foi36a...vercel.app` -> `401 Unauthorized` por proteção SSO; esperado para deployment URL porque o projeto usa `all_except_custom_domains`.
+  - `https://betterplace-content.vercel.app/` -> `200 OK`, conteúdo Astro público carregado.
+  - API segue OK: `https://api.betterplace.com.br/health` -> `{"status":"ok","db":"ok","redis":"ok"}`.
+  - DNS observado: `www.betterplace.com.br` resolve para `216.198.79.1` e `64.29.17.1`; conexões diretas para esses IPs via `--resolve` deram timeout.
+
+- Progress Tracker:
+  - Nenhuma milestone do PRD foi marcada como concluída; política de confirmação explícita preservada.
+
+## 2026-06-10/11 - Deploy backend em produção com migrations GEO
+
+- Required docs opened:
+  - `PRD.md`
+  - `skills/release-config-management/SKILL.md`
+  - Observação: `SKILLS_README.md` não existe no working tree atual; a skill primária foi aberta diretamente.
+
+- Skill used:
+  - `skills/release-config-management/SKILL.md`
+
+- Scope executed:
+  - `DATABASE_URL` de produção corrigida a partir do `.env` local em formato percent-encoded, sem imprimir segredo.
+  - Backup do `.env` remoto criado em `/opt/app/.env.backup.20260611012213.database_url`.
+  - Backend em produção na AWS atualizado do commit `c74f56eb270c2881e755831f3b866ce74b98924e` para `5aa604062df76c7fbd8c9c5b27efd02440441ac5`.
+  - Arquivos de backend, contracts, migrations, Docker, compose e `.env.example` foram enviados para `/opt/app` via archive Git, preservando `.env` e dados locais da EC2.
+  - Imagens `api`, `worker`, `worker-scrape-browser` e `worker-prewarm` foram reconstruídas.
+  - Workers foram pausados durante o rollout; API foi recriada primeiro para aplicar migrations e depois os workers foram recriados.
+  - Migrations `20260606_0042_urban_metrics_geo_layer.py` e `20260606_0043_add_district_metadata_columns.py` aplicadas em produção.
+  - Deploy do frontend/Vercel não foi executado.
+
+- Verification executed:
+  - Testes focados locais: `python -m pytest apps/api/tests/test_platform_registry.py apps/api/tests/test_phase5_scraper_extraction.py apps/api/tests/test_phase8_mercado_pago.py -q --color=no` -> `47 passed`, com 1 warning conhecido de `httpx`.
+  - `python -m py_compile infra/migrations/versions/20260606_0042_urban_metrics_geo_layer.py infra/migrations/versions/20260606_0043_add_district_metadata_columns.py` -> sem erros.
+  - `git diff --check` nos arquivos de backend/migrations do rollout -> sem erros.
+  - Alembic em produção: `20260606_0043 (head)`.
+  - Health local no EC2: `{"status":"ok","db":"ok","redis":"ok"}`.
+  - Health público: `https://api.betterplace.com.br/health` -> `{"status":"ok","db":"ok","redis":"ok"}`.
+  - Containers em produção: `api` healthy; `redis`, `worker`, `worker-prewarm` e `worker-scrape-browser` up.
+  - Objetos GEO no RDS confirmados: `urban_metrics_by_district`, `neighborhood_metric_scores`, `neighborhood_metric_coverage`, coluna `slug` e coluna `region_5_name`.
+  - Logs recentes de `api`, `worker`, `worker-scrape-browser` e `worker-prewarm` sem `error/exception/traceback/failed/fatal`; apenas warning de compose sobre `VITE_API_BASE` não definido, sem impacto no backend.
+
+- Progress Tracker:
+  - Nenhuma milestone do PRD foi marcada como concluída; política de confirmação explícita preservada.
+
+## 2026-06-10 - Tentativa bloqueada de deploy backend em produção
+
+- Required docs opened:
+  - `PRD.md`
+  - `skills/release-config-management/SKILL.md`
+  - Observação: `SKILLS_README.md` não existe no working tree atual; a skill primária foi aberta diretamente.
+
+- Skill used:
+  - `skills/release-config-management/SKILL.md`
+
+- Scope executed:
+  - Produção verificada na EC2 `18.117.21.132`: `.deploy_commit=c74f56eb270c2881e755831f3b866ce74b98924e`; containers `api`, `redis`, `worker`, `worker-prewarm` e `worker-scrape-browser` estavam `Up`, com `api` healthy.
+  - Commit local alvo identificado como `5aa604062df76c7fbd8c9c5b27efd02440441ac5`.
+  - Diferença de backend identificada em `docker-compose.yml`, `docker-compose.prod.yml`, `.env.example` e migrations `20260606_0042_urban_metrics_geo_layer.py` e `20260606_0043_add_district_metadata_columns.py`.
+  - O deploy não foi executado porque novas conexões ao RDS falharam com `FATAL: password authentication failed for user "postgres"` ao rodar Alembic dentro do container atual.
+  - A `DATABASE_URL` local foi reconstruída em formato percent-encoded e testada via arquivo temporário no EC2; a conexão ao RDS também falhou com a mesma autenticação inválida.
+  - AWS CLI local e na EC2 não possui credenciais para buscar o segredo atualizado no Secrets Manager.
+  - Arquivos temporários com `DATABASE_URL` foram removidos da EC2 e do ambiente local.
+  - Nenhum restart de API/workers foi feito e `.deploy_commit` de produção permaneceu inalterado para evitar derrubar o serviço durante a migration.
+  - Deploy do frontend/Vercel não foi executado.
+
+- Verification executed:
+  - Testes focados locais: `python -m pytest apps/api/tests/test_platform_registry.py apps/api/tests/test_phase5_scraper_extraction.py apps/api/tests/test_phase8_mercado_pago.py -q --color=no` -> `47 passed`, com 1 warning conhecido de `httpx`.
+  - `python -m py_compile infra/migrations/versions/20260606_0042_urban_metrics_geo_layer.py infra/migrations/versions/20260606_0043_add_district_metadata_columns.py` -> sem erros.
+  - `git diff --check` nos arquivos de backend/migrations do rollout -> sem erros.
+  - Health público durante a checagem: `https://api.betterplace.com.br/health` -> `{"status":"ok","db":"ok","redis":"ok"}`.
+  - Logs recentes de `api`, `worker`, `worker-scrape-browser` e `worker-prewarm` sem `error/exception/traceback/failed/fatal`.
 
 - Progress Tracker:
   - Nenhuma milestone do PRD foi marcada como concluída; política de confirmação explícita preservada.

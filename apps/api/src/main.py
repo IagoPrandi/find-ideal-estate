@@ -81,6 +81,7 @@ _cors_origins = [
     "http://127.0.0.1:3000",
     "https://betterplace.com.br",
     "https://www.betterplace.com.br",
+    "https://app.betterplace.com.br",
 ]
 
 
