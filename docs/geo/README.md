@@ -28,7 +28,7 @@ Artefatos da estratégia pública de conteúdo do BetterPlace (PRD: `../../PRD_M
 | Risco de alagamento | 0–100 ↓ | GeoSampa `mancha_inundacao` | completa |
 | Segurança pública | 0–100 ↓ | SSP-SP via **join espacial geométrico** sobre `neighborhood_boundaries` (ponto-hull SSP) — nenhuma filtragem por nome/city_code | parcial (sub-registro estrutural) |
 | Acesso a serviços | 0–100 | Proxy: densidade de paradas de ônibus (OSM M5) | completa (proxy) |
-| Panorama imobiliário | — | base imobiliária interna exige pipeline geoespacial e agregação estado/cidade/bairro/lista | **pendente (M8)** |
+| Panorama imobiliário | — | base imobiliária interna agregada por pipeline geoespacial estado/cidade/bairro/lista | disponível com limitações declaradas |
 
 ## Regra de integridade de dados (OBRIGATÓRIA)
 
@@ -40,9 +40,9 @@ real no banco de dados PostGIS.**
   para identificar quais registros pertencem a cada polígono distrital.
 - Nunca inserir valores estimados ou inventados em `bairros.ts` ou nas tabelas de score.
 - Se um dado não existir no banco, declarar como lacuna (`lacunas[]` em `Bairro`).
-- O campo `realEstateMetrics` só pode ser preenchido quando houver pipeline geoespacial
-  e/ou chaves canônicas validadas que agreguem a base imobiliária interna por estado,
-  cidade, bairro e lista (previsto M8).
+- Métricas imobiliárias só podem ser expostas quando vierem do pipeline geoespacial
+  reprodutível da base interna BetterPlace, com agregação por estado, cidade, bairro
+  e lista, amostra mínima e limitações declaradas.
 - O pipeline de segurança usa join espacial puro: `ST_Intersects(pmsp.geometry, ssp.geometry)`
   sem qualquer filtro de nome ou `city_code` dos bairros SSP.
 

@@ -1,0 +1,29 @@
+---
+import Base from '../../layouts/Base.astro';
+import Cta from '../../components/Cta.astro';
+import { GUIAS } from '../../data/guias';
+---
+
+<Base
+  title="Guias de decisão de moradia em São Paulo · BetterPlace"
+  description="Guias por intenção para decidir onde morar em São Paulo usando dados de bairro, transporte, áreas verdes, segurança, alagamento e custo imobiliário agregado."
+  canonical="/guias"
+>
+  <span class="tag">Guias · São Paulo</span>
+  <h1>Guias de decisão de moradia</h1>
+  <p class="lead">
+    Páginas criadas para responder perguntas práticas de moradia, como onde morar perto
+    do Itaim Bibi, da Faria Lima ou de regiões com melhor transporte.
+  </p>
+
+  <div class="card-grid">
+    {GUIAS.map((guia) => (
+      <div class="card">
+        <p class="card__title"><a href={`/guias/${guia.slug}`}>{guia.titulo}</a></p>
+        <p class="card__body">{guia.descricao}</p>
+      </div>
+    ))}
+  </div>
+
+  <Cta tipo="guia" posicao="end" slug="guias" />
+</Base>

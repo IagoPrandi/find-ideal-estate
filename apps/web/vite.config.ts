@@ -19,7 +19,7 @@ export default defineConfig({
       // Em Docker: CONTENT_URL=http://content:4321 (nome do serviço no docker-compose)
       // Fora do Docker: usa localhost:4321 (Astro rodando localmente)
       const contentUrl = process.env.CONTENT_URL ?? 'http://localhost:4321';
-      const routes = ['/bairros', '/comparar', '/dados', '/relatorios', '/metodologia', '/sitemap', '/robots.txt', '/llms.txt'];
+      const routes = ['/bairros', '/comparar', '/guias', '/dados', '/relatorios', '/metodologia', '/sitemap', '/robots.txt', '/llms.txt'];
       return Object.fromEntries(routes.map((r) => [r, contentUrl]));
     })()
   }

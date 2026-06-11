@@ -8,6 +8,9 @@
     { "source": "/comparar", "destination": "https://betterplace-content.vercel.app/comparar" },
     { "source": "/comparar/:path*", "destination": "https://betterplace-content.vercel.app/comparar/:path*" },
 
+    { "source": "/guias", "destination": "https://betterplace-content.vercel.app/guias" },
+    { "source": "/guias/:path*", "destination": "https://betterplace-content.vercel.app/guias/:path*" },
+
     { "source": "/dados", "destination": "https://betterplace-content.vercel.app/dados" },
     { "source": "/dados/:path*", "destination": "https://betterplace-content.vercel.app/dados/:path*" },
 

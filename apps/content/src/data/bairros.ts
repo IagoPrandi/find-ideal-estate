@@ -88,7 +88,7 @@ export const BAIRROS: Bairro[] = [
       'Cobertura moderada de pontos de interesse em relação a distritos de maior centralidade.',
     ],
     lacunas: [
-      'Dados imobiliários por distrito: pipeline de agregação pendente (previsto M8).',
+      'Dados imobiliários agregados vêm da base interna BetterPlace e não representam todo o mercado.',
       'Dados de segurança com sub-registro estrutural conhecido (SSP-SP) — interpretar com cautela.',
     ],
     bairrosSimilares: ['moema', 'bela-vista', 'liberdade'],
@@ -117,7 +117,7 @@ export const BAIRROS: Bairro[] = [
       'Os dados da SSP-SP indicam menor densidade relativa de ocorrências — sempre interpretar com ressalva de sub-registro.',
     ],
     lacunas: [
-      'Dados imobiliários por distrito: pipeline de agregação pendente (previsto M8).',
+      'Dados imobiliários agregados vêm da base interna BetterPlace e não representam todo o mercado.',
       'Dados de segurança com sub-registro estrutural conhecido (SSP-SP) — interpretar com cautela.',
     ],
     bairrosSimilares: ['itaim-bibi', 'vila-mariana', 'consolacao'],
@@ -146,7 +146,7 @@ export const BAIRROS: Bairro[] = [
       'Cobertura moderada de pontos de interesse — score de POI abaixo de distritos mais centrais.',
     ],
     lacunas: [
-      'Dados imobiliários por distrito: pipeline de agregação pendente (previsto M8).',
+      'Dados imobiliários agregados vêm da base interna BetterPlace e não representam todo o mercado.',
       'Dados de segurança com sub-registro estrutural conhecido (SSP-SP) — interpretar com cautela.',
     ],
     bairrosSimilares: ['pinheiros', 'moema', 'vila-mariana'],
@@ -175,7 +175,7 @@ export const BAIRROS: Bairro[] = [
       'Cobertura moderada de pontos de interesse — score de POI abaixo da média.',
     ],
     lacunas: [
-      'Dados imobiliários por distrito: pipeline de agregação pendente (previsto M8).',
+      'Dados imobiliários agregados vêm da base interna BetterPlace e não representam todo o mercado.',
       'Dados de segurança com sub-registro estrutural conhecido (SSP-SP) — interpretar com cautela.',
     ],
     bairrosSimilares: ['vila-mariana', 'itaim-bibi', 'campo-belo'],
@@ -204,7 +204,7 @@ export const BAIRROS: Bairro[] = [
       'Os dados da SSP-SP indicam densidade moderada de ocorrências registradas — sub-registro estrutural conhecido.',
     ],
     lacunas: [
-      'Dados imobiliários por distrito: pipeline de agregação pendente (previsto M8).',
+      'Dados imobiliários agregados vêm da base interna BetterPlace e não representam todo o mercado.',
       'Dados de segurança com sub-registro estrutural conhecido (SSP-SP) — interpretar com cautela.',
     ],
     bairrosSimilares: ['consolacao', 'liberdade', 'vila-mariana'],
@@ -233,7 +233,7 @@ export const BAIRROS: Bairro[] = [
       'Cobertura moderada de pontos de interesse em relação ao score de transporte.',
     ],
     lacunas: [
-      'Dados imobiliários por distrito: pipeline de agregação pendente (previsto M8).',
+      'Dados imobiliários agregados vêm da base interna BetterPlace e não representam todo o mercado.',
       'Dados de segurança com sub-registro estrutural conhecido (SSP-SP) — interpretar com cautela.',
     ],
     bairrosSimilares: ['bela-vista', 'pinheiros', 'perdizes'],
@@ -262,7 +262,7 @@ export const BAIRROS: Bairro[] = [
       'Cobertura moderada de pontos de interesse em relação a distritos de maior centralidade.',
     ],
     lacunas: [
-      'Dados imobiliários por distrito: pipeline de agregação pendente (previsto M8).',
+      'Dados imobiliários agregados vêm da base interna BetterPlace e não representam todo o mercado.',
       'Dados de segurança com sub-registro estrutural conhecido (SSP-SP) — interpretar com cautela.',
     ],
     bairrosSimilares: ['bela-vista', 'vila-mariana', 'cambuci'],
@@ -291,7 +291,7 @@ export const BAIRROS: Bairro[] = [
       'Cobertura moderada de pontos de interesse — score de POI abaixo de distritos centrais.',
     ],
     lacunas: [
-      'Dados imobiliários por distrito: pipeline de agregação pendente (previsto M8).',
+      'Dados imobiliários agregados vêm da base interna BetterPlace e não representam todo o mercado.',
       'Dados de segurança com sub-registro estrutural conhecido (SSP-SP) — interpretar com cautela.',
     ],
     bairrosSimilares: ['mooca', 'vila-prudente', 'penha'],
@@ -320,7 +320,7 @@ export const BAIRROS: Bairro[] = [
       'Cobertura moderada de pontos de interesse — score de POI abaixo de distritos centrais.',
     ],
     lacunas: [
-      'Dados imobiliários por distrito: pipeline de agregação pendente (previsto M8).',
+      'Dados imobiliários agregados vêm da base interna BetterPlace e não representam todo o mercado.',
       'Dados de segurança com sub-registro estrutural conhecido (SSP-SP) — interpretar com cautela.',
     ],
     bairrosSimilares: ['tatuape', 'belem', 'bras'],
@@ -349,7 +349,7 @@ export const BAIRROS: Bairro[] = [
       'Cobertura moderada de pontos de interesse — score de POI abaixo de distritos centrais.',
     ],
     lacunas: [
-      'Dados imobiliários por distrito: pipeline de agregação pendente (previsto M8).',
+      'Dados imobiliários agregados vêm da base interna BetterPlace e não representam todo o mercado.',
       'Dados de segurança com sub-registro estrutural conhecido (SSP-SP) — interpretar com cautela.',
     ],
     bairrosSimilares: ['tucuruvi', 'casa-verde', 'mandaqui'],
@@ -378,7 +378,7 @@ export const BAIRROS: Bairro[] = [
       'Cobertura moderada de pontos de interesse — dependência maior de comércio local.',
     ],
     lacunas: [
-      'Dados imobiliários por distrito: pipeline de agregação pendente (previsto M8).',
+      'Dados imobiliários agregados vêm da base interna BetterPlace e não representam todo o mercado.',
       'Dados de segurança com sub-registro estrutural conhecido (SSP-SP) — interpretar com cautela.',
     ],
     bairrosSimilares: ['pompeia', 'lapa', 'consolacao'],
@@ -407,7 +407,7 @@ export const BAIRROS: Bairro[] = [
       'Cobertura moderada de pontos de interesse — score de POI abaixo da média dos distritos analisados.',
     ],
     lacunas: [
-      'Dados imobiliários por distrito: pipeline de agregação pendente (previsto M8).',
+      'Dados imobiliários agregados vêm da base interna BetterPlace e não representam todo o mercado.',
       'Dados de segurança com sub-registro estrutural conhecido (SSP-SP) — interpretar com cautela.',
     ],
     bairrosSimilares: ['perdizes', 'pinheiros', 'lapa'],

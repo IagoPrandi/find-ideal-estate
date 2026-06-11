@@ -19,6 +19,8 @@ BetterPlace é uma plataforma de decisão de moradia baseada em dados públicos 
 - /bairros/{slug} — dados detalhados por bairro (transporte, segurança, áreas verdes, alagamento, serviços, panorama imobiliário)
 - /comparar — listagem de comparativos aprovados
 - /comparar/{bairro-a}-vs-{bairro-b} — comparativo detalhado entre dois bairros
+- /guias — guias por intenção de moradia, como morar perto do Itaim Bibi ou da Faria Lima
+- /guias/bairros-perto-do-itaim-bibi-para-morar — recomendação por perfil para quem quer morar perto do Itaim Bibi, com Itaim Bibi, Pinheiros, Moema e Vila Mariana
 - /dados — dataset aberto com dados agregados por distrito (CSV, JSON, GeoJSON) e dataset imobiliário
 - /relatorios — relatórios periódicos de qualidade urbana
 - /metodologia — descrição das fontes, processo de agregação e limitações

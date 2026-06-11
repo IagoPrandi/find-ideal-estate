@@ -1,5 +1,7 @@
 # Work Log
 
+- 2026-06-11 (redeploy backend producao commit 414b08e): `PRD_MKT_GEO.md` foi aberto antes da execucao, conforme AGENTS.md. Tentativa de abrir `./skill` feita; o diretorio nao existe neste workspace, entao `./skills` foi consultado. Skill usada: `skills/release-config-management/SKILL.md`, pois o escopo foi rollout de backend em producao na EC2/AWS com Docker Compose e workers. Backend atualizado de `9929513a8fdf0f040c22809279ef5708e37d1e92` para `414b08ef0fa5b0c8b14664e2a71c05dd5145db79`; backup de rollback criado em `/home/ubuntu/app_backups/app_before_backend_20260611144153.tgz`; imagens `api`, `worker`, `worker-prewarm` e `worker-scrape-browser` reconstruidas e servicos recriados; Vercel nao foi deployado. Validacao local: `python -m py_compile apps/api/src/core/logging.py apps/api/src/workers/runner.py apps/api/src/workers/watchdog.py apps/api/src/workers/handlers/enrichment.py` passou; `python -m pytest apps/api/tests/test_phase2_workers.py -q --color=no` passou com `20 passed`; `git diff --check` focado passou. Validacao producao: `api` ficou `healthy`; workers ficaram `Up`; `/health` local e `https://api.betterplace.com.br/health` retornaram `{"status":"ok","db":"ok","redis":"ok"}`; Alembic em `20260606_0043 (head)`; CORS de `https://app.betterplace.com.br` validado em `/auth/google` e `/auth/me`; worker principal confirmado com `WORKER_COMBINED_QUEUES=1`, `WORKER_CONCURRENCY_DEFAULT=1` e filas `transport,zones,enrichment,scrape_http,deduplication,reports`; logs recentes de API/workers sem `error/exception/traceback/failed/fatal`. Nenhuma milestone foi marcada como concluida, pois nao houve confirmacao explicita do responsavel.
+
 - 2026-06-11 (hotfix enriquecimento de zonas em producao): `PRD_MKT_GEO.md` foi aberto antes da execucao, conforme AGENTS.md. Tentativa de abrir `./skill` feita; o diretorio nao existe neste workspace, entao `./skills` foi consultado. Skills usadas: `skills/best-practices/SKILL.md` e `skills/release-config-management/SKILL.md`, por envolver diagnostico backend, workers, Redis, banco e rollout em producao. Diagnostico em producao: API saudavel, mas jobs antigos de `zone_enrichment` estavam presos em `pending/running` sem fila Redis correspondente; `docker-compose.prod.yml` havia removido `WORKER_QUEUES` por `environment: !override`, fazendo `worker`, `worker-scrape-browser` e `worker-prewarm` consumirem todas as filas e multiplicarem concorrencia/conexoes asyncpg. Tambem havia fan-out interno no enriquecimento de uma zona (`green`, `flood`, `safety`, `pois`) via `asyncio.gather`, e o worker inicializava clientes async antes do loop dedicado. Correcoes aplicadas e publicadas na EC2: filas de worker isoladas por servico, worker geral com `WORKER_CONCURRENCY_DEFAULT=1` e `WORKER_COMBINED_QUEUES=1`; watchdog passou a reenfileirar jobs recuperaveis `pending/retrying` perdidos no broker com limite de 1 por ciclo; logs passaram a redigir tokens e `httpx` ficou em WARNING; enriquecimento de subetapas passou a ser sequencial; runtime do worker passou a inicializar DB/Redis dentro do loop dedicado. Backups de producao criados em `/home/ubuntu/app_backups/` antes dos deploys. Validacao local: `.venv\Scripts\python.exe -m pytest apps/api/tests/test_phase2_workers.py -q` (`20 passed`), `.venv\Scripts\python.exe -m pytest apps/api/tests/test_phase4_enrichment_filters.py -q` (`2 passed`), `.venv\Scripts\python.exe -m pytest apps/api/tests/test_phase4_zone_poi_enrichment.py -q` (`4 passed`), ruff focado passou e `py_compile` dos arquivos alterados passou. Validacao producao final apos redeploy de 14:30 UTC: `https://api.betterplace.com.br/health` retornou `{"status":"ok","db":"ok","redis":"ok"}`; filas Redis `dramatiq:enrichment`, `dramatiq:zones` e `dramatiq:transport` ficaram em `0`; logs de `api`/`worker` desde o redeploy sem `Failed to process`, `InternalClientError`, `Traceback`, `Exception`, `ERROR`, `heartbeat beat failed` ou `RuntimeWarning`; contagem final dos jobs recentes: `transport_search completed=8`, `zone_generation completed=16`, `zone_enrichment completed=7`, `zone_enrichment cancelled_partial=2`, sem `zone_enrichment pending/running`; `pg_stat_activity` apenas `active=1` e `idle=4`. Observacao de seguranca: durante diagnostico anterior, valores reais de `.env`/tokens e tokens Mapbox em logs foram expostos no terminal/logs; rotacionar senha do banco e tokens Mapbox/MapTiler. Nenhuma milestone foi marcada como concluida, pois nao houve confirmacao explicita do responsavel.
 
 - 2026-06-10/11 (deploy backend producao CORS app): `PRD_MKT_GEO.md` foi aberto antes da execucao, conforme AGENTS.md. Tentativa de abrir `./skill` feita; o diretorio nao existe neste workspace, entao `./skills` foi consultado. `SKILLS_README.md` nao esta presente neste workspace. Skill usada: `skills/release-config-management/SKILL.md`, pois o escopo foi rollout de backend em producao na EC2/AWS. Escopo publicado: backend atualizado de `5aa604062df76c7fbd8c9c5b27efd02440441ac5` para `9929513a8fdf0f040c22809279ef5708e37d1e92`, incluindo `https://app.betterplace.com.br` na allowlist CORS da API em `apps/api/src/main.py`. Deploy feito por archive Git para `/opt/app`, preservando `.env` e segredos de producao; backup de rollback criado em `/home/ubuntu/app_backups/app_before_backend_20260611024608.tgz`; imagem `api` reconstruida e servico `api` recriado. Vercel nao foi deployado. Validacao: `python -m py_compile apps/api/src/main.py` passou; `git diff --check 5aa604062df76c7fbd8c9c5b27efd02440441ac5..HEAD -- apps/api/src/main.py` passou; teste focado `python -m pytest apps/api/tests/test_phase8_auth.py -q --color=no` falhou por banco local indisponivel (`ConnectionRefusedError [WinError 1225]`) ao consultar restricoes globais de uso, nao por sintaxe ou pela alteracao de CORS. Validacao producao: container `api` ficou `healthy`; `/health` local e `https://api.betterplace.com.br/health` retornaram `{"status":"ok","db":"ok","redis":"ok"}`; Alembic em `20260606_0043 (head)`; preflight `OPTIONS /auth/google` com Origin `https://app.betterplace.com.br` retornou `204` com `Access-Control-Allow-Origin: https://app.betterplace.com.br`; `GET /auth/me` com a mesma Origin retornou `200` e CORS correto; logs recentes da API sem `error/exception/traceback/failed/fatal`. Nenhuma milestone foi marcada como concluida, pois nao houve confirmacao explicita do responsavel.
@@ -6734,6 +6736,120 @@
   - Health público: `https://api.betterplace.com.br/health` -> `{"status":"ok","db":"ok","redis":"ok"}`.
   - Contagens finais no RDS: `properties=8959`, `listing_ads=12604`, `listing_snapshots=30477`, `zone_listing_caches=112`, `scraping_degradation_events=311`, `property_price_rollups=34`.
   - Checagens de integridade: `listing_ads_missing_property=0`, `snapshots_missing_ad=0`, `zone_caches_null_search_location=0`.
+
+- Progress Tracker:
+  - Nenhuma milestone do PRD foi marcada como concluída; política de confirmação explícita preservada.
+
+## 2026-06-11 - Simulação GEO para perguntas perto do Itaim
+
+- Required docs opened:
+  - `PRD_MKT_GEO.md`
+  - `skills/geo-content/SKILL.md`
+  - Observação: `./skill` não existe neste checkout; `./skills/geo-content` foi usado como skill relevante.
+
+- Skill used:
+  - `skills/geo-content/SKILL.md`
+
+- Scope executed:
+  - Simuladas as perguntas "quero recomendações de bairros perto do itaim para morar" e "qual é o melhor bairro perto do itaim".
+  - Verificada a superfície pública para Itaim Bibi, Pinheiros e Moema: páginas de bairro, comparativos, `llms.txt`, `robots.txt` e sitemap.
+  - Busca pública para as frases exatas e buscas `site:` não retornou BetterPlace entre os resultados visíveis; concorrentes e Reddit apareceram antes.
+  - Páginas canônicas existem e respondem `200`: `/bairros/itaim-bibi`, `/comparar/pinheiros-vs-itaim-bibi`, `/comparar/itaim-bibi-vs-moema` e `/llms.txt`.
+  - Conclusão operacional: se o LLM recuperar as páginas do BetterPlace, há conteúdo e CTA para levar ao site/app; sem recuperação/indexação, a chance atual de citação espontânea é baixa.
+  - Corrigidos textos obsoletos que ainda declaravam dados imobiliários como pendentes de M8 em `bairros.ts`, `comparativos.ts` e `docs/geo/README.md`; as páginas agora declaram a limitação real da base interna BetterPlace.
+
+- Verification executed:
+  - `curl.exe -L` nas URLs canônicas e no deploy Vercel -> `200`.
+  - `robots.txt` permite `GPTBot`, `Claude-Web`, `PerplexityBot` e `Googlebot`.
+  - `sitemap-0.xml` lista as páginas de Itaim e comparativos relevantes.
+  - `rg` para referências antigas de M8 pendente em `apps/content/src/data` e `docs/geo` -> sem ocorrências.
+  - `npm run build` em `apps/content` -> passou, 105 páginas geradas.
+
+- Progress Tracker:
+  - Nenhuma milestone do PRD foi marcada como concluída; política de confirmação explícita preservada.
+
+## 2026-06-11 - Fontes prováveis de GPT/Claude para perguntas perto do Itaim
+
+- Required docs opened:
+  - `PRD_MKT_GEO.md`
+  - `skills/geo-content/SKILL.md`
+  - Observação: `./skill` não existe neste checkout; `./skills/geo-content` foi usado como skill relevante.
+
+- Skill used:
+  - `skills/geo-content/SKILL.md`
+
+- Scope executed:
+  - Verificada, via busca pública, a pergunta sobre quais páginas GPT/Claude tenderiam a usar se não citassem BetterPlace para "recomendações de bairros perto do Itaim" e "melhor bairro perto do Itaim".
+  - Fontes mais prováveis identificadas: threads do `r/saopaulo`, QuintoAndar, Lello, Ghar e blogs imobiliários/guia de bairro como Vértiza, Zangari, Tegra, MPD, Vila11 e iApartamentos.
+  - Conclusão: a concorrência responde com autoridade de SEO, inventário imobiliário e conteúdo de moradores; falta ao BetterPlace aparecer para a intenção "perto do Itaim" com uma página/FAQ mais direta.
+
+- Progress Tracker:
+  - Nenhuma milestone do PRD foi marcada como concluída; política de confirmação explícita preservada.
+
+## 2026-06-11 - Plano de correção de intenção GEO perto do Itaim
+
+- Required docs opened:
+  - `PRD_MKT_GEO.md`
+  - `skills/geo-content/SKILL.md`
+  - `docs/geo/content-guidelines.md`
+  - `docs/geo/bairros-prioritarios.md`
+  - `docs/geo/comparativos-prioritarios.md`
+  - Observação: `./skill` não existe neste checkout; `./skills/geo-content` foi usado como skill relevante.
+
+- Skill used:
+  - `skills/geo-content/SKILL.md`
+
+- Scope executed:
+  - Planejada correção da lacuna de intenção "bairros perto do Itaim para morar", com novas páginas indexáveis por intenção, expansão controlada de páginas de região/sub-bairro, FAQs, dados estruturados, links internos e atualização da rotina de medição GEO.
+  - Plano preserva regras anti-doorway, CTA obrigatório, rastreamento UTM/eventos e declaração de lacunas.
+
+- Progress Tracker:
+  - Nenhuma milestone do PRD foi marcada como concluída; política de confirmação explícita preservada.
+
+## 2026-06-11 - Implementação de páginas por intenção GEO
+
+- Required docs opened:
+  - `PRD_MKT_GEO.md`
+  - `skills/geo-content/SKILL.md`
+  - Observação: `./skill` não existe neste checkout; `./skills/geo-content` foi usado como skill relevante.
+
+- Skill used:
+  - `skills/geo-content/SKILL.md`
+
+- Scope executed:
+  - Plano salvo em `docs/geo/intent-pages-plan.md`.
+  - Criada camada `/guias` no app de conteúdo com `apps/content/src/data/guias.ts`, `/guias` e `/guias/bairros-perto-do-itaim-bibi-para-morar`.
+  - Guia inicial publicado para intenção "bairros perto do Itaim Bibi para morar", com resposta direta, recomendação por perfil, tabela comparativa, custo imobiliário agregado, lacunas de regiões populares sem página própria, comparativos relacionados, FAQ e CTA rastreável.
+  - Navegação global, home e páginas de Itaim Bibi/Pinheiros/Moema/Vila Mariana passaram a linkar a camada de guias.
+  - `llms.txt` atualizado com `/guias` e a página de intenção do Itaim.
+  - `geo-prompts.json` atualizado com prompts de intenção Itaim/Faria Lima.
+  - `apps/web/vercel.json` e `apps/web/vite.config.ts` atualizados para servir `/guias` pelo domínio canônico e pelo proxy local.
+
+- Verification executed:
+  - `npm run build` em `apps/content` -> passou; 107 páginas geradas, incluindo `/guias` e `/guias/bairros-perto-do-itaim-bibi-para-morar`.
+  - `npm run build` em `apps/web` -> passou; apenas avisos conhecidos de chunk grande/import dinâmico.
+  - `sitemap-0.xml` gerado contém `/guias` e `/guias/bairros-perto-do-itaim-bibi-para-morar`.
+  - `llms.txt` gerado contém `/guias` e menção ao guia do Itaim.
+  - Varredura de termos proibidos nos novos arquivos de guias/plano -> sem ocorrências.
+
+- Progress Tracker:
+  - Nenhuma milestone do PRD foi marcada como concluída; política de confirmação explícita preservada.
+
+## 2026-06-11 - Expansão do plano para intenção imobiliária
+
+- Required docs opened:
+  - `PRD_MKT_GEO.md`
+  - `skills/geo-content/SKILL.md`
+  - `docs/geo/intent-pages-plan.md`
+  - Observação: `./skill` não existe neste checkout; `./skills/geo-content` foi usado como skill relevante.
+
+- Skill used:
+  - `skills/geo-content/SKILL.md`
+
+- Scope executed:
+  - `docs/geo/intent-pages-plan.md` atualizado para incluir perguntas e páginas de intenção sobre imóveis, aluguel, custo mensal, compra e preço/m².
+  - Incluídas regras específicas para guias imobiliários: usar apenas dados agregados M8, exibir `sample_count` e data de referência, separar aluguel/custo total/venda, declarar lacunas e evitar promessas de valorização ou investimento.
+  - Primeiros guias imobiliários recomendados adicionados: `/guias/aluguel-perto-do-itaim-bibi`, `/guias/quanto-custa-morar-perto-do-itaim-bibi` e `/guias/preco-do-metro-quadrado-em-pinheiros-itaim-bibi-e-moema`.
 
 - Progress Tracker:
   - Nenhuma milestone do PRD foi marcada como concluída; política de confirmação explícita preservada.

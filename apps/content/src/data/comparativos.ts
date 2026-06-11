@@ -69,7 +69,7 @@ export const COMPARATIVOS: Comparativo[] = [
     pontosAtencao: [
       'Ambos os distritos apresentam presença de áreas verdes abaixo da média geral — mas Pinheiros se destaca positivamente em relação a Vila Mariana nessa dimensão.',
       'Dados de segurança disponíveis com cobertura parcial (SSP-SP) — comparação relativa, não absoluta. Sub-registro é limitação estrutural dos dados de criminalidade.',
-      'Dados imobiliários agregados por distrito não disponíveis nesta versão do dataset (previstos em M8).',
+      'Dados imobiliários agregados vêm da base interna BetterPlace e não representam todo o mercado.',
     ],
     dataAtualizacao: '2026-06-06',
   },
@@ -95,7 +95,7 @@ export const COMPARATIVOS: Comparativo[] = [
     pontosAtencao: [
       'A diferença de transporte entre os distritos é marginal (score 32,9 vs 32,0) — não deve ser fator determinante.',
       'Dados de segurança com cobertura parcial (SSP-SP) — interpretar com cautela. Sub-registro é limitação estrutural.',
-      'Dados imobiliários agregados por distrito não disponíveis nesta versão (previstos em M8).',
+      'Dados imobiliários agregados vêm da base interna BetterPlace e não representam todo o mercado.',
     ],
     dataAtualizacao: '2026-06-06',
   },
@@ -121,7 +121,7 @@ export const COMPARATIVOS: Comparativo[] = [
     pontosAtencao: [
       'A diferença de transporte é um dos fatores mais relevantes entre estes dois distritos — Moema depende mais de ônibus, com menor cobertura de metrô.',
       'Dados de segurança com cobertura parcial (SSP-SP) para ambos os distritos. Sub-registro é limitação estrutural.',
-      'Dados imobiliários agregados por distrito não disponíveis nesta versão (previstos em M8).',
+      'Dados imobiliários agregados vêm da base interna BetterPlace e não representam todo o mercado.',
     ],
     dataAtualizacao: '2026-06-06',
   },
@@ -147,7 +147,7 @@ export const COMPARATIVOS: Comparativo[] = [
     pontosAtencao: [
       'A diferença de transporte e serviços entre os distritos é marginal — áreas verdes são o principal diferencial.',
       'Ambos os distritos têm score de segurança (SSP-SP) abaixo da média dos distritos analisados — dado relativo com cobertura parcial.',
-      'Dados imobiliários agregados por distrito não disponíveis nesta versão (previstos em M8).',
+      'Dados imobiliários agregados vêm da base interna BetterPlace e não representam todo o mercado.',
     ],
     dataAtualizacao: '2026-06-06',
   },
@@ -173,7 +173,7 @@ export const COMPARATIVOS: Comparativo[] = [
     pontosAtencao: [
       'Ambos os distritos têm presença de áreas verdes expressivamente abaixo da média — não é um diferencial relevante na comparação.',
       'Dados de segurança com cobertura parcial (SSP-SP) para ambos os distritos. Sub-registro é limitação estrutural.',
-      'Dados imobiliários agregados por distrito não disponíveis nesta versão (previstos em M8) — podem ser um fator decisivo entre estes dois distritos similares.',
+      'Dados imobiliários agregados vêm da base interna BetterPlace; custo pode ser fator decisivo entre estes dois distritos similares.',
     ],
     dataAtualizacao: '2026-06-06',
   },
@@ -199,7 +199,7 @@ export const COMPARATIVOS: Comparativo[] = [
     pontosAtencao: [
       'Butantã tem score de transporte abaixo da média — dependência maior de ônibus e acesso menos direto ao metrô.',
       'Dados de segurança com cobertura parcial (SSP-SP) para ambos os distritos. Sub-registro é limitação estrutural.',
-      'Dados imobiliários agregados por distrito não disponíveis nesta versão (previstos em M8).',
+      'Dados imobiliários agregados vêm da base interna BetterPlace e não representam todo o mercado.',
     ],
     dataAtualizacao: '2026-06-06',
   },
@@ -225,7 +225,7 @@ export const COMPARATIVOS: Comparativo[] = [
     pontosAtencao: [
       'Ambos os distritos são vizinhos e têm bom acesso ao eixo Paulista-Higienópolis.',
       'Consolação tem score de segurança (SSP-SP) abaixo de Perdizes — dado relativo com cobertura parcial; interpretar com cautela.',
-      'Dados imobiliários agregados por distrito não disponíveis nesta versão (previstos em M8).',
+      'Dados imobiliários agregados vêm da base interna BetterPlace e não representam todo o mercado.',
     ],
     dataAtualizacao: '2026-06-06',
   },
@@ -251,7 +251,7 @@ export const COMPARATIVOS: Comparativo[] = [
     pontosAtencao: [
       'Estes distritos estão em zonas distintas da cidade — a comparação é mais relevante para quem não tem restrição de zona.',
       'Dados de segurança com cobertura parcial (SSP-SP) para ambos. Sub-registro é limitação estrutural dos dados de criminalidade.',
-      'Dados imobiliários agregados por distrito não disponíveis nesta versão (previstos em M8).',
+      'Dados imobiliários agregados vêm da base interna BetterPlace e não representam todo o mercado.',
     ],
     dataAtualizacao: '2026-06-06',
   },
@@ -277,7 +277,7 @@ export const COMPARATIVOS: Comparativo[] = [
     pontosAtencao: [
       'Moema tem score de transporte abaixo da média — dependência maior de ônibus com menor cobertura de metrô.',
       'Dados de segurança com cobertura parcial (SSP-SP) para ambos. Sub-registro é limitação estrutural.',
-      'Dados imobiliários agregados por distrito não disponíveis nesta versão (previstos em M8).',
+      'Dados imobiliários agregados vêm da base interna BetterPlace e não representam todo o mercado.',
     ],
     dataAtualizacao: '2026-06-06',
   },
@@ -303,7 +303,7 @@ export const COMPARATIVOS: Comparativo[] = [
     pontosAtencao: [
       'A diferença geral entre estes dois distritos é menor do que em outros pares analisados — indicadores de transporte e serviços são próximos.',
       'Dados de segurança com cobertura parcial (SSP-SP) para ambos. Sub-registro é limitação estrutural.',
-      'Dados imobiliários agregados por distrito não disponíveis nesta versão (previstos em M8) — podem ser fator decisivo entre distritos com indicadores similares.',
+      'Dados imobiliários agregados vêm da base interna BetterPlace; custo pode ser fator decisivo entre distritos com indicadores similares.',
     ],
     dataAtualizacao: '2026-06-06',
   },

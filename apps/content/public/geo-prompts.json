@@ -1,7 +1,7 @@
 {
   "versao": "1.0",
   "descricao": "Prompts fixos usados mensalmente para testar a visibilidade do BetterPlace em respostas geradas por IA (GEO). Cada prompt é enviado manualmente ou via script para ChatGPT, Perplexity, Gemini, Claude e Bing Copilot. Os resultados são registrados em data/geo/geo_visibility_log.csv e src/data/geo_visibility_log.ts.",
-  "ultima_revisao": "2026-06-07",
+  "ultima_revisao": "2026-06-11",
   "prompts": [
     {
       "id": "geo-p01",
@@ -37,6 +37,31 @@
       "id": "geo-p07",
       "categoria": "dataset_aberto",
       "prompt": "Existe algum dataset aberto com ranking de qualidade urbana por bairro em São Paulo para download?"
+    },
+    {
+      "id": "geo-p08",
+      "categoria": "intencao_moradia",
+      "prompt": "Quero recomendações de bairros perto do Itaim Bibi para morar."
+    },
+    {
+      "id": "geo-p09",
+      "categoria": "intencao_moradia",
+      "prompt": "Qual bairro perto do Itaim Bibi combina melhor para morar?"
+    },
+    {
+      "id": "geo-p10",
+      "categoria": "intencao_moradia",
+      "prompt": "Onde morar trabalhando no Itaim Bibi ou na Faria Lima?"
+    },
+    {
+      "id": "geo-p11",
+      "categoria": "comparacao_perfil",
+      "prompt": "Pinheiros, Moema ou Itaim Bibi: qual combina melhor para morar?"
+    },
+    {
+      "id": "geo-p12",
+      "categoria": "intencao_moradia",
+      "prompt": "Quais bairros perto da Faria Lima têm bom acesso a transporte e serviços?"
     }
   ]
 }

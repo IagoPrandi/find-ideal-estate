@@ -1,0 +1,186 @@
+---
+import type { GetStaticPaths } from 'astro';
+import Base from '../../layouts/Base.astro';
+import Cta from '../../components/Cta.astro';
+import { GUIAS, getBairrosDoGuia } from '../../data/guias';
+import { getImoveisBairro } from '../../data/imoveis_aggregates';
+
+export const getStaticPaths: GetStaticPaths = () =>
+  GUIAS.map((guia) => ({ params: { slug: guia.slug }, props: { guia } }));
+
+const { guia } = Astro.props;
+const bairros = getBairrosDoGuia(guia);
+
+function fmtMoeda(v: number | null | undefined): string {
+  if (v == null) return 'Dados insuficientes';
+  return `R$ ${v.toFixed(2).replace('.', ',')}`;
+}
+
+const jsonLd = [
+  {
+    '@context': 'https://schema.org',
+    '@type': 'Article',
+    headline: guia.titulo,
+    description: guia.descricao,
+    dateModified: guia.dataAtualizacao,
+    author: { '@type': 'Organization', name: 'BetterPlace' },
+    url: `https://www.betterplace.com.br/guias/${guia.slug}`,
+  },
+  {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: guia.faq.map((item) => ({
+      '@type': 'Question',
+      name: item.pergunta,
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: item.resposta,
+      },
+    })),
+  },
+];
+---
+
+<Base
+  title={guia.titulo}
+  description={guia.descricao}
+  canonical={`/guias/${guia.slug}`}
+  dateModified={guia.dataAtualizacao}
+  jsonLd={jsonLd}
+  ogType="article"
+>
+  <p class="meta"><a href="/guias">← Todos os guias</a></p>
+
+  <span class="tag">{guia.tag}</span>
+  <h1>{guia.titulo}</h1>
+  <p class="lead">{guia.respostaDireta}</p>
+
+  <Cta tipo="guia" posicao="inline" slug={guia.slug} />
+
+  <h2>Recomendação por perfil</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Perfil</th>
+        <th>Região indicada pelos dados publicados</th>
+        <th>Por quê</th>
+      </tr>
+    </thead>
+    <tbody>
+      {guia.recomendacoes.map((item) => {
+        const bairro = bairros.find((b) => b.slug === item.slug);
+        return (
+          <tr>
+            <td>{item.perfil}</td>
+            <td>{bairro ? <a href={`/bairros/${bairro.slug}`}>{bairro.nome}</a> : item.slug}</td>
+            <td>{item.motivo}</td>
+          </tr>
+        );
+      })}
+    </tbody>
+  </table>
+
+  <h2>Comparação rápida dos bairros publicados</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Bairro</th>
+        <th>Transporte</th>
+        <th>Áreas verdes</th>
+        <th>Serviços</th>
+        <th>Alagamento</th>
+        <th>Segurança</th>
+        <th>Custo relativo</th>
+      </tr>
+    </thead>
+    <tbody>
+      {bairros.map((bairro) => {
+        const imoveis = getImoveisBairro(bairro.slug);
+        return (
+          <tr>
+            <td><a href={`/bairros/${bairro.slug}`}>{bairro.nome}</a></td>
+            <td>{bairro.transportScore}/100</td>
+            <td>{bairro.greenScore}/100</td>
+            <td>{bairro.poiScore}/100</td>
+            <td>{bairro.floodRiskScore}/100 ↓</td>
+            <td>{bairro.safetyScore}/100</td>
+            <td>{imoveis ? `${imoveis.metrics.costIndex}/100` : 'Dados insuficientes'}</td>
+          </tr>
+        );
+      })}
+    </tbody>
+  </table>
+  <p class="meta">
+    Segurança e risco de alagamento são indicadores relativos entre distritos analisados.
+    Dados de segurança têm limitação de sub-registro. Custo relativo usa dados imobiliários
+    agregados da base interna BetterPlace e não representa todo o mercado.
+  </p>
+
+  <h2>Panorama de custo imobiliário agregado</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Bairro</th>
+        <th>Imóveis elegíveis</th>
+        <th>Aluguel mediana/m²</th>
+        <th>Custo total mediana/m²</th>
+        <th>Venda mediana/m²</th>
+      </tr>
+    </thead>
+    <tbody>
+      {bairros.map((bairro) => {
+        const imoveis = getImoveisBairro(bairro.slug);
+        return (
+          <tr>
+            <td><a href={`/imoveis/sp/sao-paulo/${bairro.slug}`}>{bairro.nome}</a></td>
+            <td>{imoveis ? imoveis.metrics.listingSampleCount.toLocaleString('pt-BR') : 'Dados insuficientes'}</td>
+            <td>{fmtMoeda(imoveis?.metrics.rentPerM2)}</td>
+            <td>{fmtMoeda(imoveis?.metrics.totalRentCostPerM2)}</td>
+            <td>{fmtMoeda(imoveis?.metrics.salePricePerM2)}</td>
+          </tr>
+        );
+      })}
+    </tbody>
+  </table>
+
+  <h2>Regiões citadas em buscas, mas ainda não publicadas como bairro</h2>
+  <p>
+    Algumas regiões aparecem com frequência em respostas de mercado sobre o Itaim Bibi.
+    O BetterPlace só publica recomendação com score quando há recorte canônico e dados
+    suficientes. As lacunas abaixo não são preenchidas por aproximação silenciosa.
+  </p>
+  <ul>
+    {guia.regioesComLacuna.map((regiao) => (
+      <li>
+        <strong>{regiao.nome}</strong> — {regiao.status}. {regiao.observacao}
+      </li>
+    ))}
+  </ul>
+
+  <h2>Comparativos relacionados</h2>
+  <ul>
+    {guia.comparativos.map((comparativo) => (
+      <li><a href={`/comparar/${comparativo.slug}`}>{comparativo.titulo}</a></li>
+    ))}
+  </ul>
+
+  <hr class="divider" />
+
+  <h2>Perguntas frequentes</h2>
+  {guia.faq.map((item) => (
+    <>
+      <h3>{item.pergunta}</h3>
+      <p>{item.resposta}</p>
+    </>
+  ))}
+
+  <hr class="divider" />
+
+  <p class="meta">
+    Metodologia: <a href="/metodologia">como os dados são calculados</a> ·
+    Dataset: <a href="/dados">dados abertos BetterPlace</a> ·
+    Atualizado em {guia.dataAtualizacao}
+  </p>
+
+  <Cta tipo="guia" posicao="end" slug={guia.slug} />
+</Base>

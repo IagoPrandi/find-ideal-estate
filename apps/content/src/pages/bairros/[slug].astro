@@ -280,6 +280,17 @@ function slugToNome(s: string): string {
     ))}
   </ul>
 
+  {['itaim-bibi', 'pinheiros', 'moema', 'vila-mariana'].includes(bairro.slug) && (
+    <>
+      <h2>Guia relacionado</h2>
+      <p>
+        Está avaliando regiões próximas ao Itaim Bibi? Veja o guia com recomendação por perfil,
+        métricas comparativas e lacunas declaradas:
+        <a href="/guias/bairros-perto-do-itaim-bibi-para-morar"> bairros perto do Itaim Bibi para morar</a>.
+      </p>
+    </>
+  )}
+
   {bairro.lacunas && bairro.lacunas.length > 0 && (
     <div class="lacunas-block">
       <strong>Lacunas de dados declaradas:</strong>

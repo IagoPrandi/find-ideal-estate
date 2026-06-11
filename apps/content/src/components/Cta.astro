@@ -1,5 +1,5 @@
 ---
-export type CtaTipo = 'bairro' | 'comparativo' | 'relatorio' | 'dataset' | 'geral';
+export type CtaTipo = 'bairro' | 'comparativo' | 'relatorio' | 'dataset' | 'guia' | 'geral';
 export type CtaPosicao = 'inline' | 'mid' | 'end' | 'hero';
 
 export interface Props {
@@ -16,6 +16,7 @@ const copias: Record<CtaTipo, string> = {
   comparativo: 'A melhor escolha depende do seu trajeto, orçamento e prioridades. Use o BetterPlace para fazer uma comparação personalizada entre bairros.',
   relatorio: 'Os dados mostram tendências gerais por região. Para transformar a análise em uma decisão prática de moradia, use o BetterPlace e encontre áreas compatíveis com sua rotina.',
   dataset: 'Estes dados ajudam a entender a cidade em nível agregado. Para aplicar os indicadores à sua busca de moradia, acesse a aplicação BetterPlace.',
+  guia: 'Quer transformar esta comparação em uma busca prática? Use o BetterPlace para comparar regiões, trajetos e preferências de moradia.',
   geral: 'Compare bairros, trajetos e preferências de moradia com dados públicos no BetterPlace.',
 };
 
@@ -24,6 +25,7 @@ const eventos: Record<CtaTipo, string> = {
   comparativo: 'cta_compare_click',
   relatorio: 'cta_report_app_click',
   dataset: 'cta_dataset_app_click',
+  guia: 'cta_app_click',
   geral: 'cta_app_click',
 };
 
@@ -32,6 +34,7 @@ const tiposMedium: Record<CtaTipo, string> = {
   comparativo: 'comparison',
   relatorio: 'report',
   dataset: 'dataset',
+  guia: 'guide',
   geral: 'general',
 };
 
