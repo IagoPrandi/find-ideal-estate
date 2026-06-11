@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Analytics } from "@vercel/analytics/react";
+import { SpeedInsights } from "@vercel/speed-insights/react";
 import { AuthProvider } from "./features/auth/AuthContext";
 import { ScrapingAdminPage } from "./features/admin/ScrapingAdminPage";
 import { FindIdealApp } from "./features/app/FindIdealApp";
@@ -34,6 +35,7 @@ export default function App() {
       <AuthProvider>
         {sharedZoneToken ? <SharedZonePage token={sharedZoneToken} /> : sharedJourneyToken ? <SharedJourneyPage token={sharedJourneyToken} /> : isAdminRoute ? <ScrapingAdminPage /> : <FindIdealApp />}
         <Analytics />
+        <SpeedInsights />
       </AuthProvider>
     </QueryClientProvider>
   );
