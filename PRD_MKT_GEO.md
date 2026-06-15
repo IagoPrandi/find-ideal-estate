@@ -909,10 +909,10 @@ transport_score < 80   → "O bairro apresenta acesso moderado a transporte púb
 green_score >= 70      → "A região apresenta boa presença relativa de áreas verdes."
 green_score < 70       → "A presença relativa de áreas verdes está abaixo da média."
 
-# Risco de alagamento (score invertido)
-flood_risk_score <= 30 → "A análise indica menor exposição relativa a áreas de alagamento."
-flood_risk_score <= 55 → "A análise indica exposição moderada relativa a áreas de alagamento."
-flood_risk_score > 55  → "A análise indica exposição relativa maior a áreas de alagamento."
+# Risco de alagamento (score invertido — 100 = menor risco)
+flood_risk_score >= 70 → "A análise indica menor exposição relativa a áreas de alagamento."
+flood_risk_score >= 45 → "A análise indica exposição moderada relativa a áreas de alagamento."
+flood_risk_score < 45  → "A análise indica exposição relativa maior a áreas de alagamento."
 
 # Segurança pública (score invertido — 100 = menor densidade de ocorrências SSP-SP)
 safety_score >= 65     → "Os dados da SSP-SP indicam menor densidade relativa de ocorrências."

@@ -113,9 +113,9 @@ green_score < 70  → "A presença relativa de áreas verdes está abaixo da mé
 
 **Risco de alagamento** (score invertido — maior = menor risco)
 ```txt
-flood_risk_score <= 30 → "A análise indica menor exposição relativa a áreas de alagamento."
-flood_risk_score <= 55 → "A análise indica exposição moderada relativa a áreas de alagamento."
-flood_risk_score > 55  → "A análise indica exposição relativa maior a áreas de alagamento — consulte a metodologia."
+flood_risk_score >= 70 → "A análise indica menor exposição relativa a áreas de alagamento."
+flood_risk_score >= 45 → "A análise indica exposição moderada relativa a áreas de alagamento."
+flood_risk_score < 45  → "A análise indica exposição relativa maior a áreas de alagamento — consulte a metodologia."
 ```
 
 **Segurança pública** (score invertido — maior = menor densidade de ocorrências)

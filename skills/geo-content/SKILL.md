@@ -52,7 +52,7 @@ Leia o arquivo de template antes de gerar. Não improvise estrutura.
 ```txt
 Se transport_score >= 80:  "O bairro se destaca pelo acesso a transporte público."
 Se green_score >= 80:      "A região apresenta boa presença relativa de áreas verdes."
-Se flood_risk_score <= 30: "A análise indica menor exposição relativa a áreas de alagamento."
+Se flood_risk_score >= 70: "A análise indica menor exposição relativa a áreas de alagamento." (score invertido: maior = menor risco)
 Se safety_data_coverage < mínimo: "A métrica de segurança possui cobertura limitada para esta região."
 ```
 

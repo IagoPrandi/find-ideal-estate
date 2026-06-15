@@ -46,9 +46,9 @@ const jsonLd = [
         acceptedAnswer: {
           '@type': 'Answer',
           text:
-            bairro.floodRiskScore <= 30
-              ? `A análise indica menor exposição relativa a áreas de alagamento em ${bairro.nome} (score de risco ${bairro.floodRiskScore}/100 — menor é melhor).`
-              : `${bairro.nome} apresenta exposição relativa a alagamentos (score de risco ${bairro.floodRiskScore}/100 — menor é melhor). Consulte a metodologia para detalhes.`,
+            bairro.floodRiskScore >= 70
+              ? `A análise indica menor exposição relativa a áreas de alagamento em ${bairro.nome} (índice ${bairro.floodRiskScore}/100 — maior = menor risco).`
+              : `${bairro.nome} apresenta exposição relativa a alagamentos (índice ${bairro.floodRiskScore}/100 — maior = menor risco). Consulte a metodologia para detalhes.`,
         },
       },
       {
@@ -66,7 +66,8 @@ const jsonLd = [
 const title = `${bairro.nome}: dados de transporte, segurança, áreas verdes e qualidade urbana`;
 const description = bairro.resumo.slice(0, 155) + (bairro.resumo.length > 155 ? '…' : '');
 
-const floodBg = bairro.floodRiskScore > 50 ? '#dc2626' : '#2563eb';
+// floodRiskScore é invertido (100 = menor risco), igual a safetyScore: maior = melhor.
+const floodBg = bairro.floodRiskScore >= 60 ? '#2563eb' : bairro.floodRiskScore >= 40 ? '#d97706' : '#dc2626';
 const floodStyle = `width:${bairro.floodRiskScore}%;background:${floodBg}`;
 const safetyBg = bairro.safetyScore >= 60 ? '#2563eb' : bairro.safetyScore >= 40 ? '#d97706' : '#dc2626';
 const safetyStyle = `width:${bairro.safetyScore}%;background:${safetyBg}`;
@@ -82,9 +83,9 @@ const greenTxt = bairro.greenScore >= 70
   ? 'A região apresenta boa presença relativa de áreas verdes.'
   : 'A presença relativa de áreas verdes está abaixo da média dos distritos analisados.';
 
-const floodTxt = bairro.floodRiskScore <= 30
+const floodTxt = bairro.floodRiskScore >= 70
   ? 'A análise indica menor exposição relativa a áreas de alagamento.'
-  : bairro.floodRiskScore <= 55
+  : bairro.floodRiskScore >= 45
   ? 'A análise indica exposição moderada relativa a áreas de alagamento.'
   : 'A análise indica exposição relativa maior a áreas de alagamento — consulte a metodologia.';
 
@@ -110,9 +111,9 @@ const faqTransportTxt = bairro.transportScore >= 80
   ? `${bairro.nome} se destaca pelo acesso a transporte público, com score ${bairro.transportScore}/100 na metodologia BetterPlace.`
   : `${bairro.nome} apresenta acesso moderado a transporte público, com score ${bairro.transportScore}/100.`;
 
-const faqFloodTxt = bairro.floodRiskScore <= 30
-  ? `A análise indica menor exposição relativa a áreas de alagamento (score de risco ${bairro.floodRiskScore}/100 — menor é melhor). Isso não significa ausência de risco.`
-  : `${bairro.nome} apresenta exposição relativa a alagamentos (score de risco ${bairro.floodRiskScore}/100). Consulte a metodologia para detalhes.`;
+const faqFloodTxt = bairro.floodRiskScore >= 70
+  ? `A análise indica menor exposição relativa a áreas de alagamento (índice ${bairro.floodRiskScore}/100 — maior = menor risco). Isso não significa ausência de risco.`
+  : `${bairro.nome} apresenta exposição relativa a alagamentos (índice ${bairro.floodRiskScore}/100 — maior = menor risco). Consulte a metodologia para detalhes.`;
 
 const faqSafetyTxt = bairro.safetyDataCoverage === 'insuficiente'
   ? `Não há dados de segurança pública suficientes para ${bairro.nome} neste momento.`
@@ -126,12 +127,12 @@ const raTransporte = bairro.transportScore >= 80
 const raVerdes = bairro.greenScore >= 70
   ? 'boa presença relativa de áreas verdes'
   : 'presença de áreas verdes abaixo da média';
-const raFlood = bairro.floodRiskScore <= 30
+const raFlood = bairro.floodRiskScore >= 70
   ? 'baixa exposição relativa a alagamentos'
-  : bairro.floodRiskScore <= 55
+  : bairro.floodRiskScore >= 45
   ? 'exposição moderada a alagamentos'
   : 'exposição relativa maior a alagamentos';
-const respostaRapida = `${bairro.nome} tem ${raTransporte} (transporte ${bairro.transportScore}/100), ${raVerdes} (áreas verdes ${bairro.greenScore}/100) e ${raFlood} (risco ${bairro.floodRiskScore}/100). Dados públicos agregados por distrito de São Paulo, atualizados em ${bairro.dataAtualizacao}.`;
+const respostaRapida = `${bairro.nome} tem ${raTransporte} (transporte ${bairro.transportScore}/100), ${raVerdes} (áreas verdes ${bairro.greenScore}/100) e ${raFlood} (índice de alagamento ${bairro.floodRiskScore}/100, maior = menor risco). Dados públicos agregados por distrito de São Paulo, atualizados em ${bairro.dataAtualizacao}.`;
 
 function slugToNome(s: string): string {
   return s.split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
@@ -185,11 +186,11 @@ function slugToNome(s: string): string {
     <span class="score-bar__value">{bairro.poiScore}/100</span>
   </div>
   <div class="score-bar">
-    <span class="score-bar__label">Risco de alagamento</span>
+    <span class="score-bar__label">Proteção contra alagamento</span>
     <div class="score-bar__track">
       <div class="score-bar__fill" style={floodStyle}></div>
     </div>
-    <span class="score-bar__value">{bairro.floodRiskScore}/100 ↓</span>
+    <span class="score-bar__value">{bairro.floodRiskScore}/100</span>
   </div>
   <div class="score-bar">
     <span class="score-bar__label">Segurança pública</span>
@@ -200,7 +201,8 @@ function slugToNome(s: string): string {
   </div>
 
   <p class="meta">
-    Risco de alagamento e segurança: menor valor = maior exposição/ocorrência relativa.
+    Proteção contra alagamento e segurança são índices invertidos: <strong>maior valor = menor
+    exposição/ocorrência relativa</strong> entre os distritos analisados.
     Segurança baseada em densidade de ocorrências SSP-SP — dado relativo entre distritos.
     <a href="/metodologia">Como é calculado</a>.
   </p>
@@ -214,7 +216,7 @@ function slugToNome(s: string): string {
   <p>{greenTxt} Score: {bairro.greenScore}/100.</p>
 
   <h2>{bairro.nome} tem risco de alagamento?</h2>
-  <p>{floodTxt} Score de risco: {bairro.floodRiskScore}/100 (menor é melhor).</p>
+  <p>{floodTxt} Índice de proteção contra alagamento: {bairro.floodRiskScore}/100 (maior = menor risco).</p>
 
   <h2>Como é a segurança pública em {bairro.nome}?</h2>
   <p>{safetyScoreTxt}</p>

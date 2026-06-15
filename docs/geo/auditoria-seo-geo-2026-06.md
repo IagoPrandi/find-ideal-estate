@@ -98,5 +98,10 @@ Tudo usa **dados que já existem** (scores, polígonos, agregados imobiliários)
 ## Registro de implementação
 
 - **2026-06-15** — Bloco P1 implementado: #2, #3, #11 e a versão não-quebrável de #1. Detalhes no commit/PR correspondente.
+- **2026-06-15** — **Correção de bug (item dedicado): semântica invertida do `floodRiskScore`.**
+  - **Fonte de verdade confirmada:** `scripts/aggregate_geo_metrics.py::compute_scores` calcula `flood_risk` com `invert=True` (100 = menor risco). Concordam: `export_open_dataset.py`, `dicionario-campos.json`, comentário de tipo em `bairros.ts`, `relatorios.ts` (`topN`) e `comparativos.ts`.
+  - **Bug:** a renderização em `apps/content/src/pages/bairros/[slug].astro` (prosa, FAQ, JSON-LD, cor da barra, "menor é melhor") e o guia tratavam o score como risco direto (baixo = seguro), invertendo a leitura. Causava contradição entre a página de bairro e o comparativo do mesmo par.
+  - **Causa-raiz nos specs:** thresholds `flood_risk_score <= 30 → menor exposição` em `PRD §12.3`, `content-guidelines.md §4.3`, skill `geo-content` e `template-bairro.md`.
+  - **Correção:** thresholds invertidos para `>= 70 / >= 45 / < 45`; barra renomeada para "Proteção contra alagamento"; cor alinhada a `safetyScore` (maior = melhor); remoção do `↓` enganoso; legendas e specs atualizados. Validado por build (107 páginas) — Vila Mariana e Pinheiros (flood 100) agora exibem "menor exposição", coerentes com os comparativos.
 </content>
 </invoke>

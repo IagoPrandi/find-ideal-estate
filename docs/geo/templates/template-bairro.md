@@ -86,7 +86,7 @@ data_atualizacao
 | Transporte público | {{transport_score}}/100 | {{transport_coverage}} |
 | Áreas verdes | {{green_score}}/100 | {{green_coverage}} |
 | Acesso a serviços | {{poi_score}}/100 | {{poi_coverage}} |
-| Risco de alagamento | {{flood_risk_score}}/100 ↓ | {{flood_coverage}} |
+| Proteção contra alagamento | {{flood_risk_score}}/100 | {{flood_coverage}} |
 | Segurança pública | {{safety_score}}/100 | {{safety_coverage}} |
 
 Score de risco e segurança: menor valor = maior exposição/ocorrência relativa.

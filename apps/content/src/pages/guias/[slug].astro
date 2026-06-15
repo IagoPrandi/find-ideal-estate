@@ -88,7 +88,7 @@ const jsonLd = [
         <th>Transporte</th>
         <th>Áreas verdes</th>
         <th>Serviços</th>
-        <th>Alagamento</th>
+        <th>Proteção alag.</th>
         <th>Segurança</th>
         <th>Custo relativo</th>
       </tr>
@@ -102,7 +102,7 @@ const jsonLd = [
             <td>{bairro.transportScore}/100</td>
             <td>{bairro.greenScore}/100</td>
             <td>{bairro.poiScore}/100</td>
-            <td>{bairro.floodRiskScore}/100 ↓</td>
+            <td>{bairro.floodRiskScore}/100</td>
             <td>{bairro.safetyScore}/100</td>
             <td>{imoveis ? `${imoveis.metrics.costIndex}/100` : 'Dados insuficientes'}</td>
           </tr>
@@ -111,7 +111,8 @@ const jsonLd = [
     </tbody>
   </table>
   <p class="meta">
-    Segurança e risco de alagamento são indicadores relativos entre distritos analisados.
+    Proteção contra alagamento e segurança são índices invertidos e relativos entre os distritos
+    analisados: <strong>maior valor = menor exposição/ocorrência relativa</strong>.
     Dados de segurança têm limitação de sub-registro. Custo relativo usa dados imobiliários
     agregados da base interna BetterPlace e não representa todo o mercado.
   </p>
