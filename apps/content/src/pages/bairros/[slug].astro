@@ -14,8 +14,9 @@ const imoveisData = getImoveisBairro(bairro.slug);
 const jsonLd = [
   {
     '@context': 'https://schema.org',
-    '@type': 'Place',
+    '@type': ['Place', 'AdministrativeArea'],
     name: bairro.nome,
+    alternateName: `Distrito de ${bairro.distrito}`,
     description: bairro.resumo,
     address: {
       '@type': 'PostalAddress',
@@ -23,7 +24,26 @@ const jsonLd = [
       addressRegion: 'SP',
       addressCountry: 'BR',
     },
+    containedInPlace: {
+      '@type': 'City',
+      name: 'São Paulo',
+      containedInPlace: {
+        '@type': 'AdministrativeArea',
+        name: 'Estado de São Paulo',
+        containedInPlace: { '@type': 'Country', name: 'Brasil' },
+      },
+    },
+    ...(bairro.centroide
+      ? {
+          geo: {
+            '@type': 'GeoCoordinates',
+            latitude: bairro.centroide.lat,
+            longitude: bairro.centroide.lng,
+          },
+        }
+      : {}),
     url: `https://www.betterplace.com.br/bairros/${bairro.slug}`,
+    dateModified: bairro.dataAtualizacao,
   },
   {
     '@context': 'https://schema.org',
@@ -146,9 +166,13 @@ function slugToNome(s: string): string {
   dateModified={bairro.dataAtualizacao}
   jsonLd={jsonLd}
   ogType="article"
+  ogImage={`/og/bairros/${bairro.slug}.png`}
+  breadcrumbs={[
+    { name: 'Início', url: '/' },
+    { name: 'Bairros', url: '/bairros' },
+    { name: bairro.nome },
+  ]}
 >
-  <p class="meta"><a href="/bairros">← Todos os bairros</a></p>
-
   <span class="tag">Bairro · São Paulo</span>
   <h1>{bairro.nome}: dados de transporte, segurança, áreas verdes e qualidade urbana</h1>
   <p class="lead">{bairro.resumo}</p>

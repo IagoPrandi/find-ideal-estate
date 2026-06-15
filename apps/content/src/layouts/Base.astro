@@ -7,6 +7,10 @@ export interface Props {
   jsonLd?: Record<string, unknown> | Record<string, unknown>[];
   ogType?: 'website' | 'article';
   noindex?: boolean;
+  /** Trilha de navegação. Gera BreadcrumbList (JSON-LD) + nav visível. O último item costuma omitir `url` (página atual). */
+  breadcrumbs?: { name: string; url?: string }[];
+  /** Caminho relativo ou URL absoluta da imagem Open Graph/Twitter. */
+  ogImage?: string;
 }
 
 const APP_URL = 'https://www.betterplace.com.br';
@@ -24,9 +28,16 @@ const {
   jsonLd,
   ogType = 'website',
   noindex = false,
+  breadcrumbs,
+  ogImage,
 } = Astro.props;
 
 const canonicalURL = `${SITE_URL}${canonical}`;
+const ogImageURL = ogImage
+  ? ogImage.startsWith('http')
+    ? ogImage
+    : `${SITE_URL}${ogImage}`
+  : null;
 
 const orgJsonLd = {
   '@context': 'https://schema.org',
@@ -37,8 +48,23 @@ const orgJsonLd = {
     'BetterPlace ajuda pessoas a escolher onde morar usando dados de bairro, mobilidade, segurança, áreas verdes e riscos urbanos.',
 };
 
+const breadcrumbJsonLd =
+  breadcrumbs && breadcrumbs.length
+    ? {
+        '@context': 'https://schema.org',
+        '@type': 'BreadcrumbList',
+        itemListElement: breadcrumbs.map((b, i) => ({
+          '@type': 'ListItem',
+          position: i + 1,
+          name: b.name,
+          ...(b.url ? { item: `${SITE_URL}${b.url}` } : {}),
+        })),
+      }
+    : null;
+
 const jsonLdItems = [
   orgJsonLd,
+  ...(breadcrumbJsonLd ? [breadcrumbJsonLd] : []),
   ...(Array.isArray(jsonLd) ? jsonLd : jsonLd ? [jsonLd] : []),
 ];
 ---
@@ -60,6 +86,20 @@ const jsonLdItems = [
     <meta property="og:url" content={canonicalURL} />
     <meta property="og:site_name" content="BetterPlace" />
     <meta property="og:locale" content="pt_BR" />
+    {ogImageURL && (
+      <>
+        <meta property="og:image" content={ogImageURL} />
+        <meta property="og:image:width" content="1200" />
+        <meta property="og:image:height" content="630" />
+        <meta property="og:image:alt" content={title} />
+      </>
+    )}
+
+    <!-- Twitter Cards -->
+    <meta name="twitter:card" content={ogImageURL ? 'summary_large_image' : 'summary'} />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+    {ogImageURL && <meta name="twitter:image" content={ogImageURL} />}
 
     <meta
       name="robots"
@@ -220,6 +260,17 @@ const jsonLdItems = [
         color: var(--color-muted);
         margin-top: var(--space-xs);
       }
+      .breadcrumbs {
+        font-size: 0.82rem;
+        color: var(--color-muted);
+        margin-bottom: var(--space-sm);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.4rem;
+        align-items: center;
+      }
+      .breadcrumbs__sep { color: var(--color-border); }
+      .breadcrumbs [aria-current="page"] { color: var(--color-text); font-weight: 600; }
       .divider {
         border: none;
         border-top: 1px solid var(--color-border);
@@ -300,6 +351,16 @@ const jsonLdItems = [
     </header>
 
     <main>
+      {breadcrumbs && breadcrumbs.length > 0 && (
+        <nav class="breadcrumbs" aria-label="Trilha de navegação">
+          {breadcrumbs.map((b, i) => (
+            <>
+              {i > 0 && <span class="breadcrumbs__sep" aria-hidden="true">/</span>}
+              {b.url ? <a href={b.url}>{b.name}</a> : <span aria-current="page">{b.name}</span>}
+            </>
+          ))}
+        </nav>
+      )}
       {dateModified && (
         <p class="meta" style="margin-bottom:var(--space-md)">
           Atualizado em <time datetime={dateModified}>{new Date(dateModified + 'T12:00:00').toLocaleDateString('pt-BR', { day: 'numeric', month: 'long', year: 'numeric' })}</time>

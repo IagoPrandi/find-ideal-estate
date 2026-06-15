@@ -54,9 +54,12 @@ const jsonLd = [
   dateModified={r.dataPublicacao}
   jsonLd={jsonLd}
   ogType="article"
+  breadcrumbs={[
+    { name: 'Início', url: '/' },
+    { name: 'Relatórios', url: '/relatorios' },
+    { name: r.periodo },
+  ]}
 >
-  <p class="meta"><a href="/relatorios">← Todos os relatórios</a></p>
-
   <span class="tag">Relatório · {r.periodo}</span>
   <h1>{r.titulo}</h1>
   <p class="meta">

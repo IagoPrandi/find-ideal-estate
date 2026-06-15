@@ -58,6 +58,12 @@ export interface Bairro {
   bairrosSimilares: string[];
   dataAtualizacao: string;
   lacunas?: string[];
+  /**
+   * Ponto representativo do distrito (centroide), para JSON-LD geo.
+   * Deve ser preenchido pelo pipeline de export a partir de ST_PointOnSurface
+   * sobre neighborhood_boundaries — NÃO preencher manualmente com valores aproximados.
+   */
+  centroide?: { lat: number; lng: number };
 }
 
 // Scores gerados pelo pipeline aggregate_geo_metrics.py a partir do banco PostGIS local.

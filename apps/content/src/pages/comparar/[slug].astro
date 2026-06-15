@@ -62,9 +62,13 @@ const jsonLd = [
   dateModified={comp.dataAtualizacao}
   jsonLd={jsonLd}
   ogType="article"
+  ogImage={`/og/comparar/${comp.slug}.png`}
+  breadcrumbs={[
+    { name: 'Início', url: '/' },
+    { name: 'Comparar', url: '/comparar' },
+    { name: `${comp.bairroA} vs ${comp.bairroB}` },
+  ]}
 >
-  <p class="meta"><a href="/comparar">← Todos os comparativos</a></p>
-
   <span class="tag">Comparativo · São Paulo</span>
   <h1>{comp.titulo}</h1>
 

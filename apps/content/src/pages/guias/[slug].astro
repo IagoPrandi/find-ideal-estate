@@ -48,9 +48,12 @@ const jsonLd = [
   dateModified={guia.dataAtualizacao}
   jsonLd={jsonLd}
   ogType="article"
+  breadcrumbs={[
+    { name: 'Início', url: '/' },
+    { name: 'Guias', url: '/guias' },
+    { name: guia.tag },
+  ]}
 >
-  <p class="meta"><a href="/guias">← Todos os guias</a></p>
-
   <span class="tag">{guia.tag}</span>
   <h1>{guia.titulo}</h1>
   <p class="lead">{guia.respostaDireta}</p>
