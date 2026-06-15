@@ -118,6 +118,21 @@ const faqSafetyTxt = bairro.safetyDataCoverage === 'insuficiente'
   ? `Não há dados de segurança pública suficientes para ${bairro.nome} neste momento.`
   : `O score de segurança de ${bairro.nome} é ${bairro.safetyScore}/100, baseado em densidade de ocorrências registradas na SSP-SP (maior score = menor densidade relativa). ${bairro.safetyDataCoverage === 'parcial' ? 'Cobertura parcial — interpretar com cautela.' : 'Sub-registro é uma limitação inerente dos dados de criminalidade.'}`;
 
+// Resposta rápida (TL;DR auto-contido para AI Overview / Perplexity).
+// Mantém os mesmos limiares já usados nos blocos visíveis abaixo.
+const raTransporte = bairro.transportScore >= 80
+  ? 'ótimo acesso a transporte público'
+  : 'acesso moderado a transporte público';
+const raVerdes = bairro.greenScore >= 70
+  ? 'boa presença relativa de áreas verdes'
+  : 'presença de áreas verdes abaixo da média';
+const raFlood = bairro.floodRiskScore <= 30
+  ? 'baixa exposição relativa a alagamentos'
+  : bairro.floodRiskScore <= 55
+  ? 'exposição moderada a alagamentos'
+  : 'exposição relativa maior a alagamentos';
+const respostaRapida = `${bairro.nome} tem ${raTransporte} (transporte ${bairro.transportScore}/100), ${raVerdes} (áreas verdes ${bairro.greenScore}/100) e ${raFlood} (risco ${bairro.floodRiskScore}/100). Dados públicos agregados por distrito de São Paulo, atualizados em ${bairro.dataAtualizacao}.`;
+
 function slugToNome(s: string): string {
   return s.split('-').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
 }
@@ -137,11 +152,13 @@ function slugToNome(s: string): string {
   <h1>{bairro.nome}: dados de transporte, segurança, áreas verdes e qualidade urbana</h1>
   <p class="lead">{bairro.resumo}</p>
 
+  <p class="quick-answer"><strong>Resposta rápida:</strong> {respostaRapida}</p>
+
   <p class="meta">Distrito oficial: {bairro.distrito} · Atualizado em {bairro.dataAtualizacao}</p>
 
   <hr class="divider" />
 
-  <h2>Adequação por perfil</h2>
+  <h2>Para quem {bairro.nome} é uma boa opção para morar?</h2>
   <p>{bairro.perfil}</p>
 
   <h2>Indicadores principais</h2>
@@ -190,20 +207,20 @@ function slugToNome(s: string): string {
 
   <Cta tipo="bairro" posicao="mid" slug={bairro.slug} />
 
-  <h2>Transporte</h2>
+  <h2>{bairro.nome} tem bom transporte público?</h2>
   <p>{transportTxt}</p>
 
-  <h2>Áreas verdes</h2>
+  <h2>{bairro.nome} tem áreas verdes e parques?</h2>
   <p>{greenTxt} Score: {bairro.greenScore}/100.</p>
 
-  <h2>Risco de alagamento</h2>
+  <h2>{bairro.nome} tem risco de alagamento?</h2>
   <p>{floodTxt} Score de risco: {bairro.floodRiskScore}/100 (menor é melhor).</p>
 
-  <h2>Segurança pública</h2>
+  <h2>Como é a segurança pública em {bairro.nome}?</h2>
   <p>{safetyScoreTxt}</p>
   <p class="meta">{safetyCoverageTxt}</p>
 
-  <h2>Acesso a serviços</h2>
+  <h2>Como é o acesso a serviços e comércio em {bairro.nome}?</h2>
   <p>{poiTxt} Score: {bairro.poiScore}/100.</p>
 
   {imoveisData && (() => {
@@ -325,6 +342,16 @@ function slugToNome(s: string): string {
 </Base>
 
 <style>
+  .quick-answer {
+    background: var(--color-accent-light, #eff6ff);
+    border-left: 4px solid var(--color-accent, #2563eb);
+    padding: 0.75rem 1rem;
+    border-radius: 4px;
+    margin: 0 0 1.25rem;
+    font-size: 0.95rem;
+    line-height: 1.55;
+  }
+
   .lacunas-block {
     background: #fff8e1;
     border-left: 4px solid #f59e0b;

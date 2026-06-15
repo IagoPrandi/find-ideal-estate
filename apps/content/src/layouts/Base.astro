@@ -61,7 +61,12 @@ const jsonLdItems = [
     <meta property="og:site_name" content="BetterPlace" />
     <meta property="og:locale" content="pt_BR" />
 
-    {noindex && <meta name="robots" content="noindex" />}
+    <meta
+      name="robots"
+      content={noindex
+        ? 'noindex, nofollow'
+        : 'index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1'}
+    />
 
     <!-- Verificação de ferramentas para webmasters -->
     {GOOGLE_VERIFICATION && <meta name="google-site-verification" content={GOOGLE_VERIFICATION} />}

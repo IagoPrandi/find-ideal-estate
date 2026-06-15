@@ -38,6 +38,26 @@ const tiposMedium: Record<CtaTipo, string> = {
   geral: 'general',
 };
 
+// Rótulo de botão contextual por tipo (microcópia conectada à intenção).
+const botoes: Record<CtaTipo, string> = {
+  bairro: 'Ver esta região no mapa →',
+  comparativo: 'Comparar no BetterPlace →',
+  relatorio: 'Aplicar na minha busca →',
+  dataset: 'Explorar no BetterPlace →',
+  guia: 'Comparar regiões no BetterPlace →',
+  geral: 'Abrir BetterPlace →',
+};
+
+// Param de contexto forward-compatible: o app (SPA hash-routed, sem rotas
+// /bairros/{slug}) pode ler estes query params para pré-selecionar a região.
+// Mantemos o destino na raiz para não gerar 404; é um hook aditivo e seguro.
+const contextParam: Partial<Record<CtaTipo, string>> = {
+  bairro: 'bairro',
+  comparativo: 'comparar',
+  guia: 'guia',
+  relatorio: 'relatorio',
+};
+
 const { tipo, posicao, slug = 'home', variante = 'a' } = Astro.props;
 const evento = eventos[tipo];
 const medium = tiposMedium[tipo];
@@ -48,6 +68,11 @@ url.searchParams.set('utm_source', 'betterplace_content');
 url.searchParams.set('utm_medium', medium);
 url.searchParams.set('utm_campaign', 'geo_mvp');
 url.searchParams.set('utm_content', ctaContent);
+
+const ctxKey = contextParam[tipo];
+if (ctxKey && slug && slug !== 'home') {
+  url.searchParams.set(ctxKey, slug);
+}
 
 const href = url.toString();
 ---
@@ -61,7 +86,7 @@ const href = url.toString();
   data-variant={variante}
 >
   <p class="cta-block__text">{copias[tipo]}</p>
-  <a href={href} class="cta-block__btn">Abrir BetterPlace →</a>
+  <a href={href} class="cta-block__btn">{botoes[tipo]}</a>
 </aside>
 
 <style>
