@@ -1,4 +1,6 @@
 ---
+import Analytics from '@vercel/analytics/astro';
+
 export interface Props {
   title: string;
   description: string;
@@ -393,5 +395,6 @@ const jsonLdItems = [
         cada página.
       </p>
     </footer>
+    <Analytics />
   </body>
 </html>
