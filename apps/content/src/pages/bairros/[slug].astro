@@ -3,6 +3,9 @@ import type { GetStaticPaths } from 'astro';
 import Base from '../../layouts/Base.astro';
 import Cta from '../../components/Cta.astro';
 import { BAIRROS } from '../../data/bairros';
+import { COMPARATIVOS } from '../../data/comparativos';
+import { GUIAS } from '../../data/guias';
+import { LISTAS, METRICA_LABEL, rankBairros } from '../../data/listas';
 import { getImoveisBairro } from '../../data/imoveis_aggregates';
 import { MEDIA_DISTRITOS } from '../../lib/baseline';
 
@@ -11,6 +14,18 @@ export const getStaticPaths: GetStaticPaths = () =>
 
 const { bairro } = Astro.props;
 const imoveisData = getImoveisBairro(bairro.slug);
+
+// Cluster interno: liga este bairro aos comparativos, rankings e guias relacionados.
+const comparativosDoBairro = COMPARATIVOS.filter(
+  (c) => c.slugA === bairro.slug || c.slugB === bairro.slug,
+);
+const guiasDoBairro = GUIAS.filter((g) =>
+  g.recomendacoes.some((r) => r.slug === bairro.slug),
+);
+const rankingsDoBairro = LISTAS.map((l) => {
+  const pos = rankBairros(BAIRROS, l.metrica, l.topN).findIndex((b) => b.slug === bairro.slug);
+  return pos >= 0 ? { lista: l, posicao: pos + 1 } : null;
+}).filter((x): x is { lista: (typeof LISTAS)[number]; posicao: number } => x !== null);
 
 const jsonLd = [
   {
@@ -318,21 +333,45 @@ function slugToNome(s: string): string {
     {bairro.pontosAtencao.map((p) => <li>{p}</li>)}
   </ul>
 
-  <h2>Comparações sugeridas</h2>
+  <h2>Bairros similares</h2>
   <ul>
     {bairro.bairrosSimilares.map((s) => (
       <li><a href={`/bairros/${s}`}>{slugToNome(s)}</a></li>
     ))}
   </ul>
 
-  {['itaim-bibi', 'pinheiros', 'moema', 'vila-mariana'].includes(bairro.slug) && (
+  {comparativosDoBairro.length > 0 && (
     <>
-      <h2>Guia relacionado</h2>
-      <p>
-        Está avaliando regiões próximas ao Itaim Bibi? Veja o guia com recomendação por perfil,
-        métricas comparativas e lacunas declaradas:
-        <a href="/guias/bairros-perto-do-itaim-bibi-para-morar"> bairros perto do Itaim Bibi para morar</a>.
-      </p>
+      <h2>Comparativos com {bairro.nome}</h2>
+      <ul>
+        {comparativosDoBairro.map((c) => (
+          <li><a href={`/comparar/${c.slug}`}>{c.bairroA} vs {c.bairroB}</a></li>
+        ))}
+      </ul>
+    </>
+  )}
+
+  {rankingsDoBairro.length > 0 && (
+    <>
+      <h2>Rankings em que {bairro.nome} aparece</h2>
+      <ul>
+        {rankingsDoBairro.map(({ lista, posicao }) => (
+          <li>
+            <a href={`/listas/${lista.slug}`}>{lista.h1}</a> — {posicao}º em {METRICA_LABEL[lista.metrica]}
+          </li>
+        ))}
+      </ul>
+    </>
+  )}
+
+  {guiasDoBairro.length > 0 && (
+    <>
+      <h2>Guias que incluem {bairro.nome}</h2>
+      <ul>
+        {guiasDoBairro.map((g) => (
+          <li><a href={`/guias/${g.slug}`}>{g.titulo}</a></li>
+        ))}
+      </ul>
     </>
   )}
 

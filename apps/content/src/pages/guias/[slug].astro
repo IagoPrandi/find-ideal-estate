@@ -24,6 +24,12 @@ const jsonLd = [
     description: guia.descricao,
     dateModified: guia.dataAtualizacao,
     author: { '@type': 'Organization', name: 'BetterPlace' },
+    publisher: {
+      '@type': 'Organization',
+      name: 'BetterPlace',
+      url: 'https://www.betterplace.com.br',
+      logo: { '@type': 'ImageObject', url: 'https://www.betterplace.com.br/favicon.svg' },
+    },
     url: `https://www.betterplace.com.br/guias/${guia.slug}`,
   },
   {

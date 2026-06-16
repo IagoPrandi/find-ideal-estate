@@ -19,7 +19,12 @@ const jsonLd = [
     datePublished: r.dataPublicacao,
     dateModified: r.dataPublicacao,
     author: { '@type': 'Organization', name: 'BetterPlace' },
-    publisher: { '@type': 'Organization', name: 'BetterPlace', url: 'https://www.betterplace.com.br' },
+    publisher: {
+      '@type': 'Organization',
+      name: 'BetterPlace',
+      url: 'https://www.betterplace.com.br',
+      logo: { '@type': 'ImageObject', url: 'https://www.betterplace.com.br/favicon.svg' },
+    },
     url: `https://www.betterplace.com.br/relatorios/${r.slug}`,
     about: { '@type': 'Dataset', name: 'BetterPlace — Qualidade Urbana por Distrito (São Paulo)' },
   },

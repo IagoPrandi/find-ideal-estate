@@ -3,12 +3,27 @@ import type { GetStaticPaths } from 'astro';
 import Base from '../../layouts/Base.astro';
 import Cta from '../../components/Cta.astro';
 import { COMPARATIVOS } from '../../data/comparativos';
+import { BAIRROS } from '../../data/bairros';
 import { getImoveisBairro } from '../../data/imoveis_aggregates';
 
 export const getStaticPaths: GetStaticPaths = () =>
   COMPARATIVOS.map((c) => ({ params: { slug: c.slug }, props: { comp: c } }));
 
 const { comp } = Astro.props;
+
+// Tabela por entidade: valor de cada bairro na sua coluna (em vez de texto editorial em colspan).
+const bA = BAIRROS.find((b) => b.slug === comp.slugA);
+const bB = BAIRROS.find((b) => b.slug === comp.slugB);
+const dims =
+  bA && bB
+    ? [
+        { label: 'Transporte público', a: bA.transportScore, b: bB.transportScore },
+        { label: 'Áreas verdes', a: bA.greenScore, b: bB.greenScore },
+        { label: 'Acesso a serviços', a: bA.poiScore, b: bB.poiScore },
+        { label: 'Proteção contra alagamento', a: bA.floodRiskScore, b: bB.floodRiskScore },
+        { label: 'Segurança (relativa)', a: bA.safetyScore, b: bB.safetyScore, nota: true },
+      ]
+    : [];
 
 const imoveisA = getImoveisBairro(comp.slugA);
 const imoveisB = getImoveisBairro(comp.slugB);
@@ -31,6 +46,12 @@ const jsonLd = [
     description: comp.respostaDireta.slice(0, 155),
     dateModified: comp.dataAtualizacao,
     author: { '@type': 'Organization', name: 'BetterPlace' },
+    publisher: {
+      '@type': 'Organization',
+      name: 'BetterPlace',
+      url: 'https://www.betterplace.com.br',
+      logo: { '@type': 'ImageObject', url: 'https://www.betterplace.com.br/favicon.svg' },
+    },
     url: `https://www.betterplace.com.br/comparar/${comp.slug}`,
   },
   {
@@ -80,33 +101,50 @@ const jsonLd = [
 
   <h2>Tabela comparativa</h2>
 
-  <table>
-    <thead>
-      <tr>
-        <th>Dimensão</th>
-        <th>{comp.bairroA}</th>
-        <th>{comp.bairroB}</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td>Melhor transporte</td>
-        <td colspan="2">{comp.melhorTransporte}</td>
-      </tr>
-      <tr>
-        <td>Mais áreas verdes</td>
-        <td colspan="2">{comp.melhorAreas}</td>
-      </tr>
-      <tr>
-        <td>Mais serviços</td>
-        <td colspan="2">{comp.melhorServicos}</td>
-      </tr>
-      <tr>
-        <td>Menor risco de alagamento</td>
-        <td colspan="2">{comp.melhorFlood}</td>
-      </tr>
-    </tbody>
-  </table>
+  {dims.length > 0 ? (
+    <>
+      <table>
+        <thead>
+          <tr>
+            <th>Dimensão (índice 0–100)</th>
+            <th>{comp.bairroA}</th>
+            <th>{comp.bairroB}</th>
+          </tr>
+        </thead>
+        <tbody>
+          {dims.map((d) => (
+            <tr>
+              <td>{d.label}{d.nota ? ' *' : ''}</td>
+              <td>{d.a}/100 {d.a > d.b && <strong aria-label="maior score">✓</strong>}</td>
+              <td>{d.b}/100 {d.b > d.a && <strong aria-label="maior score">✓</strong>}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p class="meta">
+        ✓ = maior score relativo na dimensão (empates não recebem marca). Proteção contra alagamento
+        e segurança são índices invertidos: maior = menor exposição/ocorrência relativa.
+        <strong>*</strong> Segurança tem cobertura parcial e sub-registro conhecido (SSP-SP) —
+        interpretar com cautela. <a href="/metodologia">Metodologia</a>.
+      </p>
+    </>
+  ) : (
+    <table>
+      <thead>
+        <tr>
+          <th>Dimensão</th>
+          <th>{comp.bairroA}</th>
+          <th>{comp.bairroB}</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Melhor transporte</td><td colspan="2">{comp.melhorTransporte}</td></tr>
+        <tr><td>Mais áreas verdes</td><td colspan="2">{comp.melhorAreas}</td></tr>
+        <tr><td>Mais serviços</td><td colspan="2">{comp.melhorServicos}</td></tr>
+        <tr><td>Menor risco de alagamento</td><td colspan="2">{comp.melhorFlood}</td></tr>
+      </tbody>
+    </table>
+  )}
 
   <h2>Recomendação por perfil</h2>
   <table>

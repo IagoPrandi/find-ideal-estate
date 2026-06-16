@@ -105,6 +105,11 @@ Tudo usa **dados que já existem** (scores, polígonos, agregados imobiliários)
   - **#7 títulos com ano** — bairro: `Morar em {nome}: transporte, segurança e custo ({ano})` (ano derivado de `dataAtualizacao`, ~58 chars); listicles com `({ano})` no `<title>` e H1.
   - **#9 baseline "vs média"** — `méd. {N}` em cada barra da página de bairro e em cada item dos rankings. Rótulo honesto: **"média dos N distritos analisados"** (não "média de SP" — só temos 12 dos 96 scores normalizados).
   - Validado por build (111 páginas; ordem do ranking conferida via ItemList).
+- **2026-06-15** — **Semana 4 (refino) — conclui o plano P1–P3:**
+  - **#10 tabela comparativa por entidade** — `/comparar` agora mostra o valor de cada bairro na sua coluna (puxado de `BAIRROS`) com marca de vencedor (✓), substituindo o `colspan` editorial; ressalvas de índice invertido e sub-registro. Fallback editorial preservado se algum bairro não estiver publicado.
+  - **#13 cluster interno** — páginas de bairro ganham blocos data-driven: "Comparativos com {nome}", "Rankings em que {nome} aparece" (com posição) e "Guias que incluem {nome}"; removido o bloco Itaim hardcoded.
+  - **#14 E-E-A-T (sem inventar pessoa)** — `Organization` enriquecida (`logo`, `areaServed`, `knowsAbout`); `publisher` + `logo` (ImageObject) nos `Article` de comparar/guias/listas/relatórios; linha de autoria/transparência visível no rodapé citando fontes e metodologia versionada.
+  - Validado por build (111 páginas).
 - **2026-06-15** — **Correção de bug (item dedicado): semântica invertida do `floodRiskScore`.**
   - **Fonte de verdade confirmada:** `scripts/aggregate_geo_metrics.py::compute_scores` calcula `flood_risk` com `invert=True` (100 = menor risco). Concordam: `export_open_dataset.py`, `dicionario-campos.json`, comentário de tipo em `bairros.ts`, `relatorios.ts` (`topN`) e `comparativos.ts`.
   - **Bug:** a renderização em `apps/content/src/pages/bairros/[slug].astro` (prosa, FAQ, JSON-LD, cor da barra, "menor é melhor") e o guia tratavam o score como risco direto (baixo = seguro), invertendo a leitura. Causava contradição entre a página de bairro e o comparativo do mesmo par.

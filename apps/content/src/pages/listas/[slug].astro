@@ -33,7 +33,12 @@ const jsonLd = [
     description: lista.descricao,
     dateModified: lista.dataAtualizacao,
     author: { '@type': 'Organization', name: 'BetterPlace' },
-    publisher: { '@type': 'Organization', name: 'BetterPlace', url: 'https://www.betterplace.com.br' },
+    publisher: {
+      '@type': 'Organization',
+      name: 'BetterPlace',
+      url: 'https://www.betterplace.com.br',
+      logo: { '@type': 'ImageObject', url: 'https://www.betterplace.com.br/favicon.svg' },
+    },
     url: `https://www.betterplace.com.br/listas/${lista.slug}`,
   },
   {

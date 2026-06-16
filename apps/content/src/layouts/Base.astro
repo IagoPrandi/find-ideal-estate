@@ -44,8 +44,19 @@ const orgJsonLd = {
   '@type': 'Organization',
   name: 'BetterPlace',
   url: APP_URL,
+  logo: `${SITE_URL}/favicon.svg`,
   description:
     'BetterPlace ajuda pessoas a escolher onde morar usando dados de bairro, mobilidade, segurança, áreas verdes e riscos urbanos.',
+  areaServed: { '@type': 'City', name: 'São Paulo' },
+  knowsAbout: [
+    'qualidade de vida urbana',
+    'mobilidade urbana',
+    'transporte público',
+    'segurança pública',
+    'áreas verdes',
+    'risco de alagamento',
+    'decisão de moradia',
+  ],
 };
 
 const breadcrumbJsonLd =
@@ -375,6 +386,11 @@ const jsonLdItems = [
         © {new Date().getFullYear()} BetterPlace · Dados públicos agregados por bairro ·
         <a href="/metodologia">Metodologia</a> ·
         <a href="/dados">Dataset aberto</a>
+      </p>
+      <p>
+        Análises produzidas pela equipe BetterPlace a partir de dados públicos (GeoSampa, SPTrans,
+        SSP-SP) com <a href="/metodologia">metodologia versionada</a> e limitações declaradas em
+        cada página.
       </p>
     </footer>
   </body>
