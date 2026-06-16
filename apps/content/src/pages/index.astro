@@ -1,6 +1,7 @@
 ---
 import Base from '../layouts/Base.astro';
 import Cta from '../components/Cta.astro';
+import { LISTAS } from '../data/listas';
 
 const jsonLd = {
   '@context': 'https://schema.org',
@@ -40,6 +41,10 @@ const jsonLd = {
       <p class="card__body">Análise lado a lado entre bairros com recomendação por perfil de moradia.</p>
     </div>
     <div class="card">
+      <p class="card__title"><a href="/listas">Listas e rankings</a></p>
+      <p class="card__body">Bairros ranqueados por transporte, áreas verdes e proteção a alagamento, entre os distritos analisados.</p>
+    </div>
+    <div class="card">
       <p class="card__title"><a href="/guias">Guias por intenção</a></p>
       <p class="card__body">Respostas para perguntas práticas, como onde morar perto do Itaim Bibi.</p>
     </div>
@@ -67,6 +72,13 @@ const jsonLd = {
     <li><a href="/comparar/pinheiros-vs-vila-mariana">Pinheiros vs Vila Mariana</a></li>
     <li><a href="/comparar/pinheiros-vs-itaim-bibi">Pinheiros vs Itaim Bibi</a></li>
     <li><a href="/comparar/itaim-bibi-vs-moema">Itaim Bibi vs Moema</a></li>
+  </ul>
+
+  <h2>Listas e rankings</h2>
+  <ul>
+    {LISTAS.map((l) => (
+      <li><a href={`/listas/${l.slug}`}>{l.h1}</a></li>
+    ))}
   </ul>
 
   <h2>Guias em destaque</h2>

@@ -4,6 +4,7 @@ import Base from '../../layouts/Base.astro';
 import Cta from '../../components/Cta.astro';
 import { BAIRROS } from '../../data/bairros';
 import { getImoveisBairro } from '../../data/imoveis_aggregates';
+import { MEDIA_DISTRITOS } from '../../lib/baseline';
 
 export const getStaticPaths: GetStaticPaths = () =>
   BAIRROS.map((b) => ({ params: { slug: b.slug }, props: { bairro: b } }));
@@ -83,7 +84,8 @@ const jsonLd = [
   },
 ];
 
-const title = `${bairro.nome}: dados de transporte, segurança, áreas verdes e qualidade urbana`;
+const ano = new Date(`${bairro.dataAtualizacao}T12:00:00`).getFullYear();
+const title = `Morar em ${bairro.nome}: transporte, segurança e custo (${ano})`;
 const description = bairro.resumo.slice(0, 155) + (bairro.resumo.length > 155 ? '…' : '');
 
 // floodRiskScore é invertido (100 = menor risco), igual a safetyScore: maior = melhor.
@@ -193,35 +195,35 @@ function slugToNome(s: string): string {
     <div class="score-bar__track">
       <div class="score-bar__fill" style={transportStyle}></div>
     </div>
-    <span class="score-bar__value">{bairro.transportScore}/100</span>
+    <span class="score-bar__value">{bairro.transportScore}/100 · méd. {MEDIA_DISTRITOS.transportScore}</span>
   </div>
   <div class="score-bar">
     <span class="score-bar__label">Áreas verdes</span>
     <div class="score-bar__track">
       <div class="score-bar__fill" style={greenStyle}></div>
     </div>
-    <span class="score-bar__value">{bairro.greenScore}/100</span>
+    <span class="score-bar__value">{bairro.greenScore}/100 · méd. {MEDIA_DISTRITOS.greenScore}</span>
   </div>
   <div class="score-bar">
     <span class="score-bar__label">Acesso a serviços</span>
     <div class="score-bar__track">
       <div class="score-bar__fill" style={poiStyle}></div>
     </div>
-    <span class="score-bar__value">{bairro.poiScore}/100</span>
+    <span class="score-bar__value">{bairro.poiScore}/100 · méd. {MEDIA_DISTRITOS.poiScore}</span>
   </div>
   <div class="score-bar">
     <span class="score-bar__label">Proteção contra alagamento</span>
     <div class="score-bar__track">
       <div class="score-bar__fill" style={floodStyle}></div>
     </div>
-    <span class="score-bar__value">{bairro.floodRiskScore}/100</span>
+    <span class="score-bar__value">{bairro.floodRiskScore}/100 · méd. {MEDIA_DISTRITOS.floodRiskScore}</span>
   </div>
   <div class="score-bar">
     <span class="score-bar__label">Segurança pública</span>
     <div class="score-bar__track">
       <div class="score-bar__fill" style={safetyStyle}></div>
     </div>
-    <span class="score-bar__value">{bairro.safetyScore}/100</span>
+    <span class="score-bar__value">{bairro.safetyScore}/100 · méd. {MEDIA_DISTRITOS.safetyScore}</span>
   </div>
 
   <p class="meta">

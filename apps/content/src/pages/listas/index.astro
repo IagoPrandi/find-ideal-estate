@@ -1,0 +1,49 @@
+---
+import Base from '../../layouts/Base.astro';
+import { LISTAS } from '../../data/listas';
+import { N_DISTRITOS } from '../../lib/baseline';
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'CollectionPage',
+  name: 'Listas e rankings de bairros de São Paulo — BetterPlace',
+  url: 'https://www.betterplace.com.br/listas',
+};
+---
+
+<Base
+  title="Listas e rankings de bairros de São Paulo · BetterPlace"
+  description="Rankings de bairros de São Paulo por transporte público, áreas verdes e proteção contra alagamento, entre os distritos analisados pelo BetterPlace."
+  canonical="/listas"
+  jsonLd={jsonLd}
+  breadcrumbs={[
+    { name: 'Início', url: '/' },
+    { name: 'Listas' },
+  ]}
+>
+  <span class="tag">São Paulo</span>
+  <h1>Listas e rankings de bairros</h1>
+  <p class="lead">
+    Rankings por dimensão de qualidade urbana, relativos entre os {N_DISTRITOS} distritos de São Paulo
+    já publicados pelo BetterPlace. Cada lista tem metodologia e limitações declaradas.
+  </p>
+
+  <ul>
+    {LISTAS.map((l) => (
+      <li>
+        <a href={`/listas/${l.slug}`}><strong>{l.h1}</strong></a>
+        <div class="meta">{l.descricao}</div>
+      </li>
+    ))}
+  </ul>
+
+  <p class="meta">
+    Os rankings consideram apenas os distritos publicados — não toda a cidade.
+    <a href="/metodologia">Metodologia</a> · <a href="/bairros">Todos os bairros</a>.
+  </p>
+</Base>
+
+<style>
+  ul { margin-left: 1.25rem; }
+  li { margin-bottom: 0.85rem; }
+</style>
