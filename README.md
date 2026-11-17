@@ -19,16 +19,18 @@ As páginas públicas reúnem comparativos e indicadores de São Paulo. A [metod
 
 ## Rodar localmente
 
-Instale Git e Docker com Compose. Na raiz do repositório, copie o arquivo de ambiente e suba a API e a interface.
+Instale Git, Git LFS e Docker com Compose. O Git LFS baixa o `requirements.txt` e as bases geográficas e de transporte. Na raiz do repositório, copie o arquivo de ambiente e suba a API e a interface.
 
 ```bash
+git lfs install
 git clone https://github.com/IagoPrandi/find-ideal-estate.git
 cd find-ideal-estate
+git lfs pull
 cp .env.example .env
 docker compose up -d --build api ui
 ```
 
-No PowerShell, use `Copy-Item .env.example .env` para criar o arquivo. O Compose também inicia PostgreSQL/PostGIS, Redis e o site público em Astro. A API aplica as migrações do Alembic ao iniciar.
+Se o GitHub pedir autenticação para baixar os arquivos LFS, autentique o Git na sua conta do GitHub e repita `git lfs pull`. No PowerShell, use `Copy-Item .env.example .env` para criar o arquivo de ambiente. O Compose também inicia PostgreSQL/PostGIS, Redis e o site público em Astro. A API aplica as migrações do Alembic ao iniciar.
 
 | Serviço | Endereço |
 | --- | --- |
