@@ -1,111 +1,77 @@
-# Find Ideal Estate (MVP local)
+# Find Ideal Estate (BetterPlace)
 
-![CI](https://github.com/OWNER/REPO/actions/workflows/ci.yml/badge.svg)
+O BetterPlace ajuda quem procura imóvel em São Paulo a escolher primeiro onde morar. Você informa os lugares que frequenta, como trabalho ou faculdade, e os tempos máximos de deslocamento. A aplicação sugere regiões compatíveis com a rotina, compara indicadores urbanos e reúne anúncios para alugar ou comprar.
 
-## Estado atual (2026-04-24)
+## Explore online
 
-| Componente | Status |
-|---|---|
-| Fases 0–5 (backend) | ✅ Concluídas |
-| Fase 6 — Dashboard | 🔄 Em progresso (M6.1–M6.2 ✅; M6.7–M6.8 ✅; M6.3–M6.6 pendentes) |
-| Fase 7 — Prewarm noturno | ⬜ Não iniciada |
-| Fase 8 — Auth + Créditos + Stripe | 🔄 Em progresso (M8.1 ✅; demais pendentes) |
-| Frontend FE0–FE7 | ✅ Concluídas |
-| Frontend FE8 — Auth/Favoritos | 🔄 Em progresso |
+- [Explore os bairros de São Paulo](https://betterplace.com.br/bairros) para ver mapas e indicadores por distrito.
+- [Compare Pinheiros e Vila Mariana](https://betterplace.com.br/comparar/pinheiros-vs-vila-mariana) para ver um exemplo com dados publicados.
+- [Abra a aplicação](https://app.betterplace.com.br) para iniciar uma busca por área ou tempo de deslocamento.
 
-## Funcionalidades implementadas
+## Como funciona uma busca
 
-- Jornada guiada: configuração → busca de transporte → geração de zonas → comparação → imóveis → dashboard
-- Geração de isócronas via Valhalla (transporte público, a pé, carro)
-- Enriquecimento de zonas: segurança, área verde, alagamento, POIs (Mapbox)
-- Scraping de imóveis: QuintoAndar, ZapImóveis, VivaReal
-- Deduplicação de imóveis entre plataformas
-- Dashboard de preços com histórico e distribuição por faixas
-- Heatmap de segurança pública
-- **Auth** — registro e login por e-mail/senha, sessões por cookie HTTP-only
-- **Favoritos de imóveis** — salvar/listar/remover; criação manual por URL
-- **Favoritos de zonas** — salvar/listar/remover; analytics citywide integrado
-- Trace de rota do ponto de transporte selecionado
+1. Informe um endereço importante para sua rotina, selecione o meio de transporte e defina quanto tempo você aceita gastar no trajeto.
+2. A aplicação calcula isócronas, que são áreas alcançáveis dentro do tempo informado. Você também pode delimitar uma área no mapa.
+3. Compare as zonas por transporte, segurança, áreas verdes, alagamento e pontos de interesse. A cobertura de cada indicador depende da fonte e da região.
+4. Consulte os anúncios reunidos de QuintoAndar, ZAP Imóveis e Viva Real, filtre por preço e tipo de imóvel e salve os resultados de interesse. A aplicação deduplica anúncios e usa os preços coletados para compor painéis por região.
 
-## Pré-requisitos
+As páginas públicas reúnem comparativos e indicadores de São Paulo. A [metodologia](https://betterplace.com.br/metodologia) explica as fontes e suas limitações.
 
-- Docker Desktop
-- `data_cache/` preenchido
-- `.env` baseado em `.env.example`
+## Rodar localmente
 
-## Subir API/UI
+Instale Git, Git LFS e Docker com Compose. O Git LFS baixa o `requirements.txt` e as bases geográficas e de transporte. Na raiz do repositório, copie o arquivo de ambiente e suba a API e a interface.
 
 ```bash
-docker compose up -d api ui
+git lfs install
+git clone https://github.com/IagoPrandi/find-ideal-estate.git
+cd find-ideal-estate
+git lfs pull
+cp .env.example .env
+docker compose up -d --build api ui
 ```
 
-Após mudança de código no backend:
+Se o GitHub pedir autenticação para baixar os arquivos LFS, autentique o Git na sua conta do GitHub e repita `git lfs pull`. No PowerShell, use `Copy-Item .env.example .env` para criar o arquivo de ambiente. O Compose também inicia PostgreSQL/PostGIS, Redis e o site público em Astro. A API aplica as migrações do Alembic ao iniciar.
+
+| Serviço | Endereço |
+| --- | --- |
+| Aplicação | [localhost:5173](http://localhost:5173) |
+| Site público | [localhost:4321](http://localhost:4321) |
+| API | [Health check](http://localhost:8000/health) |
+
+### Habilitar a jornada com dados reais
+
+A primeira subida disponibiliza a interface e cria o banco. Para fazer buscas completas, configure as fontes que a sua instalação vai usar.
+
+| Funcionalidade | Dependência |
+| --- | --- |
+| Mapa interativo | Preencha `VITE_MAPTILER_API_KEY` no `.env` com uma chave do MapTiler. |
+| Zonas por tempo de viagem | Configure `VALHALLA_URL` para uma instância do Valhalla com dados da região, acessível pelo contêiner da API. Para transporte público, prepare o roteador com GTFS e preencha as tabelas de transporte no PostGIS. |
+| Camadas e indicadores urbanos | Use os conjuntos de dados e os scripts de ingestão descritos na [documentação técnica](DOCUMENTATION.md) e nas [fontes geográficas](docs/geo/fontes-geograficas.md). |
+| Coleta de anúncios | Configure o coletor em [`.env.example`](.env.example). Se usar Firecrawl, informe `FIRECRAWL_API_KEY`. Para tarefas de coleta que usam um navegador, inicie o worker com `docker compose up -d worker-scrape-browser`. |
+
+Após editar o `.env`, execute `docker compose up -d api ui` para aplicar as alterações. Os dados carregados em instalações anteriores e as credenciais de serviços externos devem ser fornecidos pela própria instalação.
+
+### Carregar dados básicos de transporte
+
+Com a API em execução, copie os scripts e as bases de transporte incluídas no repositório para o contêiner. Os comandos abaixo importam GTFS e a rede de transporte do GeoSampa no banco local.
 
 ```bash
-docker compose up -d --build api
+docker compose cp scripts api:/app/scripts
+docker compose cp data_cache api:/app/data_cache
+docker compose exec api python scripts/ingest_gtfs_postgis.py
+docker compose exec api python scripts/ingest_geosampa_postgis.py
 ```
 
-- Health API: `GET http://localhost:8000/health`
-- UI: http://localhost:5173
+Para parar os serviços, use `docker compose down`.
 
-## Migrations
+## Estrutura do repositório
 
-```bash
-alembic upgrade head
-```
+| Caminho | Responsabilidade |
+| --- | --- |
+| [`apps/web`](apps/web) | Jornada de busca e mapas com React, Vite e MapLibre |
+| [`apps/api`](apps/api) | API FastAPI, consultas espaciais e tarefas em segundo plano com Dramatiq e Redis |
+| [`apps/content`](apps/content) | Páginas públicas em Astro, com indicadores, comparativos e relatórios |
+| [`infra/migrations`](infra/migrations) | Esquema PostgreSQL/PostGIS e migrações Alembic |
+| [`scripts`](scripts) | Ingestão de dados, geração de relatórios e verificações da aplicação |
 
-Migrations relevantes recentes:
-- `20260412_0022` — `listing_usage_type` por anúncio
-- `20260412_0023` — auth: `user_sessions`, `password_hash` em `users`
-- `20260413_0024` — `user_listing_favorites`
-- `20260422_0025` — `user_zone_favorites`
-
-## Enriquecimento verde (v8 tiled)
-
-O adapter de enriquecimento usa `green_tiles_v3/tile_index.csv`.
-Se o `tile_index.csv` não existir, o pipeline tenta gerar automaticamente a partir de:
-- `data_cache/geosampa/SIRGAS_GPKG_VEGETACAO_SIGNIFICATIVA.gpkg`
-
-## Smoke E2E (M8)
-
-Regra: qualquer fluxo com Playwright roda no container `api`.
-
-```powershell
-pwsh ./scripts/e2e_smoke_dataset_a.ps1
-```
-
-Esse smoke valida:
-- criação de `run_id`
-- geração e seleção de zona
-- detalhe de zona
-- scraping de listings
-- finalização
-- exports finais (`json/csv/geojson`)
-- qualidade mínima: `FINAL_COUNT > 0`, `BAD_COORDS = 0`, `BAD_STATE = 0`
-
-## Logs por run
-
-- `runs/<run_id>/status.json`
-- `runs/<run_id>/logs/events.jsonl` — eventos estruturados por `stage`; em erro: `error_type` + mensagem
-
-## Recuperação de falhas
-
-1. Consultar status: `GET /runs/{run_id}/status`
-2. Inspecionar logs: `runs/<run_id>/logs/events.jsonl`
-3. Reexecutar smoke: `pwsh ./scripts/e2e_smoke_dataset_a.ps1`
-
-## Estrutura do monorepo
-
-```
-find-ideal-estate/
-  apps/
-    web/          ← Vite + React (MapLibre, TanStack Query, Zustand, shadcn/ui)
-    api/          ← FastAPI + Dramatiq + Alembic
-  packages/
-    contracts/    ← DTOs compartilhados (nunca modelos internos)
-  infra/
-    docker/
-    migrations/   ← Alembic
-    seeds/
-  skills/         ← Skills de agente (develop-frontend, playwright, etc.)
-```
+Leia a [documentação técnica](DOCUMENTATION.md) para aprofundar cada etapa da jornada, a [documentação GEO](docs/geo/README.md) para entender os indicadores e o [guia de deploy](DEPLOY.md) para publicar uma instalação.
